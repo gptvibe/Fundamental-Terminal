@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: fundamental-terminal-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fundamentals}
       POSTGRES_USER: ${POSTGRES_USER:-fundamental}
@@ -22,6 +23,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: fundamental-terminal-redis
+    restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -35,10 +37,10 @@ services:
       - fundamental-terminal-net
 
   backend:
-    build:
-      context: .
-      dockerfile: docker/backend/Dockerfile
+    image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
     container_name: fundamental-terminal-backend
+    pull_policy: always
+    restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
@@ -64,10 +66,10 @@ services:
       - fundamental-terminal-net
 
   data-fetcher:
-    build:
-      context: .
-      dockerfile: docker/backend/Dockerfile
+    image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
     container_name: fundamental-terminal-data-fetcher
+    pull_policy: always
+    restart: unless-stopped
     command: ["/bin/sh", "/app/docker/backend/start-worker.sh"]
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
@@ -84,10 +86,9 @@ services:
       - fundamental-terminal-net
 
   sp500-prewarm:
-    build:
-      context: .
-      dockerfile: docker/backend/Dockerfile
+    image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
     container_name: fundamental-terminal-sp500-prewarm
+    pull_policy: always
     command: ["/bin/sh", "/app/docker/backend/start-prewarm.sh"]
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
@@ -109,12 +110,10 @@ services:
       - fundamental-terminal-net
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}
+    image: ${FRONTEND_IMAGE:-gptvibe/fundamentalterminal:frontend-latest}
     container_name: fundamental-terminal-frontend
+    pull_policy: always
+    restart: unless-stopped
     environment:
       BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}
       PORT: 3000

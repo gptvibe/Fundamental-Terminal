@@ -62,7 +62,19 @@ Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id
 2. Start the full stack:
 
    ```bash
-   docker compose up --build
+   docker compose up -d
+   ```
+
+   This compose file pulls the published Docker Hub images and does not build locally:
+
+   - `gptvibe/fundamentalterminal:backend-latest`
+   - `gptvibe/fundamentalterminal:frontend-latest`
+
+   To refresh to the newest published tags manually:
+
+   ```bash
+   docker compose pull
+   docker compose up -d
    ```
 
 3. Services on the compose network:
@@ -106,45 +118,34 @@ Optional environment variables for the prewarm job:
 - `SP500_PREWARM_FORCE=true` to bypass the freshness window
 - `SP500_PREWARM_LIMIT=100` and `SP500_PREWARM_START_AT=201` to resume in batches
 
-## Run from published images
+To pin a specific release, change these in `.env`:
 
-If you want users to pull prebuilt images instead of building locally, use `docker-compose.release.yml`.
+```bash
+BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.0
+FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.0
+```
 
 Quick start after cloning the repo:
 
 ```bash
 cp .env.example .env
-docker compose -f docker-compose.release.yml pull
-docker compose -f docker-compose.release.yml up -d
+docker compose up -d
 ```
 
 Quick start without cloning the repo:
 
 ```bash
-curl -L -o docker-compose.release.yml https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/docker-compose.release.yml
+curl -L -o docker-compose.yml https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/docker-compose.yml
 curl -L -o .env https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/.env.example
-docker compose -f docker-compose.release.yml pull
-docker compose -f docker-compose.release.yml up -d
+docker compose up -d
 ```
 
-By default the release compose file pulls:
+## Publish images to Docker Hub
 
-- `ghcr.io/gptvibe/fundamental-terminal-backend:latest`
-- `ghcr.io/gptvibe/fundamental-terminal-frontend:latest`
+The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes prebuilt images to Docker Hub.
 
-To pin a specific release, change these in `.env`:
-
-```bash
-BACKEND_IMAGE=ghcr.io/gptvibe/fundamental-terminal-backend:v1.0.0
-FRONTEND_IMAGE=ghcr.io/gptvibe/fundamental-terminal-frontend:v1.0.0
-```
-
-## Publish images on GitHub
-
-The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes prebuilt images to GitHub Container Registry (GHCR).
-
-- Push to `main` updates the `latest` tags.
-- Push a version tag like `v1.0.0` publishes matching version tags.
+- Push to `main` updates the `backend-latest` and `frontend-latest` tags.
+- Push a version tag like `v1.0.0` publishes `backend-v1.0.0` and `frontend-v1.0.0`.
 
 Example first release:
 
@@ -153,10 +154,15 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-After the first publish, open the GHCR package pages in GitHub and set both packages to public so users can pull them without logging in:
+Add these GitHub repository secrets before using the workflow:
 
-- `ghcr.io/gptvibe/fundamental-terminal-backend`
-- `ghcr.io/gptvibe/fundamental-terminal-frontend`
+- `DOCKERHUB_USERNAME`
+- `DOCKERHUB_TOKEN`
+
+The workflow pushes to these Docker Hub tags:
+
+- `gptvibe/fundamentalterminal:backend-latest`
+- `gptvibe/fundamentalterminal:frontend-latest`
 
 ## Run as a worker
 
