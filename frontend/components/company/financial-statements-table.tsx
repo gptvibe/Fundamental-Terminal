@@ -1,0 +1,327 @@
+"use client";
+
+import { useMemo } from "react";
+import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
+
+import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import type { FinancialPayload } from "@/lib/types";
+
+const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
+
+export function FinancialStatementsTable({ financials }: { financials: FinancialPayload[] }) {
+  const metricTrends = useMemo(() => buildMetricTrendRows(financials), [financials]);
+
+  return (
+    <div className="financial-statements-stack">
+      <div className="financial-trend-table-shell">
+        <div className="financial-trend-table-note">Hover a sparkline to inspect yearly values.</div>
+        <div className="financial-trend-table-scroll">
+          <table className="financial-trend-table">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th>Latest + Trend</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metricTrends.map((metric) => (
+                <tr key={metric.key}>
+                  <td>
+                    <div className="financial-trend-label">{metric.label}</div>
+                    <div className="financial-trend-subtitle">{metric.historyLabel}</div>
+                  </td>
+                  <td>
+                    <div className="financial-trend-inline">
+                      <div className="financial-trend-value-block">
+                        <div className="financial-trend-value" style={{ color: metric.color }}>
+                          {metric.displayValue}
+                        </div>
+                        <div className="financial-trend-direction">{metric.directionLabel}</div>
+                      </div>
+                      <MetricSparkline row={metric} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="financial-table-shell">
+        <table className="financial-table">
+          <thead>
+            <tr>
+              <th>Period End</th>
+              <th>Form</th>
+              <th>Revenue</th>
+              <th>Gross Profit</th>
+              <th>Operating Inc.</th>
+              <th>Net Income</th>
+              <th>EPS</th>
+              <th>OCF</th>
+              <th>FCF</th>
+              <th>Assets</th>
+              <th>Liabilities</th>
+            </tr>
+          </thead>
+          <tbody>
+            {financials.map((row) => (
+              <tr key={`${row.period_end}-${row.filing_type}-${row.source}`}>
+                <td>{formatDate(row.period_end)}</td>
+                <td className="form-cell">{row.filing_type}</td>
+                <td>{formatCompactNumber(row.revenue)}</td>
+                <td>{formatCompactNumber(row.gross_profit)}</td>
+                <td>{formatCompactNumber(row.operating_income)}</td>
+                <td>{formatCompactNumber(row.net_income)}</td>
+                <td>{row.eps == null ? "?" : row.eps.toFixed(2)}</td>
+                <td>{formatCompactNumber(row.operating_cash_flow)}</td>
+                <td>{formatCompactNumber(row.free_cash_flow)}</td>
+                <td>{formatCompactNumber(row.total_assets)}</td>
+                <td>{formatCompactNumber(row.total_liabilities)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+type TrendDirection = "up" | "down" | "flat";
+
+type SparklineTooltipEntry = {
+  color?: string;
+  payload?: Record<string, unknown>;
+  value?: number | null;
+};
+
+interface MetricTrendPoint {
+  label: string;
+  fullDate: string;
+  value: number | null;
+}
+
+interface MetricTrendRow {
+  key: string;
+  label: string;
+  displayValue: string;
+  historyLabel: string;
+  directionLabel: string;
+  color: string;
+  valueLabel: string;
+  points: MetricTrendPoint[];
+  formatValue: (value: number | null) => string;
+}
+
+function MetricSparkline({ row }: { row: MetricTrendRow }) {
+  const hasValues = row.points.some((point) => point.value !== null && Number.isFinite(point.value));
+
+  if (!hasValues) {
+    return <div className="financial-trend-empty">No cached history</div>;
+  }
+
+  return (
+    <div className="financial-trend-sparkline-shell">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={row.points} margin={{ top: 6, right: 4, left: 4, bottom: 6 }}>
+          <Tooltip content={<MetricSparklineTooltip metricLabel={row.label} color={row.color} valueLabel={row.valueLabel} formatValue={row.formatValue} />} />
+          <Line
+            type="monotone"
+            dataKey="value"
+            stroke={row.color}
+            strokeWidth={2.4}
+            dot={false}
+            connectNulls
+            isAnimationActive={false}
+            activeDot={{ r: 4, fill: row.color, stroke: "var(--panel)", strokeWidth: 2 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function MetricSparklineTooltip({
+  active,
+  payload,
+  label,
+  metricLabel,
+  color,
+  valueLabel,
+  formatValue
+}: {
+  active?: boolean;
+  payload?: SparklineTooltipEntry[];
+  label?: string;
+  metricLabel: string;
+  color: string;
+  valueLabel: string;
+  formatValue: (value: number | null) => string;
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const point = payload[0]?.payload ?? {};
+  const value = asFiniteNumber(point.value);
+  const periodEnd = typeof point.fullDate === "string" ? formatDate(point.fullDate) : "--";
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">
+        {metricLabel}
+        {label ? ` - ${label}` : ""}
+      </div>
+      <TooltipRow label={valueLabel} value={formatValue(value)} color={color} />
+      <TooltipRow label="Period End" value={periodEnd} color="#FFD700" />
+    </div>
+  );
+}
+
+function TooltipRow({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="chart-tooltip-row">
+      <span className="chart-tooltip-key">
+        <span className="chart-tooltip-dot" style={{ background: color }} />
+        {label}
+      </span>
+      <span className="chart-tooltip-value">{value}</span>
+    </div>
+  );
+}
+
+function buildMetricTrendRows(financials: FinancialPayload[]): MetricTrendRow[] {
+  const history = selectTrendHistory(financials);
+
+  return [
+    createMetricTrendRow({
+      key: "revenue",
+      label: "Revenue",
+      history,
+      valueLabel: "Revenue",
+      selectValue: (statement) => statement.revenue,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "eps",
+      label: "EPS",
+      history,
+      valueLabel: "EPS",
+      selectValue: (statement) => statement.eps,
+      formatValue: (value) => (value === null ? "--" : value.toFixed(2))
+    }),
+    createMetricTrendRow({
+      key: "free-cash-flow",
+      label: "Free Cash Flow",
+      history,
+      valueLabel: "Free Cash Flow",
+      selectValue: (statement) => statement.free_cash_flow,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "net-margin",
+      label: "Net Margin",
+      history,
+      valueLabel: "Net Margin",
+      selectValue: (statement) => computeNetMargin(statement),
+      formatValue: (value) => formatPercent(value)
+    })
+  ];
+}
+
+function createMetricTrendRow({
+  key,
+  label,
+  history,
+  valueLabel,
+  selectValue,
+  formatValue
+}: {
+  key: string;
+  label: string;
+  history: FinancialPayload[];
+  valueLabel: string;
+  selectValue: (statement: FinancialPayload) => number | null;
+  formatValue: (value: number | null) => string;
+}): MetricTrendRow {
+  const points = history.map((statement) => ({
+    label: new Intl.DateTimeFormat("en-US", { year: "numeric" }).format(new Date(statement.period_end)),
+    fullDate: statement.period_end,
+    value: selectValue(statement)
+  }));
+
+  const firstValue = points.find((point) => point.value !== null)?.value ?? null;
+  const latestPoint = [...points].reverse().find((point) => point.value !== null) ?? null;
+  const latestValue = latestPoint?.value ?? null;
+  const direction = determineTrendDirection(firstValue, latestValue);
+
+  return {
+    key,
+    label,
+    displayValue: formatValue(latestValue),
+    historyLabel: history.length >= 2 ? `${points[0]?.label ?? "--"} to ${points.at(-1)?.label ?? "--"}` : "Latest cached period",
+    directionLabel: directionCopy(direction),
+    color: trendColor(direction),
+    valueLabel,
+    points,
+    formatValue
+  };
+}
+
+function selectTrendHistory(financials: FinancialPayload[]): FinancialPayload[] {
+  const annualStatements = financials.filter((statement) => ANNUAL_FORMS.has(statement.filing_type));
+  const source = annualStatements.length >= 2 ? annualStatements : financials;
+
+  return [...source].sort((left, right) => Date.parse(left.period_end) - Date.parse(right.period_end));
+}
+
+function computeNetMargin(statement: FinancialPayload): number | null {
+  if (statement.net_income === null || statement.revenue === null || statement.revenue === 0) {
+    return null;
+  }
+
+  return statement.net_income / statement.revenue;
+}
+
+function determineTrendDirection(firstValue: number | null, latestValue: number | null): TrendDirection {
+  if (firstValue === null || latestValue === null) {
+    return "flat";
+  }
+
+  const delta = latestValue - firstValue;
+  const threshold = Math.max(Math.abs(firstValue) * 0.02, 0.0001);
+  if (delta > threshold) {
+    return "up";
+  }
+  if (delta < -threshold) {
+    return "down";
+  }
+  return "flat";
+}
+
+function directionCopy(direction: TrendDirection): string {
+  switch (direction) {
+    case "up":
+      return "Improving trend";
+    case "down":
+      return "Softening trend";
+    default:
+      return "Stable trend";
+  }
+}
+
+function trendColor(direction: TrendDirection): string {
+  switch (direction) {
+    case "up":
+      return "#00FF41";
+    case "down":
+      return "#FF6B6B";
+    default:
+      return "#FFD700";
+  }
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}

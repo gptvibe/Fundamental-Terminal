@@ -1,0 +1,483 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
+
+import { getCompanyPeers } from "@/lib/api";
+import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, chartLegendStyle, chartTick } from "@/lib/chart-theme";
+import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import type { CompanyPeersResponse, PeerMetricsPayload, PeerRevenuePoint } from "@/lib/types";
+import { Panel } from "@/components/ui/panel";
+import { StatusPill } from "@/components/ui/status-pill";
+
+const MAX_SELECTED_PEERS = 4;
+const PEER_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7"];
+
+type TooltipEntry = {
+  color?: string;
+  dataKey?: string;
+  name?: string;
+  payload?: Record<string, unknown>;
+  value?: number;
+};
+
+interface PeerComparisonDashboardProps {
+  ticker: string;
+  reloadKey?: string;
+}
+
+export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDashboardProps) {
+  const [data, setData] = useState<CompanyPeersResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedTickers, setSelectedTickers] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    setSelectedTickers(null);
+  }, [ticker, reloadKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await getCompanyPeers(ticker, selectedTickers ?? undefined);
+        if (cancelled) {
+          return;
+        }
+        setData(response);
+        if (selectedTickers === null) {
+          setSelectedTickers(response.selected_tickers);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : "Unable to load peer comparison");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [ticker, reloadKey, selectedTickers]);
+
+  const peers = useMemo(() => data?.peers ?? [], [data?.peers]);
+  const activeTickers = useMemo(() => selectedTickers ?? data?.selected_tickers ?? [], [data?.selected_tickers, selectedTickers]);
+  const displayedPeers = useMemo(
+    () => peers.filter((peer) => peer.is_focus || activeTickers.includes(peer.ticker)),
+    [activeTickers, peers]
+  );
+  const tickerColorMap = useMemo(() => buildTickerColorMap(displayedPeers), [displayedPeers]);
+  const radarData = useMemo(() => buildRadarData(displayedPeers), [displayedPeers]);
+  const barData = useMemo(() => buildBarData(displayedPeers), [displayedPeers]);
+
+  function togglePeer(peerTicker: string) {
+    setSelectedTickers((current) => {
+      const active = current ?? data?.selected_tickers ?? [];
+      if (active.includes(peerTicker)) {
+        return active.filter((item) => item !== peerTicker);
+      }
+      if (active.length >= MAX_SELECTED_PEERS) {
+        return active;
+      }
+      return [...active, peerTicker];
+    });
+  }
+
+  function resetPeers() {
+    setSelectedTickers([]);
+  }
+
+  return (
+    <Panel
+      title="Peer Comparison"
+      subtitle={loading ? "Loading cached peer set..." : `Compare ${ticker} against ${data?.peer_basis ?? "cached peers"}`}
+      aside={data ? <StatusPill state={data.refresh} /> : undefined}
+    >
+      {error ? (
+        <div className="text-muted">{error}</div>
+      ) : !loading && peers.length === 0 ? (
+        <div className="grid-empty-state" style={{ minHeight: 220 }}>
+          <div className="grid-empty-kicker">Peer cache</div>
+          <div className="grid-empty-title">No peer data available yet</div>
+          <div className="grid-empty-copy">Refresh more cached companies to unlock richer industry comparisons.</div>
+        </div>
+      ) : (
+        <div className="peer-dashboard-shell">
+          <div className="peer-dashboard-header">
+            <div className="peer-chip-row">
+              {data?.available_companies.map((company) => {
+                const active = company.is_focus || activeTickers.includes(company.ticker);
+                return (
+                  <button
+                    key={company.ticker}
+                    type="button"
+                    className={`peer-chip${active ? " active" : ""}${company.is_focus ? " focus" : ""}`}
+                    onClick={() => {
+                      if (!company.is_focus) {
+                        togglePeer(company.ticker);
+                      }
+                    }}
+                    title={`${company.ticker} — ${company.name}`}
+                  >
+                    <span className="peer-chip-ticker">{company.ticker}</span>
+                    <span className="peer-chip-name">{company.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="peer-dashboard-meta">
+              <span className="pill">Up to {MAX_SELECTED_PEERS} peers</span>
+              <button type="button" className="ticker-button" onClick={resetPeers}>
+                Reset to Focus
+              </button>
+            </div>
+          </div>
+
+          <div className="peer-chart-card">
+            <div className="peer-section-title">Quality Radar</div>
+            <div className="peer-section-subtitle">ROE, revenue growth, Piotroski score, and the Altman proxy normalized for quick visual comparison.</div>
+            <div className="peer-chart-shell peer-chart-tall">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={radarData} outerRadius="70%">
+                  <PolarGrid stroke="var(--panel-border)" />
+                  <PolarAngleAxis dataKey="metric" tick={{ fill: CHART_LEGEND_COLOR, fontSize: 12 }} />
+                  <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
+                  <Tooltip content={<RadarTooltip />} />
+                  <Legend wrapperStyle={chartLegendStyle()} />
+                  {peers.map((peer, index) => (
+                    <Radar
+                      key={peer.ticker}
+                      name={peer.ticker}
+                      dataKey={peer.ticker}
+                      stroke={tickerColorMap[peer.ticker] ?? PEER_COLORS[index % PEER_COLORS.length]}
+                      fill={tickerColorMap[peer.ticker] ?? PEER_COLORS[index % PEER_COLORS.length]}
+                      fillOpacity={peer.is_focus ? 0.24 : 0.12}
+                      strokeWidth={peer.is_focus ? 2.6 : 1.8}
+                    />
+                  ))}
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="peer-chart-card">
+            <div className="peer-section-title">Valuation Multiples</div>
+            <div className="peer-section-subtitle">Horizontal comparison of P/E, EV/EBIT proxy, and price to free cash flow.</div>
+            <div className="peer-chart-shell peer-chart-medium">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={barData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} horizontal={false} />
+                  <XAxis type="number" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatAxisMultiple} />
+                  <YAxis dataKey="ticker" type="category" width={64} tick={{ fill: CHART_LEGEND_COLOR, fontSize: 12 }} />
+                  <Tooltip content={<BarTooltip />} />
+                  <Legend wrapperStyle={chartLegendStyle()} />
+                  <Bar dataKey="pe" name="P/E" radius={[0, 8, 8, 0]}>
+                    {barData.map((entry) => (
+                      <Cell key={`${entry.ticker}-pe`} fill={entry.is_focus ? "#00FF41" : "rgba(0,255,65,0.55)"} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="evToEbit" name="EV/EBIT*" radius={[0, 8, 8, 0]}>
+                    {barData.map((entry) => (
+                      <Cell key={`${entry.ticker}-ev`} fill={entry.is_focus ? "#00E5FF" : "rgba(0,229,255,0.55)"} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="priceToFcf" name="P/FCF" radius={[0, 8, 8, 0]}>
+                    {barData.map((entry) => (
+                      <Cell key={`${entry.ticker}-fcf`} fill={entry.is_focus ? "#FFD700" : "rgba(255,215,0,0.55)"} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="peer-bottom-grid">
+            <div className="peer-chart-card">
+              <div className="peer-section-title">Revenue Growth Tracks</div>
+              <div className="peer-section-subtitle">Small multiples show historical revenue growth from cached annual filings.</div>
+              <div className="peer-mini-grid">
+                {displayedPeers.map((peer) => (
+                  <div key={peer.ticker} className={`peer-mini-card${peer.is_focus ? " focus" : ""}`}>
+                    <div className="peer-mini-header">
+                      <span>{peer.ticker}</span>
+                      <span>{formatPercent(peer.revenue_growth)}</span>
+                    </div>
+                    <div className="peer-mini-shell">
+                      {peer.revenue_history.length ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={buildRevenueLineData(peer.revenue_history)} margin={{ top: 10, right: 6, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                            <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(10)} />
+                            <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(10)} tickFormatter={formatMiniPercent} width={30} />
+                            <Tooltip content={<RevenueTooltip ticker={peer.ticker} />} />
+                            <Line
+                              type="monotone"
+                              dataKey="value"
+                              stroke={tickerColorMap[peer.ticker] ?? "#00FF41"}
+                              strokeWidth={2.2}
+                              dot={{ r: 2.6, fill: tickerColorMap[peer.ticker] ?? "#00FF41", strokeWidth: 0 }}
+                              activeDot={{ r: 4 }}
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="text-muted">No revenue history</div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="peer-chart-card">
+              <div className="peer-section-title">Metrics Table</div>
+              <div className="peer-section-subtitle">Sortable-at-a-glance values from cached prices, filings, and model results.</div>
+              <div className="peer-table-shell">
+                <table className="peer-metrics-table">
+                  <thead>
+                    <tr>
+                      <th>Company</th>
+                      <th>P/E</th>
+                      <th>EV/EBIT*</th>
+                      <th>P/FCF</th>
+                      <th>ROE</th>
+                      <th>Revenue Growth</th>
+                      <th>Piotroski</th>
+                      <th>Altman Proxy</th>
+                      <th>Price</th>
+                      <th>Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedPeers.map((peer) => (
+                      <tr key={peer.ticker} className={peer.is_focus ? "is-focus" : undefined}>
+                        <td>
+                          <div className="peer-table-company">
+                      <span className="peer-table-ticker" style={{ color: tickerColorMap[peer.ticker] ?? "var(--text)" }}>
+                              {peer.ticker}
+                            </span>
+                            <span className="peer-table-name">{peer.name}</span>
+                          </div>
+                        </td>
+                        <td>{formatMultiple(peer.pe)}</td>
+                        <td>{formatMultiple(peer.ev_to_ebit)}</td>
+                        <td>{formatMultiple(peer.price_to_free_cash_flow)}</td>
+                        <td>{formatPercent(peer.roe)}</td>
+                        <td>{formatPercent(peer.revenue_growth)}</td>
+                        <td>{formatScore(peer.piotroski_score)}</td>
+                        <td>{formatSigned(peer.altman_z_score)}</td>
+                        <td>{formatCurrency(peer.latest_price)}</td>
+                        <td>{peer.last_checked ? formatDate(peer.last_checked) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="peer-footnote">* {data?.notes.ev_to_ebit}</div>
+              <div className="peer-footnote">{data?.notes.price_to_free_cash_flow}</div>
+              {data?.notes.piotroski ? <div className="peer-footnote">{data.notes.piotroski}</div> : null}
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function buildTickerColorMap(peers: PeerMetricsPayload[]): Record<string, string> {
+  return Object.fromEntries(
+    peers.map((peer, index) => [peer.ticker, peer.is_focus ? "#00FF41" : PEER_COLORS[(index + 1) % PEER_COLORS.length]])
+  );
+}
+
+function buildRadarData(peers: PeerMetricsPayload[]) {
+  const metrics = [
+    { key: "roe", label: "ROE", normalize: (value: number | null) => clamp((value ?? 0) * 220, 0, 100) },
+    { key: "revenue_growth", label: "Revenue Growth", normalize: (value: number | null) => clamp((value ?? 0) * 180 + 30, 0, 100) },
+    { key: "piotroski_score", label: "Piotroski", normalize: (value: number | null) => clamp(((value ?? 0) / 9) * 100, 0, 100) },
+    { key: "altman_z_score", label: "Altman Proxy", normalize: (value: number | null) => clamp(((value ?? 0) / 5) * 100, 0, 100) }
+  ] as const;
+
+  return metrics.map((metric) => ({
+    metric: metric.label,
+    ...Object.fromEntries(
+      peers.map((peer) => [peer.ticker, metric.normalize(peerMetricValue(peer, metric.key))])
+    )
+  }));
+}
+
+function peerMetricValue(
+  peer: PeerMetricsPayload,
+  key: "roe" | "revenue_growth" | "piotroski_score" | "altman_z_score"
+): number | null {
+  switch (key) {
+    case "roe":
+      return peer.roe;
+    case "revenue_growth":
+      return peer.revenue_growth;
+    case "piotroski_score":
+      return peer.piotroski_score;
+    case "altman_z_score":
+      return peer.altman_z_score;
+  }
+}
+
+function buildBarData(peers: PeerMetricsPayload[]) {
+  return peers.map((peer) => ({
+    ticker: peer.ticker,
+    is_focus: peer.is_focus,
+    pe: peer.pe,
+    evToEbit: peer.ev_to_ebit,
+    priceToFcf: peer.price_to_free_cash_flow
+  }));
+}
+
+function buildRevenueLineData(history: PeerRevenuePoint[]) {
+  return history.map((point) => ({
+    label: new Intl.DateTimeFormat("en-US", { year: "2-digit" }).format(new Date(point.period_end)),
+    fullDate: point.period_end,
+    revenue: point.revenue,
+    value: point.revenue_growth === null ? null : point.revenue_growth * 100
+  }));
+}
+
+function RadarTooltip({ active, payload }: { active?: boolean; payload?: TooltipEntry[] }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">{String(payload[0]?.payload?.metric ?? "Metric")}</div>
+      {payload.map((entry) => (
+        <TooltipRow key={entry.name} label={String(entry.name ?? entry.dataKey ?? "Value")} value={`${Math.round(Number(entry.value ?? 0))}/100`} color={entry.color ?? "#00FF41"} />
+      ))}
+    </div>
+  );
+}
+
+function BarTooltip({ active, payload, label }: { active?: boolean; payload?: TooltipEntry[]; label?: string }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">{label}</div>
+      {payload.map((entry) => (
+        <TooltipRow key={entry.dataKey} label={String(entry.name ?? entry.dataKey ?? "Metric")} value={formatMultiple(asFiniteNumber(entry.value))} color={entry.color ?? "#00FF41"} />
+      ))}
+    </div>
+  );
+}
+
+function RevenueTooltip({ active, payload, label, ticker }: { active?: boolean; payload?: TooltipEntry[]; label?: string; ticker: string }) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const point = payload[0]?.payload ?? {};
+  const revenue = asFiniteNumber(point.revenue);
+  const growth = asFiniteNumber(point.value);
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">{ticker} · {label}</div>
+      <TooltipRow label="Revenue Growth" value={growth === null ? "—" : `${growth.toFixed(2)}%`} color="#00E5FF" />
+      <TooltipRow label="Revenue" value={formatCompactNumber(revenue)} color="#00FF41" />
+      <TooltipRow label="Period End" value={typeof point.fullDate === "string" ? formatDate(point.fullDate) : "—"} color="#FFD700" />
+    </div>
+  );
+}
+
+function TooltipRow({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="chart-tooltip-row">
+      <span className="chart-tooltip-key">
+        <span className="chart-tooltip-dot" style={{ background: color }} />
+        {label}
+      </span>
+      <span className="chart-tooltip-value">{value}</span>
+    </div>
+  );
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatMultiple(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return `${value.toFixed(Math.abs(value) >= 100 ? 0 : 2)}x`;
+}
+
+function formatAxisMultiple(value: number): string {
+  return `${value.toFixed(0)}x`;
+}
+
+function formatMiniPercent(value: number): string {
+  return `${value.toFixed(0)}%`;
+}
+
+function formatCurrency(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: value >= 100 ? 0 : 2
+  }).format(value);
+}
+
+function formatScore(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return `${value.toFixed(1)}/9`;
+}
+
+function formatSigned(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+    signDisplay: "exceptZero"
+  }).format(value);
+}
