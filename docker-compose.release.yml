@@ -1,0 +1,119 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fundamentals}
+      POSTGRES_USER: ${POSTGRES_USER:-fundamental}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fundamental}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fundamental} -d ${POSTGRES_DB:-fundamentals}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - fundamental-terminal-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - fundamental-terminal-net
+
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/gptvibe/fundamental-terminal-backend:latest}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
+      SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
+      SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    ports:
+      - "8000:8000"
+    networks:
+      - fundamental-terminal-net
+
+  data-fetcher:
+    image: ${BACKEND_IMAGE:-ghcr.io/gptvibe/fundamental-terminal-backend:latest}
+    restart: unless-stopped
+    command: ["/bin/sh", "/app/docker/backend/start-worker.sh"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      WORKER_IDENTIFIERS: ${WORKER_IDENTIFIERS:-AAPL MSFT NVDA AMZN}
+      WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-3600}
+      FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
+      SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
+      SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - fundamental-terminal-net
+
+  sp500-prewarm:
+    image: ${BACKEND_IMAGE:-ghcr.io/gptvibe/fundamental-terminal-backend:latest}
+    command: ["/bin/sh", "/app/docker/backend/start-prewarm.sh"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
+      SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
+      SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}
+      SP500_PREWARM_MODE: ${SP500_PREWARM_MODE:-refresh}
+      SP500_PREWARM_FORCE: ${SP500_PREWARM_FORCE:-false}
+      SP500_CONSTITUENTS_FILE: ${SP500_CONSTITUENTS_FILE:-/app/app/data/sp500_tickers.txt}
+      SP500_PREWARM_LIMIT: ${SP500_PREWARM_LIMIT:-}
+      SP500_PREWARM_START_AT: ${SP500_PREWARM_START_AT:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    profiles:
+      - prewarm
+    networks:
+      - fundamental-terminal-net
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/gptvibe/fundamental-terminal-frontend:latest}
+    restart: unless-stopped
+    environment:
+      BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}
+      PORT: 3000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - fundamental-terminal-net
+
+volumes:
+  postgres_data:
+
+networks:
+  fundamental-terminal-net:
+    driver: bridge
