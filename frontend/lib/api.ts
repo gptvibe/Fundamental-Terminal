@@ -3,6 +3,7 @@ import {
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyModelsResponse,
+  CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
   RefreshQueuedResponse
@@ -27,8 +28,14 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function searchCompanies(ticker: string): Promise<CompanySearchResponse> {
-  return fetchJson(`/companies/search?ticker=${encodeURIComponent(ticker)}`);
+export function searchCompanies(query: string, options?: { refresh?: boolean }): Promise<CompanySearchResponse> {
+  const params = new URLSearchParams({ query });
+  params.set("refresh", String(options?.refresh ?? true));
+  return fetchJson(`/companies/search?${params.toString()}`);
+}
+
+export function resolveCompanyIdentifier(query: string): Promise<CompanyResolutionResponse> {
+  return fetchJson(`/companies/resolve?query=${encodeURIComponent(query)}`);
 }
 
 export function getCompanyFinancials(ticker: string): Promise<CompanyFinancialsResponse> {

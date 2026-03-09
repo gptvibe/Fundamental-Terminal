@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import re
 from datetime import date as DateType, datetime
 from typing import Any, Literal
 
@@ -31,6 +32,7 @@ from app.services import (
     search_company_snapshots,
     status_broker,
 )
+from app.services.sec_edgar import EdgarClient
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -61,6 +63,14 @@ class CompanySearchResponse(BaseModel):
     query: str
     results: list[CompanyPayload]
     refresh: RefreshState
+
+
+class CompanyResolutionResponse(BaseModel):
+    query: str
+    resolved: bool
+    ticker: str | None = None
+    name: str | None = None
+    error: Literal["not_found", "lookup_failed"] | None = None
 
 
 class FinancialSegmentPayload(BaseModel):
@@ -283,25 +293,76 @@ async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
 @app.get("/api/companies/search", response_model=CompanySearchResponse)
 def search_companies(
     background_tasks: BackgroundTasks,
-    ticker: str = Query(..., min_length=1),
+    query: str | None = Query(default=None, min_length=1),
+    ticker: str | None = Query(default=None, min_length=1),
+    refresh: bool = Query(default=True),
     session: Session = Depends(get_db_session),
 ) -> CompanySearchResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshots = search_company_snapshots(session, normalized_ticker)
+    raw_query = query if query is not None else ticker
+    if raw_query is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="query is required")
+
+    normalized_query = _normalize_search_query(raw_query)
+    normalized_ticker = _normalize_ticker(normalized_query)
+    snapshots = search_company_snapshots(session, normalized_query)
     exact_match = next((snapshot for snapshot in snapshots if snapshot.company.ticker == normalized_ticker), None)
 
-    refresh = RefreshState()
-    if exact_match is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+    refresh_state = RefreshState()
+    if not refresh:
+        if exact_match is None:
+            refresh_state = RefreshState(
+                triggered=False,
+                reason="none",
+                ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None,
+                job_id=None,
+            )
+        elif exact_match.cache_state in {"missing", "stale"}:
+            refresh_state = RefreshState(
+                triggered=False,
+                reason=exact_match.cache_state,
+                ticker=exact_match.company.ticker,
+                job_id=None,
+            )
+        else:
+            refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
+    elif exact_match is None:
+        if not snapshots and _looks_like_ticker(normalized_query):
+            refresh_state = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        else:
+            refresh_state = RefreshState(triggered=False, reason="none", ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None, job_id=None)
     elif exact_match.cache_state in {"missing", "stale"}:
-        refresh = _trigger_refresh(background_tasks, exact_match.company.ticker, reason=exact_match.cache_state)
+        refresh_state = _trigger_refresh(background_tasks, exact_match.company.ticker, reason=exact_match.cache_state)
     else:
-        refresh = RefreshState(triggered=False, reason="fresh", ticker=normalized_ticker, job_id=None)
+        refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
 
     return CompanySearchResponse(
-        query=normalized_ticker,
+        query=normalized_query,
         results=[_serialize_company(snapshot) for snapshot in snapshots],
-        refresh=refresh,
+        refresh=refresh_state,
+    )
+
+
+@app.get("/api/companies/resolve", response_model=CompanyResolutionResponse)
+def resolve_company_identifier(query: str = Query(..., min_length=1)) -> CompanyResolutionResponse:
+    normalized_query = _normalize_search_query(query)
+
+    client = EdgarClient()
+    try:
+        identity = client.resolve_company(normalized_query)
+    except ValueError:
+        return CompanyResolutionResponse(query=normalized_query, resolved=False, error="not_found")
+    except Exception:
+        logging.getLogger(__name__).exception("SEC company resolution failed for '%s'", normalized_query)
+        return CompanyResolutionResponse(query=normalized_query, resolved=False, error="lookup_failed")
+    finally:
+        client.close()
+
+    return CompanyResolutionResponse(
+        query=normalized_query,
+        resolved=True,
+        ticker=identity.ticker,
+        name=identity.name,
+        error=None,
     )
 
 
@@ -666,7 +727,15 @@ def _parse_csv_values(value: str | None) -> list[str]:
 
 
 def _normalize_ticker(value: str) -> str:
-    return value.strip().upper()
+    return value.strip().replace("$", "").upper()
+
+
+def _normalize_search_query(value: str) -> str:
+    return value.strip().replace("$", "")
+
+
+def _looks_like_ticker(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]{0,9}", value.strip().replace("$", "")))
 
 
 def _merge_last_checked(*values: datetime | None) -> datetime | None:

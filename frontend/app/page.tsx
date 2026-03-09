@@ -1,20 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { StatusConsole } from "@/components/console/status-console";
+import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplete-menu";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
-import { searchCompanies } from "@/lib/api";
+import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
+import { showAppToast } from "@/lib/app-toast";
+import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
 import { MODEL_GUIDE, TRENDING_TICKERS } from "@/lib/constants";
 import type { CompanyPayload, CompanySearchResponse, RefreshState } from "@/lib/types";
-
-interface ActiveSearchJob {
-  id: string;
-  ticker: string;
-}
 
 const HOW_IT_WORKS_STEPS = [
   {
@@ -55,16 +54,23 @@ const WHERE_TO_LOOK = [
 
 export default function HomePage() {
   const router = useRouter();
+  const homeSearchFormRef = useRef<HTMLFormElement>(null);
   const [query, setQuery] = useState("AAPL");
   const [data, setData] = useState<CompanySearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeJob, setActiveJob] = useState<ActiveSearchJob | null>(null);
-  const [lastSettledJobId, setLastSettledJobId] = useState<string | null>(null);
-  const normalizedQuery = query.trim().toUpperCase();
-  const { consoleEntries, connectionState, lastEvent } = useJobStream(activeJob?.id);
-  const bestMatch = getBestMatch(data?.results ?? [], normalizedQuery);
+  const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
+  const [autocompleteOpen, setAutocompleteOpen] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const normalizedSearchText = useMemo(() => normalizeSearchText(query), [query]);
+  const trimmedSearchText = normalizedSearchText.trim();
+  const normalizedTickerQuery = trimmedSearchText.toUpperCase();
+  const autocompleteResults = data?.results ?? [];
+  const showAutocomplete = autocompleteOpen && trimmedSearchText.length > 0;
+  const { consoleEntries, connectionState } = useJobStream(null);
+  const bestMatch = getBestMatch(autocompleteResults, normalizedTickerQuery);
   const refreshLabel = getRefreshLabel(data?.refresh, loading);
+  const displayTicker = bestMatch?.ticker ?? (normalizedTickerQuery || "-");
 
   const goToTicker = useCallback(
     (ticker: string, destination: "company" | "models" = "company") => {
@@ -73,69 +79,113 @@ export default function HomePage() {
         return;
       }
 
+      setInvalidMessage(null);
       const suffix = destination === "models" ? "/models" : "";
       router.push(`/company/${encodeURIComponent(normalizedTicker)}${suffix}`);
     },
     [router]
   );
 
-  const loadSearch = useCallback(
-    async (ticker: string, options?: { preserveActiveJob?: boolean }) => {
-      const normalizedTicker = ticker.trim().toUpperCase();
-      if (!normalizedTicker) {
-        setData(null);
-        setError(null);
-        setLoading(false);
-        setActiveJob(null);
-        return;
-      }
+  const loadSearch = useCallback(async (searchQuery: string) => {
+    if (!searchQuery) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      setActiveSuggestionIndex(0);
+      return;
+    }
 
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await searchCompanies(normalizedTicker);
-        setData(response);
-        if (response.refresh.job_id) {
-          setActiveJob({ id: response.refresh.job_id, ticker: normalizedTicker });
-        } else if (!options?.preserveActiveJob) {
-          setActiveJob(null);
-        }
-      } catch (nextError) {
-        setError(nextError instanceof Error ? nextError.message : "Search failed");
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await searchCompanies(searchQuery, { refresh: false });
+      setData(response);
+      setActiveSuggestionIndex(0);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Search failed");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(async () => {
-      await loadSearch(normalizedQuery);
+    const timer = window.setTimeout(() => {
+      void loadSearch(trimmedSearchText);
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [loadSearch, normalizedQuery]);
+  }, [loadSearch, trimmedSearchText]);
 
   useEffect(() => {
-    if (activeJob && activeJob.ticker !== normalizedQuery) {
-      setActiveJob(null);
+    function onPointerDown(event: MouseEvent) {
+      if (!homeSearchFormRef.current?.contains(event.target as Node)) {
+        setAutocompleteOpen(false);
+      }
     }
-  }, [activeJob, normalizedQuery]);
 
-  useEffect(() => {
-    if (!activeJob || !lastEvent) {
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, []);
+
+  function selectSuggestion(result: CompanyPayload, destination: "company" | "models" = "company") {
+    setQuery(result.ticker);
+    setAutocompleteOpen(false);
+    goToTicker(result.ticker, destination);
+  }
+
+  async function openSearch(destination: "company" | "models" = "company") {
+    const selectedSuggestion = getPreferredSuggestion(autocompleteResults, trimmedSearchText, activeSuggestionIndex);
+    if (selectedSuggestion) {
+      selectSuggestion(selectedSuggestion, destination);
       return;
     }
 
-    const terminal = lastEvent.status === "completed" || lastEvent.status === "failed";
-    if (!terminal || lastSettledJobId === activeJob.id || activeJob.ticker !== normalizedQuery) {
+    if (!trimmedSearchText) {
       return;
     }
 
-    setLastSettledJobId(activeJob.id);
-    void loadSearch(activeJob.ticker, { preserveActiveJob: true });
-  }, [activeJob, lastEvent, lastSettledJobId, loadSearch, normalizedQuery]);
+    const resolution = await resolveCompanyIdentifier(trimmedSearchText);
+    if (resolution.resolved && resolution.ticker) {
+      setQuery(resolution.ticker);
+      goToTicker(resolution.ticker, destination);
+      return;
+    }
+
+    const message = resolution.error === "lookup_failed" ? "SEC lookup unavailable" : "Wrong ticker or company";
+    setAutocompleteOpen(false);
+    setInvalidMessage(message);
+    showAppToast({ message, tone: "danger" });
+  }
+
+  function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setAutocompleteOpen(false);
+      return;
+    }
+
+    if (!autocompleteResults.length) {
+      return;
+    }
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setAutocompleteOpen(true);
+      setActiveSuggestionIndex((current) => (autocompleteOpen ? Math.min(current + 1, autocompleteResults.length - 1) : 0));
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setAutocompleteOpen(true);
+      setActiveSuggestionIndex((current) => (autocompleteOpen ? Math.max(current - 1, 0) : 0));
+      return;
+    }
+
+    if (event.key === "Enter" && showAutocomplete) {
+      event.preventDefault();
+      void openSearch();
+    }
+  }
 
   return (
     <div className="home-shell">
@@ -146,25 +196,58 @@ export default function HomePage() {
       >
         <div className="home-hero-grid">
           <form
+            ref={homeSearchFormRef}
             onSubmit={(event) => {
               event.preventDefault();
-              goToTicker(normalizedQuery);
+              void openSearch();
             }}
             className="home-search-form"
           >
             <label className="home-search-label">
-              <span className="home-search-kicker">Enter Ticker</span>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value.toUpperCase())}
-                placeholder="Type any ticker..."
-                className="home-search-input"
-              />
+              <span className="home-search-kicker">Ticker or Company</span>
+              <div className="home-search-field">
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setAutocompleteOpen(true);
+                    setInvalidMessage(null);
+                  }}
+                  onFocus={() => {
+                    if (trimmedSearchText) {
+                      setAutocompleteOpen(true);
+                    }
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="AAPL or Apple"
+                  className={`home-search-input${invalidMessage ? " is-invalid" : ""}`}
+                  aria-label="Search company or ticker"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-haspopup="listbox"
+                  aria-expanded={showAutocomplete}
+                  aria-controls="home-search-autocomplete"
+                  aria-invalid={Boolean(invalidMessage)}
+                />
+
+                {showAutocomplete ? (
+                  <CompanyAutocompleteMenu
+                    id="home-search-autocomplete"
+                    results={autocompleteResults}
+                    loading={loading}
+                    activeIndex={activeSuggestionIndex}
+                    onHover={setActiveSuggestionIndex}
+                    onSelect={(result) => selectSuggestion(result)}
+                  />
+                ) : null}
+              </div>
             </label>
 
             <div className="home-hero-note">
-              You only need the ticker. If the data is missing or old, the platform refreshes it automatically and updates the pages when ready.
+              Type a ticker like `AAPL` or a company name like `Apple`. If the SEC cannot resolve it, the search box turns red.
             </div>
+
+            {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
 
             {error ? (
               <div className="pill" style={{ borderColor: "rgba(255, 77, 109, 0.35)", color: "var(--danger)" }}>
@@ -176,7 +259,7 @@ export default function HomePage() {
               <button type="submit" className="ticker-button home-action-primary">
                 Open Company Workspace
               </button>
-              <button type="button" className="ticker-button home-action-secondary" onClick={() => goToTicker(normalizedQuery, "models")}>
+              <button type="button" className="ticker-button home-action-secondary" onClick={() => void openSearch("models")}>
                 Open Valuation Models
               </button>
             </div>
@@ -188,7 +271,7 @@ export default function HomePage() {
             <div className="metric-grid">
               <div className="metric-card">
                 <div className="metric-label">Ticker</div>
-                <div className="metric-value neon-cyan">{normalizedQuery || "-"}</div>
+                <div className="metric-value neon-cyan">{displayTicker}</div>
               </div>
               <div className="metric-card">
                 <div className="metric-label">Match</div>
@@ -204,8 +287,8 @@ export default function HomePage() {
               {bestMatch
                 ? `${bestMatch.name}${bestMatch.sector ? ` - ${bestMatch.sector}` : ""}`
                 : loading
-                  ? "Checking the ticker and whether a refresh is needed."
-                  : "New tickers can take a bit longer while filings, price history, and model results are prepared."}
+                  ? "Checking local matches and SEC availability."
+                  : "Use the dropdown suggestions or press Open to validate the ticker against the SEC."}
             </div>
 
             <div className="pill">{refreshLabel}</div>
@@ -294,9 +377,9 @@ function getRefreshLabel(refresh: RefreshState | null | undefined, loading: bool
 
   switch (refresh.reason) {
     case "missing":
-      return "Fetching source data for a new ticker.";
+      return "Saved data is missing and will load when you open the workspace.";
     case "stale":
-      return "Refreshing older data before the pages update.";
+      return "Saved data is older and will refresh when you open the workspace.";
     case "manual":
       return "A background refresh is already running.";
     case "fresh":

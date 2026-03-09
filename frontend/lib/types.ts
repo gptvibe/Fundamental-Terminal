@@ -25,6 +25,14 @@ export interface CompanySearchResponse {
   refresh: RefreshState;
 }
 
+export interface CompanyResolutionResponse {
+  query: string;
+  resolved: boolean;
+  ticker: string | null;
+  name: string | null;
+  error: "not_found" | "lookup_failed" | null;
+}
+
 export interface FinancialPayload {
   filing_type: string;
   statement_type: string;

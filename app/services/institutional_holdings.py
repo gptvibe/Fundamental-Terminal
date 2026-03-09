@@ -196,6 +196,7 @@ def refresh_company_institutional_holdings(
     try:
         reporter.step("13f", "Resolving major 13F managers...")
         resolved_funds = _resolve_curated_funds(session, client, checked_at, limit=settings.sec_13f_manager_limit)
+        session.commit()
         if not resolved_funds:
             reporter.step("13f", "No 13F managers resolved; skipping institutional holdings refresh.")
             _touch_company_institutional_holdings(session, company.id, checked_at)

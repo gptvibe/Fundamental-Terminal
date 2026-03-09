@@ -890,6 +890,7 @@ class EdgarIngestionService:
         force: bool = False,
     ) -> int:
         existing_accessions = _existing_insider_trade_accessions(session, company.id)
+        session.commit()
         form4_filings = [
             metadata
             for metadata in filing_index.values()
@@ -1020,6 +1021,7 @@ class EdgarIngestionService:
                 and effective_institutional_fresh
                 and not insider_fresh
             ):
+                session.commit()
                 active_reporter.step("sec", "Checking SEC for new Form 4 filings...")
                 submissions = self.client.get_submissions(local_company.cik)
                 filing_index = self.client.build_filing_index(submissions)
@@ -1062,6 +1064,7 @@ class EdgarIngestionService:
                 and effective_insider_fresh
                 and not institutional_fresh
             ):
+                session.commit()
                 institutional_holdings_written = refresh_company_institutional_holdings(
                     session=session,
                     company=local_company,
@@ -1099,6 +1102,7 @@ class EdgarIngestionService:
                 and effective_insider_fresh
                 and effective_institutional_fresh
             ):
+                session.commit()
                 market_profile = self.market_data.get_market_profile(local_company.ticker)
                 if market_profile.sector:
                     local_company.market_sector = market_profile.sector
@@ -1170,6 +1174,7 @@ class EdgarIngestionService:
             )
             _touch_company_statements(session, company.id, checked_at)
             precompute_core_models(session, company.id, reporter=active_reporter)
+            session.commit()
 
             insider_trades_written = 0
             if refresh_insider_data and (force or not insider_fresh):
@@ -1181,6 +1186,7 @@ class EdgarIngestionService:
                     reporter=active_reporter,
                     force=force,
                 )
+                session.commit()
 
             institutional_holdings_written = 0
             if refresh_institutional_data and (force or not institutional_fresh):
@@ -1191,6 +1197,7 @@ class EdgarIngestionService:
                     reporter=active_reporter,
                     force=force,
                 )
+                session.commit()
 
             price_points_written = 0
             if force or not prices_fresh:

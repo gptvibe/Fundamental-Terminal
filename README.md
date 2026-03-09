@@ -1,6 +1,6 @@
-# SEC EDGAR ingestion service
+# Fundamental Terminal
 
-This project pulls SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, and stores the results in PostgreSQL.
+Fundamental Terminal is a pull-first Dockerized SEC and market data app. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js research UI for searching by ticker or company name.
 
 ## Canonical metrics
 
@@ -50,9 +50,13 @@ npm run dev
 
 The frontend proxies backend requests through `/backend/*` and exposes:
 
-- `/` for search and trending tickers
+- `/` for search, autocomplete, and trending tickers
 - `/company/[ticker]` for financial statements and charts
 - `/company/[ticker]/models` for cached model outputs
+
+Search accepts either a ticker or a company name and shows an autocomplete dropdown with SEC-backed matches. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
+
+On phones, the `/company/[ticker]` view hides the large top chrome to preserve space for charts and tables.
 
 Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id}/events` and is rendered in the company console panels.
 
@@ -62,6 +66,7 @@ Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id
 2. Start the full stack:
 
    ```bash
+   docker compose pull
    docker compose up -d
    ```
 
@@ -78,20 +83,21 @@ Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id
    ```
 
 3. Services on the compose network:
-
-   - `backend` → FastAPI on port `8000`
-   - `data-fetcher` → periodic refresh worker using `WORKER_IDENTIFIERS`
-   - `sp500-prewarm` → optional one-shot S&P 500 warm-up job (profile: `prewarm`)
-   - `frontend` → Next.js on port `3000`
-   - `postgres` → PostgreSQL on port `5432`
-   - `redis` → short-term cache on port `6379`
+   - `backend` -> FastAPI on port `8000`
+   - `data-fetcher` -> periodic refresh worker using `WORKER_IDENTIFIERS`
+   - `sp500-prewarm` -> optional one-shot S&P 500 warm-up job (profile: `prewarm`)
+   - `frontend` -> Next.js on port `3000`
+   - `postgres` -> PostgreSQL on port `5432`
+   - `redis` -> short-term cache on port `6379`
 
 The stack uses environment variables for database and cache connectivity via `DATABASE_URL` and `REDIS_URL`, and all services communicate over the `fundamental-terminal-net` compose network.
 
 API endpoints:
 
 ```bash
+GET  /api/companies/search?query=intel
 GET  /api/companies/search?ticker=AAPL
+GET  /api/companies/resolve?query=INTC
 GET  /api/companies/AAPL/financials
 POST /api/companies/AAPL/refresh
 GET  /api/companies/AAPL/models?model=dcf,dupont,piotroski
@@ -129,6 +135,7 @@ Quick start after cloning the repo:
 
 ```bash
 cp .env.example .env
+docker compose pull
 docker compose up -d
 ```
 
@@ -137,6 +144,7 @@ Quick start without cloning the repo:
 ```bash
 curl -L -o docker-compose.yml https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/docker-compose.yml
 curl -L -o .env https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/.env.example
+docker compose pull
 docker compose up -d
 ```
 

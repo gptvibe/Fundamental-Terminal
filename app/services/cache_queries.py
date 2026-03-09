@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -29,12 +29,38 @@ def search_company_snapshots(
     limit: int = 20,
 ) -> list[CompanyCacheSnapshot]:
     latest_checks = _latest_checks_subquery()
-    normalized_query = ticker_query.strip().upper()
+    normalized_query = ticker_query.strip()
+    if not normalized_query:
+        return []
+
+    normalized_ticker_query = normalized_query.upper()
+    normalized_name_query = normalized_query.lower()
+    escaped_ticker_query = _escape_like_query(normalized_ticker_query)
+    escaped_name_query = _escape_like_query(normalized_query)
+
+    ticker_prefix_pattern = f"{escaped_ticker_query}%"
+    name_prefix_pattern = f"{escaped_name_query}%"
+    name_contains_pattern = f"%{escaped_name_query}%"
+    match_rank = case(
+        (func.upper(Company.ticker) == normalized_ticker_query, 0),
+        (Company.ticker.ilike(ticker_prefix_pattern, escape="\\"), 1),
+        (func.lower(Company.name) == normalized_name_query, 2),
+        (Company.name.ilike(name_prefix_pattern, escape="\\"), 3),
+        (Company.name.ilike(name_contains_pattern, escape="\\"), 4),
+        else_=5,
+    )
+
     statement = (
         select(Company, latest_checks.c.last_checked)
         .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
-        .where(Company.ticker.ilike(f"{normalized_query}%"))
-        .order_by(Company.ticker.asc())
+        .where(
+            or_(
+                Company.ticker.ilike(ticker_prefix_pattern, escape="\\"),
+                Company.name.ilike(name_prefix_pattern, escape="\\"),
+                Company.name.ilike(name_contains_pattern, escape="\\"),
+            )
+        )
+        .order_by(match_rank.asc(), func.length(Company.ticker).asc(), Company.ticker.asc())
         .limit(limit)
     )
 
@@ -199,3 +225,7 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _escape_like_query(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
