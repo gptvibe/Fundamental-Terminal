@@ -2,6 +2,19 @@
 
 Fundamental Terminal is a pull-first Dockerized SEC and market data app. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js research UI for searching by ticker or company name.
 
+## Screenshots
+
+Screenshot assets live in `docs/screenshots/`.
+
+Recommended captures:
+
+- `home-search.png` - home page search with ticker/company autocomplete open
+- `company-overview.png` - `/company/[ticker]` overview with charts and financial tables
+- `company-models.png` - `/company/[ticker]/models` with cached model output cards
+- `mobile-company.png` - phone view showing the compact `/company/[ticker]` layout
+
+When you are ready to add real images, place them in `docs/screenshots/` and embed them here with standard Markdown image tags.
+
 ## Canonical metrics
 
 - `revenue`
