@@ -4,16 +4,23 @@ Fundamental Terminal is a pull-first Dockerized SEC and market data app. It inge
 
 ## Screenshots
 
-Screenshot assets live in `docs/screenshots/`.
+Captured from the local app with `INTC` as the demo company.
 
-Recommended captures:
+### Home Search
 
-- `home-search.png` - home page search with ticker/company autocomplete open
-- `company-overview.png` - `/company/[ticker]` overview with charts and financial tables
-- `company-models.png` - `/company/[ticker]/models` with cached model output cards
-- `mobile-company.png` - phone view showing the compact `/company/[ticker]` layout
+![Home search with autocomplete](docs/screenshots/home-search.png)
 
-When you are ready to add real images, place them in `docs/screenshots/` and embed them here with standard Markdown image tags.
+### Company Overview
+
+![Company overview for INTC](docs/screenshots/company-overview.png)
+
+### Valuation Models
+
+![Valuation models for INTC](docs/screenshots/company-models.png)
+
+### Mobile Company View
+
+![Mobile company view for INTC](docs/screenshots/mobile-company.png)
 
 ## Canonical metrics
 

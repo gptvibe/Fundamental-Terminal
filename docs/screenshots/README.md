@@ -1,18 +1,17 @@
 # Screenshot Assets
 
-Add product screenshots for the main README in this folder.
+These screenshots are generated from the local app using `INTC` as the demo company.
 
-Suggested files:
+Current files:
 
-- `home-search.png`
-- `company-overview.png`
-- `company-models.png`
-- `mobile-company.png`
+- `home-search.png` - home page search with ticker/company autocomplete open
+- `company-overview.png` - `/company/INTC` overview with charts and financial summary cards
+- `company-models.png` - `/company/INTC/models` valuation dashboard
+- `mobile-company.png` - phone-sized `/company/INTC` view showing the compact mobile layout
 
 Capture notes:
 
 - Use PNG for UI screenshots.
 - Keep browser zoom at 100% when possible.
-- Prefer a clean demo ticker such as `AAPL`, `MSFT`, or `INTC`.
+- Prefer a clean demo ticker such as `INTC`, `AAPL`, or `MSFT`.
 - Avoid including personal browser data, bookmarks, or private account details in the frame.
-- Keep desktop captures wide enough for README display and mobile captures around a modern phone width.
