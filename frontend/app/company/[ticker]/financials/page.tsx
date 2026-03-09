@@ -36,6 +36,8 @@ export default function CompanyFinancialsTabPage() {
       rail={
         <CompanyUtilityRail
           ticker={ticker}
+          companyName={company?.name ?? null}
+          sector={company?.sector ?? null}
           refreshState={refreshState}
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}

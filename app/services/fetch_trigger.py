@@ -13,6 +13,10 @@ def queue_company_refresh(
     force: bool = False,
 ) -> str:
     normalized_ticker = ticker.strip().upper()
+    active_job_id = status_broker.get_active_job_id(ticker=normalized_ticker, kind="refresh")
+    if active_job_id is not None:
+        return active_job_id
+
     job_id = status_broker.create_job(ticker=normalized_ticker, kind="refresh")
     background_tasks.add_task(run_refresh_job, normalized_ticker, force, job_id)
     return job_id

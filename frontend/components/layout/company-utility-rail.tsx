@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 
+import { CompanyDevicePanel } from "@/components/personal/company-device-panel";
 import { StatusConsole } from "@/components/console/status-console";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -12,6 +13,8 @@ type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
 
 interface CompanyUtilityRailProps {
   ticker: string;
+  companyName?: string | null;
+  sector?: string | null;
   refreshState: RefreshState | null;
   refreshing: boolean;
   onRefresh: () => void | Promise<void>;
@@ -31,6 +34,8 @@ interface CompanyUtilityRailProps {
 
 export function CompanyUtilityRail({
   ticker,
+  companyName,
+  sector,
   refreshState,
   refreshing,
   onRefresh,
@@ -58,14 +63,24 @@ export function CompanyUtilityRail({
     actionTone === "gold"
       ? { borderColor: "rgba(255,215,0,0.35)", color: "#FFD700" }
       : { borderColor: "rgba(0,255,65,0.35)", color: "#00FF41" };
+  const refreshInProgress =
+    refreshing ||
+    (Boolean(effectiveState.triggered && effectiveState.job_id) && connectionState !== "idle" && connectionState !== "error");
+  const refreshButtonLabel = refreshing ? "Starting refresh..." : refreshInProgress ? "Refresh in progress" : primaryActionLabel;
 
   return (
     <div className="company-utility-stack">
       <Panel title={actionTitle} subtitle={actionSubtitle}>
         <div className="utility-action-list">
           <div className="utility-action-item">
-              <button onClick={() => void onRefresh()} className="ticker-button utility-action-button" style={actionStyle}>
-                {refreshing ? "Refreshing..." : primaryActionLabel}
+              <button
+                onClick={() => void onRefresh()}
+                className="ticker-button utility-action-button"
+                style={actionStyle}
+                disabled={refreshInProgress}
+                aria-disabled={refreshInProgress}
+              >
+                {refreshButtonLabel}
               </button>
             {primaryActionDescription ? <div className="utility-action-description">{primaryActionDescription}</div> : null}
           </div>
@@ -78,6 +93,10 @@ export function CompanyUtilityRail({
             </div>
           ) : null}
         </div>
+      </Panel>
+
+      <Panel title="Saved On This Device" subtitle="Keep your own watchlist and private notes without creating an account.">
+        <CompanyDevicePanel ticker={ticker} companyName={companyName} sector={sector} />
       </Panel>
 
       {children}

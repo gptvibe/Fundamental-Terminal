@@ -14,6 +14,7 @@ import { ModelDashboard } from "@/components/models/model-dashboard";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
+import { rememberActiveJob } from "@/lib/active-job";
 import { getCompanyFinancials, getCompanyModels, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -106,6 +107,14 @@ export default function CompanyModelsPage() {
     };
   }, [activeJobId, lastEvent, settledJobIds, ticker]);
 
+  useEffect(() => {
+    if (!activeJobId) {
+      return;
+    }
+
+    rememberActiveJob(activeJobId, ticker);
+  }, [activeJobId, ticker]);
+
   const columns = useMemo<ColDef<ModelPayload>[]>(
     () => [
       { field: "model_name", headerName: "Model", minWidth: 150, valueFormatter: ({ value }) => titleCase(String(value ?? "")) },
@@ -162,6 +171,8 @@ export default function CompanyModelsPage() {
       rail={
         <CompanyUtilityRail
           ticker={ticker}
+          companyName={data?.company?.name ?? financialData?.company?.name ?? null}
+          sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
           refreshState={data?.refresh ?? financialData?.refresh ?? null}
           refreshing={refreshing}
           onRefresh={queueRefresh}

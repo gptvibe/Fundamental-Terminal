@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { useJobStream } from "@/hooks/use-job-stream";
+import { rememberActiveJob } from "@/lib/active-job";
 import { getCompanyFinancials, getCompanyInsiderTrades, getCompanyInstitutionalHoldings, refreshCompany } from "@/lib/api";
 import type {
   CompanyFinancialsResponse,
@@ -179,6 +180,14 @@ export function useCompanyWorkspace(
     ]);
     setLastChartKey(nextChartKey);
   }, [financials, includeChartConsole, lastChartKey, priceHistory, ticker]);
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return;
+    }
+
+    rememberActiveJob(activeJobId, ticker);
+  }, [activeJobId, ticker]);
 
   async function queueRefresh(force = false) {
     try {

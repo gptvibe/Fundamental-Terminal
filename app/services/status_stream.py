@@ -66,6 +66,16 @@ class StatusBroker:
         self.publish(job_id, stage="queued", message=f"{kind.title()} job queued for {ticker}", status="queued")
         return job_id
 
+    def get_active_job_id(self, *, ticker: str, kind: str) -> str | None:
+        with self._lock:
+            for record in reversed(tuple(self._jobs.values())):
+                if record.ticker != ticker or record.kind != kind:
+                    continue
+                if record.status in {"queued", "running"}:
+                    return record.job_id
+
+        return None
+
     def publish(
         self,
         job_id: str,

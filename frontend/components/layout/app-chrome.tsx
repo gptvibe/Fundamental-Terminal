@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplete-menu";
+import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { APP_TOAST_EVENT, type AppToastDetail, showAppToast } from "@/lib/app-toast";
 import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
@@ -21,8 +22,10 @@ const AUTOCOMPLETE_DEBOUNCE_MS = 180;
 export function AppChrome({ children }: AppChromeProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const desktopInputRef = useRef<HTMLInputElement>(null);
+  const mobileInputRef = useRef<HTMLInputElement>(null);
   const searchFormRef = useRef<HTMLFormElement>(null);
+  const mobileSearchRef = useRef<HTMLDivElement>(null);
   const [searchText, setSearchText] = useState(deriveTicker(pathname));
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [autocompleteResults, setAutocompleteResults] = useState<CompanyPayload[]>([]);
@@ -31,8 +34,10 @@ export function AppChrome({ children }: AppChromeProps) {
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<AppToastDetail | null>(null);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const searchRequestId = useRef(0);
   const toastTimeoutRef = useRef<number | null>(null);
+  const { savedCompanyCount } = useLocalUserData();
   const workspace = useMemo(() => deriveWorkspace(pathname), [pathname]);
   const isCompanyRoute = pathname?.startsWith("/company/") ?? false;
   const normalizedSearchText = useMemo(() => normalizeSearchText(searchText), [searchText]);
@@ -45,6 +50,7 @@ export function AppChrome({ children }: AppChromeProps) {
     setAutocompleteResults([]);
     setActiveSuggestionIndex(0);
     setInvalidMessage(null);
+    setMobileSearchOpen(false);
   }, [pathname]);
 
   useEffect(() => {
@@ -53,8 +59,8 @@ export function AppChrome({ children }: AppChromeProps) {
       const isEditable = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
       if (event.key === "/" && !isEditable) {
         event.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
+        desktopInputRef.current?.focus();
+        desktopInputRef.current?.select();
       }
     }
 
@@ -108,7 +114,10 @@ export function AppChrome({ children }: AppChromeProps) {
 
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
-      if (!searchFormRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedDesktopSearch = searchFormRef.current?.contains(target);
+      const clickedMobileSearch = mobileSearchRef.current?.contains(target);
+      if (!clickedDesktopSearch && !clickedMobileSearch) {
         setAutocompleteOpen(false);
       }
     }
@@ -153,6 +162,19 @@ export function AppChrome({ children }: AppChromeProps) {
     return () => window.clearTimeout(timer);
   }, [trimmedSearchText]);
 
+  useEffect(() => {
+    if (!mobileSearchOpen) {
+      return;
+    }
+
+    const focusHandle = window.requestAnimationFrame(() => {
+      mobileInputRef.current?.focus();
+      mobileInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(focusHandle);
+  }, [mobileSearchOpen]);
+
   function goToTicker(nextTicker: string) {
     const normalized = nextTicker.trim().toUpperCase();
     if (!normalized) {
@@ -161,6 +183,7 @@ export function AppChrome({ children }: AppChromeProps) {
 
     setSearchText(normalized);
     setAutocompleteOpen(false);
+    setMobileSearchOpen(false);
     setInvalidMessage(null);
     router.push(`/company/${encodeURIComponent(normalized)}`);
   }
@@ -268,7 +291,7 @@ export function AppChrome({ children }: AppChromeProps) {
                 to focus
               </span>
               <input
-                ref={inputRef}
+                ref={desktopInputRef}
                 value={searchText}
                 onChange={(event) => {
                   setSearchText(event.target.value);
@@ -312,6 +335,11 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
 
         <div className="app-topbar-tools">
+          <button type="button" className="app-device-shortcut" onClick={() => router.push("/#saved-companies")} title="Open your browser-only saved list">
+            Saved
+            <span className="app-device-shortcut-count">{savedCompanyCount}</span>
+          </button>
+
           <span className="app-tools-label">Appearance</span>
 
           <div className="app-theme-switcher" role="group" aria-label="Color theme">
@@ -334,6 +362,95 @@ export function AppChrome({ children }: AppChromeProps) {
           </div>
         </div>
       </header>
+
+      {isCompanyRoute ? (
+        <div className="app-mobile-command-shell">
+          <div className="app-mobile-command-bar">
+            <button type="button" className="app-mobile-command-button" onClick={() => router.push("/")}>
+              Home
+            </button>
+            <div className="app-mobile-command-summary" aria-label="Current workspace">
+              <span className="app-mobile-command-kicker">Workspace</span>
+              <span className="app-mobile-command-title">
+                {workspace.label}
+                {workspace.ticker ? ` / ${workspace.ticker}` : ""}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="app-mobile-command-button"
+              onClick={() => {
+                setMobileSearchOpen((current) => !current);
+                setAutocompleteOpen(Boolean(trimmedSearchText));
+                setInvalidMessage(null);
+              }}
+              aria-expanded={mobileSearchOpen}
+              aria-controls="app-mobile-command-drawer"
+            >
+              {mobileSearchOpen ? "Close" : "Search"}
+            </button>
+          </div>
+
+          <div
+            ref={mobileSearchRef}
+            id="app-mobile-command-drawer"
+            className={`app-mobile-command-drawer${mobileSearchOpen ? " is-open" : ""}`}
+          >
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitSearch();
+              }}
+              className={`app-topbar-search app-mobile-command-search${invalidMessage ? " is-invalid" : ""}`}
+            >
+              <div className="app-topbar-search-copy">
+                <span className="app-topbar-search-label">Open another company</span>
+                <input
+                  ref={mobileInputRef}
+                  value={searchText}
+                  onChange={(event) => {
+                    setSearchText(event.target.value);
+                    setAutocompleteOpen(true);
+                    setInvalidMessage(null);
+                  }}
+                  onFocus={() => {
+                    if (trimmedSearchText) {
+                      setAutocompleteOpen(true);
+                    }
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="AAPL or Apple"
+                  className={`app-topbar-search-input${invalidMessage ? " is-invalid" : ""}`}
+                  aria-label="Search company or ticker"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-haspopup="listbox"
+                  aria-expanded={showAutocomplete}
+                  aria-controls="app-mobile-autocomplete"
+                  aria-invalid={Boolean(invalidMessage)}
+                />
+
+                {showAutocomplete ? (
+                  <CompanyAutocompleteMenu
+                    id="app-mobile-autocomplete"
+                    results={autocompleteResults}
+                    loading={autocompleteLoading}
+                    activeIndex={activeSuggestionIndex}
+                    onHover={setActiveSuggestionIndex}
+                    onSelect={selectSuggestion}
+                  />
+                ) : null}
+
+                {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
+              </div>
+              <button type="submit" className="app-topbar-search-submit">
+                Open
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
       <main className="content-shell">{children}</main>
     </div>
   );

@@ -1,0 +1,30 @@
+services:
+  backend:
+    image: fundamental-terminal/backend:local
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+
+  data-fetcher:
+    image: fundamental-terminal/backend:local
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+
+  sp500-prewarm:
+    image: fundamental-terminal/backend:local
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+
+  frontend:
+    image: fundamental-terminal/frontend:local
+    pull_policy: never
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}

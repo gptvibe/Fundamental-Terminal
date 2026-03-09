@@ -95,6 +95,17 @@ Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id
    - `gptvibe/fundamentalterminal:backend-latest`
    - `gptvibe/fundamentalterminal:frontend-latest`
 
+   For local development from the checked-out source, keep `docker-compose.yml` as the pull-based default and opt into local builds with `docker-compose.build.yml`:
+
+   ```bash
+   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+   ```
+
+   That override builds these local images instead of pulling published ones:
+
+   - `fundamental-terminal/backend:local`
+   - `fundamental-terminal/frontend:local`
+
    To refresh to the newest published tags manually:
 
    ```bash
@@ -159,6 +170,13 @@ docker compose pull
 docker compose up -d
 ```
 
+Local source build after cloning the repo:
+
+```bash
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+```
+
 Quick start without cloning the repo:
 
 ```bash
@@ -167,6 +185,11 @@ curl -L -o .env https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/m
 docker compose pull
 docker compose up -d
 ```
+
+Notes:
+
+- `docker-compose.yml` stays image-first for GitHub users who should pull published images.
+- `docker-compose.build.yml` is the opt-in override for maintainers who want to test local code before publishing new images.
 
 ## Publish images to Docker Hub
 

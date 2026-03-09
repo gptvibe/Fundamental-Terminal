@@ -5,10 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { StatusConsole } from "@/components/console/status-console";
+import { HomeSavedCompaniesPanel } from "@/components/personal/home-saved-companies-panel";
 import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplete-menu";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
+import { ACTIVE_JOB_EVENT, clearStoredActiveJob, readStoredActiveJob, type StoredActiveJob } from "@/lib/active-job";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
 import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
@@ -62,15 +64,36 @@ export default function HomePage() {
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [recentJob, setRecentJob] = useState<StoredActiveJob | null>(null);
   const normalizedSearchText = useMemo(() => normalizeSearchText(query), [query]);
   const trimmedSearchText = normalizedSearchText.trim();
   const normalizedTickerQuery = trimmedSearchText.toUpperCase();
   const autocompleteResults = data?.results ?? [];
   const showAutocomplete = autocompleteOpen && trimmedSearchText.length > 0;
-  const { consoleEntries, connectionState } = useJobStream(null);
+  const { consoleEntries, connectionState } = useJobStream(recentJob?.jobId ?? null);
   const bestMatch = getBestMatch(autocompleteResults, normalizedTickerQuery);
   const refreshLabel = getRefreshLabel(data?.refresh, loading);
   const displayTicker = bestMatch?.ticker ?? (normalizedTickerQuery || "-");
+
+  useEffect(() => {
+    setRecentJob(readStoredActiveJob());
+
+    function syncRecentJob() {
+      setRecentJob(readStoredActiveJob());
+    }
+
+    window.addEventListener(ACTIVE_JOB_EVENT, syncRecentJob as EventListener);
+    return () => window.removeEventListener(ACTIVE_JOB_EVENT, syncRecentJob as EventListener);
+  }, []);
+
+  useEffect(() => {
+    if (!recentJob || connectionState !== "error" || consoleEntries.length) {
+      return;
+    }
+
+    clearStoredActiveJob(recentJob.jobId);
+    setRecentJob(null);
+  }, [connectionState, consoleEntries.length, recentJob]);
 
   const goToTicker = useCallback(
     (ticker: string, destination: "company" | "models" = "company") => {
@@ -328,7 +351,16 @@ export default function HomePage() {
       </div>
 
       <div className="home-rail">
-        <Panel title="Live Updates" subtitle="Watch SEC fetches and background calculations when a ticker needs fresh data">
+        <div id="saved-companies">
+          <Panel title="Your Saved Companies" subtitle="Watchlist entries and private notes stay only on this browser on this device.">
+            <HomeSavedCompaniesPanel />
+          </Panel>
+        </div>
+
+        <Panel
+          title="Live Updates"
+          subtitle={recentJob ? `Latest background refresh for ${recentJob.ticker}` : "Watch SEC fetches and background calculations when a ticker needs fresh data"}
+        >
           <StatusConsole entries={consoleEntries} connectionState={connectionState} />
         </Panel>
 
