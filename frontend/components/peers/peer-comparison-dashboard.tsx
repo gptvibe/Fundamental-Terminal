@@ -43,15 +43,23 @@ interface PeerComparisonDashboardProps {
   reloadKey?: string;
 }
 
+interface SelectedPeerState {
+  selectionKey: string;
+  tickers: string[] | null;
+}
+
 export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDashboardProps) {
+  const selectionKey = `${ticker}:${reloadKey ?? ""}`;
   const [data, setData] = useState<CompanyPeersResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTickers, setSelectedTickers] = useState<string[] | null>(null);
+  // Scope transient peer selections to the current company so navigation falls back to fresh sector-based defaults.
+  const [selectedPeerState, setSelectedPeerState] = useState<SelectedPeerState>({ selectionKey, tickers: null });
+  const selectedTickers = selectedPeerState.selectionKey === selectionKey ? selectedPeerState.tickers : null;
 
   useEffect(() => {
-    setSelectedTickers(null);
-  }, [ticker, reloadKey]);
+    setSelectedPeerState((current) => (current.selectionKey === selectionKey ? current : { selectionKey, tickers: null }));
+  }, [selectionKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +74,12 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
         }
         setData(response);
         if (selectedTickers === null) {
-          setSelectedTickers(response.selected_tickers);
+          setSelectedPeerState((current) => {
+            if (current.selectionKey !== selectionKey || current.tickers !== null) {
+              return current;
+            }
+            return { selectionKey, tickers: response.selected_tickers };
+          });
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -83,7 +96,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
     return () => {
       cancelled = true;
     };
-  }, [ticker, reloadKey, selectedTickers]);
+  }, [ticker, reloadKey, selectedTickers, selectionKey]);
 
   const peers = useMemo(() => data?.peers ?? [], [data?.peers]);
   const activeTickers = useMemo(() => selectedTickers ?? data?.selected_tickers ?? [], [data?.selected_tickers, selectedTickers]);
@@ -96,20 +109,20 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
   const barData = useMemo(() => buildBarData(displayedPeers), [displayedPeers]);
 
   function togglePeer(peerTicker: string) {
-    setSelectedTickers((current) => {
-      const active = current ?? data?.selected_tickers ?? [];
+    setSelectedPeerState((current) => {
+      const active = current.selectionKey === selectionKey ? current.tickers ?? data?.selected_tickers ?? [] : data?.selected_tickers ?? [];
       if (active.includes(peerTicker)) {
-        return active.filter((item) => item !== peerTicker);
+        return { selectionKey, tickers: active.filter((item) => item !== peerTicker) };
       }
       if (active.length >= MAX_SELECTED_PEERS) {
-        return active;
+        return current;
       }
-      return [...active, peerTicker];
+      return { selectionKey, tickers: [...active, peerTicker] };
     });
   }
 
   function resetPeers() {
-    setSelectedTickers([]);
+    setSelectedPeerState({ selectionKey, tickers: [] });
   }
 
   return (
