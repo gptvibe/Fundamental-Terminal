@@ -210,16 +210,29 @@ def _build_company_dataset(company: Company, statements: list[FinancialStatement
 
 def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -> dict[str, Any]:
     periods = [serialize_period(point) for point in dataset.financials]
+    config = _model_config(definition)
+    signature_input = {"periods": periods}
+    if config:
+        signature_input["config"] = config
     signature = hashlib.sha256(
-        json.dumps(periods, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(signature_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return {
         "model_name": definition.name,
         "model_version": definition.version,
         "statement_type": CANONICAL_STATEMENT_TYPE,
         "signature": signature,
+        "config": config,
         "periods": periods,
     }
+
+
+def _model_config(definition: ModelDefinition) -> dict[str, Any]:
+    if definition.name == "dupont":
+        from app.model_engine.models import dupont as dupont_model
+
+        return {"mode": dupont_model.get_mode()}
+    return {}
 
 
 def _latest_model_run(session: Session, company_id: int, definition: ModelDefinition) -> ModelRun | None:

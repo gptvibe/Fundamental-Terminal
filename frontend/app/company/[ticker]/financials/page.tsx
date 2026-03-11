@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { BalanceSheetChart } from "@/components/charts/balance-sheet-chart";
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
+import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
 import { FinancialStatementsTable } from "@/components/company/financial-statements-table";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -69,7 +70,11 @@ export default function CompanyFinancialsTabPage() {
       </Panel>
 
       <Panel title="Business Segment Breakdown" subtitle="Treemap, share, and growth from reported segment revenue">
-        <BusinessSegmentBreakdown financials={financials} />
+        {financials.length ? (
+          <BusinessSegmentBreakdown financials={financials} />
+        ) : (
+          <PanelEmptyState message={loading ? "Loading segment data..." : "No business segment breakdowns are reported for this company."} />
+        )}
       </Panel>
 
       <Panel title="Cash Flow Waterfall" subtitle="Bridge from revenue to free cash flow and capital allocation over time">
@@ -80,11 +85,15 @@ export default function CompanyFinancialsTabPage() {
         {financials.length ? <BalanceSheetChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading balance-sheet history..." : "No balance-sheet history is available yet."} />}
       </Panel>
 
+      <Panel title="Share Dilution Tracker" subtitle="Shares outstanding trend with period-over-period dilution rates from reported filings">
+        {financials.length ? <ShareDilutionTrackerChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading share-count history..." : "No share-count history is available yet."} />}
+      </Panel>
+
       <Panel title="Financial Statements" subtitle="Full company statement history in one table">
         {error ? (
           <div className="text-muted">{error}</div>
         ) : financials.length ? (
-          <FinancialStatementsTable financials={financials} />
+          <FinancialStatementsTable financials={financials} ticker={ticker} />
         ) : (
           <PanelEmptyState message={loading ? "Loading financial statements..." : "No financial statements are available yet for this ticker."} />
         )}

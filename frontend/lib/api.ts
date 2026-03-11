@@ -1,5 +1,6 @@
 import {
   CompanyFinancialsResponse,
+  CompanyFilingsResponse,
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyModelsResponse,
@@ -11,14 +12,15 @@ import {
 
 const API_PREFIX = "/backend/api";
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const response = await fetch(`${API_PREFIX}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {})
     },
-    cache: "no-store"
+    cache: "no-store",
+    signal: init?.signal
   });
 
   if (!response.ok) {
@@ -28,10 +30,13 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function searchCompanies(query: string, options?: { refresh?: boolean }): Promise<CompanySearchResponse> {
+export function searchCompanies(
+  query: string,
+  options?: { refresh?: boolean; signal?: AbortSignal }
+): Promise<CompanySearchResponse> {
   const params = new URLSearchParams({ query });
   params.set("refresh", String(options?.refresh ?? true));
-  return fetchJson(`/companies/search?${params.toString()}`);
+  return fetchJson(`/companies/search?${params.toString()}`, { signal: options?.signal });
 }
 
 export function resolveCompanyIdentifier(query: string): Promise<CompanyResolutionResponse> {
@@ -42,6 +47,10 @@ export function getCompanyFinancials(ticker: string): Promise<CompanyFinancialsR
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials`);
 }
 
+export function getCompanyFilings(ticker: string): Promise<CompanyFilingsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/filings`);
+}
+
 export function getCompanyInsiderTrades(ticker: string): Promise<CompanyInsiderTradesResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/insider-trades`);
 }
@@ -50,9 +59,16 @@ export function getCompanyInstitutionalHoldings(ticker: string): Promise<Company
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/institutional-holdings`);
 }
 
-export function getCompanyModels(ticker: string, modelNames?: string[]): Promise<CompanyModelsResponse> {
-  const modelParam = modelNames?.length ? `?model=${encodeURIComponent(modelNames.join(","))}` : "";
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${modelParam}`);
+export function getCompanyModels(ticker: string, modelNames?: string[], options?: { dupontMode?: "auto" | "annual" | "ttm" }): Promise<CompanyModelsResponse> {
+  const params = new URLSearchParams();
+  if (modelNames?.length) {
+    params.set("model", modelNames.join(","));
+  }
+  if (options?.dupontMode) {
+    params.set("dupont_mode", options.dupontMode);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`);
 }
 
 export function getCompanyPeers(ticker: string, peers?: string[]): Promise<CompanyPeersResponse> {

@@ -246,19 +246,19 @@ async function loadCompanyWorkspaceData(
   let insiderError: string | null = null;
   let institutionalError: string | null = null;
 
-  if (!activeJobId && options.includeInstitutional) {
+  if (options.includeInstitutional) {
     try {
       institutionalData = await getCompanyInstitutionalHoldings(ticker);
-      activeJobId = institutionalData.refresh.job_id;
+      activeJobId = activeJobId ?? institutionalData.refresh.job_id;
     } catch (nextError) {
       institutionalError = asErrorMessage(nextError, "Unable to load institutional holdings");
     }
   }
 
-  if (!activeJobId && options.includeInsiders) {
+  if (options.includeInsiders) {
     try {
       insiderData = await getCompanyInsiderTrades(ticker);
-      activeJobId = insiderData.refresh.job_id;
+      activeJobId = activeJobId ?? insiderData.refresh.job_id;
     } catch (nextError) {
       insiderError = asErrorMessage(nextError, "Unable to load insider trades");
     }

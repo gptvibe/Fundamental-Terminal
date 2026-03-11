@@ -45,6 +45,7 @@ interface BusinessSegmentBreakdownProps {
 }
 
 export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdownProps) {
+  const noFinancials = financials.length === 0;
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
 
   const segmentStatements = useMemo(() => {
@@ -144,6 +145,14 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
 
   function toggleSegment(segmentId: string) {
     setSelectedSegmentId((current) => (current === segmentId ? null : segmentId));
+  }
+
+  if (noFinancials) {
+    return (
+      <div className="sparkline-note">
+        No business segment breakdowns are reported for this company. If segments become available in SEC filings, they will appear here automatically.
+      </div>
+    );
   }
 
   if (!segmentPoints.length) {

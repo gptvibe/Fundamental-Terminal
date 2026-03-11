@@ -203,16 +203,23 @@ export function AppChrome({ children }: AppChromeProps) {
       return;
     }
 
-    const resolution = await resolveCompanyIdentifier(trimmedSearchText);
-    if (resolution.resolved && resolution.ticker) {
-      goToTicker(resolution.ticker);
-      return;
-    }
+    try {
+      const resolution = await resolveCompanyIdentifier(trimmedSearchText);
+      if (resolution.resolved && resolution.ticker) {
+        goToTicker(resolution.ticker);
+        return;
+      }
 
-    const message = resolution.error === "lookup_failed" ? "SEC lookup unavailable" : "Wrong ticker or company";
-    setAutocompleteOpen(false);
-    setInvalidMessage(message);
-    showAppToast({ message, tone: "danger" });
+      const message = resolution.error === "lookup_failed" ? "SEC lookup unavailable" : "Wrong ticker or company";
+      setAutocompleteOpen(false);
+      setInvalidMessage(message);
+      showAppToast({ message, tone: "danger" });
+    } catch {
+      const message = "Lookup unavailable, try again.";
+      setAutocompleteOpen(false);
+      setInvalidMessage(message);
+      showAppToast({ message, tone: "danger" });
+    }
   }
 
   function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {

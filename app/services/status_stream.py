@@ -36,6 +36,13 @@ class JobEvent:
         }
 
 
+def _safe_put_nowait(queue: asyncio.Queue[JobEvent], event: JobEvent) -> None:
+    try:
+        queue.put_nowait(event)
+    except asyncio.QueueFull:
+        pass
+
+
 @dataclass(slots=True)
 class JobRecord:
     job_id: str
@@ -50,11 +57,20 @@ class JobRecord:
 
 
 class StatusBroker:
-    def __init__(self, *, max_jobs: int = 250, retention_minutes: int = 120) -> None:
+    def __init__(
+        self,
+        *,
+        max_jobs: int = 250,
+        retention_minutes: int = 120,
+        max_events_per_job: int = 200,
+        subscriber_queue_size: int = 200,
+    ) -> None:
         self._lock = threading.Lock()
         self._jobs: OrderedDict[str, JobRecord] = OrderedDict()
         self._max_jobs = max_jobs
         self._retention = timedelta(minutes=retention_minutes)
+        self._max_events_per_job = max_events_per_job
+        self._subscriber_queue_size = subscriber_queue_size
 
     def create_job(self, *, ticker: str, kind: str) -> str:
         job_id = uuid.uuid4().hex
@@ -102,11 +118,13 @@ class StatusBroker:
                 level=level,
             )
             record.events.append(event)
+            if len(record.events) > self._max_events_per_job:
+                record.events = record.events[-self._max_events_per_job :]
             subscribers = list(record.subscribers.values())
 
         for loop, queue in subscribers:
             try:
-                loop.call_soon_threadsafe(queue.put_nowait, event)
+                loop.call_soon_threadsafe(_safe_put_nowait, queue, event)
             except RuntimeError:
                 continue
 
@@ -131,7 +149,7 @@ class StatusBroker:
         job_id: str,
     ) -> tuple[list[JobEvent], asyncio.Queue[JobEvent], Callable[[], None]]:
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[JobEvent] = asyncio.Queue()
+        queue: asyncio.Queue[JobEvent] = asyncio.Queue(maxsize=self._subscriber_queue_size)
         token = uuid.uuid4().hex
         with self._lock:
             record = self._jobs.get(job_id)
@@ -163,7 +181,10 @@ class StatusBroker:
             self._jobs.pop(job_id, None)
 
         while len(self._jobs) > self._max_jobs:
-            self._jobs.popitem(last=False)
+            oldest_job_id, oldest_record = next(iter(self._jobs.items()))
+            if oldest_record.status in {"queued", "running"}:
+                break
+            self._jobs.pop(oldest_job_id, None)
 
 
 class JobReporter:

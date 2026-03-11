@@ -4,7 +4,15 @@ from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import book_equity, json_number, latest_annual_statement, latest_statement, safe_divide, statement_value
 
 MODEL_NAME = "altman_z"
-MODEL_VERSION = "1.1.0"
+MODEL_VERSION = "1.2.0"
+
+FACTOR_WEIGHTS = {
+    "ebit_to_assets": 3.3,
+    "book_equity_to_liabilities": 0.6,
+    "sales_to_assets": 1.0,
+    "working_capital_to_assets": 1.2,
+    "retained_earnings_to_assets": 1.4,
+}
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -33,22 +41,17 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     }
 
     approximate_score = None
-    core_factors_available = None not in (
-        factors["ebit_to_assets"],
-        factors["book_equity_to_liabilities"],
-        factors["sales_to_assets"],
-    )
-    if core_factors_available:
-        approximate_score = (
-            3.3 * float(factors["ebit_to_assets"])
-            + 0.6 * float(factors["book_equity_to_liabilities"])
-            + 1.0 * float(factors["sales_to_assets"])
-            + (1.2 * float(factors["working_capital_to_assets"]) if factors["working_capital_to_assets"] is not None else 0.0)
-            + (1.4 * float(factors["retained_earnings_to_assets"]) if factors["retained_earnings_to_assets"] is not None else 0.0)
-        )
+    available_factors = {key: value for key, value in factors.items() if value is not None}
+    if available_factors:
+        present_weight = sum(FACTOR_WEIGHTS[key] for key in available_factors)
+        weighted_sum = sum(FACTOR_WEIGHTS[key] * float(value) for key, value in available_factors.items())
+        if present_weight:
+            # Rescale to the full Altman-Z weight to avoid biasing missing factors to zero.
+            total_weight = sum(FACTOR_WEIGHTS.values())
+            approximate_score = weighted_sum * (total_weight / present_weight)
 
     return {
-        "status": "ok" if approximate_score is not None and all(value is not None for value in factors.values()) else "approximate" if approximate_score is not None else "insufficient_data",
+        "status": "ok" if approximate_score is not None and len(available_factors) == len(factors) else "partial" if approximate_score is not None else "insufficient_data",
         "period_end": current.period_end.isoformat(),
         "filing_type": current.filing_type,
         "z_score_approximate": json_number(approximate_score),

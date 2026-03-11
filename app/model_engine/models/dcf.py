@@ -4,7 +4,7 @@ from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import annual_series, json_number, statement_value
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.1.0"
 
 DISCOUNT_RATE = 0.10
 TERMINAL_GROWTH_RATE = 0.025
@@ -28,7 +28,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         previous = historical_fcfs[index - 1]
         current = historical_fcfs[index]
         if previous != 0:
-            growth_rates.append((current - previous) / abs(previous))
+            growth_rates.append((current - previous) / previous)
 
     assumed_growth = sum(growth_rates) / len(growth_rates) if growth_rates else 0.03
     assumed_growth = max(MIN_GROWTH_RATE, min(MAX_GROWTH_RATE, assumed_growth))

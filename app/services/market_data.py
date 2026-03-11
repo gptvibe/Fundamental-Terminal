@@ -48,7 +48,8 @@ class MarketDataClient:
     def get_price_history(self, ticker: str) -> list[PriceBar]:
         symbol = _normalize_market_symbol(ticker)
         period_end = int(time.time())
-        response = self._http.get(
+        response = _request_with_retries(
+            self._http,
             f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
             params={
                 "period1": 0,
@@ -57,7 +58,6 @@ class MarketDataClient:
                 "includeAdjustedClose": "true",
             },
         )
-        response.raise_for_status()
 
         payload = response.json()
         chart_root = payload.get("chart", {})
@@ -91,7 +91,8 @@ class MarketDataClient:
 
     def get_market_profile(self, ticker: str) -> MarketProfile:
         symbol = _normalize_market_symbol(ticker)
-        response = self._http.get(
+        response = _request_with_retries(
+            self._http,
             "https://query1.finance.yahoo.com/v1/finance/search",
             params={
                 "q": symbol,
@@ -101,7 +102,6 @@ class MarketDataClient:
                 "enableFuzzyQuery": "false",
             },
         )
-        response.raise_for_status()
         payload = response.json()
         quotes = payload.get("quotes") or []
         exact_match = next(
@@ -238,3 +238,20 @@ def _string_or_none(value: Any) -> str | None:
 
 def _chunked(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
     return [items[index:index + size] for index in range(0, len(items), size)]
+
+
+def _request_with_retries(client: httpx.Client, url: str, *, params: dict[str, Any]) -> httpx.Response:
+    max_retries = settings.market_max_retries
+    backoff = settings.market_retry_backoff_seconds
+    for attempt in range(max_retries):
+        response = client.get(url, params=params)
+        if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
+            retry_after = response.headers.get("retry-after")
+            wait = float(retry_after) if retry_after and retry_after.isdigit() else backoff * (2 ** attempt)
+            response.close()
+            time.sleep(wait)
+            continue
+        response.raise_for_status()
+        return response
+    response.raise_for_status()
+    return response

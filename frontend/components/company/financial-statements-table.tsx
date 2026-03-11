@@ -8,11 +8,33 @@ import type { FinancialPayload } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
-export function FinancialStatementsTable({ financials }: { financials: FinancialPayload[] }) {
+export function FinancialStatementsTable({ financials, ticker }: { financials: FinancialPayload[]; ticker: string }) {
   const metricTrends = useMemo(() => buildMetricTrendRows(financials), [financials]);
+  const jsonPayload = useMemo(() => JSON.stringify(financials, null, 2), [financials]);
+  const csvPayload = useMemo(() => buildFinancialsCsv(financials), [financials]);
 
   return (
     <div className="financial-statements-stack">
+      <div className="financial-export-row">
+        <div className="financial-trend-table-note">Download the current cached statement history for spreadsheet or model work.</div>
+        <div className="financial-export-actions">
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={() => triggerDownload(`${ticker}-financial-statements.csv`, csvPayload, "text/csv;charset=utf-8")}
+          >
+            Download CSV
+          </button>
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={() => triggerDownload(`${ticker}-financial-statements.json`, jsonPayload, "application/json;charset=utf-8")}
+          >
+            Download JSON
+          </button>
+        </div>
+      </div>
+
       <div className="financial-trend-table-shell">
         <div className="financial-trend-table-note">Hover a sparkline to inspect yearly values.</div>
         <div className="financial-trend-table-scroll">
@@ -324,4 +346,79 @@ function trendColor(direction: TrendDirection): string {
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function triggerDownload(filename: string, payload: string, contentType: string) {
+  const blob = new Blob([payload], { type: contentType });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+function buildFinancialsCsv(financials: FinancialPayload[]): string {
+  const headers = [
+    "period_start",
+    "period_end",
+    "filing_type",
+    "statement_type",
+    "source",
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "net_income",
+    "eps",
+    "operating_cash_flow",
+    "free_cash_flow",
+    "total_assets",
+    "total_liabilities",
+    "shares_outstanding",
+    "capex",
+    "acquisitions",
+    "debt_changes",
+    "dividends",
+    "share_buybacks"
+  ];
+  const rows = financials.map((statement) =>
+    [
+      statement.period_start,
+      statement.period_end,
+      statement.filing_type,
+      statement.statement_type,
+      statement.source,
+      statement.revenue,
+      statement.gross_profit,
+      statement.operating_income,
+      statement.net_income,
+      statement.eps,
+      statement.operating_cash_flow,
+      statement.free_cash_flow,
+      statement.total_assets,
+      statement.total_liabilities,
+      statement.shares_outstanding,
+      statement.capex,
+      statement.acquisitions,
+      statement.debt_changes,
+      statement.dividends,
+      statement.share_buybacks
+    ].map(csvCell)
+  );
+
+  return [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+}
+
+function csvCell(value: string | number | null): string {
+  if (value === null) {
+    return "";
+  }
+
+  const text = String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }

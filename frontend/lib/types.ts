@@ -155,6 +155,25 @@ export interface CompanyModelsResponse {
   refresh: RefreshState;
 }
 
+export interface FilingPayload {
+  accession_number: string | null;
+  form: string;
+  filing_date: string | null;
+  report_date: string | null;
+  primary_document: string | null;
+  primary_doc_description: string | null;
+  items: string | null;
+  source_url: string;
+}
+
+export interface CompanyFilingsResponse {
+  company: CompanyPayload | null;
+  filings: FilingPayload[];
+  timeline_source: "sec_submissions" | "cached_financials";
+  refresh: RefreshState;
+  error: string | null;
+}
+
 export interface PeerOptionPayload {
   ticker: string;
   name: string;

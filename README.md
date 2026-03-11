@@ -1,6 +1,6 @@
 # Fundamental Terminal
 
-Fundamental Terminal is a pull-first Dockerized SEC and market data app. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js research UI for searching by ticker or company name.
+Fundamental Terminal is a pull-first Dockerized SEC-first fundamental terminal. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js research UI for searching by ticker or company name.
 
 ## Screenshots
 
@@ -41,10 +41,11 @@ Captured from the local app with `INTC` as the demo company.
    pip install -r requirements.txt
    ```
 
-2. Set the database URL:
+2. Set the database URL and SEC contact:
 
    ```bash
    set DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/database_name
+   set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
    ```
 
 3. Run migrations:
@@ -154,6 +155,12 @@ Optional environment variables for the prewarm job:
 - `SP500_PREWARM_MODE=seed` to seed only company metadata
 - `SP500_PREWARM_FORCE=true` to bypass the freshness window
 - `SP500_PREWARM_LIMIT=100` and `SP500_PREWARM_START_AT=201` to resume in batches
+
+Additional environment variables:
+
+- `SEC_TICKER_CACHE_TTL_SECONDS=86400` to cache SEC ticker mappings
+- `SEC_MAX_RETRIES=3` and `SEC_RETRY_BACKOFF_SECONDS=0.5` for SEC request retries
+- `MARKET_MAX_RETRIES=3` and `MARKET_RETRY_BACKOFF_SECONDS=0.5` for market data retries
 
 To pin a specific release, change these in `.env`:
 

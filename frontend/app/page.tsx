@@ -19,12 +19,12 @@ import type { CompanyPayload, CompanySearchResponse, RefreshState } from "@/lib/
 
 const HOW_IT_WORKS_STEPS = [
   {
-    title: "Enter a ticker",
-    copy: "Type a stock ticker and open the company workspace or the valuation models page."
+    title: "Enter a company",
+    copy: "Type a stock ticker, company name, or CIK and open the company workspace or the valuation models page."
   },
   {
     title: "We fetch the source data",
-    copy: "The app checks company filings and other saved market data, then refreshes anything missing or out of date."
+    copy: "The app checks SEC filings first, layers in saved market data, and refreshes anything missing or out of date."
   },
   {
     title: "The calculations run automatically",
@@ -41,6 +41,11 @@ const WHERE_TO_LOOK = [
     title: "Company Workspace",
     accentClass: "neon-green",
     copy: "Use this page for statements, historical financial data, and company-level views."
+  },
+  {
+    title: "Filings",
+    accentClass: "neon-cyan",
+    copy: "Use this page for the SEC-first timeline of recent 10-K, 10-Q, 8-K, and related filing history."
   },
   {
     title: "Valuation Models",
@@ -109,7 +114,7 @@ export default function HomePage() {
     [router]
   );
 
-  const loadSearch = useCallback(async (searchQuery: string) => {
+  const loadSearch = useCallback(async (searchQuery: string, signal?: AbortSignal) => {
     if (!searchQuery) {
       setData(null);
       setError(null);
@@ -121,22 +126,31 @@ export default function HomePage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await searchCompanies(searchQuery, { refresh: false });
+      const response = await searchCompanies(searchQuery, { refresh: false, signal });
       setData(response);
       setActiveSuggestionIndex(0);
     } catch (nextError) {
+      if (signal?.aborted) {
+        return;
+      }
       setError(nextError instanceof Error ? nextError.message : "Search failed");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void loadSearch(trimmedSearchText);
+      void loadSearch(trimmedSearchText, controller.signal);
     }, 250);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [loadSearch, trimmedSearchText]);
 
   useEffect(() => {
@@ -167,17 +181,24 @@ export default function HomePage() {
       return;
     }
 
-    const resolution = await resolveCompanyIdentifier(trimmedSearchText);
-    if (resolution.resolved && resolution.ticker) {
-      setQuery(resolution.ticker);
-      goToTicker(resolution.ticker, destination);
-      return;
-    }
+    try {
+      const resolution = await resolveCompanyIdentifier(trimmedSearchText);
+      if (resolution.resolved && resolution.ticker) {
+        setQuery(resolution.ticker);
+        goToTicker(resolution.ticker, destination);
+        return;
+      }
 
-    const message = resolution.error === "lookup_failed" ? "SEC lookup unavailable" : "Wrong ticker or company";
-    setAutocompleteOpen(false);
-    setInvalidMessage(message);
-    showAppToast({ message, tone: "danger" });
+      const message = resolution.error === "lookup_failed" ? "SEC lookup unavailable" : "Wrong ticker, company, or CIK";
+      setAutocompleteOpen(false);
+      setInvalidMessage(message);
+      showAppToast({ message, tone: "danger" });
+    } catch {
+      const message = "Lookup unavailable, try again.";
+      setAutocompleteOpen(false);
+      setInvalidMessage(message);
+      showAppToast({ message, tone: "danger" });
+    }
   }
 
   function handleSearchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -214,7 +235,7 @@ export default function HomePage() {
     <div className="home-shell">
       <Panel
         title="Start Here"
-        subtitle="Type a ticker. We pull SEC filings and saved market data, refresh anything stale, then fill in the charts and model pages. This can take a little while."
+        subtitle="Type a ticker, company, or CIK. We pull SEC filings first, refresh anything stale, then fill in the charts, filing timeline, and model pages. This can take a little while."
         className="home-hero"
       >
         <div className="home-hero-grid">
@@ -227,7 +248,7 @@ export default function HomePage() {
             className="home-search-form"
           >
             <label className="home-search-label">
-              <span className="home-search-kicker">Ticker or Company</span>
+              <span className="home-search-kicker">Ticker, Company, or CIK</span>
               <div className="home-search-field">
                 <input
                   value={query}
@@ -242,9 +263,9 @@ export default function HomePage() {
                     }
                   }}
                   onKeyDown={handleSearchKeyDown}
-                  placeholder="AAPL or Apple"
+                  placeholder="AAPL, Apple, or CIK: 0000320193"
                   className={`home-search-input${invalidMessage ? " is-invalid" : ""}`}
-                  aria-label="Search company or ticker"
+                  aria-label="Search by ticker, company, or CIK"
                   role="combobox"
                   aria-autocomplete="list"
                   aria-haspopup="listbox"
@@ -267,7 +288,7 @@ export default function HomePage() {
             </label>
 
             <div className="home-hero-note">
-              Type a ticker like `AAPL` or a company name like `Apple`. If the SEC cannot resolve it, the search box turns red.
+              Type a ticker like `AAPL`, a company name like `Apple`, or a CIK like `CIK: 0000320193`. If the SEC cannot resolve it, the search box turns red.
             </div>
 
             {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
@@ -289,7 +310,7 @@ export default function HomePage() {
           </form>
 
           <div className="home-hero-side">
-            {data ? <StatusPill state={data.refresh} /> : <span className="pill">Ready for a ticker</span>}
+            {data ? <StatusPill state={data.refresh} /> : <span className="pill">Ready for a search</span>}
 
             <div className="metric-grid">
               <div className="metric-card">

@@ -13,7 +13,7 @@ interface CompanyAutocompleteMenuProps {
   emptyMessage?: string;
 }
 
-export function CompanyAutocompleteMenu({ id, results, loading, activeIndex, onHover, onSelect, emptyMessage = "No exact match yet. Press Enter to try it as a ticker." }: CompanyAutocompleteMenuProps) {
+export function CompanyAutocompleteMenu({ id, results, loading, activeIndex, onHover, onSelect, emptyMessage = "No exact match yet. Press Enter to try it as a ticker or CIK." }: CompanyAutocompleteMenuProps) {
   return (
     <div className="app-topbar-autocomplete" id={id} role="listbox" aria-label="Company suggestions">
       {loading ? (

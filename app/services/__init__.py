@@ -9,6 +9,7 @@ from app.services.cache_queries import (
     get_company_price_cache_status,
     get_company_price_history,
     get_company_snapshot,
+    get_company_snapshot_by_cik,
     search_company_snapshots,
 )
 from app.services.fetch_trigger import queue_company_refresh
@@ -28,6 +29,7 @@ __all__ = [
     "get_company_price_cache_status",
     "get_company_price_history",
     "get_company_snapshot",
+    "get_company_snapshot_by_cik",
     "queue_company_refresh",
     "run_refresh_job",
     "search_company_snapshots",

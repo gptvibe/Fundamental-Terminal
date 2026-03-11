@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -251,6 +252,8 @@ class FilingMetadata:
     filing_date: date | None = None
     report_date: date | None = None
     primary_document: str | None = None
+    primary_doc_description: str | None = None
+    items: str | None = None
 
 
 @dataclass(slots=True)
@@ -360,6 +363,24 @@ class EdgarClient:
         self._last_request_monotonic = 0.0
         self._company_tickers_cache: list[dict[str, Any]] | None = None
 
+    def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        max_retries = settings.sec_max_retries
+        backoff = settings.sec_retry_backoff_seconds
+        attempt = 0
+        while True:
+            self._throttle()
+            response = self._http.request(method, url, **kwargs)
+            self._last_request_monotonic = time.monotonic()
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
+                retry_after = response.headers.get("retry-after")
+                wait = _retry_wait(retry_after, backoff, attempt)
+                response.close()
+                time.sleep(wait)
+                attempt += 1
+                continue
+            response.raise_for_status()
+            return response
+
     def close(self) -> None:
         self._http.close()
 
@@ -370,21 +391,40 @@ class EdgarClient:
             time.sleep(wait_for)
 
     def _get_json(self, url: str) -> dict[str, Any]:
-        self._throttle()
-        response = self._http.get(url)
-        self._last_request_monotonic = time.monotonic()
-        response.raise_for_status()
-        return response.json()
+        return self._request("GET", url).json()
 
     def _get_text(self, url: str) -> str:
-        self._throttle()
-        response = self._http.get(url)
-        self._last_request_monotonic = time.monotonic()
-        response.raise_for_status()
-        return response.text
+        return self._request("GET", url).text
+
+    @contextmanager
+    def stream_document(self, url: str):
+        max_retries = settings.sec_max_retries
+        backoff = settings.sec_retry_backoff_seconds
+        for attempt in range(max_retries):
+            self._throttle()
+            with self._http.stream("GET", url) as response:
+                self._last_request_monotonic = time.monotonic()
+                if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
+                    retry_after = response.headers.get("retry-after")
+                    wait = _retry_wait(retry_after, backoff, attempt)
+                    time.sleep(wait)
+                    continue
+                response.raise_for_status()
+                yield response
+                return
 
     def get_company_tickers(self) -> list[dict[str, Any]]:
+        global _ticker_cache, _ticker_cache_loaded_at
         if self._company_tickers_cache is not None:
+            return self._company_tickers_cache
+
+        now = time.monotonic()
+        if (
+            _ticker_cache is not None
+            and _ticker_cache_loaded_at is not None
+            and now - _ticker_cache_loaded_at < settings.sec_ticker_cache_ttl_seconds
+        ):
+            self._company_tickers_cache = _ticker_cache
             return self._company_tickers_cache
 
         payload = self._get_json(settings.sec_ticker_lookup_url)
@@ -396,10 +436,12 @@ class EdgarClient:
             raise ValueError("Unexpected SEC ticker payload shape")
 
         self._company_tickers_cache = [item for item in values if isinstance(item, dict)]
+        _ticker_cache = self._company_tickers_cache
+        _ticker_cache_loaded_at = now
         return self._company_tickers_cache
 
     def resolve_company(self, identifier: str) -> CompanyIdentity:
-        lookup = identifier.strip()
+        lookup = re.sub(r"^cik\s*[:#-]?\s*", "", identifier.strip(), flags=re.IGNORECASE)
         if not lookup:
             raise ValueError("Company identifier is required")
 
@@ -488,6 +530,8 @@ class EdgarClient:
                 filing_date=_parse_date(_value_at(arrays.get("filingDate"), position)),
                 report_date=_parse_date(_value_at(arrays.get("reportDate"), position)),
                 primary_document=_value_at(arrays.get("primaryDocument"), position),
+                primary_doc_description=_value_at(arrays.get("primaryDocDescription"), position),
+                items=_value_at(arrays.get("items"), position),
             )
 
     def get_filing_directory_index(self, cik: str, accession_number: str) -> dict[str, Any]:
@@ -1521,6 +1565,12 @@ def _clean_text(value: Any) -> str | None:
     return text or None
 
 
+def _retry_wait(retry_after: str | None, backoff: float, attempt: int) -> float:
+    if retry_after and retry_after.isdigit():
+        return float(retry_after)
+    return backoff * (2 ** attempt)
+
+
 def _normalize_datetime_value(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -2426,3 +2476,5 @@ def _primary_supported_form(submissions: dict[str, Any]) -> str:
         if normalized_form in SUPPORTED_FORMS:
             return normalized_form
     return "10-K"
+_ticker_cache: list[dict[str, Any]] | None = None
+_ticker_cache_loaded_at: float | None = None

@@ -27,6 +27,8 @@ interface ModelsWorkspaceData {
   activeJobId: string | null;
 }
 
+type DupontMode = "auto" | "annual" | "ttm";
+
 export default function CompanyModelsPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
@@ -37,6 +39,8 @@ export default function CompanyModelsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
+  const [dupontMode, setDupontMode] = useState<DupontMode>("auto");
+  const [showModeInfo, setShowModeInfo] = useState(false);
   const { consoleEntries, connectionState, lastEvent } = useJobStream(activeJobId);
   const models = useMemo(() => data?.models ?? [], [data?.models]);
   const hasModels = models.length > 0;
@@ -50,7 +54,7 @@ export default function CompanyModelsPage() {
         setLoading(true);
         setError(null);
         setSettledJobIds([]);
-        const workspaceData = await loadModelsWorkspaceData(ticker);
+        const workspaceData = await loadModelsWorkspaceData(ticker, dupontMode);
         if (!cancelled) {
           setData(workspaceData.modelData);
           setFinancialData(workspaceData.financialData);
@@ -71,7 +75,7 @@ export default function CompanyModelsPage() {
     return () => {
       cancelled = true;
     };
-  }, [ticker]);
+  }, [ticker, dupontMode]);
 
   useEffect(() => {
     if (!activeJobId || !lastEvent) {
@@ -86,7 +90,7 @@ export default function CompanyModelsPage() {
     let cancelled = false;
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
 
-    void loadModelsWorkspaceData(ticker)
+    void loadModelsWorkspaceData(ticker, dupontMode)
       .then((workspaceData) => {
         if (cancelled) {
           return;
@@ -105,7 +109,7 @@ export default function CompanyModelsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeJobId, lastEvent, settledJobIds, ticker]);
+  }, [activeJobId, lastEvent, settledJobIds, ticker, dupontMode]);
 
   useEffect(() => {
     if (!activeJobId) {
@@ -186,7 +190,8 @@ export default function CompanyModelsPage() {
           statusLines={[
             `Available models: ${modelSummary.cachedCount}/${MODEL_NAMES.length}`,
             `Last updated: ${modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"}`,
-            `Price history points available: ${(financialData?.price_history ?? []).length.toLocaleString()}`
+            `Price history points available: ${(financialData?.price_history ?? []).length.toLocaleString()}`,
+            `DuPont basis: ${dupontMode.toUpperCase()}`
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -195,32 +200,6 @@ export default function CompanyModelsPage() {
       }
       mainClassName="models-page-grid"
     >
-      <Panel title="Valuation Models" subtitle={data?.company?.name ?? ticker} aside={data ? <StatusPill state={data.refresh} /> : undefined} className="model-hero models-page-hero">
-        <div style={{ display: "grid", gap: 14 }}>
-          <div className="metric-grid">
-            <div className="metric-card">
-              <div className="metric-label">Ticker</div>
-              <div className="metric-value neon-green">{ticker}</div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Available Models</div>
-              <div className="metric-value neon-cyan">{modelSummary.cachedCount}/{MODEL_NAMES.length}</div>
-            </div>
-          </div>
-
-          <div className="model-summary-strip">
-            <SummaryCard label="Last Updated" value={modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"} accent="cyan" />
-            <SummaryCard label="DCF EV" value={formatCompactNumber(modelSummary.dcfEnterpriseValue)} accent="green" />
-            <SummaryCard label="DuPont ROE" value={formatPercent(modelSummary.dupontRoe)} accent="gold" />
-            <SummaryCard label="Piotroski" value={modelSummary.piotroskiLabel} accent="green" />
-            <SummaryCard label="Altman Proxy" value={formatSigned(modelSummary.altmanZ)} accent="cyan" />
-          </div>
-
-          <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, DCF Scenario Analysis, and Model Analytics for the full model output.</div>
-        </div>
-      </Panel>
-
-
       <Panel
         title="Investment Summary"
         subtitle={
@@ -235,6 +214,69 @@ export default function CompanyModelsPage() {
 
       <Panel title="Financial Health Score" subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"} className="models-page-span-full">
         <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
+      </Panel>
+
+      <Panel title="Valuation Models" subtitle={data?.company?.name ?? ticker} aside={data ? <StatusPill state={data.refresh} /> : undefined} className="model-hero models-page-hero">
+        <div style={{ display: "grid", gap: 14 }}>
+          <div className="metric-grid">
+            <div className="metric-card">
+              <div className="metric-label">Ticker</div>
+              <div className="metric-value neon-green">{ticker}</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-label">Available Models</div>
+              <div className="metric-value neon-cyan">{modelSummary.cachedCount}/{MODEL_NAMES.length}</div>
+            </div>
+          </div>
+
+          <div className="dupont-mode-bar">
+            <div className="dupont-mode-select-col">
+              <div className="metric-label">DuPont Basis</div>
+              <select
+                className="dupont-mode-select"
+                value={dupontMode}
+                onChange={(event) => setDupontMode(event.target.value as DupontMode)}
+              >
+                <option value="auto">Auto (Annual if available)</option>
+                <option value="annual">Annual filing only</option>
+                <option value="ttm">Rolling TTM (4 comparable filings)</option>
+              </select>
+            </div>
+            <button className="dupont-info-button" type="button" onClick={() => setShowModeInfo(true)}>
+              DuPont basis explainer
+            </button>
+          </div>
+
+          {showModeInfo ? (
+            <div className="dupont-info-pop">
+              <div className="dupont-info-header">
+                <div>
+                  <div className="metric-label">How DuPont basis works</div>
+                  <div className="dupont-info-sub">Choose how ROE components are scaled.</div>
+                </div>
+                <button className="dupont-info-close" type="button" aria-label="Close" onClick={() => setShowModeInfo(false)}>
+                  ×
+                </button>
+              </div>
+              <ul className="dupont-info-list">
+                <li><strong>Auto</strong> – Uses the latest annual filing when present; otherwise builds TTM from the last four comparable filings.</li>
+                <li><strong>Annual</strong> – Always use the latest annual filing (10-K/20-F/40-F); ROE reflects that single year.</li>
+                <li><strong>TTM</strong> – Always use rolling four comparable filings (typically 10-Qs) to smooth seasonality.</li>
+              </ul>
+              <div className="dupont-info-footnote">Changing the basis recalculates and caches a separate DuPont run for this company.</div>
+            </div>
+          ) : null}
+
+          <div className="model-summary-strip">
+            <SummaryCard label="Last Updated" value={modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"} accent="cyan" />
+            <SummaryCard label="DCF EV" value={formatCompactNumber(modelSummary.dcfEnterpriseValue)} accent="green" />
+            <SummaryCard label="DuPont ROE" value={formatPercent(modelSummary.dupontRoe)} accent="gold" />
+            <SummaryCard label="Piotroski" value={modelSummary.piotroskiLabel} accent="green" />
+            <SummaryCard label="Altman Proxy" value={formatSigned(modelSummary.altmanZ)} accent="cyan" />
+          </div>
+
+          <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, DCF Scenario Analysis, and Model Analytics for the full model output.</div>
+        </div>
       </Panel>
 
       <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
@@ -278,8 +320,11 @@ export default function CompanyModelsPage() {
   );
 }
 
-async function loadModelsWorkspaceData(ticker: string): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData] = await Promise.all([getCompanyModels(ticker, MODEL_NAMES), getCompanyFinancials(ticker)]);
+async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
+  const [modelData, financialData] = await Promise.all([
+    getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
+    getCompanyFinancials(ticker)
+  ]);
 
   return {
     modelData,

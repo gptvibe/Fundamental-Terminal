@@ -15,7 +15,8 @@ COPY app ./app
 COPY docker/backend ./docker/backend
 COPY README.md ./README.md
 
-RUN chmod +x /app/docker/backend/start-api.sh /app/docker/backend/start-worker.sh /app/docker/backend/start-prewarm.sh
+RUN sed -i 's/\r$//' /app/docker/backend/*.sh && \
+    chmod +x /app/docker/backend/start-api.sh /app/docker/backend/start-worker.sh /app/docker/backend/start-prewarm.sh
 
 EXPOSE 8000
 

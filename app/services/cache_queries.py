@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
@@ -35,31 +36,44 @@ def search_company_snapshots(
 
     normalized_ticker_query = normalized_query.upper()
     normalized_name_query = normalized_query.lower()
+    cik_digits_query = "".join(character for character in normalized_query if character.isdigit())
+    padded_cik_query = cik_digits_query.zfill(10) if cik_digits_query else None
     escaped_ticker_query = _escape_like_query(normalized_ticker_query)
     escaped_name_query = _escape_like_query(normalized_query)
+    escaped_cik_query = _escape_like_query(cik_digits_query) if cik_digits_query else None
 
     ticker_prefix_pattern = f"{escaped_ticker_query}%"
     name_prefix_pattern = f"{escaped_name_query}%"
     name_contains_pattern = f"%{escaped_name_query}%"
-    match_rank = case(
-        (func.upper(Company.ticker) == normalized_ticker_query, 0),
-        (Company.ticker.ilike(ticker_prefix_pattern, escape="\\"), 1),
-        (func.lower(Company.name) == normalized_name_query, 2),
-        (Company.name.ilike(name_prefix_pattern, escape="\\"), 3),
-        (Company.name.ilike(name_contains_pattern, escape="\\"), 4),
-        else_=5,
+    cik_contains_pattern = f"%{escaped_cik_query}%" if escaped_cik_query else None
+    ranking_clauses = []
+    if padded_cik_query:
+        ranking_clauses.append((Company.cik == padded_cik_query, 0))
+    ranking_clauses.extend(
+        [
+            (func.upper(Company.ticker) == normalized_ticker_query, 1),
+            (Company.ticker.ilike(ticker_prefix_pattern, escape="\\"), 2),
+            (func.lower(Company.name) == normalized_name_query, 3),
+            (Company.name.ilike(name_prefix_pattern, escape="\\"), 4),
+            (Company.name.ilike(name_contains_pattern, escape="\\"), 5),
+        ]
     )
+    if cik_contains_pattern:
+        ranking_clauses.append((Company.cik.ilike(cik_contains_pattern, escape="\\"), 6))
+    match_rank = case(*ranking_clauses, else_=7)
+
+    search_clauses = [
+        Company.ticker.ilike(ticker_prefix_pattern, escape="\\"),
+        Company.name.ilike(name_prefix_pattern, escape="\\"),
+        Company.name.ilike(name_contains_pattern, escape="\\"),
+    ]
+    if cik_contains_pattern:
+        search_clauses.append(Company.cik.ilike(cik_contains_pattern, escape="\\"))
 
     statement = (
         select(Company, latest_checks.c.last_checked)
         .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
-        .where(
-            or_(
-                Company.ticker.ilike(ticker_prefix_pattern, escape="\\"),
-                Company.name.ilike(name_prefix_pattern, escape="\\"),
-                Company.name.ilike(name_contains_pattern, escape="\\"),
-            )
-        )
+        .where(or_(*search_clauses))
         .order_by(match_rank.asc(), func.length(Company.ticker).asc(), Company.ticker.asc())
         .limit(limit)
     )
@@ -75,6 +89,23 @@ def get_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot 
         select(Company, latest_checks.c.last_checked)
         .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
         .where(Company.ticker == normalized_ticker)
+    )
+
+    row = session.execute(statement).one_or_none()
+    if row is None:
+        return None
+
+    company, last_checked = row
+    return _build_snapshot(company, last_checked)
+
+
+def get_company_snapshot_by_cik(session: Session, cik: str) -> CompanyCacheSnapshot | None:
+    latest_checks = _latest_checks_subquery()
+    normalized_cik = str(cik).strip().zfill(10)
+    statement = (
+        select(Company, latest_checks.c.last_checked)
+        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
+        .where(Company.cik == normalized_cik)
     )
 
     row = session.execute(statement).one_or_none()
@@ -101,6 +132,7 @@ def get_company_models(
     session: Session,
     company_id: int,
     model_names: list[str] | None = None,
+    config_by_model: dict[str, dict[str, Any]] | None = None,
 ) -> list[ModelRun]:
     statement = select(ModelRun).where(ModelRun.company_id == company_id)
     if model_names:
@@ -113,12 +145,27 @@ def get_company_models(
     latest_by_model: dict[str, ModelRun] = {}
     for row in rows:
         key = row.model_name.lower()
+        expected_config = config_by_model.get(key) if config_by_model else None
+        if expected_config is not None and not _config_matches(row.input_periods, expected_config):
+            continue
         if key not in latest_by_model:
             latest_by_model[key] = row
 
     if not model_names:
         return list(latest_by_model.values())
     return [latest_by_model[name] for name in normalized_names if name in latest_by_model]
+
+
+def _config_matches(input_periods: Any, expected: dict[str, Any]) -> bool:
+    if expected is None:
+        return True
+    if isinstance(input_periods, dict):
+        config = input_periods.get("config")
+        if config is None:
+            # Legacy runs without config are treated as matching only when expected mode is auto.
+            return expected == {"mode": "auto"}
+        return config == expected
+    return False
 
 
 def get_company_price_history(session: Session, company_id: int) -> list[PriceHistory]:
