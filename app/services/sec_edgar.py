@@ -27,6 +27,7 @@ from app.services.institutional_holdings import (
 )
 from app.services.market_data import (
     MarketDataClient,
+    MarketProfile,
     get_company_price_last_checked,
     touch_company_price_history,
     upsert_price_history,
@@ -1147,22 +1148,27 @@ class EdgarIngestionService:
                 and effective_institutional_fresh
             ):
                 session.commit()
-                market_profile = self.market_data.get_market_profile(local_company.ticker)
-                if market_profile.sector:
-                    local_company.market_sector = market_profile.sector
-                if market_profile.industry:
-                    local_company.market_industry = market_profile.industry
-                active_reporter.step("market", "Fetching price history...")
-                price_bars = self.market_data.get_price_history(local_company.ticker)
-                active_reporter.step("database", "Saving price history to database...")
-                price_points_written = upsert_price_history(
-                    session=session,
-                    company=local_company,
-                    price_bars=price_bars,
-                    checked_at=checked_at,
-                )
-                if price_points_written > 0:
-                    touch_company_price_history(session, local_company.id, checked_at)
+                try:
+                    market_profile = self.market_data.get_market_profile(local_company.ticker)
+                    if market_profile.sector:
+                        local_company.market_sector = market_profile.sector
+                    if market_profile.industry:
+                        local_company.market_industry = market_profile.industry
+                    active_reporter.step("market", "Fetching price history...")
+                    price_bars = self.market_data.get_price_history(local_company.ticker)
+                    active_reporter.step("database", "Saving price history to database...")
+                    price_points_written = upsert_price_history(
+                        session=session,
+                        company=local_company,
+                        price_bars=price_bars,
+                        checked_at=checked_at,
+                    )
+                    if price_points_written > 0:
+                        touch_company_price_history(session, local_company.id, checked_at)
+                except Exception as exc:
+                    logger.exception("Market data refresh failed for %s", local_company.ticker)
+                    active_reporter.step("market", f"Market data refresh failed: {exc}")
+                    price_points_written = 0
                 session.commit()
                 active_reporter.complete("Refresh and compute complete.")
                 return IngestionResult(
@@ -1186,7 +1192,12 @@ class EdgarIngestionService:
         active_reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
         filing_index = self.client.build_filing_index(submissions)
         companyfacts = self.client.get_companyfacts(company_identity.cik)
-        market_profile = self.market_data.get_market_profile(company_identity.ticker)
+        try:
+            market_profile = self.market_data.get_market_profile(company_identity.ticker)
+        except Exception as exc:
+            logger.exception("Market profile lookup failed for %s", company_identity.ticker)
+            active_reporter.step("market", f"Market profile lookup failed: {exc}")
+            market_profile = MarketProfile(sector=None, industry=None)
 
         enriched_identity = CompanyIdentity(
             cik=company_identity.cik,
@@ -1245,17 +1256,22 @@ class EdgarIngestionService:
 
             price_points_written = 0
             if force or not prices_fresh:
-                active_reporter.step("market", "Fetching price history...")
-                price_bars = self.market_data.get_price_history(company.ticker)
-                active_reporter.step("database", "Saving price history to database...")
-                price_points_written = upsert_price_history(
-                    session=session,
-                    company=company,
-                    price_bars=price_bars,
-                    checked_at=checked_at,
-                )
-                if price_points_written > 0:
-                    touch_company_price_history(session, company.id, checked_at)
+                try:
+                    active_reporter.step("market", "Fetching price history...")
+                    price_bars = self.market_data.get_price_history(company.ticker)
+                    active_reporter.step("database", "Saving price history to database...")
+                    price_points_written = upsert_price_history(
+                        session=session,
+                        company=company,
+                        price_bars=price_bars,
+                        checked_at=checked_at,
+                    )
+                    if price_points_written > 0:
+                        touch_company_price_history(session, company.id, checked_at)
+                except Exception as exc:
+                    logger.exception("Market data refresh failed for %s", company.ticker)
+                    active_reporter.step("market", f"Market data refresh failed: {exc}")
+                    price_points_written = 0
 
             session.commit()
             active_reporter.complete("Refresh and compute complete.")

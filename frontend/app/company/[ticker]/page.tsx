@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { PriceFundamentalsModule } from "@/components/charts/price-fundamentals-module";
+import { FinancialHistorySection } from "@/components/company/financial-history-section";
 import { PeerComparisonDashboard } from "@/components/peers/peer-comparison-dashboard";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -79,6 +80,10 @@ export default function CompanyOverviewPage() {
       </Panel>
 
       <PriceFundamentalsModule priceData={priceHistory} fundamentalsData={fundamentalsTrendData} />
+
+      <Panel title="10-Year Financial History" subtitle="SEC EDGAR companyfacts (FY)">
+        <FinancialHistorySection cik={company?.cik ?? null} />
+      </Panel>
 
       <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
     </CompanyWorkspaceShell>

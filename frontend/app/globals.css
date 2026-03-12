@@ -2141,6 +2141,59 @@ select {
   font-weight: 700;
 }
 
+.financial-history-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.financial-history-note {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.financial-history-table-shell {
+  width: 100%;
+  min-width: 0;
+  max-height: 520px;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 22%),
+    rgba(0, 0, 0, 0.22);
+}
+
+.financial-history-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.financial-history-chart-shell {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(0, 229, 255, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(139, 92, 246, 0.08), transparent 32%),
+    rgba(255, 255, 255, 0.015);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.financial-history-chart-title {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+.financial-history-chart-canvas {
+  height: 220px;
+  min-width: 0;
+}
+
 .price-fundamentals-shell {
   display: grid;
   gap: 16px;

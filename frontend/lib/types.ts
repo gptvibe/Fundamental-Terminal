@@ -16,6 +16,11 @@ export interface CompanyPayload {
   market_sector: string | null;
   market_industry: string | null;
   last_checked: string | null;
+  last_checked_financials: string | null;
+  last_checked_prices: string | null;
+  last_checked_insiders: string | null;
+  last_checked_institutional: string | null;
+  last_checked_filings: string | null;
   cache_state: CacheState;
 }
 
@@ -80,6 +85,14 @@ export interface FundamentalsTrendPoint {
   revenue: number | null;
   eps: number | null;
   free_cash_flow: number | null;
+}
+
+export interface FinancialHistoryPoint {
+  year: number;
+  revenue: number | null;
+  net_income: number | null;
+  eps: number | null;
+  operating_cash_flow: number | null;
 }
 
 export interface CompanyFinancialsResponse {

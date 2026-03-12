@@ -6,7 +6,7 @@ import html
 import json
 import re
 import time
-from datetime import date as DateType, datetime
+from datetime import date as DateType, datetime, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -70,6 +70,11 @@ class CompanyPayload(BaseModel):
     market_sector: str | None = None
     market_industry: str | None = None
     last_checked: datetime | None = None
+    last_checked_financials: datetime | None = None
+    last_checked_prices: datetime | None = None
+    last_checked_insiders: datetime | None = None
+    last_checked_institutional: datetime | None = None
+    last_checked_filings: datetime | None = None
     cache_state: Literal["fresh", "stale", "missing"]
 
 
@@ -134,6 +139,10 @@ class CompanyFinancialsResponse(BaseModel):
     financials: list[FinancialPayload]
     price_history: list[PriceHistoryPayload]
     refresh: RefreshState
+
+
+class CompanyFactsResponse(BaseModel):
+    facts: dict[str, Any]
 
 
 class InsiderTradePayload(BaseModel):
@@ -448,7 +457,11 @@ def company_financials(
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = get_company_price_history(session, snapshot.company.id)
     return CompanyFinancialsResponse(
-        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked)),
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+        ),
         financials=[_serialize_financial(statement) for statement in financials],
         price_history=[_serialize_price_history(point) for point in price_history],
         refresh=refresh,
@@ -479,7 +492,11 @@ def company_insider_trades(
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
     return CompanyInsiderTradesResponse(
-        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, insider_last_checked)),
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, insider_last_checked),
+            last_checked_insiders=insider_last_checked,
+        ),
         insider_trades=[_serialize_insider_trade(trade) for trade in insider_trades],
         summary=_serialize_insider_activity_summary(build_insider_activity_summary(insider_trades)),
         refresh=refresh,
@@ -509,7 +526,11 @@ def company_institutional_holdings(
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
     return CompanyInstitutionalHoldingsResponse(
-        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, holdings_last_checked)),
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, holdings_last_checked),
+            last_checked_institutional=holdings_last_checked,
+        ),
         institutional_holdings=[_serialize_institutional_holding(holding) for holding in holdings],
         refresh=refresh,
     )
@@ -625,7 +646,11 @@ def company_peers(
         )
 
     return CompanyPeersResponse(
-        company=_serialize_company(payload["company"], last_checked=_merge_last_checked(payload["company"].last_checked, price_last_checked)),
+        company=_serialize_company(
+            payload["company"],
+            last_checked=_merge_last_checked(payload["company"].last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+        ),
         peer_basis=payload["peer_basis"],
         available_companies=[PeerOptionPayload(**item) for item in payload["available_companies"]],
         selected_tickers=payload["selected_tickers"],
@@ -657,7 +682,7 @@ def company_filings(
     cached_filings = _load_filings_from_cache(snapshot.company.cik)
     if cached_filings is not None:
         return CompanyFilingsResponse(
-            company=_serialize_company(snapshot),
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(cached_filings)),
             filings=cached_filings,
             timeline_source="sec_submissions",
             refresh=refresh,
@@ -671,7 +696,7 @@ def company_filings(
         filings = _serialize_recent_filings(snapshot.company.cik, filing_index)
         _store_filings_in_cache(snapshot.company.cik, filings)
         return CompanyFilingsResponse(
-            company=_serialize_company(snapshot),
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(filings)),
             filings=filings,
             timeline_source="sec_submissions",
             refresh=refresh,
@@ -682,7 +707,7 @@ def company_filings(
         _evict_filings_cache(snapshot.company.cik)
         fallback_filings = _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
         return CompanyFilingsResponse(
-            company=_serialize_company(snapshot),
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(fallback_filings)),
             filings=fallback_filings,
             timeline_source="cached_financials",
             refresh=refresh,
@@ -692,6 +717,36 @@ def company_filings(
                 else "SEC submissions are temporarily unavailable. Try refreshing again shortly."
             ),
         )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/financial-history", response_model=CompanyFactsResponse)
+def company_financial_history(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyFactsResponse:
+    normalized = _normalize_search_query(ticker)
+    resolved_cik = _normalize_cik_query(normalized)
+    if resolved_cik:
+        cik = resolved_cik
+    else:
+        snapshot = _resolve_cached_company_snapshot(session, _normalize_ticker(ticker))
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown ticker")
+        cik = snapshot.company.cik
+
+    client = EdgarClient()
+    try:
+        facts = client.get_companyfacts(cik)
+        if not isinstance(facts, dict):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unexpected SEC companyfacts payload")
+        return CompanyFactsResponse(facts=facts.get("facts", {}))
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load SEC companyfacts for '%s'", cik)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to load SEC companyfacts")
     finally:
         client.close()
 
@@ -791,7 +846,15 @@ def _trigger_refresh(
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
-def _serialize_company(snapshot: CompanyCacheSnapshot, last_checked: datetime | None = None) -> CompanyPayload:
+def _serialize_company(
+    snapshot: CompanyCacheSnapshot,
+    last_checked: datetime | None = None,
+    *,
+    last_checked_prices: datetime | None = None,
+    last_checked_insiders: datetime | None = None,
+    last_checked_institutional: datetime | None = None,
+    last_checked_filings: datetime | None = None,
+) -> CompanyPayload:
     return CompanyPayload(
         ticker=snapshot.company.ticker,
         cik=snapshot.company.cik,
@@ -800,6 +863,11 @@ def _serialize_company(snapshot: CompanyCacheSnapshot, last_checked: datetime | 
         market_sector=snapshot.company.market_sector,
         market_industry=snapshot.company.market_industry,
         last_checked=last_checked if last_checked is not None else snapshot.last_checked,
+        last_checked_financials=snapshot.last_checked,
+        last_checked_prices=last_checked_prices,
+        last_checked_insiders=last_checked_insiders,
+        last_checked_institutional=last_checked_institutional,
+        last_checked_filings=last_checked_filings,
         cache_state=snapshot.cache_state,
     )
 
@@ -944,6 +1012,13 @@ def _serialize_filing_metadata(cik: str, filing: FilingMetadata) -> FilingPayloa
         items=_normalize_optional_text(filing.items),
         source_url=source_url,
     )
+
+
+def _filings_cache_last_checked(filings: list[FilingPayload]) -> datetime | None:
+    dates = [filing.filing_date for filing in filings if filing.filing_date is not None]
+    if not dates:
+        return None
+    return datetime.combine(max(dates), datetime.min.time(), tzinfo=timezone.utc)
 
 
 def _serialize_cached_statement_filings(financials: list[FinancialStatement]) -> list[FilingPayload]:

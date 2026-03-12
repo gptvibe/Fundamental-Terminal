@@ -50,6 +50,7 @@ export function useCompanyWorkspace(
   const [chartConsoleEntries, setChartConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [lastChartKey, setLastChartKey] = useState<string | null>(null);
   const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
+  const [refreshTick, setRefreshTick] = useState(0);
   const { consoleEntries: streamEntries, connectionState, lastEvent } = useJobStream(activeJobId);
 
   const financials = useMemo(() => data?.financials ?? [], [data?.financials]);
@@ -87,6 +88,7 @@ export function useCompanyWorkspace(
         setChartConsoleEntries([]);
         setLastChartKey(null);
         setSettledJobIds([]);
+        setRefreshTick(0);
 
         const result = await loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional });
         if (cancelled) {
@@ -128,6 +130,7 @@ export function useCompanyWorkspace(
 
     let cancelled = false;
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
+    setRefreshTick((current) => current + 1);
 
     void loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
       .then((result) => {
@@ -209,9 +212,24 @@ export function useCompanyWorkspace(
     [chartConsoleEntries, streamEntries]
   );
 
+  const mergedCompany = useMemo(() => {
+    const baseCompany =
+      data?.company ?? institutionalData?.company ?? insiderData?.company ?? null;
+    if (!baseCompany) {
+      return null;
+    }
+
+    return {
+      ...baseCompany,
+      last_checked_insiders: insiderData?.company?.last_checked_insiders ?? baseCompany.last_checked_insiders,
+      last_checked_institutional:
+        institutionalData?.company?.last_checked_institutional ?? baseCompany.last_checked_institutional,
+    };
+  }, [data?.company, insiderData?.company, institutionalData?.company]);
+
   return {
     data,
-    company: data?.company ?? institutionalData?.company ?? insiderData?.company ?? null,
+    company: mergedCompany,
     financials,
     priceHistory,
     annualStatements,
