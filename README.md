@@ -165,8 +165,8 @@ Additional environment variables:
 To pin a specific release, change these in `.env`:
 
 ```bash
-BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.0
-FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.0
+BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.3
+FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.3
 ```
 
 Quick start after cloning the repo:
@@ -203,13 +203,13 @@ Notes:
 The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes prebuilt images to Docker Hub.
 
 - Push to `main` updates the `backend-latest` and `frontend-latest` tags.
-- Push a version tag like `v1.0.0` publishes `backend-v1.0.0` and `frontend-v1.0.0`.
+- Push a version tag like `v1.0.3` publishes `backend-v1.0.3` and `frontend-v1.0.3`.
 
 Example first release:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.3
+git push origin v1.0.3
 ```
 
 Add these GitHub repository secrets before using the workflow:
@@ -259,3 +259,4 @@ Run model computations from cached PostgreSQL data only:
 ```bash
 python -m app.model_engine.worker AAPL --models dcf,dupont,piotroski,altman_z,ratios
 ```
+
