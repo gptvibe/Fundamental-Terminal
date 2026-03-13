@@ -1,1 +1,52 @@
+# Secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.crt
+*.kubeconfig
+*.sqlite
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Node / Frontend
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.svelte-kit/
+.vite/
+.parcel-cache/
+coverage/
+
+# Logs / temp
+*.log
+*.tmp
+tmp/
+temp/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local tools
+apply_patch.bat
