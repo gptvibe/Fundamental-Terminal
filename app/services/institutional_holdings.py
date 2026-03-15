@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, InstitutionalFund, InstitutionalHolding
+from app.services.sec_cache import sec_http_cache
 from app.services.status_stream import JobReporter
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,10 @@ class InstitutionalHoldingsClient:
         return response.json()
 
     def _request(self, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> httpx.Response:
+        cached_response = sec_http_cache.get("GET", url, params=params, headers=headers)
+        if cached_response is not None:
+            return cached_response
+
         elapsed = time.monotonic() - self._last_request_at
         wait_seconds = settings.sec_min_request_interval_seconds - elapsed
         if wait_seconds > 0:
@@ -181,6 +186,7 @@ class InstitutionalHoldingsClient:
         response = self._http.get(url, params=params, headers=headers)
         self._last_request_at = time.monotonic()
         response.raise_for_status()
+        sec_http_cache.put("GET", url, response, params=params, headers=headers)
         return response
 
 

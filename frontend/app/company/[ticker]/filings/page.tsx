@@ -4,15 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { FilingDocumentViewer } from "@/components/filings/filing-document-viewer";
+import { FilingParserInsights } from "@/components/filings/filing-parser-insights";
 import { CompanyFilingsTimeline } from "@/components/filings/company-filings-timeline";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyFilings } from "@/lib/api";
+import { getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyFilingsResponse } from "@/lib/types";
+import type { CompanyFilingInsightsResponse, CompanyFilingsResponse } from "@/lib/types";
 
 export default function CompanyFilingsPage() {
   const params = useParams<{ ticker: string }>();
@@ -28,6 +29,9 @@ export default function CompanyFilingsPage() {
     reloadKey
   } = useCompanyWorkspace(ticker);
   const [data, setData] = useState<CompanyFilingsResponse | null>(null);
+  const [insightsData, setInsightsData] = useState<CompanyFilingInsightsResponse | null>(null);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | null>(null);
@@ -62,6 +66,37 @@ export default function CompanyFilingsPage() {
     };
   }, [reloadKey, ticker]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInsights() {
+      try {
+        setInsightsLoading(true);
+        setInsightsError(null);
+        setInsightsData(null);
+        const response = await getCompanyFilingInsights(ticker);
+        if (cancelled) {
+          return;
+        }
+        setInsightsData(response);
+      } catch (nextError) {
+        if (!cancelled) {
+          setInsightsError(nextError instanceof Error ? nextError.message : "Unable to load filing insights");
+        }
+      } finally {
+        if (!cancelled) {
+          setInsightsLoading(false);
+        }
+      }
+    }
+
+    void loadInsights();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
+  const insights = useMemo(() => (insightsData?.insights == null ? [] : insightsData.insights), [insightsData?.insights]);
   const pageCompany = company ?? data?.company ?? null;
   const filings = useMemo(() => data?.filings ?? [], [data?.filings]);
   const latestFilingDate = useMemo(
@@ -146,6 +181,15 @@ export default function CompanyFilingsPage() {
         />
       </Panel>
 
+      <Panel title="Filing Parser Snapshot" subtitle="Fast parse of recent 10-K/10-Q HTML filings">
+        <FilingParserInsights
+          insights={insights}
+          loading={insightsLoading || workspaceLoading}
+          error={insightsError}
+          refresh={insightsData?.refresh == null ? refreshState : insightsData.refresh}
+        />
+      </Panel>
+
       <Panel title="Filing Viewer" subtitle="Open the selected SEC document inside the workspace without leaving the terminal">
         <FilingDocumentViewer ticker={ticker} filing={selectedFiling} />
       </Panel>
@@ -176,3 +220,4 @@ function Metric({ label, value }: { label: string; value: string | null }) {
     </div>
   );
 }
+

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 import type { CompanyPayload } from "@/lib/types";
 import { buildSuggestionMeta } from "@/lib/company-search";
 
@@ -14,14 +16,26 @@ interface CompanyAutocompleteMenuProps {
 }
 
 export function CompanyAutocompleteMenu({ id, results, loading, activeIndex, onHover, onSelect, emptyMessage = "No exact match yet. Press Enter to try it as a ticker or CIK." }: CompanyAutocompleteMenuProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (loading || !results.length) {
+      return;
+    }
+
+    const activeOption = listRef.current?.querySelector<HTMLElement>(`#${id}-option-${activeIndex}`);
+    activeOption?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, id, loading, results.length]);
+
   return (
-    <div className="app-topbar-autocomplete" id={id} role="listbox" aria-label="Company suggestions">
+    <div ref={listRef} className="app-topbar-autocomplete" id={id} role="listbox" aria-label="Company suggestions">
       {loading ? (
         <div className="app-topbar-autocomplete-state">Searching companies...</div>
       ) : results.length ? (
         results.map((result, index) => (
           <button
             key={result.ticker}
+            id={`${id}-option-${index}`}
             type="button"
             role="option"
             aria-selected={index === activeIndex}

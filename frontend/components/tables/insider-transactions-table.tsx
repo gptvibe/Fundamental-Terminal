@@ -5,9 +5,21 @@ import { useMemo, useState } from "react";
 import { formatDate } from "@/lib/format";
 import type { InsiderTradePayload, RefreshState } from "@/lib/types";
 
-type SortKey = "date" | "name" | "role" | "action" | "shares" | "price" | "value" | "ownership_after" | "is_10b5_1";
+type SortKey = "date" | "filing_date" | "name" | "role" | "action" | "shares" | "price" | "value" | "ownership_after" | "is_10b5_1";
 type SortDirection = "asc" | "desc";
 type NormalizedAction = "buy" | "sell" | "other";
+
+type FilingLagPoint = {
+  key: string;
+  filingDate: string;
+  lagDays: number;
+};
+
+type FilingLagSummary = {
+  points: FilingLagPoint[];
+  median: number | null;
+  max: number;
+};
 
 const EMPTY_ROLE_VALUE = "__none__";
 
@@ -65,6 +77,7 @@ export function InsiderTransactionsTable({
 
   const buyCount = filteredTrades.filter((trade) => normalizeAction(trade.action) === "buy").length;
   const sellCount = filteredTrades.filter((trade) => normalizeAction(trade.action) === "sell").length;
+  const filingLagSummary = useMemo(() => buildFilingLagSummary(trades), [trades]);
 
   function handleSortToggle(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -143,11 +156,32 @@ export function InsiderTransactionsTable({
         </div>
       </div>
 
+      {filingLagSummary.points.length ? (
+        <div className="filing-lag-strip">
+          <div className="filing-lag-header">
+            <span>Filing lag</span>
+            <span>{filingLagSummary.median != null ? `${filingLagSummary.median}d median` : "Lag unavailable"}</span>
+            <span>{filingLagSummary.max}d max</span>
+          </div>
+          <div className="filing-lag-bars">
+            {filingLagSummary.points.map((point) => (
+              <div
+                key={point.key}
+                className="filing-lag-bar"
+                style={{ height: `${resolveLagHeight(point.lagDays, filingLagSummary.max)}px` }}
+                title={`Filed ${formatDate(point.filingDate)} - ${point.lagDays} day lag`}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="insider-table-shell">
         <table className="insider-table">
           <thead>
             <tr>
               <SortableHeader label="Date" sortKey="date" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
+              <SortableHeader label="Filing" sortKey="filing_date" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
               <SortableHeader label="Insider Name" sortKey="name" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
               <SortableHeader label="Role" sortKey="role" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
               <SortableHeader label="Action" sortKey="action" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
@@ -171,6 +205,19 @@ export function InsiderTransactionsTable({
               return (
                 <tr key={`${trade.name}-${trade.date ?? "na"}-${trade.transaction_code ?? "none"}-${index}`}>
                   <td>{trade.date ? formatDate(trade.date) : "--"}</td>
+                  <td>
+                    <div className="filing-meta-cell">
+                      <span className="filing-form-pill">{trade.filing_type ? trade.filing_type : "Form 4"}</span>
+                      <span className="filing-date">{trade.filing_date ? formatDate(trade.filing_date) : "--"}</span>
+                      {trade.source ? (
+                        <a className="filing-link" href={trade.source} target="_blank" rel="noreferrer">
+                          {trade.accession_number ? trade.accession_number : "SEC Filing"}
+                        </a>
+                      ) : (
+                        <span className="filing-link is-muted">{trade.accession_number ? trade.accession_number : "--"}</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="insider-name-cell">{trade.name}</td>
                   <td>{trade.role ?? "Unspecified"}</td>
                   <td>
@@ -257,6 +304,8 @@ function sortValue(trade: InsiderTradePayload, sortKey: SortKey): number | strin
   switch (sortKey) {
     case "date":
       return trade.date ? Date.parse(trade.date) : null;
+    case "filing_date":
+      return trade.filing_date ? Date.parse(trade.filing_date) : null;
     case "name":
       return trade.name.toLowerCase();
     case "role":
@@ -327,3 +376,70 @@ function formatCurrency(value: number | null) {
     maximumFractionDigits: 2
   }).format(value);
 }
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function buildFilingLagSummary(trades: InsiderTradePayload[]): FilingLagSummary {
+  const byAccession = new Map<string, { filingDate: string; transactionDate: string }>();
+
+  for (const trade of trades) {
+    if (!trade.filing_date || !trade.date) {
+      continue;
+    }
+    const key = trade.accession_number
+      ? trade.accession_number
+      : trade.source
+      ? trade.source
+      : `${trade.name}-${trade.date}-${trade.transaction_code ? trade.transaction_code : "na"}`;
+    const existing = byAccession.get(key);
+    if (!existing || trade.date < existing.transactionDate) {
+      byAccession.set(key, { filingDate: trade.filing_date, transactionDate: trade.date });
+    }
+  }
+
+  const points: FilingLagPoint[] = [];
+  for (const [key, entry] of byAccession) {
+    const filingDate = parseLagDate(entry.filingDate);
+    const transactionDate = parseLagDate(entry.transactionDate);
+    if (!filingDate || !transactionDate) {
+      continue;
+    }
+    const lagDays = Math.max(0, Math.round((filingDate.getTime() - transactionDate.getTime()) / 86400000));
+    points.push({ key, filingDate: entry.filingDate, lagDays });
+  }
+
+  const ordered = points.sort((left, right) => Date.parse(left.filingDate) - Date.parse(right.filingDate));
+  const trimmed = ordered.slice(Math.max(0, ordered.length - 12));
+  const lags = trimmed.map((point) => point.lagDays).sort((a, b) => a - b);
+  const median = lags.length ? lags[Math.floor((lags.length - 1) / 2)] : null;
+  const max = trimmed.reduce((value, point) => Math.max(value, point.lagDays), 0);
+
+  return { points: trimmed, median, max };
+}
+
+function parseLagDate(value: string) {
+  if (!value) {
+    return null;
+  }
+  if (DATE_ONLY_PATTERN.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function resolveLagHeight(value: number, max: number) {
+  if (!max) {
+    return 8;
+  }
+  return Math.max(8, Math.round((value / max) * 32) + 6);
+}
+
+
+
+
+

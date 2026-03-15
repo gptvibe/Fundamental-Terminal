@@ -75,6 +75,7 @@ export default function HomePage() {
   const normalizedTickerQuery = trimmedSearchText.toUpperCase();
   const autocompleteResults = data?.results ?? [];
   const showAutocomplete = autocompleteOpen && trimmedSearchText.length > 0;
+  const activeOptionId = showAutocomplete && autocompleteResults.length ? `home-search-autocomplete-option-${activeSuggestionIndex}` : undefined;
   const { consoleEntries, connectionState } = useJobStream(recentJob?.jobId ?? null);
   const bestMatch = getBestMatch(autocompleteResults, normalizedTickerQuery);
   const refreshLabel = getRefreshLabel(data?.refresh, loading);
@@ -233,6 +234,7 @@ export default function HomePage() {
 
   return (
     <div className="home-shell">
+      <h1 className="sr-only">Fundamental Terminal Home</h1>
       <Panel
         title="Start Here"
         subtitle="Type a ticker, company, or CIK. We pull SEC filings first, refresh anything stale, then fill in the charts, filing timeline, and model pages. This can take a little while."
@@ -271,6 +273,7 @@ export default function HomePage() {
                   aria-haspopup="listbox"
                   aria-expanded={showAutocomplete}
                   aria-controls="home-search-autocomplete"
+                  aria-activedescendant={activeOptionId}
                   aria-invalid={Boolean(invalidMessage)}
                 />
 

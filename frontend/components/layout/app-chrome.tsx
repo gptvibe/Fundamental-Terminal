@@ -43,6 +43,8 @@ export function AppChrome({ children }: AppChromeProps) {
   const normalizedSearchText = useMemo(() => normalizeSearchText(searchText), [searchText]);
   const trimmedSearchText = normalizedSearchText.trim();
   const showAutocomplete = autocompleteOpen && trimmedSearchText.length > 0;
+  const activeOptionId = showAutocomplete && autocompleteResults.length ? `app-topbar-autocomplete-option-${activeSuggestionIndex}` : undefined;
+  const activeMobileOptionId = showAutocomplete && autocompleteResults.length ? `app-mobile-autocomplete-option-${activeSuggestionIndex}` : undefined;
 
   useEffect(() => {
     setSearchText(deriveTicker(pathname));
@@ -319,6 +321,7 @@ export function AppChrome({ children }: AppChromeProps) {
                 aria-haspopup="listbox"
                 aria-expanded={showAutocomplete}
                 aria-controls="app-topbar-autocomplete"
+                aria-activedescendant={activeOptionId}
                 aria-invalid={Boolean(invalidMessage)}
               />
 
@@ -434,6 +437,7 @@ export function AppChrome({ children }: AppChromeProps) {
                   aria-haspopup="listbox"
                   aria-expanded={showAutocomplete}
                   aria-controls="app-mobile-autocomplete"
+                  aria-activedescendant={activeMobileOptionId}
                   aria-invalid={Boolean(invalidMessage)}
                 />
 

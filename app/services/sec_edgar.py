@@ -21,6 +21,7 @@ from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.models import Company, FinancialStatement, InsiderTrade
+from app.services.filing_parser import FilingParser, ParsedFilingInsight
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
     refresh_company_institutional_holdings,
@@ -32,6 +33,7 @@ from app.services.market_data import (
     touch_company_price_history,
     upsert_price_history,
 )
+from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.status_stream import JobReporter
 
 logger = logging.getLogger(__name__)
@@ -40,6 +42,7 @@ SUPPORTED_FORMS = {"10-K", "10-Q", "20-F", "40-F", "6-K"}
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 INTERIM_FORMS = {"10-Q", "6-K"}
 CANONICAL_STATEMENT_TYPE = "canonical_xbrl"
+FILING_PARSER_STATEMENT_TYPE = "filing_parser"
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -365,6 +368,12 @@ class EdgarClient:
         self._company_tickers_cache: list[dict[str, Any]] | None = None
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        params = kwargs.get("params")
+        headers = kwargs.get("headers")
+        cached_response = sec_http_cache.get(method, url, params=params, headers=headers)
+        if cached_response is not None:
+            return cached_response
+
         max_retries = settings.sec_max_retries
         backoff = settings.sec_retry_backoff_seconds
         attempt = 0
@@ -380,6 +389,7 @@ class EdgarClient:
                 attempt += 1
                 continue
             response.raise_for_status()
+            sec_http_cache.put(method, url, response, params=params, headers=headers)
             return response
 
     def close(self) -> None:
@@ -399,20 +409,11 @@ class EdgarClient:
 
     @contextmanager
     def stream_document(self, url: str):
-        max_retries = settings.sec_max_retries
-        backoff = settings.sec_retry_backoff_seconds
-        for attempt in range(max_retries):
-            self._throttle()
-            with self._http.stream("GET", url) as response:
-                self._last_request_monotonic = time.monotonic()
-                if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
-                    retry_after = response.headers.get("retry-after")
-                    wait = _retry_wait(retry_after, backoff, attempt)
-                    time.sleep(wait)
-                    continue
-                response.raise_for_status()
-                yield response
-                return
+        response = self._request("GET", url)
+        try:
+            yield response
+        finally:
+            response.close()
 
     def get_company_tickers(self) -> list[dict[str, Any]]:
         global _ticker_cache, _ticker_cache_loaded_at
@@ -898,6 +899,7 @@ class EdgarIngestionService:
         self.client = EdgarClient()
         self.market_data = MarketDataClient()
         self.normalizer = EdgarNormalizer()
+        self.filing_parser = FilingParser(fetch_text=self.client._get_text)
 
     def close(self) -> None:
         self.client.close()
@@ -992,6 +994,18 @@ class EdgarIngestionService:
     ) -> IngestionResult:
         checked_at = datetime.now(timezone.utc)
         active_reporter = reporter or JobReporter()
+
+        if settings.sec_cache_prune_max_entries > 0:
+            try:
+                removed_entries = prune_sec_cache_periodic(
+                    min_interval_seconds=float(settings.sec_cache_prune_interval_seconds),
+                    max_entries=settings.sec_cache_prune_max_entries,
+                )
+                if removed_entries:
+                    logger.info("SEC cache prune removed %s expired entries", removed_entries)
+            except Exception:
+                logger.exception("SEC cache periodic prune failed")
+
         active_reporter.step("lookup", "Looking up ticker -> CIK...")
 
         get_engine()
@@ -1192,6 +1206,11 @@ class EdgarIngestionService:
         active_reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
         filing_index = self.client.build_filing_index(submissions)
         companyfacts = self.client.get_companyfacts(company_identity.cik)
+        active_reporter.step("filing", "Parsing filing reports...")
+        parsed_filing_insights = self.filing_parser.parse_financial_insights(
+            cik=company_identity.cik,
+            filing_index=filing_index,
+        )
         try:
             market_profile = self.market_data.get_market_profile(company_identity.ticker)
         except Exception as exc:
@@ -1225,6 +1244,12 @@ class EdgarIngestionService:
                 session=session,
                 company=company,
                 normalized_statements=normalized_statements,
+                checked_at=checked_at,
+            )
+            parsed_statements_written = _upsert_filing_parser_statements(
+                session=session,
+                company=company,
+                parsed_insights=parsed_filing_insights,
                 checked_at=checked_at,
             )
             _touch_company_statements(session, company.id, checked_at)
@@ -1298,7 +1323,7 @@ class EdgarIngestionService:
                 cik=company.cik,
                 ticker=company.ticker,
                 status="fetched",
-                statements_written=statements_written,
+                statements_written=statements_written + parsed_statements_written,
                 insider_trades_written=insider_trades_written,
                 institutional_holdings_written=institutional_holdings_written,
                 price_points_written=price_points_written,
@@ -1704,6 +1729,51 @@ def _upsert_statements(
             "last_checked": checked_at,
         }
         for statement in normalized_statements
+    ]
+
+    statement = insert(FinancialStatement).values(payload)
+    data_changed = or_(
+        FinancialStatement.data.is_distinct_from(statement.excluded.data),
+        FinancialStatement.filing_type.is_distinct_from(statement.excluded.filing_type),
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_financial_statements_company_period_type_source",
+        set_={
+            "data": statement.excluded.data,
+            "last_updated": case(
+                (data_changed, statement.excluded.last_updated),
+                else_=FinancialStatement.last_updated,
+            ),
+            "last_checked": statement.excluded.last_checked,
+            "filing_type": statement.excluded.filing_type,
+        },
+    )
+    session.execute(statement)
+    return len(payload)
+
+
+def _upsert_filing_parser_statements(
+    session: Session,
+    company: Company,
+    parsed_insights: list[ParsedFilingInsight],
+    checked_at: datetime,
+) -> int:
+    if not parsed_insights:
+        return 0
+
+    payload = [
+        {
+            "company_id": company.id,
+            "period_start": item.period_start,
+            "period_end": item.period_end,
+            "filing_type": item.filing_type,
+            "statement_type": FILING_PARSER_STATEMENT_TYPE,
+            "data": item.data,
+            "source": item.source,
+            "last_updated": checked_at,
+            "last_checked": checked_at,
+        }
+        for item in parsed_insights
     ]
 
     statement = insert(FinancialStatement).values(payload)

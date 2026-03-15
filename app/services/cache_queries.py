@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.models import Company, FinancialStatement, InsiderTrade, InstitutionalHolding, ModelRun, PriceHistory
-from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE
+from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, FILING_PARSER_STATEMENT_TYPE
 
 
 @dataclass(slots=True)
@@ -124,6 +124,24 @@ def get_company_financials(session: Session, company_id: int) -> list[FinancialS
             FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
         )
         .order_by(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_filing_insights(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 8,
+) -> list[FinancialStatement]:
+    statement = (
+        select(FinancialStatement)
+        .where(
+            FinancialStatement.company_id == company_id,
+            FinancialStatement.statement_type == FILING_PARSER_STATEMENT_TYPE,
+        )
+        .order_by(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
+        .limit(limit)
     )
     return list(session.execute(statement).scalars())
 

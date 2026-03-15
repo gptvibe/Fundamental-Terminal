@@ -51,7 +51,10 @@ export interface FinancialPayload {
   operating_income: number | null;
   net_income: number | null;
   total_assets: number | null;
+  current_assets: number | null;
   total_liabilities: number | null;
+  current_liabilities: number | null;
+  retained_earnings: number | null;
   operating_cash_flow: number | null;
   capex: number | null;
   acquisitions: number | null;
@@ -102,10 +105,38 @@ export interface CompanyFinancialsResponse {
   refresh: RefreshState;
 }
 
+export interface FilingParserSegmentPayload {
+  name: string;
+  revenue: number | null;
+}
+
+export interface FilingParserInsightPayload {
+  accession_number: string | null;
+  filing_type: string;
+  period_start: string;
+  period_end: string;
+  source: string;
+  last_updated: string;
+  last_checked: string;
+  revenue: number | null;
+  net_income: number | null;
+  operating_income: number | null;
+  segments: FilingParserSegmentPayload[];
+}
+
+export interface CompanyFilingInsightsResponse {
+  company: CompanyPayload | null;
+  insights: FilingParserInsightPayload[];
+  refresh: RefreshState;
+}
 export interface InsiderTradePayload {
   name: string;
   role: string | null;
   date: string | null;
+  filing_date: string | null;
+  filing_type: string | null;
+  accession_number: string | null;
+  source: string | null;
   action: string;
   transaction_code: string | null;
   shares: number | null;
@@ -139,12 +170,15 @@ export interface CompanyInsiderTradesResponse {
 export interface InstitutionalHoldingPayload {
   fund_name: string;
   fund_strategy: string | null;
+  accession_number: string | null;
   reporting_date: string;
+  filing_date: string | null;
   shares_held: number | null;
   market_value: number | null;
   change_in_shares: number | null;
   percent_change: number | null;
   portfolio_weight: number | null;
+  source: string | null;
 }
 
 export interface CompanyInstitutionalHoldingsResponse {
@@ -262,3 +296,4 @@ export interface ConsoleEntry {
   status: "queued" | "running" | "completed" | "failed";
   source: "backend" | "client";
 }
+

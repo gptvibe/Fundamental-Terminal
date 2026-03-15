@@ -54,6 +54,8 @@ class Settings:
     sec_13f_manager_limit: int = _int_env("SEC_13F_MANAGER_LIMIT", 8, minimum=1)
     sec_max_retries: int = _int_env("SEC_MAX_RETRIES", 3, minimum=1)
     sec_retry_backoff_seconds: float = _float_env("SEC_RETRY_BACKOFF_SECONDS", 0.5)
+    sec_cache_prune_interval_seconds: int = _int_env("SEC_CACHE_PRUNE_INTERVAL_SECONDS", 3600, minimum=60)
+    sec_cache_prune_max_entries: int = _int_env("SEC_CACHE_PRUNE_MAX_ENTRIES", 5000, minimum=0)
     market_max_retries: int = _int_env("MARKET_MAX_RETRIES", 3, minimum=1)
     market_retry_backoff_seconds: float = _float_env("MARKET_RETRY_BACKOFF_SECONDS", 0.5)
     freshness_window_hours: int = _int_env("FRESHNESS_WINDOW_HOURS", 24, minimum=1)

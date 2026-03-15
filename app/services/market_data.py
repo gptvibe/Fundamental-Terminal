@@ -169,8 +169,16 @@ def upsert_price_history(
         for bar in price_bars
     ]
 
+    # Keep only one row per unique conflict key to avoid PostgreSQL cardinality violations.
+    deduplicated_payload: dict[tuple[int, Any, str], dict[str, Any]] = {}
+    for row in payload:
+        key = (row["company_id"], row["trade_date"], row["source"])
+        deduplicated_payload[key] = row
+
+    unique_payload = list(deduplicated_payload.values())
+
     total_rows = 0
-    for batch in _chunked(payload, size=5000):
+    for batch in _chunked(unique_payload, size=5000):
         statement = insert(PriceHistory).values(batch)
         data_changed = or_(
             PriceHistory.close.is_distinct_from(statement.excluded.close),

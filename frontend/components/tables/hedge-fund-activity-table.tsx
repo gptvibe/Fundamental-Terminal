@@ -5,8 +5,20 @@ import { useMemo, useState } from "react";
 import { formatDate, formatPercent } from "@/lib/format";
 import type { InstitutionalHoldingPayload, RefreshState } from "@/lib/types";
 
-type SortKey = "fund_name" | "shares_held" | "change_in_shares" | "percent_change" | "portfolio_weight" | "quarter";
+type SortKey = "fund_name" | "shares_held" | "change_in_shares" | "percent_change" | "portfolio_weight" | "quarter" | "filing_date";
 type SortDirection = "asc" | "desc";
+
+type ReportingLagPoint = {
+  key: string;
+  filingDate: string;
+  lagDays: number;
+};
+
+type ReportingLagSummary = {
+  points: ReportingLagPoint[];
+  median: number | null;
+  max: number;
+};
 
 interface HedgeFundActivityTableProps {
   ticker: string;
@@ -35,6 +47,7 @@ export function HedgeFundActivityTable({
 
   const increaseCount = filteredHoldings.filter((holding) => (holding.change_in_shares ?? 0) > 0).length;
   const decreaseCount = filteredHoldings.filter((holding) => (holding.change_in_shares ?? 0) < 0).length;
+  const reportingLagSummary = useMemo(() => buildReportingLagSummary(holdings), [holdings]);
 
   function handleSortToggle(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -97,6 +110,26 @@ export function HedgeFundActivityTable({
         </div>
       </div>
 
+      {reportingLagSummary.points.length ? (
+        <div className="filing-lag-strip">
+          <div className="filing-lag-header">
+            <span>Reporting lag</span>
+            <span>{reportingLagSummary.median != null ? `${reportingLagSummary.median}d median` : "Lag unavailable"}</span>
+            <span>{reportingLagSummary.max}d max</span>
+          </div>
+          <div className="filing-lag-bars">
+            {reportingLagSummary.points.map((point) => (
+              <div
+                key={point.key}
+                className="filing-lag-bar"
+                style={{ height: `${resolveLagHeight(point.lagDays, reportingLagSummary.max)}px` }}
+                title={`Filed ${formatDate(point.filingDate)} - ${point.lagDays} day lag`}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="insider-table-shell">
         <table className="insider-table hedge-fund-table">
           <thead>
@@ -107,6 +140,7 @@ export function HedgeFundActivityTable({
               <SortableHeader label="% Change" sortKey="percent_change" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} align="right" />
               <SortableHeader label="Portfolio Weight" sortKey="portfolio_weight" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} align="right" />
               <SortableHeader label="Quarter" sortKey="quarter" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
+              <SortableHeader label="Filing" sortKey="filing_date" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
             </tr>
           </thead>
           <tbody>
@@ -134,6 +168,19 @@ export function HedgeFundActivityTable({
                     <div className="hedge-fund-quarter-cell">
                       <span>{formatQuarter(holding.reporting_date)}</span>
                       <span className="hedge-fund-quarter-date">{formatDate(holding.reporting_date)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div className="filing-meta-cell">
+                      <span className="filing-form-pill">13F</span>
+                      <span className="filing-date">{holding.filing_date ? formatDate(holding.filing_date) : "--"}</span>
+                      {holding.source ? (
+                        <a className="filing-link" href={holding.source} target="_blank" rel="noreferrer">
+                          {holding.accession_number ? holding.accession_number : "SEC Filing"}
+                        </a>
+                      ) : (
+                        <span className="filing-link is-muted">{holding.accession_number ? holding.accession_number : "--"}</span>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -210,6 +257,8 @@ function sortValue(holding: InstitutionalHoldingPayload, sortKey: SortKey): numb
       return holding.portfolio_weight;
     case "quarter":
       return Date.parse(holding.reporting_date);
+    case "filing_date":
+      return holding.filing_date ? Date.parse(holding.filing_date) : null;
     default:
       return null;
   }
@@ -249,4 +298,53 @@ function formatQuarter(value: string) {
   const dateValue = new Date(value);
   const quarter = Math.floor(dateValue.getUTCMonth() / 3) + 1;
   return `Q${quarter} ${dateValue.getUTCFullYear()}`;
+}
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function buildReportingLagSummary(holdings: InstitutionalHoldingPayload[]): ReportingLagSummary {
+  const points: ReportingLagPoint[] = [];
+  for (const holding of holdings) {
+    if (!holding.filing_date || !holding.reporting_date) {
+      continue;
+    }
+    const filingDate = parseLagDate(holding.filing_date);
+    const reportingDate = parseLagDate(holding.reporting_date);
+    if (!filingDate || !reportingDate) {
+      continue;
+    }
+    const lagDays = Math.max(0, Math.round((filingDate.getTime() - reportingDate.getTime()) / 86400000));
+    const key = holding.accession_number ? holding.accession_number : `${holding.fund_name}-${holding.reporting_date}`;
+    points.push({ key, filingDate: holding.filing_date, lagDays });
+  }
+
+  const ordered = points.sort((left, right) => Date.parse(left.filingDate) - Date.parse(right.filingDate));
+  const trimmed = ordered.slice(Math.max(0, ordered.length - 12));
+  const lags = trimmed.map((point) => point.lagDays).sort((a, b) => a - b);
+  const median = lags.length ? lags[Math.floor((lags.length - 1) / 2)] : null;
+  const max = trimmed.reduce((value, point) => Math.max(value, point.lagDays), 0);
+
+  return { points: trimmed, median, max };
+}
+
+function parseLagDate(value: string) {
+  if (!value) {
+    return null;
+  }
+  if (DATE_ONLY_PATTERN.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function resolveLagHeight(value: number, max: number) {
+  if (!max) {
+    return 8;
+  }
+  return Math.max(8, Math.round((value / max) * 32) + 6);
 }

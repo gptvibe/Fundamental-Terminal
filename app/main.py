@@ -20,12 +20,15 @@ from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
 from app.models import FinancialStatement, InsiderTrade, ModelRun, PriceHistory
+from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
+from app.services.ownership_analytics import build_ownership_analytics
 from app.services.peer_comparison import build_peer_comparison
 from app.services import (
     CompanyCacheSnapshot,
     get_company_financials,
+    get_company_filing_insights,
     get_company_insider_trade_cache_status,
     get_company_insider_trades,
     get_company_institutional_holdings,
@@ -102,6 +105,25 @@ class FinancialSegmentPayload(BaseModel):
     share_of_revenue: Number = None
 
 
+class FilingParserSegmentPayload(BaseModel):
+    name: str
+    revenue: Number = None
+
+
+class FilingParserInsightPayload(BaseModel):
+    accession_number: str | None = None
+    filing_type: str
+    period_start: DateType
+    period_end: DateType
+    source: str
+    last_updated: datetime
+    last_checked: datetime
+    revenue: Number = None
+    net_income: Number = None
+    operating_income: Number = None
+    segments: list[FilingParserSegmentPayload] = Field(default_factory=list)
+
+
 class FinancialPayload(BaseModel):
     filing_type: str
     statement_type: str
@@ -115,7 +137,10 @@ class FinancialPayload(BaseModel):
     operating_income: Number = None
     net_income: Number = None
     total_assets: Number = None
+    current_assets: Number = None
     total_liabilities: Number = None
+    current_liabilities: Number = None
+    retained_earnings: Number = None
     operating_cash_flow: Number = None
     capex: Number = None
     acquisitions: Number = None
@@ -141,6 +166,12 @@ class CompanyFinancialsResponse(BaseModel):
     refresh: RefreshState
 
 
+class CompanyFilingInsightsResponse(BaseModel):
+    company: CompanyPayload | None
+    insights: list[FilingParserInsightPayload]
+    refresh: RefreshState
+
+
 class CompanyFactsResponse(BaseModel):
     facts: dict[str, Any]
 
@@ -149,6 +180,10 @@ class InsiderTradePayload(BaseModel):
     name: str
     role: str | None = None
     date: DateType | None = None
+    filing_date: DateType | None = None
+    filing_type: str | None = None
+    accession_number: str | None = None
+    source: str | None = None
     action: str
     transaction_code: str | None = None
     shares: Number = None
@@ -179,21 +214,55 @@ class CompanyInsiderTradesResponse(BaseModel):
     refresh: RefreshState
 
 
+class LargestInsiderTradePayload(BaseModel):
+    insider: str
+    type: Literal["BUY", "SELL", "OTHER"]
+    value: float
+    date: DateType | None = None
+
+
+class InsiderAnalyticsResponse(BaseModel):
+    buy_value_30d: float
+    sell_value_30d: float
+    buy_sell_ratio: float
+    largest_trade: LargestInsiderTradePayload | None = None
+    insider_activity_trend: Literal["increasing_buying", "increasing_selling", "stable", "mixed"]
+
+
 class InstitutionalHoldingPayload(BaseModel):
     fund_name: str
     fund_strategy: str | None = None
+    accession_number: str | None = None
     reporting_date: DateType
+    filing_date: DateType | None = None
     shares_held: Number = None
     market_value: Number = None
     change_in_shares: Number = None
     percent_change: Number = None
     portfolio_weight: Number = None
+    source: str | None = None
 
 
 class CompanyInstitutionalHoldingsResponse(BaseModel):
     company: CompanyPayload | None
     institutional_holdings: list[InstitutionalHoldingPayload]
     refresh: RefreshState
+
+
+class TopHolderPayload(BaseModel):
+    fund: str
+    shares: float
+
+
+class OwnershipAnalyticsResponse(BaseModel):
+    top_holders: list[TopHolderPayload]
+    institutional_ownership: float
+    ownership_concentration: float
+    quarterly_inflow: float
+    quarterly_outflow: float
+    new_positions: int
+    sold_positions: int
+    reporting_date: DateType | None = None
 
 
 class ModelPayload(BaseModel):
@@ -276,6 +345,20 @@ class FilingPayload(BaseModel):
     primary_doc_description: str | None = None
     items: str | None = None
     source_url: str
+
+
+class FilingTimelineItemPayload(BaseModel):
+    date: DateType | None = None
+    form: str
+    description: str
+    accession: str | None = None
+
+
+class FilingSearchResultPayload(BaseModel):
+    form: str
+    company: str
+    filing_date: DateType | None = None
+    filing_link: str
 
 
 class CompanyFilingsResponse(BaseModel):
@@ -468,6 +551,31 @@ def company_financials(
     )
 
 
+@app.get("/api/companies/{ticker}/filing-insights", response_model=CompanyFilingInsightsResponse)
+def company_filing_insights(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyFilingInsightsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyFilingInsightsResponse(
+            company=None,
+            insights=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    insights = get_company_filing_insights(session, snapshot.company.id)
+    insights_last_checked = max((item.last_checked for item in insights if item.last_checked is not None), default=None)
+    refresh = _refresh_for_filing_insights(background_tasks, snapshot)
+    return CompanyFilingInsightsResponse(
+        company=_serialize_company(snapshot, last_checked=insights_last_checked),
+        insights=[_serialize_filing_parser_insight(item) for item in insights],
+        refresh=refresh,
+    )
+
+
 @app.get("/api/companies/{ticker}/insider-trades", response_model=CompanyInsiderTradesResponse)
 def company_insider_trades(
     ticker: str,
@@ -534,6 +642,35 @@ def company_institutional_holdings(
         institutional_holdings=[_serialize_institutional_holding(holding) for holding in holdings],
         refresh=refresh,
     )
+
+
+@app.get("/api/insiders/{ticker}", response_model=InsiderAnalyticsResponse)
+def insider_analytics(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> InsiderAnalyticsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    trades = get_company_insider_trades(session, snapshot.company.id, limit=400)
+    return _serialize_insider_analytics(build_insider_analytics(trades))
+
+
+@app.get("/api/ownership/{ticker}", response_model=OwnershipAnalyticsResponse)
+def ownership_analytics(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> OwnershipAnalyticsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    holdings = get_company_institutional_holdings(session, snapshot.company.id, limit=600)
+    analytics = build_ownership_analytics(holdings)
+    return _serialize_ownership_analytics(analytics)
 
 
 @app.post(
@@ -721,6 +858,65 @@ def company_filings(
         client.close()
 
 
+@app.get("/api/filings/{ticker}", response_model=list[FilingTimelineItemPayload])
+def filings_timeline(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> list[FilingTimelineItemPayload]:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_recent_filings(snapshot.company.cik, filing_index)
+        timeline: list[FilingTimelineItemPayload] = []
+        for filing in filings:
+            timeline.append(
+                FilingTimelineItemPayload(
+                    date=filing.filing_date or filing.report_date,
+                    form=filing.form,
+                    description=_filing_timeline_description(filing),
+                    accession=filing.accession_number,
+                )
+            )
+        return timeline
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load normalized filing timeline for '%s'", snapshot.company.ticker)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to load filings")
+    finally:
+        client.close()
+
+
+@app.get("/api/search_filings", response_model=list[FilingSearchResultPayload])
+def search_filings(
+    q: str = Query(..., min_length=2, max_length=120),
+) -> list[FilingSearchResultPayload]:
+    client = EdgarClient()
+    try:
+        response = client._request("GET", settings.sec_search_base_url, params={"q": q})
+        payload = response.json()
+        hits = ((payload or {}).get("hits") or {}).get("hits") or []
+        results: list[FilingSearchResultPayload] = []
+        for item in hits:
+            parsed = _serialize_search_filing_hit(item)
+            if parsed is not None:
+                results.append(parsed)
+        return results
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to search SEC filings for query '%s'", q)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to search filings")
+    finally:
+        client.close()
+
+
 @app.get("/api/companies/{ticker}/financial-history", response_model=CompanyFactsResponse)
 def company_financial_history(
     ticker: str,
@@ -835,6 +1031,17 @@ def _refresh_for_financial_page(
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_filing_insights(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+) -> RefreshState:
+    if snapshot.cache_state == "missing":
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+    if snapshot.cache_state == "stale":
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _trigger_refresh(
     background_tasks: BackgroundTasks,
     ticker: str,
@@ -887,7 +1094,10 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         operating_income=data.get("operating_income"),
         net_income=data.get("net_income"),
         total_assets=data.get("total_assets"),
+        current_assets=data.get("current_assets"),
         total_liabilities=data.get("total_liabilities"),
+        current_liabilities=data.get("current_liabilities"),
+        retained_earnings=data.get("retained_earnings"),
         operating_cash_flow=data.get("operating_cash_flow"),
         capex=data.get("capex"),
         acquisitions=data.get("acquisitions"),
@@ -910,6 +1120,34 @@ def _serialize_financial_segment(payload: dict[str, Any]) -> FinancialSegmentPay
         kind=payload.get("kind") if payload.get("kind") in {"business", "geographic", "other"} else "other",
         revenue=payload.get("revenue"),
         share_of_revenue=payload.get("share_of_revenue"),
+    )
+
+
+def _serialize_filing_parser_segment(payload: dict[str, Any]) -> FilingParserSegmentPayload:
+    return FilingParserSegmentPayload(
+        name=str(payload.get("name") or payload.get("segment") or payload.get("segment_name") or "Unknown"),
+        revenue=payload.get("revenue"),
+    )
+
+
+def _serialize_filing_parser_insight(statement: FinancialStatement) -> FilingParserInsightPayload:
+    data = statement.data or {}
+    return FilingParserInsightPayload(
+        accession_number=_extract_accession_number(statement.source),
+        filing_type=statement.filing_type,
+        period_start=statement.period_start,
+        period_end=statement.period_end,
+        source=statement.source,
+        last_updated=statement.last_updated,
+        last_checked=statement.last_checked,
+        revenue=data.get("revenue"),
+        net_income=data.get("net_income"),
+        operating_income=data.get("operating_income"),
+        segments=[
+            _serialize_filing_parser_segment(item)
+            for item in data.get("segments", [])
+            if isinstance(item, dict)
+        ],
     )
 
 
@@ -938,6 +1176,10 @@ def _serialize_insider_trade(trade: InsiderTrade) -> InsiderTradePayload:
         name=trade.insider_name,
         role=trade.role,
         date=trade.transaction_date,
+        filing_date=trade.filing_date,
+        filing_type=trade.filing_type,
+        accession_number=trade.accession_number,
+        source=trade.source,
         action=trade.action,
         transaction_code=trade.transaction_code,
         shares=trade.shares,
@@ -962,16 +1204,51 @@ def _serialize_insider_activity_summary(summary) -> InsiderActivitySummaryPayloa
     )
 
 
+def _serialize_insider_analytics(analytics) -> InsiderAnalyticsResponse:
+    largest_trade_payload = None
+    if analytics.largest_trade is not None:
+        largest_trade_payload = LargestInsiderTradePayload(
+            insider=analytics.largest_trade.insider,
+            type=analytics.largest_trade.type,
+            value=analytics.largest_trade.value,
+            date=analytics.largest_trade.date,
+        )
+
+    return InsiderAnalyticsResponse(
+        buy_value_30d=analytics.buy_value_30d,
+        sell_value_30d=analytics.sell_value_30d,
+        buy_sell_ratio=analytics.buy_sell_ratio,
+        largest_trade=largest_trade_payload,
+        insider_activity_trend=analytics.insider_activity_trend,
+    )
+
+
+def _serialize_ownership_analytics(analytics) -> OwnershipAnalyticsResponse:
+    return OwnershipAnalyticsResponse(
+        top_holders=[TopHolderPayload(fund=item.fund, shares=item.shares) for item in analytics.top_holders],
+        institutional_ownership=analytics.institutional_ownership,
+        ownership_concentration=analytics.ownership_concentration,
+        quarterly_inflow=analytics.quarterly_inflow,
+        quarterly_outflow=analytics.quarterly_outflow,
+        new_positions=analytics.new_positions,
+        sold_positions=analytics.sold_positions,
+        reporting_date=analytics.reporting_date,
+    )
+
+
 def _serialize_institutional_holding(holding) -> InstitutionalHoldingPayload:
     return InstitutionalHoldingPayload(
         fund_name=holding.fund.fund_name,
         fund_strategy=get_institutional_fund_strategy(holding.fund.fund_name, getattr(holding.fund, "fund_manager", None)),
+        accession_number=holding.accession_number,
         reporting_date=holding.reporting_date,
+        filing_date=holding.filing_date,
         shares_held=holding.shares_held,
         market_value=holding.market_value,
         change_in_shares=holding.change_in_shares,
         percent_change=holding.percent_change,
         portfolio_weight=holding.portfolio_weight,
+        source=holding.source,
     )
 
 
@@ -1012,6 +1289,78 @@ def _serialize_filing_metadata(cik: str, filing: FilingMetadata) -> FilingPayloa
         items=_normalize_optional_text(filing.items),
         source_url=source_url,
     )
+
+
+def _filing_timeline_description(filing: FilingPayload) -> str:
+    explicit = _normalize_optional_text(filing.primary_doc_description)
+    if explicit:
+        return explicit
+
+    items = _normalize_optional_text(filing.items)
+    if filing.form == "8-K":
+        if items:
+            return f"Current report (Items {items})"
+        return "Current report"
+    if filing.form == "10-K":
+        return "Annual report"
+    if filing.form == "10-Q":
+        return "Quarterly report"
+    if items:
+        return f"SEC filing (Items {items})"
+    return "SEC filing"
+
+
+def _serialize_search_filing_hit(hit: dict[str, Any]) -> FilingSearchResultPayload | None:
+    source = hit.get("_source") if isinstance(hit, dict) else None
+    if not isinstance(source, dict):
+        return None
+
+    form = str(source.get("form") or "").strip().upper()
+    if not form:
+        return None
+
+    display_names = source.get("display_names")
+    company = ""
+    if isinstance(display_names, list) and display_names:
+        company = str(display_names[0] or "").strip()
+    if not company:
+        company = str(source.get("entityName") or source.get("companyName") or "").strip()
+    if not company:
+        company = "Unknown"
+
+    filing_date = _parse_date(source.get("filed") or source.get("filedAt") or source.get("filingDate"))
+    filing_link = _resolve_search_filing_link(source)
+    if not filing_link:
+        return None
+
+    return FilingSearchResultPayload(
+        form=form,
+        company=company,
+        filing_date=filing_date,
+        filing_link=filing_link,
+    )
+
+
+def _resolve_search_filing_link(source: dict[str, Any]) -> str | None:
+    for key in ("link", "url", "filingHref", "filingLink", "html_url"):
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    adsh = str(source.get("adsh") or source.get("accessionNumber") or "").strip()
+    ciks = source.get("ciks")
+    cik = ""
+    if isinstance(ciks, list) and ciks:
+        cik = str(ciks[0] or "").strip()
+    if not cik:
+        cik = str(source.get("cik") or "").strip()
+
+    accession = adsh.replace("-", "")
+    if cik.isdigit() and accession.isdigit() and adsh:
+        numeric_cik = str(int(cik))
+        return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession}/"
+
+    return None
 
 
 def _filings_cache_last_checked(filings: list[FilingPayload]) -> datetime | None:

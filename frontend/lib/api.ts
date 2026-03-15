@@ -1,6 +1,7 @@
 import {
   CompanyFinancialsResponse,
   CompanyFilingsResponse,
+  CompanyFilingInsightsResponse,
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyModelsResponse,
@@ -50,6 +51,12 @@ export function getCompanyFinancials(ticker: string): Promise<CompanyFinancialsR
 
 export function getCompanyFilings(ticker: string): Promise<CompanyFilingsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/filings`);
+}
+
+
+
+export function getCompanyFilingInsights(ticker: string): Promise<CompanyFilingInsightsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/filing-insights`);
 }
 
 export function getCompanyInsiderTrades(ticker: string): Promise<CompanyInsiderTradesResponse> {
@@ -224,4 +231,8 @@ function parseFactDate(value: unknown): number {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
+
+
+
+
 

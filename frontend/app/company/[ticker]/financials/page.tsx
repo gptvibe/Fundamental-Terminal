@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 
 import { BalanceSheetChart } from "@/components/charts/balance-sheet-chart";
+import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
 import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
@@ -85,6 +86,10 @@ export default function CompanyFinancialsTabPage() {
         {financials.length ? <BalanceSheetChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading balance-sheet history..." : "No balance-sheet history is available yet."} />}
       </Panel>
 
+      <Panel title="Liquidity & Capital" subtitle="Current assets, liabilities, and retained earnings from reported filings">
+        <LiquidityCapitalChart financials={financials} />
+      </Panel>
+
       <Panel title="Share Dilution Tracker" subtitle="Shares outstanding trend with period-over-period dilution rates from reported filings">
         {financials.length ? <ShareDilutionTrackerChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading share-count history..." : "No share-count history is available yet."} />}
       </Panel>
@@ -110,3 +115,4 @@ function Metric({ label, value }: { label: string; value: string | null }) {
     </div>
   );
 }
+
