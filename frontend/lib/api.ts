@@ -1,7 +1,10 @@
 import {
   CompanyFinancialsResponse,
+  CompanyBeneficialOwnershipResponse,
+  CompanyEventsResponse,
   CompanyFilingsResponse,
   CompanyFilingInsightsResponse,
+  CompanyGovernanceResponse,
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyModelsResponse,
@@ -51,6 +54,18 @@ export function getCompanyFinancials(ticker: string): Promise<CompanyFinancialsR
 
 export function getCompanyFilings(ticker: string): Promise<CompanyFilingsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/filings`);
+}
+
+export function getCompanyBeneficialOwnership(ticker: string): Promise<CompanyBeneficialOwnershipResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/beneficial-ownership`);
+}
+
+export function getCompanyGovernance(ticker: string): Promise<CompanyGovernanceResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/governance`);
+}
+
+export function getCompanyEvents(ticker: string): Promise<CompanyEventsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/events`);
 }
 
 

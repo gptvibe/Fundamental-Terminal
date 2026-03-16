@@ -3,7 +3,11 @@
 import { useParams } from "next/navigation";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
+import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
+import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
+import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
 import { PriceFundamentalsModule } from "@/components/charts/price-fundamentals-module";
+import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
 import { FinancialHistorySection } from "@/components/company/financial-history-section";
 import { PeerComparisonDashboard } from "@/components/peers/peer-comparison-dashboard";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -50,7 +54,7 @@ export default function CompanyOverviewPage() {
           statusLines={[
             `Price history points available: ${priceHistory.length.toLocaleString()}`,
             `Annual results available: ${fundamentalsTrendData.length.toLocaleString()}`,
-            "If anything is missing or out of date, this page stays available while fresh data loads in the background."
+            `${financials.filter((statement) => statement.segment_breakdown.length > 0).length.toLocaleString()} filings include segment detail`,
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -80,6 +84,22 @@ export default function CompanyOverviewPage() {
       </Panel>
 
       <PriceFundamentalsModule priceData={priceHistory} fundamentalsData={fundamentalsTrendData} />
+
+      <Panel title="Cash Flow Bridge" subtitle="How operating cash flow turns into free cash flow and capital allocation uses">
+        <CashFlowWaterfallChart financials={financials} />
+      </Panel>
+
+      <Panel title="Liquidity & Capital" subtitle="Current assets, current liabilities, current ratio, and retained earnings trend">
+        <LiquidityCapitalChart financials={financials} />
+      </Panel>
+
+      <Panel title="Share Dilution" subtitle="Shares outstanding history and year-over-year dilution rate from SEC filings">
+        <ShareDilutionTrackerChart financials={financials} />
+      </Panel>
+
+      <Panel title="Business Segments" subtitle="Reported segment revenue mix and growth from cached SEC filing data">
+        <BusinessSegmentBreakdown financials={financials} />
+      </Panel>
 
       <Panel title="10-Year Financial History" subtitle="SEC EDGAR companyfacts (FY)">
         <FinancialHistorySection cik={company?.cik ?? null} />

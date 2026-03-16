@@ -12,6 +12,11 @@ const tabs: Array<{ key: string; label: string; suffix: string; exact?: boolean 
   { key: "overview", label: "Overview", suffix: "", exact: true },
   { key: "financials", label: "Financials", suffix: "/financials" },
   { key: "filings", label: "Filings", suffix: "/filings" },
+  { key: "events", label: "Events", suffix: "/events" },
+  { key: "capital-markets", label: "Capital Markets", suffix: "/capital-markets" },
+  { key: "sec-feed", label: "SEC Feed", suffix: "/sec-feed" },
+  { key: "governance", label: "Governance", suffix: "/governance" },
+  { key: "ownership-changes", label: "Stake Changes", suffix: "/ownership-changes" },
   { key: "ownership", label: "Ownership", suffix: "/ownership" },
   { key: "insiders", label: "Insiders", suffix: "/insiders" },
   { key: "models", label: "Models", suffix: "/models" }

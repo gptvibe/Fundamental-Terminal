@@ -27,6 +27,8 @@ interface ModelsWorkspaceData {
   activeJobId: string | null;
 }
 
+const REFRESH_POLL_INTERVAL_MS = 3000;
+
 type DupontMode = "auto" | "annual" | "ttm";
 
 export default function CompanyModelsPage() {
@@ -110,6 +112,53 @@ export default function CompanyModelsPage() {
       cancelled = true;
     };
   }, [activeJobId, lastEvent, settledJobIds, ticker, dupontMode]);
+
+  useEffect(() => {
+    if (!activeJobId || settledJobIds.includes(activeJobId)) {
+      return;
+    }
+
+    let cancelled = false;
+    let pending = false;
+
+    const poll = async () => {
+      if (pending) {
+        return;
+      }
+
+      pending = true;
+      try {
+        const workspaceData = await loadModelsWorkspaceData(ticker, dupontMode);
+        if (cancelled) {
+          return;
+        }
+
+        setError(null);
+        setData(workspaceData.modelData);
+        setFinancialData(workspaceData.financialData);
+        setActiveJobId(workspaceData.activeJobId);
+
+        if (workspaceData.activeJobId !== activeJobId) {
+          setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : "Unable to refresh models");
+        }
+      } finally {
+        pending = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, REFRESH_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeJobId, dupontMode, settledJobIds, ticker]);
 
   useEffect(() => {
     if (!activeJobId) {

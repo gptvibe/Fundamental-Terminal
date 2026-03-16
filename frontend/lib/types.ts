@@ -55,6 +55,15 @@ export interface FinancialPayload {
   total_liabilities: number | null;
   current_liabilities: number | null;
   retained_earnings: number | null;
+  sga: number | null;
+  research_and_development: number | null;
+  interest_expense: number | null;
+  income_tax_expense: number | null;
+  inventory: number | null;
+  accounts_receivable: number | null;
+  goodwill_and_intangibles: number | null;
+  long_term_debt: number | null;
+  lease_liabilities: number | null;
   operating_cash_flow: number | null;
   capex: number | null;
   acquisitions: number | null;
@@ -64,6 +73,8 @@ export interface FinancialPayload {
   free_cash_flow: number | null;
   eps: number | null;
   shares_outstanding: number | null;
+  stock_based_compensation: number | null;
+  weighted_average_diluted_shares: number | null;
   segment_breakdown: FinancialSegmentPayload[];
 }
 
@@ -143,6 +154,12 @@ export interface InsiderTradePayload {
   price: number | null;
   value: number | null;
   ownership_after: number | null;
+  security_title: string | null;
+  is_derivative: boolean | null;
+  ownership_nature: string | null;
+  exercise_price: number | null;
+  expiration_date: string | null;
+  footnote_tags: string[] | null;
   is_10b5_1: boolean;
 }
 
@@ -178,6 +195,11 @@ export interface InstitutionalHoldingPayload {
   change_in_shares: number | null;
   percent_change: number | null;
   portfolio_weight: number | null;
+  put_call: string | null;
+  investment_discretion: string | null;
+  voting_authority_sole: number | null;
+  voting_authority_shared: number | null;
+  voting_authority_none: number | null;
   source: string | null;
 }
 
@@ -217,6 +239,64 @@ export interface CompanyFilingsResponse {
   company: CompanyPayload | null;
   filings: FilingPayload[];
   timeline_source: "sec_submissions" | "cached_financials";
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface BeneficialOwnershipFilingPayload {
+  accession_number: string | null;
+  form: string;
+  base_form: "SC 13D" | "SC 13G";
+  filing_date: string | null;
+  report_date: string | null;
+  is_amendment: boolean;
+  primary_document: string | null;
+  primary_doc_description: string | null;
+  source_url: string;
+  summary: string;
+}
+
+export interface CompanyBeneficialOwnershipResponse {
+  company: CompanyPayload | null;
+  filings: BeneficialOwnershipFilingPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface GovernanceFilingPayload {
+  accession_number: string | null;
+  form: string;
+  filing_date: string | null;
+  report_date: string | null;
+  primary_document: string | null;
+  primary_doc_description: string | null;
+  source_url: string;
+  summary: string;
+}
+
+export interface CompanyGovernanceResponse {
+  company: CompanyPayload | null;
+  filings: GovernanceFilingPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface FilingEventPayload {
+  accession_number: string | null;
+  form: string;
+  filing_date: string | null;
+  report_date: string | null;
+  items: string | null;
+  category: string;
+  primary_document: string | null;
+  primary_doc_description: string | null;
+  source_url: string;
+  summary: string;
+}
+
+export interface CompanyEventsResponse {
+  company: CompanyPayload | null;
+  events: FilingEventPayload[];
   refresh: RefreshState;
   error: string | null;
 }

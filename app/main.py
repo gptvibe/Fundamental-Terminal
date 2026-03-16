@@ -141,6 +141,15 @@ class FinancialPayload(BaseModel):
     total_liabilities: Number = None
     current_liabilities: Number = None
     retained_earnings: Number = None
+    sga: Number = None
+    research_and_development: Number = None
+    interest_expense: Number = None
+    income_tax_expense: Number = None
+    inventory: Number = None
+    accounts_receivable: Number = None
+    goodwill_and_intangibles: Number = None
+    long_term_debt: Number = None
+    lease_liabilities: Number = None
     operating_cash_flow: Number = None
     capex: Number = None
     acquisitions: Number = None
@@ -150,6 +159,8 @@ class FinancialPayload(BaseModel):
     free_cash_flow: Number = None
     eps: Number = None
     shares_outstanding: Number = None
+    stock_based_compensation: Number = None
+    weighted_average_diluted_shares: Number = None
     segment_breakdown: list[FinancialSegmentPayload] = Field(default_factory=list)
 
 
@@ -190,6 +201,12 @@ class InsiderTradePayload(BaseModel):
     price: Number = None
     value: Number = None
     ownership_after: Number = None
+    security_title: str | None = None
+    is_derivative: bool | None = None
+    ownership_nature: str | None = None
+    exercise_price: Number = None
+    expiration_date: DateType | None = None
+    footnote_tags: list[str] | None = None
     is_10b5_1: bool
 
 
@@ -240,6 +257,11 @@ class InstitutionalHoldingPayload(BaseModel):
     change_in_shares: Number = None
     percent_change: Number = None
     portfolio_weight: Number = None
+    put_call: str | None = None
+    investment_discretion: str | None = None
+    voting_authority_sole: Number = None
+    voting_authority_shared: Number = None
+    voting_authority_none: Number = None
     source: str | None = None
 
 
@@ -365,6 +387,64 @@ class CompanyFilingsResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[FilingPayload]
     timeline_source: Literal["sec_submissions", "cached_financials"]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class BeneficialOwnershipFilingPayload(BaseModel):
+    accession_number: str | None = None
+    form: str
+    base_form: Literal["SC 13D", "SC 13G"]
+    filing_date: DateType | None = None
+    report_date: DateType | None = None
+    is_amendment: bool
+    primary_document: str | None = None
+    primary_doc_description: str | None = None
+    source_url: str
+    summary: str
+
+
+class CompanyBeneficialOwnershipResponse(BaseModel):
+    company: CompanyPayload | None
+    filings: list[BeneficialOwnershipFilingPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class GovernanceFilingPayload(BaseModel):
+    accession_number: str | None = None
+    form: str
+    filing_date: DateType | None = None
+    report_date: DateType | None = None
+    primary_document: str | None = None
+    primary_doc_description: str | None = None
+    source_url: str
+    summary: str
+
+
+class CompanyGovernanceResponse(BaseModel):
+    company: CompanyPayload | None
+    filings: list[GovernanceFilingPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class FilingEventPayload(BaseModel):
+    accession_number: str | None = None
+    form: str
+    filing_date: DateType | None = None
+    report_date: DateType | None = None
+    items: str | None = None
+    category: str
+    primary_document: str | None = None
+    primary_doc_description: str | None = None
+    source_url: str
+    summary: str
+
+
+class CompanyEventsResponse(BaseModel):
+    company: CompanyPayload | None
+    events: list[FilingEventPayload]
     refresh: RefreshState
     error: str | None = None
 
@@ -858,6 +938,129 @@ def company_filings(
         client.close()
 
 
+@app.get("/api/companies/{ticker}/beneficial-ownership", response_model=CompanyBeneficialOwnershipResponse)
+def company_beneficial_ownership(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyBeneficialOwnershipResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyBeneficialOwnershipResponse(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_beneficial_ownership_filings(snapshot.company.cik, filing_index)
+        return CompanyBeneficialOwnershipResponse(
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"base_form", "is_amendment", "summary"})) for item in filings]) if filings else None),
+            filings=filings,
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load beneficial ownership filings for '%s'", snapshot.company.ticker)
+        return CompanyBeneficialOwnershipResponse(
+            company=_serialize_company(snapshot),
+            filings=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/governance", response_model=CompanyGovernanceResponse)
+def company_governance(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyGovernanceResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyGovernanceResponse(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_governance_filings(snapshot.company.cik, filing_index)
+        return CompanyGovernanceResponse(
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"summary"})) for item in filings]) if filings else None),
+            filings=filings,
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load governance filings for '%s'", snapshot.company.ticker)
+        return CompanyGovernanceResponse(
+            company=_serialize_company(snapshot),
+            filings=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/events", response_model=CompanyEventsResponse)
+def company_events(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyEventsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEventsResponse(
+            company=None,
+            events=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        events = _serialize_filing_events(snapshot.company.cik, filing_index)
+        return CompanyEventsResponse(
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"category", "summary"})) for item in events]) if events else None),
+            events=events,
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load 8-K events for '%s'", snapshot.company.ticker)
+        return CompanyEventsResponse(
+            company=_serialize_company(snapshot),
+            events=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
 @app.get("/api/filings/{ticker}", response_model=list[FilingTimelineItemPayload])
 def filings_timeline(
     ticker: str,
@@ -1098,6 +1301,15 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         total_liabilities=data.get("total_liabilities"),
         current_liabilities=data.get("current_liabilities"),
         retained_earnings=data.get("retained_earnings"),
+        sga=data.get("sga"),
+        research_and_development=data.get("research_and_development"),
+        interest_expense=data.get("interest_expense"),
+        income_tax_expense=data.get("income_tax_expense"),
+        inventory=data.get("inventory"),
+        accounts_receivable=data.get("accounts_receivable"),
+        goodwill_and_intangibles=data.get("goodwill_and_intangibles"),
+        long_term_debt=data.get("long_term_debt"),
+        lease_liabilities=data.get("lease_liabilities"),
         operating_cash_flow=data.get("operating_cash_flow"),
         capex=data.get("capex"),
         acquisitions=data.get("acquisitions"),
@@ -1107,6 +1319,8 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         free_cash_flow=data.get("free_cash_flow"),
         eps=data.get("eps"),
         shares_outstanding=data.get("shares_outstanding"),
+        stock_based_compensation=data.get("stock_based_compensation"),
+        weighted_average_diluted_shares=data.get("weighted_average_diluted_shares"),
         segment_breakdown=[_serialize_financial_segment(item) for item in data.get("segment_breakdown", []) if isinstance(item, dict)],
     )
 
@@ -1186,6 +1400,12 @@ def _serialize_insider_trade(trade: InsiderTrade) -> InsiderTradePayload:
         price=trade.price,
         value=trade.value,
         ownership_after=trade.ownership_after,
+        security_title=getattr(trade, "security_title", None),
+        is_derivative=getattr(trade, "is_derivative", None),
+        ownership_nature=getattr(trade, "ownership_nature", None),
+        exercise_price=getattr(trade, "exercise_price", None),
+        expiration_date=getattr(trade, "expiration_date", None),
+        footnote_tags=getattr(trade, "footnote_tags", None),
         is_10b5_1=trade.is_10b5_1,
     )
 
@@ -1248,6 +1468,11 @@ def _serialize_institutional_holding(holding) -> InstitutionalHoldingPayload:
         change_in_shares=holding.change_in_shares,
         percent_change=holding.percent_change,
         portfolio_weight=holding.portfolio_weight,
+        put_call=getattr(holding, "put_call", None),
+        investment_discretion=getattr(holding, "investment_discretion", None),
+        voting_authority_sole=getattr(holding, "voting_authority_sole", None),
+        voting_authority_shared=getattr(holding, "voting_authority_shared", None),
+        voting_authority_none=getattr(holding, "voting_authority_none", None),
         source=holding.source,
     )
 
@@ -1274,6 +1499,109 @@ def _serialize_recent_filings(cik: str, filing_index: dict[str, FilingMetadata])
         reverse=True,
     )
     return [_serialize_filing_metadata(cik, item) for item in ordered[:MAX_FILING_TIMELINE_ITEMS]]
+
+
+def _serialize_beneficial_ownership_filings(cik: str, filing_index: dict[str, FilingMetadata]) -> list[BeneficialOwnershipFilingPayload]:
+    filtered = [item for item in filing_index.values() if _is_beneficial_ownership_form(item.form)]
+    ordered = sorted(
+        filtered,
+        key=lambda item: (item.filing_date or DateType.min, item.report_date or DateType.min, item.accession_number),
+        reverse=True,
+    )
+    return [_serialize_beneficial_ownership_filing(cik, item) for item in ordered[:MAX_FILING_TIMELINE_ITEMS]]
+
+
+def _serialize_beneficial_ownership_filing(cik: str, filing: FilingMetadata) -> BeneficialOwnershipFilingPayload:
+    form_display = (filing.form or "UNKNOWN").upper()
+    base_form = "SC 13D" if form_display.startswith("SC 13D") else "SC 13G"
+    is_amendment = form_display.endswith("/A")
+    description = _normalize_optional_text(filing.primary_doc_description)
+    if description:
+        summary = description
+    elif base_form == "SC 13D":
+        summary = "Beneficial ownership filing showing a major stake disclosure or activist-style amendment."
+    else:
+        summary = "Beneficial ownership filing showing passive ownership disclosure or amendment."
+
+    return BeneficialOwnershipFilingPayload(
+        accession_number=filing.accession_number,
+        form=form_display,
+        base_form=base_form,
+        filing_date=filing.filing_date,
+        report_date=filing.report_date,
+        is_amendment=is_amendment,
+        primary_document=_normalize_optional_text(filing.primary_document),
+        primary_doc_description=description,
+        source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
+        summary=summary,
+    )
+
+
+def _serialize_governance_filings(cik: str, filing_index: dict[str, FilingMetadata]) -> list[GovernanceFilingPayload]:
+    filtered = [item for item in filing_index.values() if _is_governance_form(item.form)]
+    ordered = sorted(
+        filtered,
+        key=lambda item: (item.filing_date or DateType.min, item.report_date or DateType.min, item.accession_number),
+        reverse=True,
+    )
+    return [_serialize_governance_filing(cik, item) for item in ordered[:MAX_FILING_TIMELINE_ITEMS]]
+
+
+def _serialize_governance_filing(cik: str, filing: FilingMetadata) -> GovernanceFilingPayload:
+    form_display = (filing.form or "UNKNOWN").upper()
+    description = _normalize_optional_text(filing.primary_doc_description)
+    if description:
+        summary = description
+    elif form_display == "DEF 14A":
+        summary = "Definitive proxy statement covering meeting materials and governance disclosures."
+    else:
+        summary = "Additional proxy material linked to a shareholder meeting or vote."
+
+    return GovernanceFilingPayload(
+        accession_number=filing.accession_number,
+        form=form_display,
+        filing_date=filing.filing_date,
+        report_date=filing.report_date,
+        primary_document=_normalize_optional_text(filing.primary_document),
+        primary_doc_description=description,
+        source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
+        summary=summary,
+    )
+
+
+def _serialize_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> list[FilingEventPayload]:
+    filtered = [item for item in filing_index.values() if _is_event_form(item.form)]
+    ordered = sorted(
+        filtered,
+        key=lambda item: (item.filing_date or DateType.min, item.report_date or DateType.min, item.accession_number),
+        reverse=True,
+    )
+    return [_serialize_filing_event(cik, item) for item in ordered[:MAX_FILING_TIMELINE_ITEMS]]
+
+
+def _serialize_filing_event(cik: str, filing: FilingMetadata) -> FilingEventPayload:
+    items = _normalize_optional_text(filing.items)
+    description = _normalize_optional_text(filing.primary_doc_description)
+    category = _classify_filing_event(items, description)
+    if description:
+        summary = description
+    elif items:
+        summary = f"Current report covering Item(s) {items}."
+    else:
+        summary = "Current report with event-driven disclosure."
+
+    return FilingEventPayload(
+        accession_number=filing.accession_number,
+        form=(filing.form or "UNKNOWN").upper(),
+        filing_date=filing.filing_date,
+        report_date=filing.report_date,
+        items=items,
+        category=category,
+        primary_document=_normalize_optional_text(filing.primary_document),
+        primary_doc_description=description,
+        source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
+        summary=summary,
+    )
 
 
 def _serialize_filing_metadata(cik: str, filing: FilingMetadata) -> FilingPayload:
@@ -1408,6 +1736,49 @@ def _build_filing_document_url(cik: str, accession_number: str, primary_document
     if primary_document:
         return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/{primary_document}"
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json#accn={accession_number}"
+
+
+def _is_beneficial_ownership_form(form: str | None) -> bool:
+    normalized = (form or "").upper()
+    return normalized in {"SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"}
+
+
+def _is_governance_form(form: str | None) -> bool:
+    normalized = (form or "").upper()
+    return normalized in {"DEF 14A", "DEFA14A"}
+
+
+def _is_event_form(form: str | None) -> bool:
+    normalized = (form or "").upper()
+    return normalized == "8-K"
+
+
+def _classify_filing_event(items: str | None, description: str | None) -> str:
+    normalized_items = (items or "").replace(" ", "")
+    item_tokens = {token for token in normalized_items.split(",") if token}
+    description_text = (description or "").lower()
+
+    if item_tokens & {"2.02", "7.01", "9.01"}:
+        return "Earnings"
+    if item_tokens & {"1.01", "2.01"}:
+        return "Deal"
+    if item_tokens & {"2.03", "2.04", "2.05", "2.06"}:
+        return "Financing"
+    if item_tokens & {"5.02", "5.03", "5.05"}:
+        return "Leadership"
+    if item_tokens & {"3.01", "3.02", "3.03"}:
+        return "Capital Markets"
+    if item_tokens & {"8.01"}:
+        return "General Update"
+    if "earnings" in description_text or "results" in description_text:
+        return "Earnings"
+    if "director" in description_text or "officer" in description_text or "chief executive" in description_text:
+        return "Leadership"
+    if "agreement" in description_text or "acquisition" in description_text or "merger" in description_text:
+        return "Deal"
+    if "debt" in description_text or "credit" in description_text or "financing" in description_text:
+        return "Financing"
+    return "Other"
 
 
 def _extract_accession_number(source_url: str) -> str | None:

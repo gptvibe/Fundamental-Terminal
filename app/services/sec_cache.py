@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import re
@@ -36,7 +37,7 @@ class SecHttpCache:
             return None
 
         normalized_url = _normalized_url(url, params=params)
-        cache_path = self._cache_path(policy)
+        cache_path = self._cache_path(policy, normalized_url)
         if not cache_path.exists():
             logger.info("CACHE MISS %s", normalized_url)
             return None
@@ -79,7 +80,7 @@ class SecHttpCache:
             return
 
         normalized_url = _normalized_url(url, params=params)
-        cache_path = self._cache_path(policy)
+        cache_path = self._cache_path(policy, normalized_url)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         response.read()
@@ -101,8 +102,8 @@ class SecHttpCache:
         tmp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
         tmp_path.replace(cache_path)
 
-    def _cache_path(self, policy: CachePolicy) -> Path:
-        filename = _cache_filename(policy)
+    def _cache_path(self, policy: CachePolicy, normalized_url: str) -> Path:
+        filename = _cache_filename(policy, normalized_url)
         return self._root / filename
 
     def prune_expired(self, *, max_entries: int | None = None) -> int:
@@ -181,11 +182,12 @@ def _policy_for_request(method: str, url: str) -> CachePolicy | None:
     return None
 
 
-def _cache_filename(policy: CachePolicy) -> str:
+def _cache_filename(policy: CachePolicy, normalized_url: str) -> str:
     cik = policy.cik or "unknown"
+    url_hash = hashlib.sha256(normalized_url.encode("utf-8")).hexdigest()[:16]
     if policy.accession:
-        return f"{policy.endpoint}_{cik}_{policy.accession}.json"
-    return f"{policy.endpoint}_{cik}.json"
+        return f"{policy.endpoint}_{cik}_{policy.accession}_{url_hash}.json"
+    return f"{policy.endpoint}_{cik}_{url_hash}.json"
 
 
 def prune_sec_cache(*, max_entries: int | None = None) -> int:

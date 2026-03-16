@@ -34,6 +34,12 @@ def _load_sec_user_agent() -> str:
     return value
 
 
+def _csv_env(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name, "")
+    values = [value.strip() for value in raw.split(",")]
+    return tuple(value for value in values if value)
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_url: str = os.getenv(
@@ -52,6 +58,9 @@ class Settings:
     sec_filings_timeline_ttl_seconds: int = _int_env("SEC_FILINGS_TIMELINE_TTL_SECONDS", 300, minimum=30)
     sec_form4_max_filings_per_refresh: int = _int_env("SEC_FORM4_MAX_FILINGS_PER_REFRESH", 80, minimum=1)
     sec_13f_manager_limit: int = _int_env("SEC_13F_MANAGER_LIMIT", 8, minimum=1)
+    sec_13f_history_quarters: int = _int_env("SEC_13F_HISTORY_QUARTERS", 4, minimum=2)
+    sec_13f_universe_mode: str = os.getenv("SEC_13F_UNIVERSE_MODE", "curated").strip().lower()
+    sec_13f_extra_managers: tuple[str, ...] = _csv_env("SEC_13F_EXTRA_MANAGERS")
     sec_max_retries: int = _int_env("SEC_MAX_RETRIES", 3, minimum=1)
     sec_retry_backoff_seconds: float = _float_env("SEC_RETRY_BACKOFF_SECONDS", 0.5)
     sec_cache_prune_interval_seconds: int = _int_env("SEC_CACHE_PRUNE_INTERVAL_SECONDS", 3600, minimum=60)

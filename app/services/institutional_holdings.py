@@ -106,6 +106,11 @@ class HoldingSnapshot:
     change_in_shares: float | None
     percent_change: float | None
     portfolio_weight: float | None
+    put_call: str | None
+    investment_discretion: str | None
+    voting_authority_sole: float | None
+    voting_authority_shared: float | None
+    voting_authority_none: float | None
     source: str
 
 
@@ -214,7 +219,7 @@ def refresh_company_institutional_holdings(
         for fund in resolved_funds:
             try:
                 submissions = client.get_submissions(fund.fund_cik)
-                filings = _latest_two_13f_filings(submissions)
+                filings = _latest_n_13f_filings(submissions, limit=settings.sec_13f_history_quarters)
                 if not filings:
                     continue
                 snapshots = _collect_fund_company_snapshots(client, fund, company_tokens, filings)
@@ -251,13 +256,32 @@ def _resolve_curated_funds(
     limit: int,
 ) -> list[InstitutionalFund]:
     resolved_rows: list[InstitutionalFund] = []
-    for search_query, manager_name in CURATED_13F_MANAGERS[:limit]:
+    for search_query, manager_name in _manager_candidates(limit):
         resolved = client.resolve_fund(FundCandidate(search_query=search_query, manager_name=manager_name))
         if resolved is None:
             continue
         fund = _upsert_institutional_fund(session, resolved, checked_at)
         resolved_rows.append(fund)
     return resolved_rows
+
+
+def _manager_candidates(limit: int) -> list[tuple[str, str]]:
+    candidates = list(CURATED_13F_MANAGERS)
+    if settings.sec_13f_universe_mode == "expanded":
+        for manager in settings.sec_13f_extra_managers:
+            candidates.append((manager, manager))
+
+    deduped: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for query, manager in candidates:
+        normalized = re.sub(r"\s+", " ", manager.strip().lower())
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append((query, manager))
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 def _upsert_institutional_fund(session: Session, resolved: ResolvedFund, checked_at: datetime) -> InstitutionalFund:
@@ -283,7 +307,7 @@ def _upsert_institutional_fund(session: Session, resolved: ResolvedFund, checked
     return session.get(InstitutionalFund, fund_id)
 
 
-def _latest_two_13f_filings(submissions: dict[str, Any]) -> list[FilingMetadata]:
+def _latest_n_13f_filings(submissions: dict[str, Any], *, limit: int) -> list[FilingMetadata]:
     recent = submissions.get("filings", {}).get("recent", {})
     rows: list[FilingMetadata] = []
     for form, accession, filing_date, report_date, primary_document in zip(
@@ -313,7 +337,7 @@ def _latest_two_13f_filings(submissions: dict[str, Any]) -> list[FilingMetadata]
             continue
         seen_reporting_dates.add(row.report_date)
         distinct_rows.append(row)
-        if len(distinct_rows) >= 2:
+        if len(distinct_rows) >= limit:
             break
     return distinct_rows
 
@@ -324,45 +348,43 @@ def _collect_fund_company_snapshots(
     company_tokens: set[str],
     filings: Sequence[FilingMetadata],
 ) -> list[HoldingSnapshot]:
-    parsed_rows: list[tuple[FilingMetadata, HoldingSnapshot | None]] = []
+    parsed_rows: list[HoldingSnapshot] = []
     for filing in filings:
-        parsed_rows.append((filing, _extract_company_snapshot(client, fund, company_tokens, filing)))
+        parsed = _extract_company_snapshot(client, fund, company_tokens, filing)
+        if parsed is not None:
+            parsed_rows.append(parsed)
 
     if not parsed_rows:
         return []
 
-    latest_filing, latest_snapshot = parsed_rows[0]
-    previous_snapshot = parsed_rows[1][1] if len(parsed_rows) > 1 else None
-
     snapshots: list[HoldingSnapshot] = []
-    if latest_snapshot is not None:
-        previous_shares = previous_snapshot.shares_held if previous_snapshot is not None else 0.0
+    for index, current in enumerate(parsed_rows):
+        previous = parsed_rows[index + 1] if index + 1 < len(parsed_rows) else None
         change_in_shares = None
         percent_change = None
-        if latest_snapshot.shares_held is not None:
-            if previous_snapshot is not None and previous_snapshot.shares_held is not None:
-                change_in_shares = latest_snapshot.shares_held - previous_snapshot.shares_held
-                if previous_snapshot.shares_held != 0:
-                    percent_change = change_in_shares / previous_snapshot.shares_held
-            elif latest_filing.report_date is not None:
-                change_in_shares = latest_snapshot.shares_held - previous_shares
+        if current.shares_held is not None and previous is not None and previous.shares_held is not None:
+            change_in_shares = current.shares_held - previous.shares_held
+            if previous.shares_held != 0:
+                percent_change = change_in_shares / previous.shares_held
 
         snapshots.append(
             HoldingSnapshot(
-                accession_number=latest_snapshot.accession_number,
-                reporting_date=latest_snapshot.reporting_date,
-                filing_date=latest_snapshot.filing_date,
-                shares_held=latest_snapshot.shares_held,
-                market_value=latest_snapshot.market_value,
+                accession_number=current.accession_number,
+                reporting_date=current.reporting_date,
+                filing_date=current.filing_date,
+                shares_held=current.shares_held,
+                market_value=current.market_value,
                 change_in_shares=change_in_shares,
                 percent_change=percent_change,
-                portfolio_weight=latest_snapshot.portfolio_weight,
-                source=latest_snapshot.source,
+                portfolio_weight=current.portfolio_weight,
+                put_call=current.put_call,
+                investment_discretion=current.investment_discretion,
+                voting_authority_sole=current.voting_authority_sole,
+                voting_authority_shared=current.voting_authority_shared,
+                voting_authority_none=current.voting_authority_none,
+                source=current.source,
             )
         )
-
-    if previous_snapshot is not None:
-        snapshots.append(previous_snapshot)
 
     return snapshots
 
@@ -393,12 +415,22 @@ def _extract_company_snapshot(
     total_market_value = 0.0
     matched_market_value = 0.0
     matched_shares = 0.0
+    matched_voting_sole = 0.0
+    matched_voting_shared = 0.0
+    matched_voting_none = 0.0
     matched = False
+    matched_put_call: str | None = None
+    matched_discretion: str | None = None
 
     for row in rows:
         issuer_name = _child_text(row, "nameOfIssuer")
         market_value = _parse_float(_child_text(row, "value"))
         shares = _parse_float(_child_text(row, "sshPrnamt"))
+        put_call = _child_text(row, "putCall")
+        investment_discretion = _child_text(row, "investmentDiscretion")
+        voting_sole = _parse_float(_child_text(row, "Sole"))
+        voting_shared = _parse_float(_child_text(row, "Shared"))
+        voting_none = _parse_float(_child_text(row, "None"))
 
         actual_market_value = market_value or 0.0
         total_market_value += actual_market_value
@@ -409,6 +441,13 @@ def _extract_company_snapshot(
         matched = True
         matched_market_value += actual_market_value
         matched_shares += shares or 0.0
+        matched_voting_sole += voting_sole or 0.0
+        matched_voting_shared += voting_shared or 0.0
+        matched_voting_none += voting_none or 0.0
+        if matched_put_call is None and put_call:
+            matched_put_call = put_call.upper()
+        if matched_discretion is None and investment_discretion:
+            matched_discretion = investment_discretion.upper()
 
     if not matched:
         return None
@@ -423,6 +462,11 @@ def _extract_company_snapshot(
         change_in_shares=None,
         percent_change=None,
         portfolio_weight=portfolio_weight,
+        put_call=matched_put_call,
+        investment_discretion=matched_discretion,
+        voting_authority_sole=matched_voting_sole if matched_voting_sole else None,
+        voting_authority_shared=matched_voting_shared if matched_voting_shared else None,
+        voting_authority_none=matched_voting_none if matched_voting_none else None,
         source=xml_url,
     )
 
@@ -481,6 +525,11 @@ def _upsert_institutional_holdings(
                 change_in_shares=snapshot.change_in_shares,
                 percent_change=snapshot.percent_change,
                 portfolio_weight=snapshot.portfolio_weight,
+                put_call=snapshot.put_call,
+                investment_discretion=snapshot.investment_discretion,
+                voting_authority_sole=snapshot.voting_authority_sole,
+                voting_authority_shared=snapshot.voting_authority_shared,
+                voting_authority_none=snapshot.voting_authority_none,
                 source=snapshot.source,
                 last_checked=checked_at,
             )
@@ -494,6 +543,11 @@ def _upsert_institutional_holdings(
                     "change_in_shares": snapshot.change_in_shares,
                     "percent_change": snapshot.percent_change,
                     "portfolio_weight": snapshot.portfolio_weight,
+                    "put_call": snapshot.put_call,
+                    "investment_discretion": snapshot.investment_discretion,
+                    "voting_authority_sole": snapshot.voting_authority_sole,
+                    "voting_authority_shared": snapshot.voting_authority_shared,
+                    "voting_authority_none": snapshot.voting_authority_none,
                     "source": snapshot.source,
                     "last_checked": checked_at,
                     "last_updated": checked_at,

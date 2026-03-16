@@ -1,0 +1,446 @@
+# SEC Expansion Execution Checklist
+
+## How To Use This Checklist
+
+- Treat each phase as a vertical slice.
+- Do not mark a dataset complete until backend ingestion, API wiring, frontend visualization, and tests are all done.
+- Keep backend and frontend types in sync before merging.
+- Prefer small pull requests grouped by one page or one dataset family.
+
+## Sprint 1: Existing SEC Data Visibility Gaps
+
+### Backend API contracts
+
+- [x] Add `GET /api/companies/{ticker}/filing-insights` to `app/main.py`.
+- [x] Add a response model for filing insights in `app/main.py` if not already declared.
+- [x] Use `get_company_filing_insights` from `app/services/cache_queries.py` in the new route.
+- [x] Return latest filing parser snapshots ordered by `period_end` descending.
+
+Acceptance criteria:
+
+- Route returns HTTP 200 for a company with cached filing parser data.
+- Route returns an empty `insights` list for a company without filing parser data.
+
+### Backend serializer fixes
+
+- [x] Update `_serialize_insider_trade` in `app/main.py` to return:
+  - [x] `filing_date`
+  - [x] `filing_type`
+  - [x] `accession_number`
+  - [x] `source`
+- [x] Update `_serialize_institutional_holding` in `app/main.py` to return:
+  - [x] `accession_number`
+  - [x] `filing_date`
+  - [x] `source`
+
+Acceptance criteria:
+
+- Insider trade API payload matches the fields declared in `frontend/lib/types.ts`.
+- Institutional holdings API payload matches the fields declared in `frontend/lib/types.ts`.
+
+### Frontend data plumbing
+
+- [x] Verify `getCompanyFilingInsights` in `frontend/lib/api.ts` points to a real backend route.
+- [x] Verify `CompanyFilingInsightsResponse` in `frontend/lib/types.ts` matches backend payload.
+- [x] Verify `InsiderTradePayload` and `InstitutionalHoldingPayload` remain aligned with backend output.
+
+Acceptance criteria:
+
+- No frontend runtime errors caused by missing response fields.
+- TypeScript types match actual API payloads.
+
+### Frontend UI verification
+
+- [x] Verify filing metadata renders in `frontend/components/tables/insider-transactions-table.tsx`.
+- [x] Verify filing metadata renders in `frontend/components/tables/hedge-fund-activity-table.tsx`.
+- [x] Verify `frontend/components/filings/filing-parser-insights.tsx` loads real data.
+- [x] Verify `frontend/app/company/[ticker]/filings/page.tsx` handles loading, empty, and error states for filing insights.
+
+Acceptance criteria:
+
+- Insider table shows filing date, accession, and SEC source link.
+- 13F table shows filing date, accession, and SEC source link.
+- Filing parser snapshot panel renders cached results when present.
+
+### Tests
+
+- [x] Add API route test for `GET /api/companies/{ticker}/filing-insights`.
+- [x] Add serializer tests for insider and institutional payloads.
+- [ ] Add frontend render tests for filing metadata cells if a frontend test harness exists.
+
+Definition of done:
+
+- All three pages show currently fetched SEC metadata.
+- No placeholder fields remain disconnected from backend output.
+
+## Sprint 2: Expanded XBRL Fundamentals And Segment Visuals
+
+### Canonical metric expansion
+
+- [x] Add companyfacts mappings in `app/services/sec_edgar.py` for:
+  - [x] `sga`
+  - [x] `research_and_development`
+  - [x] `interest_expense`
+  - [x] `income_tax_expense`
+  - [x] `inventory`
+  - [x] `accounts_receivable`
+  - [x] `goodwill_and_intangibles`
+  - [x] `long_term_debt`
+  - [x] `lease_liabilities`
+  - [x] `stock_based_compensation`
+  - [x] `weighted_average_diluted_shares`
+
+Acceptance criteria:
+
+- New metrics are normalized for representative 10-K and 10-Q filings.
+- Existing metrics continue to serialize unchanged.
+
+### Response model updates
+
+- [x] Extend financial payload model in `app/main.py`.
+- [x] Extend `FinancialPayload` in `frontend/lib/types.ts`.
+- [x] Confirm `useCompanyWorkspace` continues to function with additional fields in `frontend/hooks/use-company-workspace.ts`.
+
+Acceptance criteria:
+
+- Backend and frontend types compile cleanly.
+- Existing pages do not regress.
+
+### Frontend components
+
+- [ ] Add a margin trend chart component under `frontend/components/charts/`.
+- [ ] Add a capital allocation chart component under `frontend/components/charts/`.
+- [ ] Add a balance-sheet risk chart component under `frontend/components/charts/`.
+- [x] Add a segment mix chart component under `frontend/components/charts/`.
+- [ ] Add a financial quality summary component under `frontend/components/company/`.
+
+### Frontend page integration
+
+- [x] Extend `frontend/app/company/[ticker]/page.tsx` with new financial summary visuals.
+- [ ] Decide whether to add a dedicated financials page or keep visual expansion on the overview page.
+
+Acceptance criteria:
+
+- Users can see margin, capital allocation, leverage, and segment visuals.
+- New charts work on desktop and mobile layouts.
+
+### Tests
+
+- [x] Add parser tests for newly mapped XBRL tags.
+- [x] Add serializer tests for expanded financial payloads.
+- [x] Add chart transform tests for representative financial data.
+
+Definition of done:
+
+- Expanded fundamentals are both stored and visualized.
+
+## Sprint 3: Deeper Insider And 13F Analysis
+
+### Form 4 parser improvements
+
+- [ ] Extend Form 4 parsing in `app/services/sec_edgar.py` to capture:
+  - [x] security title
+  - [x] derivative vs non-derivative flag
+  - [x] direct vs indirect ownership
+  - [x] exercise price if present
+  - [x] expiration date if present
+  - [x] optional normalized footnote tags
+
+### 13F parser improvements
+
+- [ ] Extend 13F parsing in `app/services/institutional_holdings.py` to capture where available:
+  - [x] put-call flags
+  - [x] discretion
+  - [x] voting authority
+  - [x] more than two quarters of history
+- [x] Design a safe expansion strategy for broader manager coverage.
+
+Acceptance criteria:
+
+- Data model supports deeper analysis without breaking current pages.
+- Historical snapshots can support quarter-over-quarter visualizations.
+
+### Frontend components
+
+- [x] Add insider signal quality component under `frontend/components/insiders/`.
+- [x] Add insider role activity chart under `frontend/components/charts/`.
+- [x] Add top holder trend component under `frontend/components/institutional/`.
+- [x] Add conviction heatmap under `frontend/components/institutional/`.
+- [x] Add new vs exited positions summary under `frontend/components/institutional/`.
+
+### Frontend page integration
+
+- [x] Extend `frontend/app/company/[ticker]/insiders/page.tsx` with signal-quality visuals.
+- [x] Extend `frontend/app/company/[ticker]/ownership/page.tsx` with conviction and turnover visuals.
+
+Acceptance criteria:
+
+- Insiders page distinguishes open-market signal from low-signal activity.
+- Ownership page highlights conviction, concentration, and flow changes.
+
+### Tests
+
+- [x] Add parser tests for derivative and ownership attributes.
+- [x] Add analytics tests for updated insider and 13F summaries.
+
+Definition of done:
+
+- Insider and institutional sections are analytical, not just tabular.
+
+## Sprint 4: Beneficial Ownership (13D and 13G)
+
+### Backend scaffolding
+
+- [x] Create `app/services/beneficial_ownership.py`.
+- [x] Add migration for `beneficial_ownership_reports`.
+- [x] Add migration for `beneficial_ownership_parties` if needed.
+- [x] Add ORM models under `app/models/`.
+- [x] Add query helpers in `app/services/cache_queries.py`.
+
+### SEC ingestion
+
+- [ ] Detect `SC 13D`, `SC 13D/A`, `SC 13G`, and `SC 13G/A` from submissions.
+- [ ] Parse filer name, ownership percentage, share count, filing date, and source URL.
+- [ ] Normalize amendment history.
+
+### API contracts
+
+- [ ] Add `GET /api/companies/{ticker}/beneficial-ownership`.
+- [ ] Add `GET /api/beneficial-ownership/{ticker}/summary`.
+- [ ] Add corresponding frontend types in `frontend/lib/types.ts`.
+- [ ] Add API calls in `frontend/lib/api.ts`.
+
+### Frontend visualization
+
+- [ ] Add `frontend/app/company/[ticker]/ownership-changes/page.tsx`.
+- [ ] Add beneficial owner timeline component.
+- [ ] Add beneficial owner table component.
+- [ ] Add activist signal panel.
+
+Acceptance criteria:
+
+- Users can see major beneficial owners and stake changes over time.
+- Activist-style stake changes are visually highlighted.
+
+### Tests
+
+- [ ] Add parser tests for representative 13D and 13G filings.
+- [ ] Add route tests for ownership-change APIs.
+
+Definition of done:
+
+- Beneficial ownership is visible as a standalone investor workflow.
+
+## Sprint 5: Proxy And Governance (DEF 14A)
+
+### Backend scaffolding
+
+- [ ] Create `app/services/proxy_parser.py`.
+- [ ] Add migrations for:
+  - [ ] `proxy_statements`
+  - [ ] `executive_compensation`
+  - [ ] `proxy_vote_results`
+- [ ] Add ORM models under `app/models/`.
+
+### SEC ingestion
+
+- [ ] Detect and ingest `DEF 14A` filings.
+- [ ] Parse meeting date and source URL.
+- [ ] Parse named executive compensation table.
+- [ ] Parse high-level vote outcomes when available.
+
+### API contracts
+
+- [ ] Add `GET /api/companies/{ticker}/governance`.
+- [ ] Add `GET /api/companies/{ticker}/executive-compensation`.
+- [ ] Add matching frontend API and types.
+
+### Frontend visualization
+
+- [ ] Add `frontend/app/company/[ticker]/governance/page.tsx`.
+- [ ] Add executive pay table.
+- [ ] Add pay trend chart.
+- [ ] Add vote outcomes panel.
+- [ ] Add board or governance summary panel.
+
+Acceptance criteria:
+
+- Governance data is visible from a dedicated page.
+- Executive compensation and vote outcomes are understandable without reading the filing.
+
+### Tests
+
+- [ ] Add parser tests against multiple proxy formats.
+- [ ] Add API response tests for governance endpoints.
+
+Definition of done:
+
+- Governance is first-class research surface, not just a filing link.
+
+## Sprint 6: 8-K Event Intelligence
+
+### Backend scaffolding
+
+- [ ] Create `app/services/eight_k_parser.py`.
+- [ ] Add migration for `filing_events`.
+- [ ] Add ORM model for filing events.
+
+### SEC ingestion
+
+- [ ] Classify 8-K item codes for at least:
+  - [ ] 1.01
+  - [ ] 2.02
+  - [ ] 2.06
+  - [ ] 5.02
+  - [ ] 8.01
+- [ ] Create normalized event summaries.
+
+### API contracts
+
+- [ ] Add `GET /api/companies/{ticker}/filing-events`.
+- [ ] Add `GET /api/companies/{ticker}/filing-events/summary`.
+- [ ] Add matching frontend API and types.
+
+### Frontend visualization
+
+- [ ] Extend `frontend/app/company/[ticker]/filings/page.tsx` with an event timeline.
+- [ ] Add a reusable SEC activity feed component.
+- [ ] Add category filters.
+- [ ] Add a latest material events panel on `frontend/app/company/[ticker]/page.tsx`.
+
+Acceptance criteria:
+
+- Users can filter 8-K events by category.
+- Overview page surfaces recent material filing events.
+
+### Tests
+
+- [ ] Add event-classification tests for 8-K samples.
+- [ ] Add API route tests for event endpoints.
+
+Definition of done:
+
+- 8-K filings are translated into an event workflow users can browse quickly.
+
+## Sprint 7: Dilution And Capital Markets Risk
+
+### Backend scaffolding
+
+- [ ] Create `app/services/capital_markets_parser.py`.
+- [ ] Add migration for `capital_markets_events`.
+- [ ] Add ORM model for capital markets events.
+
+### SEC ingestion
+
+- [ ] Detect and classify:
+  - [ ] `S-1`
+  - [ ] `S-3`
+  - [ ] `F-3`
+  - [ ] `424B*`
+  - [ ] `NT 10-K`
+  - [ ] `NT 10-Q`
+- [ ] Parse event type, security type, filing date, source, and summary.
+- [ ] Capture shelf size or raise amount when extractable.
+
+### API contracts
+
+- [ ] Add `GET /api/companies/{ticker}/capital-markets`.
+- [ ] Add `GET /api/companies/{ticker}/capital-markets/summary`.
+- [ ] Add matching frontend API and types.
+
+### Frontend visualization
+
+- [ ] Add `frontend/app/company/[ticker]/capital-markets/page.tsx`.
+- [ ] Add dilution risk panel.
+- [ ] Add offering timeline component.
+- [ ] Add late-filer alerts component.
+
+Acceptance criteria:
+
+- Users can identify dilution and financing risk from a dedicated UI.
+- Late-filer warnings are visible without opening raw filings.
+
+### Tests
+
+- [ ] Add parser tests for offering and notice filings.
+- [ ] Add route tests for capital-markets endpoints.
+
+Definition of done:
+
+- Dilution and financing activity is visualized and searchable.
+
+## Sprint 8: Unified Activity Feed And Alerts
+
+### Backend feed assembly
+
+- [ ] Create `app/services/sec_activity_feed.py`.
+- [ ] Compose a unified feed from:
+  - [ ] filing timeline
+  - [ ] filing events
+  - [ ] insider trades
+  - [ ] 13F changes
+  - [ ] beneficial ownership changes
+  - [ ] governance updates
+  - [ ] capital markets events
+
+### Backend alerts
+
+- [ ] Create `app/services/alert_rules.py`.
+- [ ] Implement alert rules for at least:
+  - [ ] insider buying drought
+  - [ ] new activist stake
+  - [ ] sudden large institutional exits
+  - [ ] compensation spike
+  - [ ] recent financing or dilution filing
+  - [ ] late filing notices
+
+### API contracts
+
+- [ ] Add `GET /api/companies/{ticker}/activity-feed`.
+- [ ] Add `GET /api/companies/{ticker}/alerts`.
+- [ ] Add matching frontend API and types.
+
+### Frontend visualization
+
+- [ ] Extend `frontend/app/company/[ticker]/page.tsx` with a unified activity feed.
+- [ ] Add alerts panel under `frontend/components/alerts/`.
+- [ ] Add severity styling and filtering.
+
+Acceptance criteria:
+
+- Overview page provides one place to review important SEC activity.
+- Alerts summarize the most decision-relevant changes without requiring raw filing review.
+
+### Tests
+
+- [ ] Add feed assembly tests.
+- [ ] Add alert rule tests.
+- [ ] Add component tests for ordering and severity rendering.
+
+Definition of done:
+
+- SEC data across filing families is unified into a coherent investor workflow.
+
+## Cross-Cutting Tasks
+
+### Data quality and fixtures
+
+- [ ] Create a reusable SEC fixture directory for representative filings.
+- [ ] Add fixtures for 10-K, 10-Q, 8-K, Form 4, 13F, 13D, 13G, DEF 14A, S-3, and NT filings.
+- [ ] Add parser test coverage before broadening production ingestion.
+
+### Refresh and cache wiring
+
+- [ ] Reuse existing refresh queue and SSE reporting where possible.
+- [ ] Add progress stage names for new dataset families.
+- [ ] Add cache TTL decisions for new SEC document classes.
+
+### Documentation
+
+- [ ] Keep `docs/sec-expansion-roadmap.md` updated when scope changes.
+- [ ] Update `README.md` when major new pages or APIs ship.
+
+### Release discipline
+
+- [ ] Ship each sprint with both backend and frontend complete.
+- [ ] Avoid merging hidden backend-only datasets.

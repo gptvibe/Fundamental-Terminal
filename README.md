@@ -22,6 +22,11 @@ Captured from the local app with `INTC` as the demo company.
 
 ![Mobile company view for INTC](docs/screenshots/mobile-company.png)
 
+## Roadmap
+
+- See [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md) for the phased SEC dataset expansion plan, including backend models, API contracts, frontend visualizations, and sprint ordering.
+- See [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md) for the task-by-task execution checklist.
+
 ## Canonical metrics
 
 - `revenue`
@@ -159,6 +164,9 @@ Optional environment variables for the prewarm job:
 Additional environment variables:
 
 - `SEC_TICKER_CACHE_TTL_SECONDS=86400` to cache SEC ticker mappings
+- `SEC_13F_HISTORY_QUARTERS=4` to control how many distinct 13F reporting quarters are retained per manager/company pair
+- `SEC_13F_UNIVERSE_MODE=curated` keeps manager coverage on the curated list (default), while `expanded` allows controlled extras
+- `SEC_13F_EXTRA_MANAGERS="Manager One,Manager Two"` provides optional manager names used only when `SEC_13F_UNIVERSE_MODE=expanded`
 - `SEC_MAX_RETRIES=3` and `SEC_RETRY_BACKOFF_SECONDS=0.5` for SEC request retries
 - `MARKET_MAX_RETRIES=3` and `MARKET_RETRY_BACKOFF_SECONDS=0.5` for market data retries
 

@@ -248,6 +248,62 @@ function buildMetricTrendRows(financials: FinancialPayload[]): MetricTrendRow[] 
       valueLabel: "Net Margin",
       selectValue: (statement) => computeNetMargin(statement),
       formatValue: (value) => formatPercent(value)
+    }),
+    createMetricTrendRow({
+      key: "sga",
+      label: "SG&A",
+      history,
+      valueLabel: "SG&A",
+      selectValue: (statement) => statement.sga,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "rnd",
+      label: "R&D",
+      history,
+      valueLabel: "R&D",
+      selectValue: (statement) => statement.research_and_development,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "interest-expense",
+      label: "Interest Expense",
+      history,
+      valueLabel: "Interest Expense",
+      selectValue: (statement) => statement.interest_expense,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "income-tax-expense",
+      label: "Income Tax Expense",
+      history,
+      valueLabel: "Income Tax Expense",
+      selectValue: (statement) => statement.income_tax_expense,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "long-term-debt",
+      label: "Long-Term Debt",
+      history,
+      valueLabel: "Long-Term Debt",
+      selectValue: (statement) => statement.long_term_debt,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "lease-liabilities",
+      label: "Lease Liabilities",
+      history,
+      valueLabel: "Lease Liabilities",
+      selectValue: (statement) => statement.lease_liabilities,
+      formatValue: (value) => formatCompactNumber(value)
+    }),
+    createMetricTrendRow({
+      key: "stock-based-compensation",
+      label: "Stock-Based Comp",
+      history,
+      valueLabel: "Stock-Based Compensation",
+      selectValue: (statement) => statement.stock_based_compensation,
+      formatValue: (value) => formatCompactNumber(value)
     })
   ];
 }
@@ -379,7 +435,18 @@ function buildFinancialsCsv(financials: FinancialPayload[]): string {
     "total_liabilities",
     "current_liabilities",
     "retained_earnings",
+    "sga",
+    "research_and_development",
+    "interest_expense",
+    "income_tax_expense",
+    "inventory",
+    "accounts_receivable",
+    "goodwill_and_intangibles",
+    "long_term_debt",
+    "lease_liabilities",
     "shares_outstanding",
+    "weighted_average_diluted_shares",
+    "stock_based_compensation",
     "capex",
     "acquisitions",
     "debt_changes",
@@ -405,7 +472,18 @@ function buildFinancialsCsv(financials: FinancialPayload[]): string {
       statement.total_liabilities,
       statement.current_liabilities,
       statement.retained_earnings,
+      statement.sga,
+      statement.research_and_development,
+      statement.interest_expense,
+      statement.income_tax_expense,
+      statement.inventory,
+      statement.accounts_receivable,
+      statement.goodwill_and_intangibles,
+      statement.long_term_debt,
+      statement.lease_liabilities,
       statement.shares_outstanding,
+      statement.weighted_average_diluted_shares,
+      statement.stock_based_compensation,
       statement.capex,
       statement.acquisitions,
       statement.debt_changes,

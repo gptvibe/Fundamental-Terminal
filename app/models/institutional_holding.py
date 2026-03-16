@@ -45,6 +45,11 @@ class InstitutionalHolding(Base):
     change_in_shares: Mapped[float | None] = mapped_column(Float, nullable=True)
     percent_change: Mapped[float | None] = mapped_column(Float, nullable=True)
     portfolio_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    put_call: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    investment_discretion: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    voting_authority_sole: Mapped[float | None] = mapped_column(Float, nullable=True)
+    voting_authority_shared: Mapped[float | None] = mapped_column(Float, nullable=True)
+    voting_authority_none: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String(255), nullable=False)
     last_updated: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

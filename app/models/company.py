@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.financial_statement import FinancialStatement
     from app.models.insider_trade import InsiderTrade
     from app.models.institutional_holding import InstitutionalHolding
@@ -33,6 +34,7 @@ class Company(Base):
     market_industry: Mapped[str | None] = mapped_column(String(150), nullable=True)
     insider_trades_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     institutional_holdings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    beneficial_ownership_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
         back_populates="company",
@@ -55,6 +57,11 @@ class Company(Base):
         passive_deletes=True,
     )
     institutional_holdings: Mapped[list["InstitutionalHolding"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    beneficial_ownership_reports: Mapped[list["BeneficialOwnershipReport"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

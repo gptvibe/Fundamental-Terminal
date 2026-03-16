@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -45,6 +45,12 @@ class InsiderTrade(Base):
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     value: Mapped[float | None] = mapped_column(Float, nullable=True)
     ownership_after: Mapped[float | None] = mapped_column(Float, nullable=True)
+    security_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_derivative: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ownership_nature: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    exercise_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expiration_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    footnote_tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     transaction_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
     is_10b5_1: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     source: Mapped[str] = mapped_column(String(255), nullable=False)

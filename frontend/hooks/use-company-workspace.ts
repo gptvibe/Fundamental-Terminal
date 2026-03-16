@@ -30,6 +30,8 @@ interface LoadCompanyWorkspaceDataResult {
   activeJobId: string | null;
 }
 
+const REFRESH_POLL_INTERVAL_MS = 3000;
+
 export function useCompanyWorkspace(
   ticker: string,
   {
@@ -72,6 +74,7 @@ export function useCompanyWorkspace(
       })),
     [annualStatements]
   );
+  const refreshState = data?.refresh ?? institutionalData?.refresh ?? insiderData?.refresh ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -138,6 +141,7 @@ export function useCompanyWorkspace(
           return;
         }
 
+        setError(null);
         setData(result.financialData);
         setInsiderData(result.insiderData);
         setInstitutionalData(result.institutionalData);
@@ -155,6 +159,58 @@ export function useCompanyWorkspace(
       cancelled = true;
     };
   }, [activeJobId, includeInsiders, includeInstitutional, lastEvent, settledJobIds, ticker]);
+
+  useEffect(() => {
+    const trackedJobId = activeJobId ?? refreshState?.job_id;
+    if (!trackedJobId || settledJobIds.includes(trackedJobId)) {
+      return;
+    }
+
+    let cancelled = false;
+    let pending = false;
+
+    const poll = async () => {
+      if (pending) {
+        return;
+      }
+
+      pending = true;
+      try {
+        const result = await loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional });
+        if (cancelled) {
+          return;
+        }
+
+        setError(null);
+        setData(result.financialData);
+        setInsiderData(result.insiderData);
+        setInstitutionalData(result.institutionalData);
+        setInsiderError(result.insiderError);
+        setInstitutionalError(result.institutionalError);
+        setActiveJobId(result.activeJobId);
+
+        if (result.activeJobId !== trackedJobId) {
+          setSettledJobIds((current) => (current.includes(trackedJobId) ? current : [...current, trackedJobId]));
+          setRefreshTick((current) => current + 1);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(asErrorMessage(nextError, "Unable to refresh company workspace"));
+        }
+      } finally {
+        pending = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, REFRESH_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeJobId, includeInsiders, includeInstitutional, refreshState?.job_id, settledJobIds, ticker]);
 
   useEffect(() => {
     if (!includeChartConsole) {
@@ -244,12 +300,12 @@ export function useCompanyWorkspace(
     insiderError,
     institutionalError,
     refreshing,
-    refreshState: data?.refresh ?? institutionalData?.refresh ?? insiderData?.refresh ?? null,
+    refreshState,
     activeJobId,
     consoleEntries,
     connectionState,
     queueRefresh,
-    reloadKey: `${data?.company?.last_checked ?? "none"}:${financials.length}:${priceHistory.length}`
+    reloadKey: `${refreshTick}:${data?.company?.last_checked ?? "none"}:${financials.length}:${priceHistory.length}`
   };
 }
 

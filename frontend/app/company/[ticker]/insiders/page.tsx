@@ -4,9 +4,11 @@ import { useMemo } from "react";
 import { useParams } from "next/navigation";
 
 import { InsiderActivityTrendChart } from "@/components/charts/insider-activity-trend-chart";
+import { InsiderRoleActivityChart } from "@/components/charts/insider-role-activity-chart";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { InsiderActivitySummary } from "@/components/insiders/insider-activity-summary";
+import { InsiderSignalBreakdown } from "@/components/insiders/insider-signal-breakdown";
 import { InsiderTransactionsTable } from "@/components/tables/insider-transactions-table";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -76,6 +78,14 @@ export default function CompanyInsidersPage() {
 
       <Panel title="Insider Activity Trend" subtitle="Monthly insider buys, sells, and net activity from Form 4 filings">
         <InsiderActivityTrendChart trades={insiderTrades} />
+      </Panel>
+
+      <Panel title="Signal Quality" subtitle="Separate higher-signal open-market trades from plan-driven or administrative Form 4 entries">
+        <InsiderSignalBreakdown trades={insiderTrades} />
+      </Panel>
+
+      <Panel title="Role Activity" subtitle="Open-market buy, sell, and net value split by insider role">
+        <InsiderRoleActivityChart trades={insiderTrades} />
       </Panel>
 
       <Panel title="Insider Transactions" subtitle="Sortable Form 4 activity with buy, sell, and 10b5-1 details">

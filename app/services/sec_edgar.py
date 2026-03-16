@@ -91,6 +91,133 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
         ("us-gaap", ["RetainedEarningsAccumulatedDeficit"]),
         ("ifrs-full", ["RetainedEarnings"]),
     ],
+    "sga": [
+        (
+            "us-gaap",
+            [
+                "SellingGeneralAndAdministrativeExpense",
+            ],
+        ),
+    ],
+    "research_and_development": [
+        (
+            "us-gaap",
+            [
+                "ResearchAndDevelopmentExpense",
+                "ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "ResearchAndDevelopmentExpense",
+            ],
+        ),
+    ],
+    "interest_expense": [
+        (
+            "us-gaap",
+            [
+                "InterestExpenseExpense",
+                "InterestExpenseAndOther",
+                "InterestExpense",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "FinanceCosts",
+                "InterestExpense",
+            ],
+        ),
+    ],
+    "income_tax_expense": [
+        (
+            "us-gaap",
+            [
+                "IncomeTaxExpenseBenefit",
+                "IncomeTaxes",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "IncomeTaxExpenseContinuingOperations",
+                "IncomeTaxExpense",
+            ],
+        ),
+    ],
+    "inventory": [
+        ("us-gaap", ["InventoryNet"]),
+        ("ifrs-full", ["Inventories"]),
+    ],
+    "accounts_receivable": [
+        (
+            "us-gaap",
+            [
+                "AccountsReceivableNetCurrent",
+                "ReceivablesNetCurrent",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "TradeAndOtherCurrentReceivables",
+                "CurrentTradeReceivables",
+            ],
+        ),
+    ],
+    "goodwill_and_intangibles": [
+        (
+            "us-gaap",
+            [
+                "FiniteLivedIntangibleAssetsNet",
+                "GoodwillAndIntangibleAssetsNet",
+                "OtherThanGoodwillIntangibleAssetsNet",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "IntangibleAssetsOtherThanGoodwill",
+                "GoodwillAndOtherIntangibleAssets",
+            ],
+        ),
+    ],
+    "long_term_debt": [
+        (
+            "us-gaap",
+            [
+                "LongTermDebtNoncurrent",
+                "LongTermDebtAndCapitalLeaseObligations",
+                "LongTermDebt",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "NoncurrentBorrowings",
+                "BorrowingsNoncurrent",
+            ],
+        ),
+    ],
+    "lease_liabilities": [
+        (
+            "us-gaap",
+            [
+                "OperatingLeaseLiabilityNoncurrent",
+                "FinanceLeaseLiabilityNoncurrent",
+                "OperatingLeaseLiability",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "LeaseLiabilitiesNoncurrent",
+                "LeaseLiabilities",
+            ],
+        ),
+    ],
     "operating_cash_flow": [
         (
             "us-gaap",
@@ -151,6 +278,21 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
             ],
         ),
     ],
+    "stock_based_compensation": [
+        (
+            "us-gaap",
+            [
+                "ShareBasedCompensation",
+                "AllocatedShareBasedCompensationExpense",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "SharebasedPaymentExpense",
+            ],
+        ),
+    ],
     "eps": [
         (
             "us-gaap",
@@ -179,6 +321,21 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
             "dei",
             [
                 "EntityCommonStockSharesOutstanding",
+            ],
+        ),
+    ],
+    "weighted_average_diluted_shares": [
+        (
+            "us-gaap",
+            [
+                "WeightedAverageNumberOfDilutedSharesOutstanding",
+                "WeightedAverageNumberOfShareOutstandingBasicAndDiluted",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "WeightedAverageNumberOfOrdinarySharesOutstandingDiluted",
             ],
         ),
     ],
@@ -316,6 +473,12 @@ class NormalizedInsiderTrade:
     price: float | None
     value: float | None
     ownership_after: float | None
+    security_title: str | None
+    is_derivative: bool | None
+    ownership_nature: str | None
+    exercise_price: float | None
+    expiration_date: date | None
+    footnote_tags: list[str] | None
     transaction_code: str | None
     is_10b5_1: bool
     source: str
@@ -1406,6 +1569,12 @@ def _upsert_insider_trades(
             "price": trade.price,
             "value": trade.value,
             "ownership_after": trade.ownership_after,
+            "security_title": trade.security_title,
+            "is_derivative": trade.is_derivative,
+            "ownership_nature": trade.ownership_nature,
+            "exercise_price": trade.exercise_price,
+            "expiration_date": trade.expiration_date,
+            "footnote_tags": trade.footnote_tags,
             "transaction_code": trade.transaction_code,
             "is_10b5_1": trade.is_10b5_1,
             "source": trade.source,
@@ -1427,6 +1596,12 @@ def _upsert_insider_trades(
             "price": statement.excluded.price,
             "value": statement.excluded.value,
             "ownership_after": statement.excluded.ownership_after,
+            "security_title": statement.excluded.security_title,
+            "is_derivative": statement.excluded.is_derivative,
+            "ownership_nature": statement.excluded.ownership_nature,
+            "exercise_price": statement.excluded.exercise_price,
+            "expiration_date": statement.excluded.expiration_date,
+            "footnote_tags": statement.excluded.footnote_tags,
             "transaction_code": statement.excluded.transaction_code,
             "is_10b5_1": statement.excluded.is_10b5_1,
             "source": statement.excluded.source,
@@ -1478,11 +1653,13 @@ def _parse_form4_transactions(
     trades: list[NormalizedInsiderTrade] = []
     transaction_index = 0
     for path in ("./nonDerivativeTable/nonDerivativeTransaction", "./derivativeTable/derivativeTransaction"):
+        is_derivative = "derivative" in path.lower()
         for transaction in root.findall(path):
             transaction_code = _clean_text(transaction.findtext("./transactionCoding/transactionCode"))
             acquired_disposed = _clean_text(
                 transaction.findtext("./transactionAmounts/transactionAcquiredDisposedCode/value")
             )
+            security_title = _clean_text(transaction.findtext("./securityTitle/value"))
             transaction_date = (
                 _parse_date(transaction.findtext("./transactionDate/value"))
                 or _parse_date(transaction.findtext("./deemedExecutionDate/value"))
@@ -1490,8 +1667,13 @@ def _parse_form4_transactions(
             )
             shares = _parse_optional_float(transaction.findtext("./transactionAmounts/transactionShares/value"))
             price = _parse_optional_float(transaction.findtext("./transactionAmounts/transactionPricePerShare/value"))
+            exercise_price = _parse_optional_float(transaction.findtext("./conversionOrExercisePrice/value"))
             if price is None:
-                price = _parse_optional_float(transaction.findtext("./conversionOrExercisePrice/value"))
+                price = exercise_price
+            expiration_date = _parse_date(transaction.findtext("./expirationDate/value"))
+            ownership_nature = _normalize_ownership_nature(
+                _clean_text(transaction.findtext("./postTransactionAmounts/ownershipNature/directOrIndirectOwnership/value"))
+            )
             ownership_after = _parse_optional_float(
                 transaction.findtext("./postTransactionAmounts/sharesOwnedFollowingTransaction/value")
             )
@@ -1501,6 +1683,7 @@ def _parse_form4_transactions(
                 for node in transaction.findall(".//footnoteId")
                 if str(node.attrib.get("id") or "").strip()
             }
+            footnote_tags = _normalize_form4_footnote_tags(footnote_ids, footnotes)
             is_10b5_1 = document_10b5_1 or _footnotes_indicate_10b5_1(footnote_ids, footnotes)
             action = _normalize_insider_action(transaction_code, acquired_disposed)
 
@@ -1519,6 +1702,12 @@ def _parse_form4_transactions(
                         price=price,
                         value=value,
                         ownership_after=ownership_after,
+                        security_title=security_title,
+                        is_derivative=is_derivative,
+                        ownership_nature=ownership_nature,
+                        exercise_price=exercise_price,
+                        expiration_date=expiration_date,
+                        footnote_tags=footnote_tags,
                         transaction_code=transaction_code,
                         is_10b5_1=is_10b5_1,
                         source=source_url,
@@ -1586,8 +1775,42 @@ def _footnotes_indicate_10b5_1(footnote_ids: set[str], footnotes: dict[str, str]
     return False
 
 
+def _normalize_form4_footnote_tags(footnote_ids: set[str], footnotes: dict[str, str]) -> list[str] | None:
+    if not footnote_ids:
+        return None
+
+    tags: set[str] = set()
+    for footnote_id in footnote_ids:
+        text = footnotes.get(footnote_id, "")
+        normalized = re.sub(r"\s+", " ", text.lower()).strip()
+        compact = re.sub(r"[^a-z0-9]+", "", normalized)
+        if "10b51" in compact:
+            tags.add("10b5-1")
+        if "gift" in normalized:
+            tags.add("gift")
+        if "tax" in normalized or "withhold" in normalized:
+            tags.add("tax-withholding")
+        if "estate" in normalized or "trust" in normalized:
+            tags.add("trust-estate")
+        if "option" in normalized or "exercise" in normalized:
+            tags.add("option-exercise")
+        if "restricted stock" in normalized or "rsu" in normalized:
+            tags.add("equity-award")
+
+    return sorted(tags) if tags else None
+
+
 def _parse_form4_bool(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def _normalize_ownership_nature(value: str | None) -> str | None:
+    normalized = (value or "").strip().upper()
+    if normalized == "D":
+        return "direct"
+    if normalized == "I":
+        return "indirect"
+    return value
 
 
 def _parse_optional_float(value: Any) -> float | None:
@@ -2173,7 +2396,7 @@ def _parse_table_number(value: str) -> int | float | None:
 def _iter_fact_observations(metric: str, fact_payload: dict[str, Any]) -> list[dict[str, Any]]:
     if metric == "eps":
         return _iter_ratio_observations(fact_payload)
-    if metric == "shares_outstanding":
+    if metric in {"shares_outstanding", "weighted_average_diluted_shares"}:
         return _iter_share_observations(fact_payload)
     return _iter_monetary_observations(fact_payload)
 

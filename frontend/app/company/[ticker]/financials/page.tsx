@@ -6,8 +6,10 @@ import { BalanceSheetChart } from "@/components/charts/balance-sheet-chart";
 import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
+import { OperatingCostStructureChart } from "@/components/charts/operating-cost-structure-chart";
 import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
 import { FinancialStatementsTable } from "@/components/company/financial-statements-table";
+import { FinancialQualitySummary } from "@/components/company/financial-quality-summary";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -88,6 +90,14 @@ export default function CompanyFinancialsTabPage() {
 
       <Panel title="Liquidity & Capital" subtitle="Current assets, liabilities, and retained earnings from reported filings">
         <LiquidityCapitalChart financials={financials} />
+      </Panel>
+
+      <Panel title="Operating Cost Structure" subtitle="SG&A, R&D, stock-based compensation, interest, and tax expense trends from reported filings">
+        <OperatingCostStructureChart financials={financials} />
+      </Panel>
+
+      <Panel title="Financial Quality Summary" subtitle="Quick view of margins, balance-sheet leverage, profitability, and growth quality from annual filings">
+        <FinancialQualitySummary financials={financials} />
       </Panel>
 
       <Panel title="Share Dilution Tracker" subtitle="Shares outstanding trend with period-over-period dilution rates from reported filings">

@@ -5,7 +5,10 @@ import { useParams } from "next/navigation";
 
 import { InstitutionalOwnershipTrendChart } from "@/components/charts/institutional-ownership-trend-chart";
 import { SmartMoneyFlowChart } from "@/components/charts/smart-money-flow-chart";
+import { NewVsExitedPositions } from "@/components/institutional/new-vs-exited-positions";
+import { ConvictionHeatmap } from "@/components/institutional/conviction-heatmap";
 import { SmartMoneySummary } from "@/components/institutional/smart-money-summary";
+import { TopHolderTrend } from "@/components/institutional/top-holder-trend";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { HedgeFundActivityTable } from "@/components/tables/hedge-fund-activity-table";
@@ -87,6 +90,18 @@ export default function CompanyOwnershipPage() {
 
       <Panel title="Institutional Ownership Trend" subtitle="Quarterly tracked shares, top 10 funds combined, and tracked ownership percentage">
         <InstitutionalOwnershipTrendChart holdings={institutionalHoldings} financials={financials} />
+      </Panel>
+
+      <Panel title="Top Holder Trend" subtitle="Latest top tracked funds and how their reported share counts moved across quarters">
+        <TopHolderTrend holdings={institutionalHoldings} />
+      </Panel>
+
+      <Panel title="New vs Exited Positions" subtitle="How the latest quarter compares with the prior quarter across tracked 13F funds">
+        <NewVsExitedPositions holdings={institutionalHoldings} />
+      </Panel>
+
+      <Panel title="Conviction Heatmap" subtitle="Latest tracked funds ranked by position weight and quarter-over-quarter position change">
+        <ConvictionHeatmap holdings={institutionalHoldings} />
       </Panel>
 
       <Panel title="Smart Money Flow" subtitle="Quarterly buying, selling, and net institutional flow from 13F filings">
