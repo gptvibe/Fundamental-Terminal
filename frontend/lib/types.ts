@@ -301,6 +301,24 @@ export interface CompanyEventsResponse {
   error: string | null;
 }
 
+export interface CapitalRaisePayload {
+  accession_number: string | null;
+  form: string;
+  filing_date: string | null;
+  report_date: string | null;
+  primary_document: string | null;
+  primary_doc_description: string | null;
+  source_url: string;
+  summary: string;
+}
+
+export interface CompanyCapitalRaisesResponse {
+  company: CompanyPayload | null;
+  filings: CapitalRaisePayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
 export interface PeerOptionPayload {
   ticker: string;
   name: string;

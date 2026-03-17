@@ -1,5 +1,6 @@
 from app.services.cache_queries import (
     CompanyCacheSnapshot,
+    get_company_beneficial_ownership_reports,
     get_company_financials,
     get_company_filing_insights,
     get_company_insider_trade_cache_status,
@@ -21,6 +22,7 @@ __all__ = [
     "CompanyCacheSnapshot",
     "EdgarIngestionService",
     "JobReporter",
+    "get_company_beneficial_ownership_reports",
     "get_company_financials",
     "get_company_filing_insights",
     "get_company_insider_trade_cache_status",

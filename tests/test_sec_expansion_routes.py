@@ -12,6 +12,7 @@ from app.services.sec_edgar import FilingMetadata
 
 def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
     company = SimpleNamespace(
+        id=1,
         ticker=ticker,
         cik=cik,
         name="Apple Inc.",
@@ -60,6 +61,7 @@ def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
         "cache_state": "fresh",
     })
     monkeypatch.setattr(main_module, "EdgarClient", lambda: _FakeEdgarClient(filings))
+    monkeypatch.setattr(main_module, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: [])
 
 
 def test_events_route_classifies_item_codes(monkeypatch):

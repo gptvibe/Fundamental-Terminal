@@ -42,6 +42,7 @@ from app.services import (
     search_company_snapshots,
     status_broker,
 )
+from app.services.cache_queries import get_company_beneficial_ownership_reports
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -407,6 +408,24 @@ class BeneficialOwnershipFilingPayload(BaseModel):
 class CompanyBeneficialOwnershipResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[BeneficialOwnershipFilingPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class CapitalRaisePayload(BaseModel):
+    accession_number: str | None = None
+    form: str
+    filing_date: DateType | None = None
+    report_date: DateType | None = None
+    primary_document: str | None = None
+    primary_doc_description: str | None = None
+    source_url: str
+    summary: str
+
+
+class CompanyCapitalRaisesResponse(BaseModel):
+    company: CompanyPayload | None
+    filings: list[CapitalRaisePayload]
     refresh: RefreshState
     error: str | None = None
 
@@ -956,6 +975,31 @@ def company_beneficial_ownership(
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
 
+    # Serve from DB cache when available; fall back to live SEC submissions if empty.
+    cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
+    if cached_reports:
+        filings = [
+            BeneficialOwnershipFilingPayload(
+                accession_number=report.accession_number,
+                form=report.form,
+                base_form=report.base_form,  # type: ignore[arg-type]
+                filing_date=report.filing_date,
+                report_date=report.report_date,
+                is_amendment=report.is_amendment,
+                primary_document=report.primary_document,
+                primary_doc_description=report.primary_doc_description,
+                source_url=report.source_url,
+                summary=report.summary,
+            )
+            for report in cached_reports
+        ]
+        return CompanyBeneficialOwnershipResponse(
+            company=_serialize_company(snapshot),
+            filings=filings,
+            refresh=refresh,
+            error=None,
+        )
+
     client = EdgarClient()
     try:
         submissions = client.get_submissions(snapshot.company.cik)
@@ -1011,6 +1055,77 @@ def company_governance(
     except Exception:
         logging.getLogger(__name__).exception("Unable to load governance filings for '%s'", snapshot.company.ticker)
         return CompanyGovernanceResponse(
+            company=_serialize_company(snapshot),
+            filings=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+REGISTRATION_FORMS = {
+    "S-1", "S-1/A",
+    "S-3", "S-3/A",
+    "S-4", "S-4/A",
+    "F-1", "F-1/A",
+    "F-3", "F-3/A",
+    "424B1", "424B2", "424B3", "424B4", "424B5",
+}
+
+_REGISTRATION_FORM_SUMMARIES: dict[str, str] = {
+    "S-1": "Initial registration statement for a domestic IPO or initial public offering.",
+    "S-1/A": "Amendment to an S-1 registration statement.",
+    "S-3": "Shelf registration statement for eligible domestic issuers.",
+    "S-3/A": "Amendment to an S-3 shelf registration.",
+    "S-4": "Registration statement for securities issued in business combination transactions.",
+    "S-4/A": "Amendment to an S-4 registration statement.",
+    "F-1": "Initial registration statement for foreign private issuers.",
+    "F-1/A": "Amendment to an F-1 registration statement.",
+    "F-3": "Shelf registration for eligible foreign private issuers.",
+    "F-3/A": "Amendment to an F-3 registration statement.",
+    "424B1": "Prospectus supplement filed under Rule 424(b)(1).",
+    "424B2": "Prospectus supplement filed under Rule 424(b)(2).",
+    "424B3": "Prospectus supplement filed under Rule 424(b)(3).",
+    "424B4": "Prospectus supplement filed under Rule 424(b)(4).",
+    "424B5": "Prospectus supplement filed under Rule 424(b)(5).",
+}
+
+
+@app.get("/api/companies/{ticker}/capital-raises", response_model=CompanyCapitalRaisesResponse)
+def company_capital_raises(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalRaisesResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyCapitalRaisesResponse(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_capital_raise_filings(snapshot.company.cik, filing_index)
+        return CompanyCapitalRaisesResponse(
+            company=_serialize_company(snapshot),
+            filings=filings,
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to load capital raise filings for '%s'", snapshot.company.ticker
+        )
+        return CompanyCapitalRaisesResponse(
             company=_serialize_company(snapshot),
             filings=[],
             refresh=refresh,
@@ -1741,6 +1856,39 @@ def _build_filing_document_url(cik: str, accession_number: str, primary_document
 def _is_beneficial_ownership_form(form: str | None) -> bool:
     normalized = (form or "").upper()
     return normalized in {"SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"}
+
+
+def _is_registration_form(form: str | None) -> bool:
+    return (form or "").upper() in REGISTRATION_FORMS
+
+
+def _serialize_capital_raise_filings(
+    cik: str, filing_index: dict[str, FilingMetadata]
+) -> list[CapitalRaisePayload]:
+    filtered = [item for item in filing_index.values() if _is_registration_form(item.form)]
+    ordered = sorted(
+        filtered,
+        key=lambda item: (item.filing_date or DateType.min, item.report_date or DateType.min, item.accession_number),
+        reverse=True,
+    )
+    results: list[CapitalRaisePayload] = []
+    for item in ordered[:MAX_FILING_TIMELINE_ITEMS]:
+        form_display = (item.form or "UNKNOWN").upper()
+        description = _normalize_optional_text(item.primary_doc_description)
+        summary = description or _REGISTRATION_FORM_SUMMARIES.get(form_display, "Registration or prospectus filing.")
+        results.append(
+            CapitalRaisePayload(
+                accession_number=item.accession_number,
+                form=form_display,
+                filing_date=item.filing_date,
+                report_date=item.report_date,
+                primary_document=_normalize_optional_text(item.primary_document),
+                primary_doc_description=description,
+                source_url=_build_filing_document_url(cik, item.accession_number, item.primary_document),
+                summary=summary,
+            )
+        )
+    return results
 
 
 def _is_governance_form(form: str | None) -> bool:

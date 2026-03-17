@@ -66,7 +66,22 @@ export function CompanyUtilityRail({
   const refreshInProgress =
     refreshing ||
     (Boolean(effectiveState.triggered && effectiveState.job_id) && connectionState !== "idle" && connectionState !== "error");
-  const refreshButtonLabel = refreshing ? "Starting refresh..." : refreshInProgress ? "Refresh in progress" : primaryActionLabel;
+
+  // Find the latest console entry message if refreshing
+  let dynamicStatusMsg: string | null = null;
+  if (refreshInProgress && consoleEntries.length > 0) {
+    // Show the last non-empty message
+    const lastMsg = [...consoleEntries].reverse().find(e => e.message && e.status === "running");
+    if (lastMsg) {
+      dynamicStatusMsg = lastMsg.message;
+    }
+  }
+
+  const refreshButtonLabel = refreshing
+    ? "Starting refresh..."
+    : refreshInProgress
+      ? dynamicStatusMsg || "Refresh in progress"
+      : primaryActionLabel;
 
   return (
     <div className="company-utility-stack">
@@ -80,6 +95,15 @@ export function CompanyUtilityRail({
                 disabled={refreshInProgress}
                 aria-disabled={refreshInProgress}
               >
+                {refreshInProgress && (
+                  <span className="spinner" style={{ marginRight: 8, verticalAlign: "middle" }}>
+                    <svg width="18" height="18" viewBox="0 0 50 50">
+                      <circle cx="25" cy="25" r="20" fill="none" stroke="#00FF41" strokeWidth="5" strokeDasharray="31.4 31.4" strokeLinecap="round">
+                        <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite" />
+                      </circle>
+                    </svg>
+                  </span>
+                )}
                 {refreshButtonLabel}
               </button>
             {primaryActionDescription ? <div className="utility-action-description">{primaryActionDescription}</div> : null}

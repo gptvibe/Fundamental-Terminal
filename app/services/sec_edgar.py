@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
-from app.models import Company, FinancialStatement, InsiderTrade
+from app.models import BeneficialOwnershipReport, Company, FinancialStatement, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -494,6 +494,7 @@ class IngestionResult:
     statements_written: int = 0
     insider_trades_written: int = 0
     institutional_holdings_written: int = 0
+    beneficial_ownership_written: int = 0
     price_points_written: int = 0
     fetched_from_sec: bool = False
     last_checked: datetime | None = None
@@ -1101,27 +1102,27 @@ class EdgarIngestionService:
     ) -> int:
         existing_accessions = _existing_insider_trade_accessions(session, company.id)
         session.commit()
-        form4_filings = [
+        insider_filings = [
             metadata
             for metadata in filing_index.values()
-            if _base_form(metadata.form) == "4"
+            if _base_form(metadata.form) in {"4", "5"}
         ]
-        form4_filings.sort(
+        insider_filings.sort(
             key=lambda metadata: (
                 metadata.filing_date or date.min,
                 metadata.accession_number,
             ),
             reverse=True,
         )
-        form4_filings = form4_filings[: settings.sec_form4_max_filings_per_refresh]
+        insider_filings = insider_filings[: settings.sec_form4_max_filings_per_refresh]
 
-        candidate_filings = form4_filings if force else [
-            metadata for metadata in form4_filings if metadata.accession_number not in existing_accessions
+        candidate_filings = insider_filings if force else [
+            metadata for metadata in insider_filings if metadata.accession_number not in existing_accessions
         ]
         if candidate_filings:
-            reporter.step("insider", f"Fetching {len(candidate_filings)} Form 4 filing(s)...")
+            reporter.step("insider", f"Fetching {len(candidate_filings)} Form 4/5 filing(s)...")
         else:
-            reporter.step("insider", "Checking cached Form 4 coverage...")
+            reporter.step("insider", "Checking cached Form 4/5 coverage...")
 
         normalized_trades: list[NormalizedInsiderTrade] = []
         for metadata in candidate_filings:
@@ -1154,6 +1155,7 @@ class EdgarIngestionService:
         *,
         refresh_insider_data: bool = True,
         refresh_institutional_data: bool = True,
+        refresh_beneficial_ownership_data: bool = True,
     ) -> IngestionResult:
         checked_at = datetime.now(timezone.utc)
         active_reporter = reporter or JobReporter()
@@ -1181,6 +1183,9 @@ class EdgarIngestionService:
             latest_institutional_checked = (
                 get_company_institutional_holdings_last_checked(session, local_company) if local_company else None
             )
+            latest_beneficial_checked = (
+                _latest_beneficial_ownership_last_checked(session, local_company) if local_company else None
+            )
             has_segment_breakdown_key = (
                 _latest_statement_has_segment_breakdown_key(session, local_company.id) if local_company else False
             )
@@ -1191,14 +1196,20 @@ class EdgarIngestionService:
             institutional_fresh = (
                 latest_institutional_checked is not None and latest_institutional_checked >= freshness_cutoff
             )
+            beneficial_fresh = (
+                latest_beneficial_checked is not None and latest_beneficial_checked >= freshness_cutoff
+            )
             effective_insider_fresh = insider_fresh or not refresh_insider_data
             effective_institutional_fresh = institutional_fresh or not refresh_institutional_data
+            effective_beneficial_fresh = beneficial_fresh or not refresh_beneficial_ownership_data
 
             relevant_last_checked_values = [latest_statement_checked, latest_price_checked]
             if refresh_insider_data:
                 relevant_last_checked_values.append(latest_insider_checked)
             if refresh_institutional_data:
                 relevant_last_checked_values.append(latest_institutional_checked)
+            if refresh_beneficial_ownership_data:
+                relevant_last_checked_values.append(latest_beneficial_checked)
 
             if (
                 local_company is not None
@@ -1208,6 +1219,7 @@ class EdgarIngestionService:
                 and has_segment_breakdown_key
                 and effective_insider_fresh
                 and effective_institutional_fresh
+                and effective_beneficial_fresh
             ):
                 active_reporter.complete("Using fresh cached data.")
                 session.commit()
@@ -1220,6 +1232,7 @@ class EdgarIngestionService:
                     statements_written=0,
                     insider_trades_written=0,
                     institutional_holdings_written=0,
+                    beneficial_ownership_written=0,
                     price_points_written=0,
                     fetched_from_sec=False,
                     last_checked=min(
@@ -1232,6 +1245,50 @@ class EdgarIngestionService:
 
             if local_company is not None and not force and statements_fresh and prices_fresh and not has_segment_breakdown_key:
                 active_reporter.step("cache", "Cached filings need segment metadata backfill...")
+
+            if (
+                local_company is not None
+                and not force
+                and refresh_beneficial_ownership_data
+                and statements_fresh
+                and prices_fresh
+                and effective_insider_fresh
+                and effective_institutional_fresh
+                and not beneficial_fresh
+            ):
+                session.commit()
+                active_reporter.step("sec", "Checking SEC for new beneficial ownership filings...")
+                submissions = self.client.get_submissions(local_company.cik)
+                filing_index = self.client.build_filing_index(submissions)
+                from app.services.beneficial_ownership import (  # local import avoids circular dependency
+                    collect_beneficial_ownership_reports,
+                    upsert_beneficial_ownership_reports,
+                )
+                reports = collect_beneficial_ownership_reports(local_company.cik, filing_index)
+                beneficial_ownership_written = upsert_beneficial_ownership_reports(
+                    session, local_company, reports, checked_at=checked_at
+                )
+                session.commit()
+                active_reporter.complete("Refresh and compute complete.")
+                return IngestionResult(
+                    identifier=identifier,
+                    company_id=local_company.id,
+                    cik=local_company.cik,
+                    ticker=local_company.ticker,
+                    status="fetched",
+                    statements_written=0,
+                    insider_trades_written=0,
+                    institutional_holdings_written=0,
+                    beneficial_ownership_written=beneficial_ownership_written,
+                    price_points_written=0,
+                    fetched_from_sec=True,
+                    last_checked=checked_at,
+                    detail=(
+                        f"Cached {beneficial_ownership_written} beneficial ownership filings"
+                        if beneficial_ownership_written
+                        else "Checked beneficial ownership filings; no new entries"
+                    ),
+                )
 
             if (
                 local_company is not None
@@ -1305,6 +1362,7 @@ class EdgarIngestionService:
                     statements_written=0,
                     insider_trades_written=0,
                     institutional_holdings_written=institutional_holdings_written,
+                    beneficial_ownership_written=0,
                     price_points_written=0,
                     fetched_from_sec=True,
                     last_checked=checked_at,
@@ -1357,6 +1415,7 @@ class EdgarIngestionService:
                     statements_written=0,
                     insider_trades_written=0,
                     institutional_holdings_written=0,
+                    beneficial_ownership_written=0,
                     price_points_written=price_points_written,
                     fetched_from_sec=False,
                     last_checked=checked_at,
@@ -1442,6 +1501,19 @@ class EdgarIngestionService:
                 )
                 session.commit()
 
+            beneficial_ownership_written = 0
+            if refresh_beneficial_ownership_data and (force or not beneficial_fresh):
+                active_reporter.step("beneficial", "Caching beneficial ownership filings...")
+                from app.services.beneficial_ownership import (  # local import avoids circular dependency
+                    collect_beneficial_ownership_reports,
+                    upsert_beneficial_ownership_reports,
+                )
+                bo_reports = collect_beneficial_ownership_reports(company.cik, filing_index)
+                beneficial_ownership_written = upsert_beneficial_ownership_reports(
+                    session, company, bo_reports, checked_at=checked_at
+                )
+                session.commit()
+
             price_points_written = 0
             if force or not prices_fresh:
                 try:
@@ -1469,13 +1541,19 @@ class EdgarIngestionService:
                 detail_parts.append(
                     f"Cached {insider_trades_written} insider trades"
                     if insider_trades_written
-                    else "Checked Form 4 filings"
+                    else "Checked Form 4/5 filings"
                 )
             if refresh_institutional_data and (force or not institutional_fresh):
                 detail_parts.append(
                     f"Cached {institutional_holdings_written} institutional holdings snapshots"
                     if institutional_holdings_written
                     else "Checked 13F filings"
+                )
+            if refresh_beneficial_ownership_data and (force or not beneficial_fresh):
+                detail_parts.append(
+                    f"Cached {beneficial_ownership_written} beneficial ownership filings"
+                    if beneficial_ownership_written
+                    else "Checked beneficial ownership filings"
                 )
             if force or not prices_fresh:
                 detail_parts.append(f"Cached {price_points_written} daily price bars")
@@ -1489,6 +1567,7 @@ class EdgarIngestionService:
                 statements_written=statements_written + parsed_statements_written,
                 insider_trades_written=insider_trades_written,
                 institutional_holdings_written=institutional_holdings_written,
+                beneficial_ownership_written=beneficial_ownership_written,
                 price_points_written=price_points_written,
                 fetched_from_sec=True,
                 last_checked=checked_at,
@@ -1542,6 +1621,16 @@ def _latest_insider_trade_last_checked(session: Session, company: Company) -> da
         return _normalize_datetime_value(company.insider_trades_last_checked)
 
     statement = select(func.max(InsiderTrade.last_checked)).where(InsiderTrade.company_id == company.id)
+    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _latest_beneficial_ownership_last_checked(session: Session, company: Company) -> datetime | None:
+    if company.beneficial_ownership_last_checked is not None:
+        return _normalize_datetime_value(company.beneficial_ownership_last_checked)
+
+    statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(
+        BeneficialOwnershipReport.company_id == company.id
+    )
     return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
 
 

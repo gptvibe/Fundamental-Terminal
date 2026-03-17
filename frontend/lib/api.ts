@@ -1,4 +1,5 @@
 import {
+  CompanyCapitalRaisesResponse,
   CompanyFinancialsResponse,
   CompanyBeneficialOwnershipResponse,
   CompanyEventsResponse,
@@ -66,6 +67,10 @@ export function getCompanyGovernance(ticker: string): Promise<CompanyGovernanceR
 
 export function getCompanyEvents(ticker: string): Promise<CompanyEventsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/events`);
+}
+
+export function getCompanyCapitalRaises(ticker: string): Promise<CompanyCapitalRaisesResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-raises`);
 }
 
 
