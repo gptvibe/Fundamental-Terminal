@@ -194,12 +194,14 @@ export default function CompanyModelsPage() {
       .map((model) => model.created_at)
       .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? null;
     const piotroskiState = resolvePiotroskiScoreState(byName.piotroski?.result);
+    const dupontBasisRaw = byName.dupont?.result?.basis;
 
     return {
       cachedCount: models.length,
       latestComputed,
       dcfEnterpriseValue: asNumber(byName.dcf?.result?.enterprise_value_proxy),
       dupontRoe: asNumber(byName.dupont?.result?.return_on_equity),
+      dupontBasis: typeof dupontBasisRaw === "string" ? dupontBasisRaw.toUpperCase() : null,
       piotroskiLabel: formatPiotroskiDisplay(piotroskiState),
       altmanZ: asNumber(byName.altman_z?.result?.z_score_approximate)
     };
@@ -240,7 +242,7 @@ export default function CompanyModelsPage() {
             `Available models: ${modelSummary.cachedCount}/${MODEL_NAMES.length}`,
             `Last updated: ${modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"}`,
             `Price history points available: ${(financialData?.price_history ?? []).length.toLocaleString()}`,
-            `DuPont basis: ${dupontMode.toUpperCase()}`
+            `DuPont basis: ${modelSummary.dupontBasis ?? dupontMode.toUpperCase()}`
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}

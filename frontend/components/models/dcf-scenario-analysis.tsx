@@ -56,6 +56,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
     const revenueGrowthDefault = growthRate(latestAnnual?.revenue ?? null, previousAnnual?.revenue ?? null) ?? 0.05;
     const discountRateDefault = safeNumber(assumptions.discount_rate) ?? 0.1;
     const terminalGrowthDefault = safeNumber(assumptions.terminal_growth_rate) ?? 0.025;
+    const terminalGrowthCap = Math.max(discountRateDefault - 0.01, 0);
     const operatingMarginDefault = safeDivide(latestAnnual?.operating_income ?? null, latestAnnual?.revenue ?? null) ?? 0.18;
     const capexPercentDefault =
       safeDivide(
@@ -68,7 +69,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
     return {
       revenueGrowth: clamp(revenueGrowthDefault, -0.05, 0.25),
       discountRate: clamp(discountRateDefault, 0.05, 0.18),
-      terminalGrowth: clamp(terminalGrowthDefault, 0.0, 0.06),
+      terminalGrowth: clamp(terminalGrowthDefault, 0.0, Math.min(0.06, terminalGrowthCap)),
       operatingMargin: clamp(operatingMarginDefault, 0.05, 0.5),
       capexPercent: clamp(capexPercentDefault, 0.01, 0.15),
       projectionYears: safeNumber(assumptions.projection_years) ?? 5,
@@ -91,7 +92,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
   const [controls, setControls] = useState<ScenarioControls>({
     revenueGrowth: defaults.revenueGrowth,
     discountRate: defaults.discountRate,
-    terminalGrowth: defaults.terminalGrowth,
+    terminalGrowth: Math.min(defaults.terminalGrowth, defaults.discountRate - 0.01),
     operatingMargin: defaults.operatingMargin,
     capexPercent: defaults.capexPercent
   });
@@ -100,7 +101,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
     setControls({
       revenueGrowth: defaults.revenueGrowth,
       discountRate: defaults.discountRate,
-      terminalGrowth: defaults.terminalGrowth,
+      terminalGrowth: Math.min(defaults.terminalGrowth, defaults.discountRate - 0.01),
       operatingMargin: defaults.operatingMargin,
       capexPercent: defaults.capexPercent
     });
@@ -173,13 +174,19 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
               max={0.18}
               step={0.0025}
               accent="#FF6B6B"
-              onChange={(value) => setControls((current) => ({ ...current, discountRate: value }))}
+              onChange={(value) =>
+                setControls((current) => ({
+                  ...current,
+                  discountRate: value,
+                  terminalGrowth: Math.min(current.terminalGrowth, value - 0.01)
+                }))
+              }
             />
             <SliderControl
               label="Terminal Growth"
               value={controls.terminalGrowth}
               min={0}
-              max={0.06}
+              max={Math.min(0.06, Math.max(controls.discountRate - 0.01, 0))}
               step={0.0025}
               accent="#FFD700"
               onChange={(value) => setControls((current) => ({ ...current, terminalGrowth: Math.min(value, current.discountRate - 0.01) }))}
