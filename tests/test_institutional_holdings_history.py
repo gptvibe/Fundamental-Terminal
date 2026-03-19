@@ -24,6 +24,7 @@ def test_latest_n_13f_filings_returns_distinct_reporting_dates_in_desc_order():
 
     assert [row.report_date.isoformat() for row in rows] == ["2025-12-31", "2025-09-30", "2025-06-30"]
     assert [row.accession_number for row in rows] == ["a2", "a3", "a4"]
+    assert rows[0].form == "13F-HR/A"
 
 
 def test_latest_n_13f_filings_respects_limit():
@@ -103,7 +104,8 @@ def test_manager_candidates_curated_mode_does_not_include_extras(monkeypatch):
     candidates = _manager_candidates(limit=3)
 
     assert len(candidates) == 3
-    assert all(manager != "Imaginary Capital" for _, manager in candidates)
+    assert all(manager != "Imaginary Capital" for _, manager, _ in candidates)
+    assert all(source == "curated" for _, _, source in candidates)
 
 
 def test_manager_candidates_expanded_mode_includes_extras_when_space_allows(monkeypatch):
@@ -115,4 +117,5 @@ def test_manager_candidates_expanded_mode_includes_extras_when_space_allows(monk
 
     candidates = _manager_candidates(limit=len(institutional_module.CURATED_13F_MANAGERS) + 1)
 
-    assert any(manager == "Imaginary Capital" for _, manager in candidates)
+    assert any(manager == "Imaginary Capital" for _, manager, _ in candidates)
+    assert any(source == "expanded" for _, manager, source in candidates if manager == "Imaginary Capital")

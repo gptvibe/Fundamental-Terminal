@@ -10,6 +10,8 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
+    from app.models.capital_markets_event import CapitalMarketsEvent
+    from app.models.filing_event import FilingEvent
     from app.models.financial_statement import FinancialStatement
     from app.models.insider_trade import InsiderTrade
     from app.models.institutional_holding import InstitutionalHolding
@@ -35,6 +37,8 @@ class Company(Base):
     insider_trades_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     institutional_holdings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     beneficial_ownership_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    filing_events_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    capital_markets_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
         back_populates="company",
@@ -62,6 +66,16 @@ class Company(Base):
         passive_deletes=True,
     )
     beneficial_ownership_reports: Mapped[list["BeneficialOwnershipReport"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    filing_events: Mapped[list["FilingEvent"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    capital_markets_events: Mapped[list["CapitalMarketsEvent"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

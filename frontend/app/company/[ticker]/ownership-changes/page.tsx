@@ -9,9 +9,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyBeneficialOwnership } from "@/lib/api";
+import { getCompanyBeneficialOwnership, getCompanyBeneficialOwnershipSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyBeneficialOwnershipResponse } from "@/lib/types";
+import type { CompanyBeneficialOwnershipResponse, CompanyBeneficialOwnershipSummaryResponse } from "@/lib/types";
 
 export default function CompanyOwnershipChangesPage() {
   const params = useParams<{ ticker: string }>();
@@ -27,6 +27,7 @@ export default function CompanyOwnershipChangesPage() {
     reloadKey
   } = useCompanyWorkspace(ticker);
   const [data, setData] = useState<CompanyBeneficialOwnershipResponse | null>(null);
+  const [summaryData, setSummaryData] = useState<CompanyBeneficialOwnershipSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,9 +38,13 @@ export default function CompanyOwnershipChangesPage() {
       try {
         setLoading(true);
         setError(null);
-        const response = await getCompanyBeneficialOwnership(ticker);
+        const [response, summary] = await Promise.all([
+          getCompanyBeneficialOwnership(ticker),
+          getCompanyBeneficialOwnershipSummary(ticker)
+        ]);
         if (!cancelled) {
           setData(response);
+          setSummaryData(summary);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -59,6 +64,7 @@ export default function CompanyOwnershipChangesPage() {
   }, [reloadKey, ticker]);
 
   const filings = useMemo(() => data?.filings ?? [], [data?.filings]);
+  const summary = summaryData?.summary ?? null;
   const pageCompany = company ?? data?.company ?? null;
   const effectiveRefreshState = data?.refresh ?? refreshState;
   const latestFilingDate = filings[0]?.filing_date ?? filings[0]?.report_date ?? null;
@@ -90,8 +96,8 @@ export default function CompanyOwnershipChangesPage() {
           secondaryActionLabel="Open Ownership Dashboard"
           secondaryActionDescription="Compare 13F trends, top holders, and smart-money flow alongside stake-change filings."
           statusLines={[
-            `Major stake filings: ${filings.length.toLocaleString()}`,
-            `Latest filing date: ${latestFilingDate ? formatDate(latestFilingDate) : "Pending"}`,
+            `Major stake filings: ${(summary?.total_filings ?? filings.length).toLocaleString()}`,
+            `Latest filing date: ${summary?.latest_filing_date ? formatDate(summary.latest_filing_date) : latestFilingDate ? formatDate(latestFilingDate) : "Pending"}`,
             formMix || "Form mix pending"
           ]}
           consoleEntries={consoleEntries}
@@ -103,9 +109,18 @@ export default function CompanyOwnershipChangesPage() {
       <Panel title="Stake Changes" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
         <div className="metric-grid">
           <Metric label="Ticker" value={ticker} />
-          <Metric label="13D / 13G Filings" value={filings.length.toLocaleString()} />
-          <Metric label="Initial Filings" value={initialFilings.toLocaleString()} />
-          <Metric label="Amendments" value={amendments.toLocaleString()} />
+          <Metric label="13D / 13G Filings" value={(summary?.total_filings ?? filings.length).toLocaleString()} />
+          <Metric label="Initial Filings" value={(summary?.initial_filings ?? initialFilings).toLocaleString()} />
+          <Metric label="Amendments" value={(summary?.amendments ?? amendments).toLocaleString()} />
+          <Metric label="Reporting Persons" value={(summary?.unique_reporting_persons ?? 0).toLocaleString()} />
+          <Metric
+            label="Largest Reported Stake"
+            value={summary?.max_reported_percent != null ? `${summary.max_reported_percent.toFixed(2)}%` : "Pending"}
+          />
+          <Metric
+            label="Latest Event Date"
+            value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : "Pending"}
+          />
         </div>
       </Panel>
 
@@ -137,6 +152,18 @@ export default function CompanyOwnershipChangesPage() {
                   <div className="text-muted">{formatDate(filing.filing_date ?? filing.report_date)}</div>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{filing.summary}</div>
+                {filing.parties.length ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    {filing.parties.slice(0, 2).map((party) => {
+                      const ownershipBits = [
+                        party.percent_owned != null ? `${party.percent_owned.toFixed(2)}%` : null,
+                        party.shares_owned != null ? `${Math.round(party.shares_owned).toLocaleString()} shares` : null
+                      ].filter(Boolean);
+                      return `${party.party_name}${ownershipBits.length ? ` (${ownershipBits.join(" · ")})` : ""}`;
+                    }).join(" · ")}
+                    {filing.parties.length > 2 ? ` · +${filing.parties.length - 2} more` : ""}
+                  </div>
+                ) : null}
                 <div className="text-muted" style={{ fontSize: 13 }}>
                   {filing.accession_number ?? "Accession pending"}
                   {filing.primary_document ? ` · ${filing.primary_document}` : ""}

@@ -10,9 +10,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyCapitalRaises, getCompanyEvents } from "@/lib/api";
+import { getCompanyCapitalMarkets, getCompanyCapitalMarketsSummary, getCompanyFilingEvents } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
-import type { CompanyCapitalRaisesResponse, CompanyEventsResponse } from "@/lib/types";
+import type { CompanyCapitalMarketsSummaryResponse, CompanyCapitalRaisesResponse, CompanyEventsResponse } from "@/lib/types";
 
 export default function CompanyCapitalMarketsPage() {
   const params = useParams<{ ticker: string }>();
@@ -29,6 +29,7 @@ export default function CompanyCapitalMarketsPage() {
     reloadKey
   } = useCompanyWorkspace(ticker);
   const [eventsData, setEventsData] = useState<CompanyEventsResponse | null>(null);
+  const [capitalSummaryData, setCapitalSummaryData] = useState<CompanyCapitalMarketsSummaryResponse | null>(null);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [capitalRaisesData, setCapitalRaisesData] = useState<CompanyCapitalRaisesResponse | null>(null);
@@ -44,13 +45,15 @@ export default function CompanyCapitalMarketsPage() {
         setCapitalRaisesLoading(true);
         setEventsError(null);
         setCapitalRaisesError(null);
-        const [eventsResponse, capitalRaisesResponse] = await Promise.all([
-          getCompanyEvents(ticker),
-          getCompanyCapitalRaises(ticker)
+        const [eventsResponse, capitalRaisesResponse, capitalSummary] = await Promise.all([
+          getCompanyFilingEvents(ticker),
+          getCompanyCapitalMarkets(ticker),
+          getCompanyCapitalMarketsSummary(ticker)
         ]);
         if (!cancelled) {
           setEventsData(eventsResponse);
           setCapitalRaisesData(capitalRaisesResponse);
+          setCapitalSummaryData(capitalSummary);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -78,6 +81,7 @@ export default function CompanyCapitalMarketsPage() {
   );
   const latestEventDate = capitalMarketsEvents[0]?.filing_date ?? capitalMarketsEvents[0]?.report_date ?? null;
   const capitalRaises = useMemo(() => capitalRaisesData?.filings ?? [], [capitalRaisesData?.filings]);
+  const capitalSummary = capitalSummaryData?.summary ?? null;
   const latestCapitalRaiseDate = capitalRaises[0]?.filing_date ?? capitalRaises[0]?.report_date ?? null;
   const latestFinancial = financials[0] ?? null;
   const effectiveRefreshState = capitalRaisesData?.refresh ?? eventsData?.refresh ?? refreshState;
@@ -102,7 +106,7 @@ export default function CompanyCapitalMarketsPage() {
           statusLines={[
             `Financing events: ${capitalMarketsEvents.length.toLocaleString()}`,
             `Latest financing event: ${latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
-            `Capital raise filings: ${capitalRaises.length.toLocaleString()}`
+            `Capital raise filings: ${(capitalSummary?.total_filings ?? capitalRaises.length).toLocaleString()}`
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -115,7 +119,12 @@ export default function CompanyCapitalMarketsPage() {
           <Metric label="Ticker" value={ticker} />
           <Metric label="Financing Events" value={capitalMarketsEvents.length.toLocaleString()} />
           <Metric label="Latest Event" value={latestEventDate ? formatDate(latestEventDate) : "Pending"} />
-          <Metric label="Capital Raises" value={capitalRaises.length.toLocaleString()} />
+          <Metric label="Capital Raises" value={(capitalSummary?.total_filings ?? capitalRaises.length).toLocaleString()} />
+          <Metric label="Late Filer Notices" value={(capitalSummary?.late_filer_notices ?? 0).toLocaleString()} />
+          <Metric
+            label="Largest Offering"
+            value={capitalSummary?.max_offering_amount != null ? `$${Math.round(capitalSummary.max_offering_amount).toLocaleString()}` : "Pending"}
+          />
         </div>
       </Panel>
 
@@ -152,6 +161,13 @@ export default function CompanyCapitalMarketsPage() {
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{filing.summary}</div>
                 <div className="text-muted" style={{ fontSize: 13 }}>
+                  {filing.event_type ? `Type: ${filing.event_type}` : "Type: pending"}
+                  {filing.security_type ? ` · Security: ${filing.security_type}` : ""}
+                  {filing.offering_amount != null ? ` · Amount: $${Math.round(filing.offering_amount).toLocaleString()}` : ""}
+                  {filing.shelf_size != null ? ` · Shelf: $${Math.round(filing.shelf_size).toLocaleString()}` : ""}
+                  {filing.is_late_filer ? " · Late filer notice" : ""}
+                </div>
+                <div className="text-muted" style={{ fontSize: 13 }}>
                   {filing.accession_number ?? "Accession pending"}
                   {filing.primary_document ? ` · ${filing.primary_document}` : ""}
                 </div>
@@ -187,11 +203,17 @@ export default function CompanyCapitalMarketsPage() {
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span className="pill">{event.form}</span>
                     <span className="pill">{event.category}</span>
+                    {event.item_code && event.item_code !== "UNSPECIFIED" ? <span className="pill">Item {event.item_code}</span> : null}
                     {event.items ? <span className="pill">Items {event.items}</span> : null}
                   </div>
                   <div className="text-muted">{formatDate(event.filing_date ?? event.report_date)}</div>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{event.summary}</div>
+                {event.key_amounts.length ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    Key amounts: {event.key_amounts.slice(0, 2).map((amount) => `$${Math.round(amount).toLocaleString()}`).join(" · ")}
+                  </div>
+                ) : null}
                 <div className="text-muted" style={{ fontSize: 13 }}>
                   {event.accession_number ?? "Accession pending"}
                   {event.primary_document ? ` · ${event.primary_document}` : ""}

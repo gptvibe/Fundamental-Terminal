@@ -9,9 +9,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyEvents } from "@/lib/api";
+import { getCompanyFilingEvents, getCompanyFilingEventsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyEventsResponse } from "@/lib/types";
+import type { CompanyEventsResponse, CompanyFilingEventsSummaryResponse } from "@/lib/types";
 
 export default function CompanyEventsPage() {
   const params = useParams<{ ticker: string }>();
@@ -27,6 +27,7 @@ export default function CompanyEventsPage() {
     reloadKey
   } = useCompanyWorkspace(ticker);
   const [data, setData] = useState<CompanyEventsResponse | null>(null);
+  const [summaryData, setSummaryData] = useState<CompanyFilingEventsSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,9 +38,13 @@ export default function CompanyEventsPage() {
       try {
         setLoading(true);
         setError(null);
-        const response = await getCompanyEvents(ticker);
+        const [response, summary] = await Promise.all([
+          getCompanyFilingEvents(ticker),
+          getCompanyFilingEventsSummary(ticker)
+        ]);
         if (!cancelled) {
           setData(response);
+          setSummaryData(summary);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -59,6 +64,7 @@ export default function CompanyEventsPage() {
   }, [reloadKey, ticker]);
 
   const events = useMemo(() => data?.events ?? [], [data?.events]);
+  const summary = summaryData?.summary ?? null;
   const pageCompany = company ?? data?.company ?? null;
   const effectiveRefreshState = data?.refresh ?? refreshState;
   const latestEventDate = events[0]?.filing_date ?? events[0]?.report_date ?? null;
@@ -92,8 +98,8 @@ export default function CompanyEventsPage() {
           secondaryActionLabel="Open Filings Workspace"
           secondaryActionDescription="Move from event intelligence back to the full SEC filing timeline and filing viewer."
           statusLines={[
-            `8-K events: ${events.length.toLocaleString()}`,
-            `Latest event date: ${latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
+            `8-K events: ${(summary?.total_events ?? events.length).toLocaleString()}`,
+            `Latest event date: ${summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
             categorySummary || "Event categories pending"
           ]}
           consoleEntries={consoleEntries}
@@ -105,8 +111,10 @@ export default function CompanyEventsPage() {
       <Panel title="Event Feed" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
         <div className="metric-grid">
           <Metric label="Ticker" value={ticker} />
-          <Metric label="Current Reports" value={events.length.toLocaleString()} />
-          <Metric label="Latest Event" value={latestEventDate ? formatDate(latestEventDate) : "Pending"} />
+          <Metric label="Current Reports" value={(summary?.total_events ?? events.length).toLocaleString()} />
+          <Metric label="Unique Filings" value={(summary?.unique_accessions ?? 0).toLocaleString()} />
+          <Metric label="Latest Event" value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending"} />
+          <Metric label="Largest Amount" value={summary?.max_key_amount != null ? `$${Math.round(summary.max_key_amount).toLocaleString()}` : "Pending"} />
           <Metric label="Last Checked" value={pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : null} />
         </div>
       </Panel>
@@ -135,11 +143,17 @@ export default function CompanyEventsPage() {
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span className="pill">{event.form}</span>
                     <span className="pill">{event.category}</span>
+                    {event.item_code && event.item_code !== "UNSPECIFIED" ? <span className="pill">Item {event.item_code}</span> : null}
                     {event.items ? <span className="pill">Items {event.items}</span> : null}
                   </div>
                   <div className="text-muted">{formatDate(event.filing_date ?? event.report_date)}</div>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{event.summary}</div>
+                {event.key_amounts.length ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    Key amounts: {event.key_amounts.slice(0, 3).map((amount) => `$${Math.round(amount).toLocaleString()}`).join(" · ")}
+                  </div>
+                ) : null}
                 <div className="text-muted" style={{ fontSize: 13 }}>
                   {event.accession_number ?? "Accession pending"}
                   {event.primary_document ? ` · ${event.primary_document}` : ""}

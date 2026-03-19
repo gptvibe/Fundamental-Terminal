@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.main import RefreshState, app
+from app.services.beneficial_ownership import BeneficialOwnershipNormalizedParty, BeneficialOwnershipNormalizedReport
 from app.services.sec_edgar import FilingMetadata
 
 
@@ -32,6 +33,12 @@ class _FakeEdgarClient:
 
     def build_filing_index(self, submissions: dict):
         return self._filings
+
+    def get_filing_document_text(self, cik: str, accession_number: str, document_name: str):
+        return (
+            f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_number.replace('-', '')}/{document_name}",
+            "<html><body>Proxy placeholder document.</body></html>",
+        )
 
     def close(self):
         return None
@@ -62,6 +69,7 @@ def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
     })
     monkeypatch.setattr(main_module, "EdgarClient", lambda: _FakeEdgarClient(filings))
     monkeypatch.setattr(main_module, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: [])
 
 
 def test_events_route_classifies_item_codes(monkeypatch):
@@ -86,6 +94,101 @@ def test_events_route_classifies_item_codes(monkeypatch):
     assert payload["events"]
     assert payload["events"][0]["category"] == "Earnings"
     assert payload["events"][0]["form"] == "8-K"
+
+
+def test_filing_events_alias_route_returns_events(monkeypatch):
+    filings = {
+        "0001": FilingMetadata(
+            accession_number="0001",
+            form="8-K",
+            filing_date=date(2026, 3, 1),
+            report_date=date(2026, 2, 28),
+            primary_document="a8k.htm",
+            primary_doc_description="",
+            items="2.02",
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/filing-events")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["events"]
+    assert payload["events"][0]["form"] == "8-K"
+
+
+def test_filing_events_summary_endpoint_returns_aggregates(monkeypatch):
+    filings = {
+        "0001": FilingMetadata(
+            accession_number="0001",
+            form="8-K",
+            filing_date=date(2026, 3, 1),
+            report_date=date(2026, 2, 28),
+            primary_document="a8k.htm",
+            primary_doc_description="Earnings release for $100,000,000 revenue.",
+            items="2.02",
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/filing-events/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["summary"]
+    assert summary["total_events"] >= 1
+    assert summary["unique_accessions"] >= 1
+    assert "Earnings" in summary["categories"] or "Other" in summary["categories"]
+
+
+def test_capital_markets_alias_route_returns_filings(monkeypatch):
+    filings = {
+        "0008": FilingMetadata(
+            accession_number="0008",
+            form="S-3",
+            filing_date=date(2026, 3, 22),
+            report_date=date(2026, 3, 22),
+            primary_document="s3.htm",
+            primary_doc_description="Shelf registration statement for up to $300,000,000 of common stock.",
+            items=None,
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/capital-markets")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filings"]
+    assert payload["filings"][0]["form"] == "S-3"
+
+
+def test_capital_markets_summary_endpoint_returns_aggregates(monkeypatch):
+    filings = {
+        "0009": FilingMetadata(
+            accession_number="0009",
+            form="NT 10-Q",
+            filing_date=date(2026, 3, 23),
+            report_date=date(2026, 3, 23),
+            primary_document="nt10q.htm",
+            primary_doc_description="Notification of inability to timely file quarterly report.",
+            items=None,
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/capital-markets/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["summary"]
+    assert summary["total_filings"] >= 1
+    assert summary["late_filer_notices"] >= 1
 
 
 def test_governance_route_filters_proxy_forms(monkeypatch):
@@ -120,6 +223,116 @@ def test_governance_route_filters_proxy_forms(monkeypatch):
     assert payload["filings"][0]["form"] == "DEF 14A"
 
 
+def test_governance_route_includes_deterministic_parser_signals(monkeypatch):
+    filings = {
+        "0002": FilingMetadata(
+            accession_number="0002",
+            form="DEF 14A",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2026, 2, 10),
+            primary_document="proxy.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+    monkeypatch.setattr(
+        main_module,
+        "parse_proxy_filing_signals",
+        lambda *_args, **_kwargs: main_module.ProxyFilingSignals(
+            meeting_date=date(2026, 5, 20),
+            executive_comp_table_detected=True,
+            vote_item_count=3,
+            board_nominee_count=9,
+            key_amounts=(1250000.0,),
+            vote_outcomes=(
+                main_module.ProxyVoteOutcome(
+                    proposal_number=1,
+                    title="Election of Directors",
+                    for_votes=100000,
+                    against_votes=5000,
+                    abstain_votes=1200,
+                    broker_non_votes=9500,
+                ),
+            ),
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/governance")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filings"][0]["meeting_date"] == "2026-05-20"
+    assert payload["filings"][0]["executive_comp_table_detected"] is True
+    assert payload["filings"][0]["vote_item_count"] == 3
+    assert payload["filings"][0]["board_nominee_count"] == 9
+    assert payload["filings"][0]["key_amounts"] == [1250000.0]
+    assert payload["filings"][0]["vote_outcomes"][0]["proposal_number"] == 1
+    assert payload["filings"][0]["vote_outcomes"][0]["for_votes"] == 100000
+
+
+def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
+    filings = {
+        "0002": FilingMetadata(
+            accession_number="0002",
+            form="DEF 14A",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2026, 2, 10),
+            primary_document="proxy.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+    monkeypatch.setattr(
+        main_module,
+        "_serialize_governance_filings",
+        lambda *_args, **_kwargs: [
+            main_module.GovernanceFilingPayload(
+                accession_number="0002",
+                form="DEF 14A",
+                filing_date=date(2026, 2, 15),
+                report_date=date(2026, 2, 10),
+                primary_document="proxy.htm",
+                primary_doc_description=None,
+                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+                summary="Deterministic summary.",
+                meeting_date=date(2026, 5, 20),
+                executive_comp_table_detected=True,
+                vote_item_count=3,
+                board_nominee_count=9,
+                key_amounts=[1250000.0],
+                vote_outcomes=[
+                    main_module.GovernanceVoteOutcomePayload(
+                        proposal_number=1,
+                        title="Election of Directors",
+                        for_votes=100000,
+                        against_votes=5000,
+                        abstain_votes=1200,
+                        broker_non_votes=9500,
+                    )
+                ],
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/governance/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["summary"]
+    assert summary["total_filings"] == 1
+    assert summary["definitive_proxies"] == 1
+    assert summary["supplemental_proxies"] == 0
+    assert summary["filings_with_meeting_date"] == 1
+    assert summary["filings_with_exec_comp"] == 1
+    assert summary["filings_with_vote_items"] == 1
+    assert summary["latest_meeting_date"] == "2026-05-20"
+    assert summary["max_vote_item_count"] == 3
+
+
 def test_beneficial_ownership_route_flags_amendments(monkeypatch):
     filings = {
         "0004": FilingMetadata(
@@ -142,6 +355,297 @@ def test_beneficial_ownership_route_flags_amendments(monkeypatch):
     assert payload["filings"]
     assert payload["filings"][0]["base_form"] == "SC 13D"
     assert payload["filings"][0]["is_amendment"] is True
+    assert payload["filings"][0]["parties"] == []
+
+
+def test_beneficial_ownership_route_includes_cached_party_details(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0005",
+                form="SC 13D",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 16),
+                report_date=date(2026, 3, 15),
+                is_amendment=False,
+                primary_document="sc13d.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/5/sc13d.htm",
+                summary="Beneficial ownership filing.",
+                parties=[
+                    SimpleNamespace(
+                        party_name="Example Capital LP",
+                        role="reporting_person",
+                        filer_cik="0001234567",
+                        shares_owned=2500000.0,
+                        percent_owned=8.1,
+                        event_date=date(2026, 3, 15),
+                        purpose="Item 4 text",
+                    )
+                ],
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/beneficial-ownership")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filings"]
+    party = payload["filings"][0]["parties"][0]
+    assert party["party_name"] == "Example Capital LP"
+    assert party["filer_cik"] == "0001234567"
+    assert party["shares_owned"] == 2500000.0
+    assert party["percent_owned"] == 8.1
+
+
+def test_beneficial_ownership_route_live_fallback_includes_parsed_parties(monkeypatch):
+    filings = {
+        "0004": FilingMetadata(
+            accession_number="0004",
+            form="SC 13D",
+            filing_date=date(2026, 1, 20),
+            report_date=date(2026, 1, 18),
+            primary_document="sc13d.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    _install_common_overrides(monkeypatch, filings)
+    monkeypatch.setattr(
+        main_module,
+        "collect_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            BeneficialOwnershipNormalizedReport(
+                accession_number="0004",
+                form="SC 13D",
+                base_form="SC 13D",
+                filing_date=date(2026, 1, 20),
+                report_date=date(2026, 1, 18),
+                is_amendment=False,
+                primary_document="sc13d.htm",
+                primary_doc_description=None,
+                source_url="https://www.sec.gov/Archives/edgar/data/1/4/sc13d.htm",
+                summary="Beneficial ownership filing.",
+                parties=(
+                    BeneficialOwnershipNormalizedParty(
+                        party_name="Atlas Capital",
+                        role="reporting_person",
+                        filer_cik="0001111111",
+                        shares_owned=1200000.0,
+                        percent_owned=5.2,
+                        event_date=date(2026, 1, 18),
+                        purpose="Item 4 text",
+                    ),
+                ),
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/beneficial-ownership")
+
+    assert response.status_code == 200
+    payload = response.json()
+    party = payload["filings"][0]["parties"][0]
+    assert party["party_name"] == "Atlas Capital"
+    assert party["percent_owned"] == 5.2
+
+
+def test_beneficial_ownership_summary_endpoint_aggregates_cached_data(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0005",
+                form="SC 13D",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 16),
+                report_date=date(2026, 3, 15),
+                is_amendment=False,
+                primary_document="sc13d.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/5/sc13d.htm",
+                summary="Beneficial ownership filing.",
+                parties=[
+                    SimpleNamespace(
+                        party_name="Example Capital LP",
+                        role="reporting_person",
+                        filer_cik="0001234567",
+                        shares_owned=2500000.0,
+                        percent_owned=8.1,
+                        event_date=date(2026, 3, 15),
+                        purpose="Item 4 text",
+                    )
+                ],
+            ),
+            SimpleNamespace(
+                accession_number="0006",
+                form="SC 13D/A",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 17),
+                report_date=date(2026, 3, 16),
+                is_amendment=True,
+                primary_document="sc13da.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/6/sc13da.htm",
+                summary="Beneficial ownership amendment filing.",
+                parties=[
+                    SimpleNamespace(
+                        party_name="Example Capital LP",
+                        role="reporting_person",
+                        filer_cik="0001234567",
+                        shares_owned=2600000.0,
+                        percent_owned=8.5,
+                        event_date=date(2026, 3, 16),
+                        purpose="Item 4 update",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/beneficial-ownership/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total_filings"] == 2
+    assert payload["summary"]["initial_filings"] == 1
+    assert payload["summary"]["amendments"] == 1
+    assert payload["summary"]["unique_reporting_persons"] == 1
+    assert payload["summary"]["max_reported_percent"] == 8.5
+
+
+def test_institutional_holdings_route_includes_manager_universe_and_amendment_fields(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_institutional_holdings_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "get_company_institutional_holdings",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                fund=SimpleNamespace(
+                    fund_name="Example Fund",
+                    fund_cik="0001234567",
+                    fund_manager="Example Capital",
+                    manager_query="Example Capital",
+                    universe_source="expanded",
+                ),
+                accession_number="0001000000-26-000001",
+                filing_form="13F-HR/A",
+                base_form="13F-HR",
+                is_amendment=True,
+                reporting_date=date(2025, 12, 31),
+                filing_date=date(2026, 2, 14),
+                shares_held=1000.0,
+                market_value=150000.0,
+                change_in_shares=100.0,
+                percent_change=0.1111,
+                portfolio_weight=0.02,
+                put_call=None,
+                investment_discretion="SOLE",
+                voting_authority_sole=900.0,
+                voting_authority_shared=50.0,
+                voting_authority_none=50.0,
+                source="https://www.sec.gov/Archives/edgar/data/1234567/000100000026000001/infotable.xml",
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/institutional-holdings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["institutional_holdings"]
+    row = payload["institutional_holdings"][0]
+    assert row["fund_cik"] == "0001234567"
+    assert row["fund_manager"] == "Example Capital"
+    assert row["universe_source"] == "expanded"
+    assert row["filing_form"] == "13F-HR/A"
+    assert row["base_form"] == "13F-HR"
+    assert row["is_amendment"] is True
+
+
+def test_institutional_holdings_summary_endpoint_returns_counts(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_institutional_holdings_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "get_company_institutional_holdings",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                fund=SimpleNamespace(
+                    fund_name="Example Fund",
+                    fund_cik="0001234567",
+                    fund_manager="Example Capital",
+                    manager_query="Example Capital",
+                    universe_source="curated",
+                ),
+                accession_number="0001000000-26-000001",
+                filing_form="13F-HR",
+                base_form="13F-HR",
+                is_amendment=False,
+                reporting_date=date(2025, 12, 31),
+                filing_date=date(2026, 2, 14),
+                shares_held=1000.0,
+                market_value=150000.0,
+                change_in_shares=100.0,
+                percent_change=0.1111,
+                portfolio_weight=0.02,
+                put_call=None,
+                investment_discretion="SOLE",
+                voting_authority_sole=900.0,
+                voting_authority_shared=50.0,
+                voting_authority_none=50.0,
+                source="https://www.sec.gov/Archives/edgar/data/1234567/000100000026000001/infotable.xml",
+            ),
+            SimpleNamespace(
+                fund=SimpleNamespace(
+                    fund_name="Example Fund",
+                    fund_cik="0001234567",
+                    fund_manager="Example Capital",
+                    manager_query="Example Capital",
+                    universe_source="curated",
+                ),
+                accession_number="0001000000-26-000002",
+                filing_form="13F-HR/A",
+                base_form="13F-HR",
+                is_amendment=True,
+                reporting_date=date(2025, 9, 30),
+                filing_date=date(2025, 11, 15),
+                shares_held=900.0,
+                market_value=120000.0,
+                change_in_shares=-100.0,
+                percent_change=-0.1,
+                portfolio_weight=0.015,
+                put_call=None,
+                investment_discretion="SOLE",
+                voting_authority_sole=800.0,
+                voting_authority_shared=60.0,
+                voting_authority_none=40.0,
+                source="https://www.sec.gov/Archives/edgar/data/1234567/000100000026000002/infotable.xml",
+            ),
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/institutional-holdings/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["summary"]
+    assert summary["total_rows"] == 2
+    assert summary["unique_managers"] == 1
+    assert summary["amended_rows"] == 1
+    assert summary["latest_reporting_date"] == "2025-12-31"
 
 
 def test_serialize_insider_trade_includes_filing_metadata_fields():

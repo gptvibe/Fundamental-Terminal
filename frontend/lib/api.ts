@@ -1,13 +1,18 @@
 import {
   CompanyCapitalRaisesResponse,
+  CompanyCapitalMarketsSummaryResponse,
   CompanyFinancialsResponse,
   CompanyBeneficialOwnershipResponse,
+  CompanyBeneficialOwnershipSummaryResponse,
   CompanyEventsResponse,
+  CompanyFilingEventsSummaryResponse,
   CompanyFilingsResponse,
   CompanyFilingInsightsResponse,
   CompanyGovernanceResponse,
+  CompanyGovernanceSummaryResponse,
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
+  CompanyInstitutionalHoldingsSummaryResponse,
   CompanyModelsResponse,
   CompanyResolutionResponse,
   CompanyPeersResponse,
@@ -61,16 +66,40 @@ export function getCompanyBeneficialOwnership(ticker: string): Promise<CompanyBe
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/beneficial-ownership`);
 }
 
+export function getCompanyBeneficialOwnershipSummary(ticker: string): Promise<CompanyBeneficialOwnershipSummaryResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/beneficial-ownership/summary`);
+}
+
 export function getCompanyGovernance(ticker: string): Promise<CompanyGovernanceResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/governance`);
+}
+
+export function getCompanyGovernanceSummary(ticker: string): Promise<CompanyGovernanceSummaryResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/governance/summary`);
 }
 
 export function getCompanyEvents(ticker: string): Promise<CompanyEventsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/events`);
 }
 
+export function getCompanyFilingEvents(ticker: string): Promise<CompanyEventsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/filing-events`);
+}
+
+export function getCompanyFilingEventsSummary(ticker: string): Promise<CompanyFilingEventsSummaryResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/filing-events/summary`);
+}
+
 export function getCompanyCapitalRaises(ticker: string): Promise<CompanyCapitalRaisesResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-raises`);
+}
+
+export function getCompanyCapitalMarkets(ticker: string): Promise<CompanyCapitalRaisesResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-markets`);
+}
+
+export function getCompanyCapitalMarketsSummary(ticker: string): Promise<CompanyCapitalMarketsSummaryResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-markets/summary`);
 }
 
 
@@ -85,6 +114,10 @@ export function getCompanyInsiderTrades(ticker: string): Promise<CompanyInsiderT
 
 export function getCompanyInstitutionalHoldings(ticker: string): Promise<CompanyInstitutionalHoldingsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/institutional-holdings`);
+}
+
+export function getCompanyInstitutionalHoldingsSummary(ticker: string): Promise<CompanyInstitutionalHoldingsSummaryResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/institutional-holdings/summary`);
 }
 
 export function getCompanyModels(ticker: string, modelNames?: string[], options?: { dupontMode?: "auto" | "annual" | "ttm" }): Promise<CompanyModelsResponse> {

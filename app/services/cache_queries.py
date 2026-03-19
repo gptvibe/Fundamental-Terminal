@@ -8,7 +8,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.models import BeneficialOwnershipReport, Company, FinancialStatement, InsiderTrade, InstitutionalHolding, ModelRun, PriceHistory
+from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, Company, FilingEvent, FinancialStatement, InsiderTrade, InstitutionalHolding, ModelRun, PriceHistory
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, FILING_PARSER_STATEMENT_TYPE
 
 
@@ -260,6 +260,7 @@ def get_company_beneficial_ownership_reports(
 ) -> list[BeneficialOwnershipReport]:
     statement = (
         select(BeneficialOwnershipReport)
+        .options(selectinload(BeneficialOwnershipReport.parties))
         .where(BeneficialOwnershipReport.company_id == company_id)
         .order_by(BeneficialOwnershipReport.filing_date.desc().nullslast(), BeneficialOwnershipReport.id.desc())
         .limit(limit)
@@ -271,6 +272,57 @@ def get_company_beneficial_ownership_cache_status(session: Session, company: Com
     last_checked = _normalize_datetime(company.beneficial_ownership_last_checked)
     if last_checked is None:
         statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(BeneficialOwnershipReport.company_id == company.id)
+        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    return last_checked, _cache_state_from_last_checked(last_checked)
+
+
+def get_company_filing_events(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 300,
+) -> list[FilingEvent]:
+    statement = (
+        select(FilingEvent)
+        .where(FilingEvent.company_id == company_id)
+        .order_by(
+            FilingEvent.filing_date.desc().nullslast(),
+            FilingEvent.report_date.desc().nullslast(),
+            FilingEvent.accession_number.desc(),
+            FilingEvent.item_code.asc(),
+        )
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_filing_events_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    last_checked = _normalize_datetime(company.filing_events_last_checked)
+    if last_checked is None:
+        statement = select(func.max(FilingEvent.last_checked)).where(FilingEvent.company_id == company.id)
+        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    return last_checked, _cache_state_from_last_checked(last_checked)
+
+
+def get_company_capital_markets_events(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 200,
+) -> list[CapitalMarketsEvent]:
+    statement = (
+        select(CapitalMarketsEvent)
+        .where(CapitalMarketsEvent.company_id == company_id)
+        .order_by(CapitalMarketsEvent.filing_date.desc().nullslast(), CapitalMarketsEvent.id.desc())
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_capital_markets_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    last_checked = _normalize_datetime(company.capital_markets_last_checked)
+    if last_checked is None:
+        statement = select(func.max(CapitalMarketsEvent.last_checked)).where(CapitalMarketsEvent.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     return last_checked, _cache_state_from_last_checked(last_checked)
 

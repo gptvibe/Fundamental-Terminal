@@ -186,8 +186,15 @@ export interface CompanyInsiderTradesResponse {
 
 export interface InstitutionalHoldingPayload {
   fund_name: string;
+  fund_cik: string | null;
+  fund_manager: string | null;
+  manager_query: string | null;
+  universe_source: string | null;
   fund_strategy: string | null;
   accession_number: string | null;
+  filing_form: string | null;
+  base_form: string | null;
+  is_amendment: boolean;
   reporting_date: string;
   filing_date: string | null;
   shares_held: number | null;
@@ -206,6 +213,19 @@ export interface InstitutionalHoldingPayload {
 export interface CompanyInstitutionalHoldingsResponse {
   company: CompanyPayload | null;
   institutional_holdings: InstitutionalHoldingPayload[];
+  refresh: RefreshState;
+}
+
+export interface InstitutionalHoldingsSummaryPayload {
+  total_rows: number;
+  unique_managers: number;
+  amended_rows: number;
+  latest_reporting_date: string | null;
+}
+
+export interface CompanyInstitutionalHoldingsSummaryResponse {
+  company: CompanyPayload | null;
+  summary: InstitutionalHoldingsSummaryPayload;
   refresh: RefreshState;
 }
 
@@ -254,11 +274,39 @@ export interface BeneficialOwnershipFilingPayload {
   primary_doc_description: string | null;
   source_url: string;
   summary: string;
+  parties: BeneficialOwnershipPartyPayload[];
+}
+
+export interface BeneficialOwnershipPartyPayload {
+  party_name: string;
+  role: string | null;
+  filer_cik: string | null;
+  shares_owned: number | null;
+  percent_owned: number | null;
+  event_date: string | null;
+  purpose: string | null;
 }
 
 export interface CompanyBeneficialOwnershipResponse {
   company: CompanyPayload | null;
   filings: BeneficialOwnershipFilingPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface BeneficialOwnershipSummaryPayload {
+  total_filings: number;
+  initial_filings: number;
+  amendments: number;
+  unique_reporting_persons: number;
+  latest_filing_date: string | null;
+  latest_event_date: string | null;
+  max_reported_percent: number | null;
+}
+
+export interface CompanyBeneficialOwnershipSummaryResponse {
+  company: CompanyPayload | null;
+  summary: BeneficialOwnershipSummaryPayload;
   refresh: RefreshState;
   error: string | null;
 }
@@ -272,11 +320,44 @@ export interface GovernanceFilingPayload {
   primary_doc_description: string | null;
   source_url: string;
   summary: string;
+  meeting_date: string | null;
+  executive_comp_table_detected: boolean;
+  vote_item_count: number;
+  board_nominee_count: number | null;
+  key_amounts: number[];
+  vote_outcomes: GovernanceVoteOutcomePayload[];
+}
+
+export interface GovernanceVoteOutcomePayload {
+  proposal_number: number;
+  title: string | null;
+  for_votes: number | null;
+  against_votes: number | null;
+  abstain_votes: number | null;
+  broker_non_votes: number | null;
 }
 
 export interface CompanyGovernanceResponse {
   company: CompanyPayload | null;
   filings: GovernanceFilingPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface GovernanceSummaryPayload {
+  total_filings: number;
+  definitive_proxies: number;
+  supplemental_proxies: number;
+  filings_with_meeting_date: number;
+  filings_with_exec_comp: number;
+  filings_with_vote_items: number;
+  latest_meeting_date: string | null;
+  max_vote_item_count: number;
+}
+
+export interface CompanyGovernanceSummaryResponse {
+  company: CompanyPayload | null;
+  summary: GovernanceSummaryPayload;
   refresh: RefreshState;
   error: string | null;
 }
@@ -287,16 +368,33 @@ export interface FilingEventPayload {
   filing_date: string | null;
   report_date: string | null;
   items: string | null;
+  item_code: string | null;
   category: string;
   primary_document: string | null;
   primary_doc_description: string | null;
   source_url: string;
   summary: string;
+  key_amounts: number[];
 }
 
 export interface CompanyEventsResponse {
   company: CompanyPayload | null;
   events: FilingEventPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface FilingEventsSummaryPayload {
+  total_events: number;
+  unique_accessions: number;
+  categories: Record<string, number>;
+  latest_event_date: string | null;
+  max_key_amount: number | null;
+}
+
+export interface CompanyFilingEventsSummaryResponse {
+  company: CompanyPayload | null;
+  summary: FilingEventsSummaryPayload;
   refresh: RefreshState;
   error: string | null;
 }
@@ -310,11 +408,32 @@ export interface CapitalRaisePayload {
   primary_doc_description: string | null;
   source_url: string;
   summary: string;
+  event_type: string | null;
+  security_type: string | null;
+  offering_amount: number | null;
+  shelf_size: number | null;
+  is_late_filer: boolean;
 }
 
 export interface CompanyCapitalRaisesResponse {
   company: CompanyPayload | null;
   filings: CapitalRaisePayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface CapitalMarketsSummaryPayload {
+  total_filings: number;
+  late_filer_notices: number;
+  registration_filings: number;
+  prospectus_filings: number;
+  latest_filing_date: string | null;
+  max_offering_amount: number | null;
+}
+
+export interface CompanyCapitalMarketsSummaryResponse {
+  company: CompanyPayload | null;
+  summary: CapitalMarketsSummaryPayload;
   refresh: RefreshState;
   error: string | null;
 }

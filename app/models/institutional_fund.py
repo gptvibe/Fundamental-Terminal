@@ -23,6 +23,8 @@ class InstitutionalFund(Base):
     fund_cik: Mapped[str] = mapped_column(String(20), nullable=False)
     fund_name: Mapped[str] = mapped_column(String(255), nullable=False)
     fund_manager: Mapped[str] = mapped_column(String(255), nullable=False)
+    manager_query: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    universe_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_updated: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

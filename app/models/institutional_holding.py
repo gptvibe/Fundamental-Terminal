@@ -38,6 +38,9 @@ class InstitutionalHolding(Base):
         nullable=False,
     )
     accession_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    filing_form: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    base_form: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    is_amendment: Mapped[bool] = mapped_column(default=False, nullable=False)
     reporting_date: Mapped[date] = mapped_column(Date, nullable=False)
     filing_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     shares_held: Mapped[float | None] = mapped_column(Float, nullable=True)

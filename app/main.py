@@ -26,6 +26,8 @@ from app.services.institutional_holdings import get_institutional_fund_strategy
 from app.services.ownership_analytics import build_ownership_analytics
 from app.services.peer_comparison import build_peer_comparison
 from app.services import (
+        get_company_filing_events,
+        get_company_capital_markets_events,
     CompanyCacheSnapshot,
     get_company_financials,
     get_company_filing_insights,
@@ -43,6 +45,8 @@ from app.services import (
     status_broker,
 )
 from app.services.cache_queries import get_company_beneficial_ownership_reports
+from app.services.beneficial_ownership import collect_beneficial_ownership_reports
+from app.services.proxy_parser import ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -249,8 +253,15 @@ class InsiderAnalyticsResponse(BaseModel):
 
 class InstitutionalHoldingPayload(BaseModel):
     fund_name: str
+    fund_cik: str | None = None
+    fund_manager: str | None = None
+    manager_query: str | None = None
+    universe_source: str | None = None
     fund_strategy: str | None = None
     accession_number: str | None = None
+    filing_form: str | None = None
+    base_form: str | None = None
+    is_amendment: bool = False
     reporting_date: DateType
     filing_date: DateType | None = None
     shares_held: Number = None
@@ -269,6 +280,19 @@ class InstitutionalHoldingPayload(BaseModel):
 class CompanyInstitutionalHoldingsResponse(BaseModel):
     company: CompanyPayload | None
     institutional_holdings: list[InstitutionalHoldingPayload]
+    refresh: RefreshState
+
+
+class InstitutionalHoldingsSummaryPayload(BaseModel):
+    total_rows: int
+    unique_managers: int
+    amended_rows: int
+    latest_reporting_date: DateType | None = None
+
+
+class CompanyInstitutionalHoldingsSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: InstitutionalHoldingsSummaryPayload
     refresh: RefreshState
 
 
@@ -392,6 +416,16 @@ class CompanyFilingsResponse(BaseModel):
     error: str | None = None
 
 
+class BeneficialOwnershipPartyPayload(BaseModel):
+    party_name: str
+    role: str | None = None
+    filer_cik: str | None = None
+    shares_owned: Number = None
+    percent_owned: Number = None
+    event_date: DateType | None = None
+    purpose: str | None = None
+
+
 class BeneficialOwnershipFilingPayload(BaseModel):
     accession_number: str | None = None
     form: str
@@ -403,11 +437,29 @@ class BeneficialOwnershipFilingPayload(BaseModel):
     primary_doc_description: str | None = None
     source_url: str
     summary: str
+    parties: list[BeneficialOwnershipPartyPayload] = Field(default_factory=list)
 
 
 class CompanyBeneficialOwnershipResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[BeneficialOwnershipFilingPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class BeneficialOwnershipSummaryPayload(BaseModel):
+    total_filings: int
+    initial_filings: int
+    amendments: int
+    unique_reporting_persons: int
+    latest_filing_date: DateType | None = None
+    latest_event_date: DateType | None = None
+    max_reported_percent: Number = None
+
+
+class CompanyBeneficialOwnershipSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: BeneficialOwnershipSummaryPayload
     refresh: RefreshState
     error: str | None = None
 
@@ -421,11 +473,32 @@ class CapitalRaisePayload(BaseModel):
     primary_doc_description: str | None = None
     source_url: str
     summary: str
+    event_type: str | None = None
+    security_type: str | None = None
+    offering_amount: Number = None
+    shelf_size: Number = None
+    is_late_filer: bool = False
 
 
 class CompanyCapitalRaisesResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[CapitalRaisePayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class CapitalMarketsSummaryPayload(BaseModel):
+    total_filings: int
+    late_filer_notices: int
+    registration_filings: int
+    prospectus_filings: int
+    latest_filing_date: DateType | None = None
+    max_offering_amount: Number = None
+
+
+class CompanyCapitalMarketsSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: CapitalMarketsSummaryPayload
     refresh: RefreshState
     error: str | None = None
 
@@ -439,11 +512,44 @@ class GovernanceFilingPayload(BaseModel):
     primary_doc_description: str | None = None
     source_url: str
     summary: str
+    meeting_date: DateType | None = None
+    executive_comp_table_detected: bool = False
+    vote_item_count: int = 0
+    board_nominee_count: int | None = None
+    key_amounts: list[float] = Field(default_factory=list)
+    vote_outcomes: list["GovernanceVoteOutcomePayload"] = Field(default_factory=list)
+
+
+class GovernanceVoteOutcomePayload(BaseModel):
+    proposal_number: int
+    title: str | None = None
+    for_votes: int | None = None
+    against_votes: int | None = None
+    abstain_votes: int | None = None
+    broker_non_votes: int | None = None
 
 
 class CompanyGovernanceResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[GovernanceFilingPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class GovernanceSummaryPayload(BaseModel):
+    total_filings: int
+    definitive_proxies: int
+    supplemental_proxies: int
+    filings_with_meeting_date: int
+    filings_with_exec_comp: int
+    filings_with_vote_items: int
+    latest_meeting_date: DateType | None = None
+    max_vote_item_count: int = 0
+
+
+class CompanyGovernanceSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: GovernanceSummaryPayload
     refresh: RefreshState
     error: str | None = None
 
@@ -454,16 +560,33 @@ class FilingEventPayload(BaseModel):
     filing_date: DateType | None = None
     report_date: DateType | None = None
     items: str | None = None
+    item_code: str | None = None
     category: str
     primary_document: str | None = None
     primary_doc_description: str | None = None
     source_url: str
     summary: str
+    key_amounts: list[float] = Field(default_factory=list)
 
 
 class CompanyEventsResponse(BaseModel):
     company: CompanyPayload | None
     events: list[FilingEventPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class FilingEventsSummaryPayload(BaseModel):
+    total_events: int
+    unique_accessions: int
+    categories: dict[str, int]
+    latest_event_date: DateType | None = None
+    max_key_amount: Number = None
+
+
+class CompanyFilingEventsSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: FilingEventsSummaryPayload
     refresh: RefreshState
     error: str | None = None
 
@@ -743,6 +866,40 @@ def company_institutional_holdings(
     )
 
 
+@app.get("/api/companies/{ticker}/institutional-holdings/summary", response_model=CompanyInstitutionalHoldingsSummaryResponse)
+def company_institutional_holdings_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyInstitutionalHoldingsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyInstitutionalHoldingsSummaryResponse(
+            company=None,
+            summary=InstitutionalHoldingsSummaryPayload(total_rows=0, unique_managers=0, amended_rows=0, latest_reporting_date=None),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
+    holdings = get_company_institutional_holdings(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=holdings_cache_state)
+        if holdings_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    rows = [_serialize_institutional_holding(holding) for holding in holdings]
+    return CompanyInstitutionalHoldingsSummaryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, holdings_last_checked),
+            last_checked_institutional=holdings_last_checked,
+        ),
+        summary=_build_institutional_holdings_summary(rows),
+        refresh=refresh,
+    )
+
+
 @app.get("/api/insiders/{ticker}", response_model=InsiderAnalyticsResponse)
 def insider_analytics(
     ticker: str,
@@ -978,21 +1135,7 @@ def company_beneficial_ownership(
     # Serve from DB cache when available; fall back to live SEC submissions if empty.
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     if cached_reports:
-        filings = [
-            BeneficialOwnershipFilingPayload(
-                accession_number=report.accession_number,
-                form=report.form,
-                base_form=report.base_form,  # type: ignore[arg-type]
-                filing_date=report.filing_date,
-                report_date=report.report_date,
-                is_amendment=report.is_amendment,
-                primary_document=report.primary_document,
-                primary_doc_description=report.primary_doc_description,
-                source_url=report.source_url,
-                summary=report.summary,
-            )
-            for report in cached_reports
-        ]
+        filings = [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
         return CompanyBeneficialOwnershipResponse(
             company=_serialize_company(snapshot),
             filings=filings,
@@ -1004,7 +1147,10 @@ def company_beneficial_ownership(
     try:
         submissions = client.get_submissions(snapshot.company.cik)
         filing_index = client.build_filing_index(submissions)
-        filings = _serialize_beneficial_ownership_filings(snapshot.company.cik, filing_index)
+        filings = [
+            _serialize_normalized_beneficial_ownership_report(report)
+            for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
+        ]
         return CompanyBeneficialOwnershipResponse(
             company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"base_form", "is_amendment", "summary"})) for item in filings]) if filings else None),
             filings=filings,
@@ -1016,6 +1162,59 @@ def company_beneficial_ownership(
         return CompanyBeneficialOwnershipResponse(
             company=_serialize_company(snapshot),
             filings=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/beneficial-ownership/summary", response_model=CompanyBeneficialOwnershipSummaryResponse)
+def company_beneficial_ownership_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyBeneficialOwnershipSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyBeneficialOwnershipSummaryResponse(
+            company=None,
+            summary=_empty_beneficial_ownership_summary(),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
+    if cached_reports:
+        filings = [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+        return CompanyBeneficialOwnershipSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_beneficial_ownership_summary(filings),
+            refresh=refresh,
+            error=None,
+        )
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = [
+            _serialize_normalized_beneficial_ownership_report(report)
+            for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
+        ]
+        return CompanyBeneficialOwnershipSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_beneficial_ownership_summary(filings),
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load beneficial ownership summary for '%s'", snapshot.company.ticker)
+        return CompanyBeneficialOwnershipSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_empty_beneficial_ownership_summary(),
             refresh=refresh,
             error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
         )
@@ -1045,7 +1244,7 @@ def company_governance(
     try:
         submissions = client.get_submissions(snapshot.company.cik)
         filing_index = client.build_filing_index(submissions)
-        filings = _serialize_governance_filings(snapshot.company.cik, filing_index)
+        filings = _serialize_governance_filings(snapshot.company.cik, filing_index, client=client)
         return CompanyGovernanceResponse(
             company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"summary"})) for item in filings]) if filings else None),
             filings=filings,
@@ -1057,6 +1256,46 @@ def company_governance(
         return CompanyGovernanceResponse(
             company=_serialize_company(snapshot),
             filings=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/governance/summary", response_model=CompanyGovernanceSummaryResponse)
+def company_governance_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyGovernanceSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyGovernanceSummaryResponse(
+            company=None,
+            summary=_empty_governance_summary(),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_governance_filings(snapshot.company.cik, filing_index, client=client)
+        return CompanyGovernanceSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_governance_summary(filings),
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load governance summary for '%s'", snapshot.company.ticker)
+        return CompanyGovernanceSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_empty_governance_summary(),
             refresh=refresh,
             error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
         )
@@ -1109,12 +1348,26 @@ def company_capital_raises(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    cached_events = get_company_capital_markets_events(session, snapshot.company.id)
+    if cached_events:
+        filings = [_serialize_cached_capital_markets_event(event) for event in cached_events]
+        return CompanyCapitalRaisesResponse(
+            company=_serialize_company(snapshot),
+            filings=filings,
+            refresh=refresh,
+            error=None,
+        )
 
     client = EdgarClient()
     try:
         submissions = client.get_submissions(snapshot.company.cik)
         filing_index = client.build_filing_index(submissions)
-        filings = _serialize_capital_raise_filings(snapshot.company.cik, filing_index)
+        from app.services.capital_markets import collect_capital_markets_events
+
+        filings = [
+            _serialize_normalized_capital_markets_event(event)
+            for event in collect_capital_markets_events(snapshot.company.cik, filing_index)
+        ]
         return CompanyCapitalRaisesResponse(
             company=_serialize_company(snapshot),
             filings=filings,
@@ -1128,6 +1381,70 @@ def company_capital_raises(
         return CompanyCapitalRaisesResponse(
             company=_serialize_company(snapshot),
             filings=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/capital-markets", response_model=CompanyCapitalRaisesResponse)
+def company_capital_markets(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalRaisesResponse:
+    return company_capital_raises(ticker=ticker, background_tasks=background_tasks, session=session)
+
+
+@app.get("/api/companies/{ticker}/capital-markets/summary", response_model=CompanyCapitalMarketsSummaryResponse)
+def company_capital_markets_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalMarketsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyCapitalMarketsSummaryResponse(
+            company=None,
+            summary=_empty_capital_markets_summary(),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    cached_events = get_company_capital_markets_events(session, snapshot.company.id)
+    if cached_events:
+        rows = [_serialize_cached_capital_markets_event(event) for event in cached_events]
+        return CompanyCapitalMarketsSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_capital_markets_summary(rows),
+            refresh=refresh,
+            error=None,
+        )
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        from app.services.capital_markets import collect_capital_markets_events
+
+        rows = [
+            _serialize_normalized_capital_markets_event(event)
+            for event in collect_capital_markets_events(snapshot.company.cik, filing_index)
+        ]
+        return CompanyCapitalMarketsSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_capital_markets_summary(rows),
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load capital markets summary for '%s'", snapshot.company.ticker)
+        return CompanyCapitalMarketsSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_empty_capital_markets_summary(),
             refresh=refresh,
             error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
         )
@@ -1153,13 +1470,28 @@ def company_events(
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
 
+    cached_events = get_company_filing_events(session, snapshot.company.id)
+    if cached_events:
+        events = [_serialize_cached_filing_event(event) for event in cached_events]
+        return CompanyEventsResponse(
+            company=_serialize_company(snapshot),
+            events=events,
+            refresh=refresh,
+            error=None,
+        )
+
     client = EdgarClient()
     try:
         submissions = client.get_submissions(snapshot.company.cik)
         filing_index = client.build_filing_index(submissions)
-        events = _serialize_filing_events(snapshot.company.cik, filing_index)
+        from app.services.eight_k_events import collect_filing_events
+
+        events = [
+            _serialize_normalized_filing_event(event)
+            for event in collect_filing_events(snapshot.company.cik, filing_index)
+        ]
         return CompanyEventsResponse(
-            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"category", "summary"})) for item in events]) if events else None),
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"category", "summary", "item_code", "key_amounts"})) for item in events]) if events else None),
             events=events,
             refresh=refresh,
             error=None,
@@ -1169,6 +1501,70 @@ def company_events(
         return CompanyEventsResponse(
             company=_serialize_company(snapshot),
             events=[],
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/filing-events", response_model=CompanyEventsResponse)
+def company_filing_events(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyEventsResponse:
+    return company_events(ticker=ticker, background_tasks=background_tasks, session=session)
+
+
+@app.get("/api/companies/{ticker}/filing-events/summary", response_model=CompanyFilingEventsSummaryResponse)
+def company_filing_events_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyFilingEventsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyFilingEventsSummaryResponse(
+            company=None,
+            summary=_empty_filing_events_summary(),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    cached_events = get_company_filing_events(session, snapshot.company.id)
+    if cached_events:
+        rows = [_serialize_cached_filing_event(event) for event in cached_events]
+        return CompanyFilingEventsSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_filing_events_summary(rows),
+            refresh=refresh,
+            error=None,
+        )
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        from app.services.eight_k_events import collect_filing_events
+
+        rows = [
+            _serialize_normalized_filing_event(event)
+            for event in collect_filing_events(snapshot.company.cik, filing_index)
+        ]
+        return CompanyFilingEventsSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_build_filing_events_summary(rows),
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load filing event summary for '%s'", snapshot.company.ticker)
+        return CompanyFilingEventsSummaryResponse(
+            company=_serialize_company(snapshot),
+            summary=_empty_filing_events_summary(),
             refresh=refresh,
             error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
         )
@@ -1574,8 +1970,15 @@ def _serialize_ownership_analytics(analytics) -> OwnershipAnalyticsResponse:
 def _serialize_institutional_holding(holding) -> InstitutionalHoldingPayload:
     return InstitutionalHoldingPayload(
         fund_name=holding.fund.fund_name,
+        fund_cik=getattr(holding.fund, "fund_cik", None),
+        fund_manager=getattr(holding.fund, "fund_manager", None),
+        manager_query=getattr(holding.fund, "manager_query", None),
+        universe_source=getattr(holding.fund, "universe_source", None),
         fund_strategy=get_institutional_fund_strategy(holding.fund.fund_name, getattr(holding.fund, "fund_manager", None)),
         accession_number=holding.accession_number,
+        filing_form=getattr(holding, "filing_form", None),
+        base_form=getattr(holding, "base_form", None),
+        is_amendment=bool(getattr(holding, "is_amendment", False)),
         reporting_date=holding.reporting_date,
         filing_date=holding.filing_date,
         shares_held=holding.shares_held,
@@ -1589,6 +1992,25 @@ def _serialize_institutional_holding(holding) -> InstitutionalHoldingPayload:
         voting_authority_shared=getattr(holding, "voting_authority_shared", None),
         voting_authority_none=getattr(holding, "voting_authority_none", None),
         source=holding.source,
+    )
+
+
+def _build_institutional_holdings_summary(rows: list[InstitutionalHoldingPayload]) -> InstitutionalHoldingsSummaryPayload:
+    if not rows:
+        return InstitutionalHoldingsSummaryPayload(total_rows=0, unique_managers=0, amended_rows=0, latest_reporting_date=None)
+
+    unique_managers = len({
+        (row.fund_cik or "", row.fund_name.strip().lower())
+        for row in rows
+        if row.fund_name.strip()
+    })
+    latest_reporting_date = max((row.reporting_date for row in rows), default=None)
+    amended_rows = sum(1 for row in rows if row.is_amendment)
+    return InstitutionalHoldingsSummaryPayload(
+        total_rows=len(rows),
+        unique_managers=unique_managers,
+        amended_rows=amended_rows,
+        latest_reporting_date=latest_reporting_date,
     )
 
 
@@ -1649,28 +2071,152 @@ def _serialize_beneficial_ownership_filing(cik: str, filing: FilingMetadata) -> 
         primary_doc_description=description,
         source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
         summary=summary,
+        parties=[],
     )
 
 
-def _serialize_governance_filings(cik: str, filing_index: dict[str, FilingMetadata]) -> list[GovernanceFilingPayload]:
+def _serialize_cached_beneficial_ownership_report(report) -> BeneficialOwnershipFilingPayload:
+    return BeneficialOwnershipFilingPayload(
+        accession_number=report.accession_number,
+        form=report.form,
+        base_form=report.base_form,  # type: ignore[arg-type]
+        filing_date=report.filing_date,
+        report_date=report.report_date,
+        is_amendment=report.is_amendment,
+        primary_document=report.primary_document,
+        primary_doc_description=report.primary_doc_description,
+        source_url=report.source_url,
+        summary=report.summary,
+        parties=[
+            BeneficialOwnershipPartyPayload(
+                party_name=party.party_name,
+                role=party.role,
+                filer_cik=getattr(party, "filer_cik", None),
+                shares_owned=getattr(party, "shares_owned", None),
+                percent_owned=getattr(party, "percent_owned", None),
+                event_date=getattr(party, "event_date", None),
+                purpose=getattr(party, "purpose", None),
+            )
+            for party in report.parties
+        ],
+    )
+
+
+def _serialize_normalized_beneficial_ownership_report(report) -> BeneficialOwnershipFilingPayload:
+    return BeneficialOwnershipFilingPayload(
+        accession_number=report.accession_number,
+        form=report.form,
+        base_form=report.base_form,  # type: ignore[arg-type]
+        filing_date=report.filing_date,
+        report_date=report.report_date,
+        is_amendment=report.is_amendment,
+        primary_document=report.primary_document,
+        primary_doc_description=report.primary_doc_description,
+        source_url=report.source_url,
+        summary=report.summary,
+        parties=[
+            BeneficialOwnershipPartyPayload(
+                party_name=party.party_name,
+                role=party.role,
+                filer_cik=party.filer_cik,
+                shares_owned=party.shares_owned,
+                percent_owned=party.percent_owned,
+                event_date=party.event_date,
+                purpose=party.purpose,
+            )
+            for party in report.parties
+        ],
+    )
+
+
+def _build_beneficial_ownership_summary(
+    filings: list[BeneficialOwnershipFilingPayload],
+) -> BeneficialOwnershipSummaryPayload:
+    if not filings:
+        return _empty_beneficial_ownership_summary()
+
+    unique_people = {
+        party.party_name.strip().lower()
+        for filing in filings
+        for party in filing.parties
+        if party.party_name.strip()
+    }
+    max_percent = max(
+        (party.percent_owned for filing in filings for party in filing.parties if party.percent_owned is not None),
+        default=None,
+    )
+    latest_filing_date = max(
+        (filing.filing_date or filing.report_date for filing in filings if filing.filing_date or filing.report_date),
+        default=None,
+    )
+    latest_event_date = max(
+        (party.event_date for filing in filings for party in filing.parties if party.event_date is not None),
+        default=None,
+    )
+    amendments = sum(1 for filing in filings if filing.is_amendment)
+
+    return BeneficialOwnershipSummaryPayload(
+        total_filings=len(filings),
+        initial_filings=len(filings) - amendments,
+        amendments=amendments,
+        unique_reporting_persons=len(unique_people),
+        latest_filing_date=latest_filing_date,
+        latest_event_date=latest_event_date,
+        max_reported_percent=max_percent,
+    )
+
+
+def _empty_beneficial_ownership_summary() -> BeneficialOwnershipSummaryPayload:
+    return BeneficialOwnershipSummaryPayload(
+        total_filings=0,
+        initial_filings=0,
+        amendments=0,
+        unique_reporting_persons=0,
+        latest_filing_date=None,
+        latest_event_date=None,
+        max_reported_percent=None,
+    )
+
+
+def _serialize_governance_filings(
+    cik: str,
+    filing_index: dict[str, FilingMetadata],
+    client: EdgarClient | None = None,
+) -> list[GovernanceFilingPayload]:
     filtered = [item for item in filing_index.values() if _is_governance_form(item.form)]
     ordered = sorted(
         filtered,
         key=lambda item: (item.filing_date or DateType.min, item.report_date or DateType.min, item.accession_number),
         reverse=True,
     )
-    return [_serialize_governance_filing(cik, item) for item in ordered[:MAX_FILING_TIMELINE_ITEMS]]
+    rows: list[GovernanceFilingPayload] = []
+    for index, filing in enumerate(ordered[:MAX_FILING_TIMELINE_ITEMS]):
+        signals = ProxyFilingSignals()
+        if client is not None and filing.primary_document and index < 12:
+            try:
+                _, payload = client.get_filing_document_text(cik, filing.accession_number, filing.primary_document)
+                signals = parse_proxy_filing_signals(payload)
+            except Exception:
+                signals = ProxyFilingSignals()
+        rows.append(_serialize_governance_filing(cik, filing, signals=signals))
+    return rows
 
 
-def _serialize_governance_filing(cik: str, filing: FilingMetadata) -> GovernanceFilingPayload:
+def _serialize_governance_filing(
+    cik: str,
+    filing: FilingMetadata,
+    *,
+    signals: ProxyFilingSignals | None = None,
+) -> GovernanceFilingPayload:
+    resolved_signals = signals or ProxyFilingSignals()
     form_display = (filing.form or "UNKNOWN").upper()
     description = _normalize_optional_text(filing.primary_doc_description)
     if description:
         summary = description
     elif form_display == "DEF 14A":
-        summary = "Definitive proxy statement covering meeting materials and governance disclosures."
+        summary = _governance_summary_line(form_display, resolved_signals)
     else:
-        summary = "Additional proxy material linked to a shareholder meeting or vote."
+        summary = _governance_summary_line(form_display, resolved_signals)
 
     return GovernanceFilingPayload(
         accession_number=filing.accession_number,
@@ -1681,6 +2227,75 @@ def _serialize_governance_filing(cik: str, filing: FilingMetadata) -> Governance
         primary_doc_description=description,
         source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
         summary=summary,
+        meeting_date=resolved_signals.meeting_date,
+        executive_comp_table_detected=resolved_signals.executive_comp_table_detected,
+        vote_item_count=resolved_signals.vote_item_count,
+        board_nominee_count=resolved_signals.board_nominee_count,
+        key_amounts=list(resolved_signals.key_amounts),
+        vote_outcomes=[
+            GovernanceVoteOutcomePayload(
+                proposal_number=item.proposal_number,
+                title=item.title,
+                for_votes=item.for_votes,
+                against_votes=item.against_votes,
+                abstain_votes=item.abstain_votes,
+                broker_non_votes=item.broker_non_votes,
+            )
+            for item in resolved_signals.vote_outcomes
+        ],
+    )
+
+
+def _governance_summary_line(form_display: str, signals: ProxyFilingSignals) -> str:
+    segments: list[str] = []
+    if form_display == "DEF 14A":
+        segments.append("Definitive proxy statement")
+    else:
+        segments.append("Additional proxy material")
+
+    if signals.meeting_date is not None:
+        segments.append(f"meeting date {signals.meeting_date.isoformat()}")
+    if signals.vote_item_count > 0:
+        segments.append(f"{signals.vote_item_count} proposal items detected")
+    if signals.executive_comp_table_detected:
+        segments.append("executive compensation table detected")
+
+    return "; ".join(segments) + "."
+
+
+def _build_governance_summary(filings: list[GovernanceFilingPayload]) -> GovernanceSummaryPayload:
+    if not filings:
+        return _empty_governance_summary()
+
+    definitive = sum(1 for filing in filings if filing.form == "DEF 14A")
+    filings_with_meeting = sum(1 for filing in filings if filing.meeting_date is not None)
+    filings_with_comp = sum(1 for filing in filings if filing.executive_comp_table_detected)
+    filings_with_votes = sum(1 for filing in filings if filing.vote_item_count > 0)
+    latest_meeting_date = max((filing.meeting_date for filing in filings if filing.meeting_date is not None), default=None)
+    max_vote_items = max((filing.vote_item_count for filing in filings), default=0)
+
+    return GovernanceSummaryPayload(
+        total_filings=len(filings),
+        definitive_proxies=definitive,
+        supplemental_proxies=len(filings) - definitive,
+        filings_with_meeting_date=filings_with_meeting,
+        filings_with_exec_comp=filings_with_comp,
+        filings_with_vote_items=filings_with_votes,
+        latest_meeting_date=latest_meeting_date,
+        max_vote_item_count=max_vote_items,
+    )
+
+
+def _empty_governance_summary() -> GovernanceSummaryPayload:
+    return GovernanceSummaryPayload(
+        total_filings=0,
+        definitive_proxies=0,
+        supplemental_proxies=0,
+        filings_with_meeting_date=0,
+        filings_with_exec_comp=0,
+        filings_with_vote_items=0,
+        latest_meeting_date=None,
+        max_vote_item_count=0,
     )
 
 
@@ -1711,11 +2326,84 @@ def _serialize_filing_event(cik: str, filing: FilingMetadata) -> FilingEventPayl
         filing_date=filing.filing_date,
         report_date=filing.report_date,
         items=items,
+        item_code=None,
         category=category,
         primary_document=_normalize_optional_text(filing.primary_document),
         primary_doc_description=description,
         source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
         summary=summary,
+        key_amounts=[],
+    )
+
+
+def _serialize_cached_filing_event(event) -> FilingEventPayload:
+    return FilingEventPayload(
+        accession_number=event.accession_number,
+        form=event.form,
+        filing_date=event.filing_date,
+        report_date=event.report_date,
+        items=event.items,
+        item_code=event.item_code,
+        category=event.category,
+        primary_document=event.primary_document,
+        primary_doc_description=event.primary_doc_description,
+        source_url=event.source_url,
+        summary=event.summary,
+        key_amounts=[float(value) for value in (event.key_amounts or [])],
+    )
+
+
+def _serialize_normalized_filing_event(event) -> FilingEventPayload:
+    return FilingEventPayload(
+        accession_number=event.accession_number,
+        form=event.form,
+        filing_date=event.filing_date,
+        report_date=event.report_date,
+        items=event.items,
+        item_code=event.item_code,
+        category=event.category,
+        primary_document=event.primary_document,
+        primary_doc_description=event.primary_doc_description,
+        source_url=event.source_url,
+        summary=event.summary,
+        key_amounts=list(event.key_amounts),
+    )
+
+
+def _build_filing_events_summary(events: list[FilingEventPayload]) -> FilingEventsSummaryPayload:
+    if not events:
+        return _empty_filing_events_summary()
+
+    categories: dict[str, int] = {}
+    for event in events:
+        categories[event.category] = categories.get(event.category, 0) + 1
+
+    latest_event_date = max(
+        (event.filing_date or event.report_date for event in events if event.filing_date or event.report_date),
+        default=None,
+    )
+    max_key_amount = max(
+        (amount for event in events for amount in event.key_amounts),
+        default=None,
+    )
+    unique_accessions = len({event.accession_number for event in events if event.accession_number})
+
+    return FilingEventsSummaryPayload(
+        total_events=len(events),
+        unique_accessions=unique_accessions,
+        categories=categories,
+        latest_event_date=latest_event_date,
+        max_key_amount=max_key_amount,
+    )
+
+
+def _empty_filing_events_summary() -> FilingEventsSummaryPayload:
+    return FilingEventsSummaryPayload(
+        total_events=0,
+        unique_accessions=0,
+        categories={},
+        latest_event_date=None,
+        max_key_amount=None,
     )
 
 
@@ -1886,9 +2574,81 @@ def _serialize_capital_raise_filings(
                 primary_doc_description=description,
                 source_url=_build_filing_document_url(cik, item.accession_number, item.primary_document),
                 summary=summary,
+                event_type=None,
+                security_type=None,
+                offering_amount=None,
+                shelf_size=None,
+                is_late_filer=False,
             )
         )
     return results
+
+
+def _serialize_cached_capital_markets_event(event) -> CapitalRaisePayload:
+    return CapitalRaisePayload(
+        accession_number=event.accession_number,
+        form=event.form,
+        filing_date=event.filing_date,
+        report_date=event.report_date,
+        primary_document=event.primary_document,
+        primary_doc_description=event.primary_doc_description,
+        source_url=event.source_url,
+        summary=event.summary,
+        event_type=event.event_type,
+        security_type=event.security_type,
+        offering_amount=event.offering_amount,
+        shelf_size=event.shelf_size,
+        is_late_filer=event.is_late_filer,
+    )
+
+
+def _serialize_normalized_capital_markets_event(event) -> CapitalRaisePayload:
+    return CapitalRaisePayload(
+        accession_number=event.accession_number,
+        form=event.form,
+        filing_date=event.filing_date,
+        report_date=event.report_date,
+        primary_document=event.primary_document,
+        primary_doc_description=event.primary_doc_description,
+        source_url=event.source_url,
+        summary=event.summary,
+        event_type=event.event_type,
+        security_type=event.security_type,
+        offering_amount=event.offering_amount,
+        shelf_size=event.shelf_size,
+        is_late_filer=event.is_late_filer,
+    )
+
+
+def _build_capital_markets_summary(filings: list[CapitalRaisePayload]) -> CapitalMarketsSummaryPayload:
+    if not filings:
+        return _empty_capital_markets_summary()
+
+    latest_filing_date = max(
+        (filing.filing_date or filing.report_date for filing in filings if filing.filing_date or filing.report_date),
+        default=None,
+    )
+    max_offering_amount = max((filing.offering_amount for filing in filings if filing.offering_amount is not None), default=None)
+
+    return CapitalMarketsSummaryPayload(
+        total_filings=len(filings),
+        late_filer_notices=sum(1 for filing in filings if filing.is_late_filer),
+        registration_filings=sum(1 for filing in filings if filing.event_type == "Registration"),
+        prospectus_filings=sum(1 for filing in filings if filing.event_type == "Prospectus"),
+        latest_filing_date=latest_filing_date,
+        max_offering_amount=max_offering_amount,
+    )
+
+
+def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
+    return CapitalMarketsSummaryPayload(
+        total_filings=0,
+        late_filer_notices=0,
+        registration_filings=0,
+        prospectus_filings=0,
+        latest_filing_date=None,
+        max_offering_amount=None,
+    )
 
 
 def _is_governance_form(form: str | None) -> bool:

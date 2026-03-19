@@ -9,9 +9,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyGovernance } from "@/lib/api";
+import { getCompanyGovernance, getCompanyGovernanceSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyGovernanceResponse } from "@/lib/types";
+import type { CompanyGovernanceResponse, CompanyGovernanceSummaryResponse } from "@/lib/types";
 
 export default function CompanyGovernancePage() {
   const params = useParams<{ ticker: string }>();
@@ -27,6 +27,7 @@ export default function CompanyGovernancePage() {
     reloadKey
   } = useCompanyWorkspace(ticker);
   const [data, setData] = useState<CompanyGovernanceResponse | null>(null);
+  const [summaryData, setSummaryData] = useState<CompanyGovernanceSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,9 +38,13 @@ export default function CompanyGovernancePage() {
       try {
         setLoading(true);
         setError(null);
-        const response = await getCompanyGovernance(ticker);
+        const [response, summary] = await Promise.all([
+          getCompanyGovernance(ticker),
+          getCompanyGovernanceSummary(ticker)
+        ]);
         if (!cancelled) {
           setData(response);
+          setSummaryData(summary);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -59,6 +64,7 @@ export default function CompanyGovernancePage() {
   }, [reloadKey, ticker]);
 
   const filings = useMemo(() => data?.filings ?? [], [data?.filings]);
+  const summary = summaryData?.summary ?? null;
   const pageCompany = company ?? data?.company ?? null;
   const effectiveRefreshState = data?.refresh ?? refreshState;
   const latestFilingDate = filings[0]?.filing_date ?? filings[0]?.report_date ?? null;
@@ -83,9 +89,9 @@ export default function CompanyGovernancePage() {
           secondaryActionLabel="Open Filings Workspace"
           secondaryActionDescription="View annual, quarterly, current reports, and filing parser snapshots in one place."
           statusLines={[
-            `Proxy filings: ${filings.length.toLocaleString()}`,
+            `Proxy filings: ${(summary?.total_filings ?? filings.length).toLocaleString()}`,
             `Latest filing date: ${latestFilingDate ? formatDate(latestFilingDate) : "Pending"}`,
-            `Definitive proxies: ${definitiveCount.toLocaleString()} · Additional materials: ${additionalCount.toLocaleString()}`
+            `Definitive proxies: ${(summary?.definitive_proxies ?? definitiveCount).toLocaleString()} · Additional materials: ${(summary?.supplemental_proxies ?? additionalCount).toLocaleString()}`
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -96,9 +102,12 @@ export default function CompanyGovernancePage() {
       <Panel title="Governance" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
         <div className="metric-grid">
           <Metric label="Ticker" value={ticker} />
-          <Metric label="Proxy Filings" value={filings.length.toLocaleString()} />
-          <Metric label="DEF 14A" value={definitiveCount.toLocaleString()} />
-          <Metric label="DEFA14A" value={additionalCount.toLocaleString()} />
+          <Metric label="Proxy Filings" value={(summary?.total_filings ?? filings.length).toLocaleString()} />
+          <Metric label="DEF 14A" value={(summary?.definitive_proxies ?? definitiveCount).toLocaleString()} />
+          <Metric label="DEFA14A" value={(summary?.supplemental_proxies ?? additionalCount).toLocaleString()} />
+          <Metric label="Meeting Dates Parsed" value={(summary?.filings_with_meeting_date ?? 0).toLocaleString()} />
+          <Metric label="Comp Tables Parsed" value={(summary?.filings_with_exec_comp ?? 0).toLocaleString()} />
+          <Metric label="Vote Items Parsed" value={(summary?.filings_with_vote_items ?? 0).toLocaleString()} />
         </div>
       </Panel>
 
@@ -129,6 +138,32 @@ export default function CompanyGovernancePage() {
                   <div className="text-muted">{formatDate(filing.filing_date ?? filing.report_date)}</div>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{filing.summary}</div>
+                <div className="text-muted" style={{ fontSize: 13 }}>
+                  {filing.meeting_date ? `Meeting: ${formatDate(filing.meeting_date)}` : "Meeting: pending"}
+                  {` · Votes: ${filing.vote_item_count}`}
+                  {` · Exec comp table: ${filing.executive_comp_table_detected ? "yes" : "no"}`}
+                  {filing.board_nominee_count != null ? ` · Nominees: ${filing.board_nominee_count}` : ""}
+                </div>
+                {filing.key_amounts.length ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    Key amounts: {filing.key_amounts.slice(0, 3).map((amount) => `$${Math.round(amount).toLocaleString()}`).join(" · ")}
+                  </div>
+                ) : null}
+                {filing.vote_outcomes.length ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    {filing.vote_outcomes.slice(0, 2).map((outcome) => {
+                      const metrics = [
+                        outcome.for_votes != null ? `For ${outcome.for_votes.toLocaleString()}` : null,
+                        outcome.against_votes != null ? `Against ${outcome.against_votes.toLocaleString()}` : null,
+                        outcome.abstain_votes != null ? `Abstain ${outcome.abstain_votes.toLocaleString()}` : null,
+                        outcome.broker_non_votes != null ? `Broker Non-Votes ${outcome.broker_non_votes.toLocaleString()}` : null
+                      ].filter(Boolean);
+                      const title = outcome.title ? `: ${outcome.title}` : "";
+                      return `Prop ${outcome.proposal_number}${title}${metrics.length ? ` (${metrics.join(" · ")})` : ""}`;
+                    }).join(" || ")}
+                    {filing.vote_outcomes.length > 2 ? ` || +${filing.vote_outcomes.length - 2} more` : ""}
+                  </div>
+                ) : null}
                 <div className="text-muted" style={{ fontSize: 13 }}>
                   {filing.accession_number ?? "Accession pending"}
                   {filing.primary_document ? ` · ${filing.primary_document}` : ""}

@@ -152,6 +152,11 @@ export function HedgeFundActivityTable({
                   <td>
                     <div className="hedge-fund-name-cell">
                       <span className="insider-name-cell">{holding.fund_name}</span>
+                      {holding.fund_manager ? <span className="text-muted">Manager: {holding.fund_manager}</span> : null}
+                      <span className="text-muted">
+                        {holding.fund_cik ? `CIK ${holding.fund_cik}` : "CIK pending"}
+                        {holding.universe_source ? ` · ${holding.universe_source}` : ""}
+                      </span>
                       {strategy ? (
                         <span className="hedge-fund-strategy-chip" tabIndex={0} title={strategy}>
                           Strategy
@@ -172,7 +177,8 @@ export function HedgeFundActivityTable({
                   </td>
                   <td>
                     <div className="filing-meta-cell">
-                      <span className="filing-form-pill">13F</span>
+                      <span className="filing-form-pill">{holding.filing_form ?? "13F"}</span>
+                      {holding.is_amendment ? <span className="pill">Amendment</span> : null}
                       <span className="filing-date">{holding.filing_date ? formatDate(holding.filing_date) : "--"}</span>
                       {holding.source ? (
                         <a className="filing-link" href={holding.source} target="_blank" rel="noreferrer">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { InstitutionalOwnershipTrendChart } from "@/components/charts/institutional-ownership-trend-chart";
@@ -15,7 +15,9 @@ import { HedgeFundActivityTable } from "@/components/tables/hedge-fund-activity-
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
+import { getCompanyInstitutionalHoldingsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import type { CompanyInstitutionalHoldingsSummaryResponse } from "@/lib/types";
 
 export default function CompanyOwnershipPage() {
   const params = useParams<{ ticker: string }>();
@@ -31,8 +33,11 @@ export default function CompanyOwnershipPage() {
     refreshState,
     consoleEntries,
     connectionState,
-    queueRefresh
+    queueRefresh,
+    reloadKey
   } = useCompanyWorkspace(ticker, { includeInstitutional: true });
+  const [summaryData, setSummaryData] = useState<CompanyInstitutionalHoldingsSummaryResponse | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const latestReportingDate = useMemo(
     () =>
       institutionalHoldings.reduce<string | null>(
@@ -41,6 +46,31 @@ export default function CompanyOwnershipPage() {
       ),
     [institutionalHoldings]
   );
+  const summary = summaryData?.summary ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummary() {
+      try {
+        setSummaryError(null);
+        const response = await getCompanyInstitutionalHoldingsSummary(ticker);
+        if (!cancelled) {
+          setSummaryData(response);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSummaryError(error instanceof Error ? error.message : "Unable to load institutional summary");
+          setSummaryData(null);
+        }
+      }
+    }
+
+    void loadSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [ticker, reloadKey]);
 
   return (
     <CompanyWorkspaceShell
@@ -60,8 +90,9 @@ export default function CompanyOwnershipPage() {
           secondaryActionLabel="Open Valuation Models"
           secondaryActionDescription="View DCF, health score, scenario analysis, and model outputs."
           statusLines={[
-            `Tracked holdings available: ${institutionalHoldings.length.toLocaleString()}`,
-            `Latest filing quarter: ${latestReportingDate ? formatDate(latestReportingDate) : "Pending"}`,
+            `Tracked holdings available: ${(summary?.total_rows ?? institutionalHoldings.length).toLocaleString()}`,
+            `Latest filing quarter: ${summary?.latest_reporting_date ? formatDate(summary.latest_reporting_date) : latestReportingDate ? formatDate(latestReportingDate) : "Pending"}`,
+            `Unique managers: ${(summary?.unique_managers ?? 0).toLocaleString()} · Amended filings: ${(summary?.amended_rows ?? 0).toLocaleString()}`,
             `Financial periods available: ${financials.length.toLocaleString()}`
           ]}
           consoleEntries={consoleEntries}
@@ -73,10 +104,13 @@ export default function CompanyOwnershipPage() {
       <Panel title="Ownership" subtitle={company?.name ?? ticker} aside={refreshState ? <StatusPill state={refreshState} /> : undefined}>
         <div className="metric-grid">
           <Metric label="Ticker" value={ticker} />
-          <Metric label="Tracked Holdings" value={institutionalHoldings.length.toLocaleString()} />
-          <Metric label="Latest Quarter" value={latestReportingDate ? formatDate(latestReportingDate) : "Pending"} />
+          <Metric label="Tracked Holdings" value={(summary?.total_rows ?? institutionalHoldings.length).toLocaleString()} />
+          <Metric label="Unique Managers" value={(summary?.unique_managers ?? 0).toLocaleString()} />
+          <Metric label="Amended Filings" value={(summary?.amended_rows ?? 0).toLocaleString()} />
+          <Metric label="Latest Quarter" value={summary?.latest_reporting_date ? formatDate(summary.latest_reporting_date) : latestReportingDate ? formatDate(latestReportingDate) : "Pending"} />
           <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
         </div>
+        {summaryError ? <div className="text-muted">{summaryError}</div> : null}
       </Panel>
 
       <Panel title="Smart Money Summary" subtitle="Quarter-over-quarter view of institutional positioning from 13F filings">

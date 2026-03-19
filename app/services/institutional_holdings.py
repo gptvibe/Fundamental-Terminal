@@ -78,6 +78,7 @@ CURATED_13F_STRATEGIES: dict[str, str] = {
 class FundCandidate:
     search_query: str
     manager_name: str
+    universe_source: str
 
 
 @dataclass(slots=True)
@@ -85,6 +86,8 @@ class ResolvedFund:
     fund_cik: str
     fund_name: str
     fund_manager: str
+    manager_query: str
+    universe_source: str
 
 
 @dataclass(slots=True)
@@ -99,6 +102,9 @@ class FilingMetadata:
 @dataclass(slots=True)
 class HoldingSnapshot:
     accession_number: str
+    filing_form: str | None
+    base_form: str | None
+    is_amendment: bool
     reporting_date: date
     filing_date: date | None
     shares_held: float | None
@@ -162,6 +168,8 @@ class InstitutionalHoldingsClient:
             fund_cik=fund_cik,
             fund_name=cleaned_name or candidate.manager_name,
             fund_manager=candidate.manager_name,
+            manager_query=candidate.search_query,
+            universe_source=candidate.universe_source,
         )
 
     def get_submissions(self, cik: str) -> dict[str, Any]:
@@ -256,8 +264,14 @@ def _resolve_curated_funds(
     limit: int,
 ) -> list[InstitutionalFund]:
     resolved_rows: list[InstitutionalFund] = []
-    for search_query, manager_name in _manager_candidates(limit):
-        resolved = client.resolve_fund(FundCandidate(search_query=search_query, manager_name=manager_name))
+    for search_query, manager_name, universe_source in _manager_candidates(limit):
+        resolved = client.resolve_fund(
+            FundCandidate(
+                search_query=search_query,
+                manager_name=manager_name,
+                universe_source=universe_source,
+            )
+        )
         if resolved is None:
             continue
         fund = _upsert_institutional_fund(session, resolved, checked_at)
@@ -265,20 +279,25 @@ def _resolve_curated_funds(
     return resolved_rows
 
 
-def _manager_candidates(limit: int) -> list[tuple[str, str]]:
+def _manager_candidates(limit: int) -> list[tuple[str, str, str]]:
     candidates = list(CURATED_13F_MANAGERS)
     if settings.sec_13f_universe_mode == "expanded":
         for manager in settings.sec_13f_extra_managers:
             candidates.append((manager, manager))
 
-    deduped: list[tuple[str, str]] = []
+    deduped: list[tuple[str, str, str]] = []
     seen: set[str] = set()
+    curated_managers = {
+        re.sub(r"\s+", " ", manager.strip().lower())
+        for _, manager in CURATED_13F_MANAGERS
+    }
     for query, manager in candidates:
         normalized = re.sub(r"\s+", " ", manager.strip().lower())
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
-        deduped.append((query, manager))
+        universe_source = "curated" if normalized in curated_managers else "expanded"
+        deduped.append((query, manager, universe_source))
         if len(deduped) >= limit:
             break
     return deduped
@@ -291,6 +310,8 @@ def _upsert_institutional_fund(session: Session, resolved: ResolvedFund, checked
             fund_cik=resolved.fund_cik,
             fund_name=resolved.fund_name,
             fund_manager=resolved.fund_manager,
+            manager_query=resolved.manager_query,
+            universe_source=resolved.universe_source,
             last_checked=checked_at,
         )
         .on_conflict_do_update(
@@ -298,6 +319,8 @@ def _upsert_institutional_fund(session: Session, resolved: ResolvedFund, checked
             set_={
                 "fund_name": resolved.fund_name,
                 "fund_manager": resolved.fund_manager,
+                "manager_query": resolved.manager_query,
+                "universe_source": resolved.universe_source,
                 "last_checked": checked_at,
             },
         )
@@ -455,6 +478,9 @@ def _extract_company_snapshot(
     portfolio_weight = (matched_market_value / total_market_value) if total_market_value else None
     return HoldingSnapshot(
         accession_number=filing.accession_number,
+        filing_form=(filing.form or "").upper() or None,
+        base_form=_base_form(filing.form),
+        is_amendment=_is_amendment_form(filing.form),
         reporting_date=filing.report_date,
         filing_date=filing.filing_date,
         shares_held=matched_shares,
@@ -518,6 +544,9 @@ def _upsert_institutional_holdings(
                 company_id=company.id,
                 fund_id=fund_id,
                 accession_number=snapshot.accession_number,
+                filing_form=snapshot.filing_form,
+                base_form=snapshot.base_form,
+                is_amendment=snapshot.is_amendment,
                 reporting_date=snapshot.reporting_date,
                 filing_date=snapshot.filing_date,
                 shares_held=snapshot.shares_held,
@@ -537,6 +566,9 @@ def _upsert_institutional_holdings(
                 constraint="uq_institutional_holdings_company_fund_reporting_date",
                 set_={
                     "accession_number": snapshot.accession_number,
+                    "filing_form": snapshot.filing_form,
+                    "base_form": snapshot.base_form,
+                    "is_amendment": snapshot.is_amendment,
                     "filing_date": snapshot.filing_date,
                     "shares_held": snapshot.shares_held,
                     "market_value": snapshot.market_value,
@@ -622,6 +654,11 @@ def _base_form(value: str | None) -> str:
     if not value:
         return ""
     return value.split("/")[0].upper()
+
+
+def _is_amendment_form(value: str | None) -> bool:
+    normalized = (value or "").upper().strip()
+    return normalized.endswith("/A")
 
 
 def _parse_date(value: Any) -> date | None:

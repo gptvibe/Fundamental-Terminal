@@ -732,6 +732,12 @@ class EdgarClient:
 
         raise ValueError(f"Unable to locate raw Form 4 XML for accession {filing_metadata.accession_number}")
 
+    def get_filing_document_text(self, cik: str, accession_number: str, document_name: str) -> tuple[str, str]:
+        accession_compact = accession_number.replace("-", "")
+        numeric_cik = str(int(cik))
+        source_url = f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/{document_name}"
+        return source_url, self._get_text(source_url)
+
 
 class EdgarNormalizer:
     def normalize(
@@ -1264,7 +1270,7 @@ class EdgarIngestionService:
                     collect_beneficial_ownership_reports,
                     upsert_beneficial_ownership_reports,
                 )
-                reports = collect_beneficial_ownership_reports(local_company.cik, filing_index)
+                reports = collect_beneficial_ownership_reports(local_company.cik, filing_index, client=self.client)
                 beneficial_ownership_written = upsert_beneficial_ownership_reports(
                     session, local_company, reports, checked_at=checked_at
                 )
@@ -1508,11 +1514,37 @@ class EdgarIngestionService:
                     collect_beneficial_ownership_reports,
                     upsert_beneficial_ownership_reports,
                 )
-                bo_reports = collect_beneficial_ownership_reports(company.cik, filing_index)
+                bo_reports = collect_beneficial_ownership_reports(company.cik, filing_index, client=self.client)
                 beneficial_ownership_written = upsert_beneficial_ownership_reports(
                     session, company, bo_reports, checked_at=checked_at
                 )
                 session.commit()
+
+            filing_events_written = 0
+            active_reporter.step("events", "Caching 8-K filing events...")
+            from app.services.eight_k_events import collect_filing_events, upsert_filing_events
+
+            filing_events = collect_filing_events(company.cik, filing_index)
+            filing_events_written = upsert_filing_events(
+                session=session,
+                company=company,
+                events=filing_events,
+                checked_at=checked_at,
+            )
+            session.commit()
+
+            capital_markets_written = 0
+            active_reporter.step("capital", "Caching capital markets filings...")
+            from app.services.capital_markets import collect_capital_markets_events, upsert_capital_markets_events
+
+            capital_markets_events = collect_capital_markets_events(company.cik, filing_index)
+            capital_markets_written = upsert_capital_markets_events(
+                session=session,
+                company=company,
+                events=capital_markets_events,
+                checked_at=checked_at,
+            )
+            session.commit()
 
             price_points_written = 0
             if force or not prices_fresh:
@@ -1555,6 +1587,16 @@ class EdgarIngestionService:
                     if beneficial_ownership_written
                     else "Checked beneficial ownership filings"
                 )
+            detail_parts.append(
+                f"Cached {filing_events_written} filing event rows"
+                if filing_events_written
+                else "Checked 8-K filing events"
+            )
+            detail_parts.append(
+                f"Cached {capital_markets_written} capital markets rows"
+                if capital_markets_written
+                else "Checked capital markets filings"
+            )
             if force or not prices_fresh:
                 detail_parts.append(f"Cached {price_points_written} daily price bars")
 

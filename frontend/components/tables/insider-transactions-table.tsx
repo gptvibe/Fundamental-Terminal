@@ -185,6 +185,8 @@ export function InsiderTransactionsTable({
               <SortableHeader label="Insider Name" sortKey="name" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
               <SortableHeader label="Role" sortKey="role" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
               <SortableHeader label="Action" sortKey="action" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
+              <th>Instrument</th>
+              <th>Ownership</th>
               <SortableHeader label="Shares" sortKey="shares" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} align="right" />
               <SortableHeader label="Price" sortKey="price" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} align="right" />
               <SortableHeader label="Value" sortKey="value" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} align="right" />
@@ -197,6 +199,7 @@ export function InsiderTransactionsTable({
                 align="right"
               />
               <SortableHeader label="10b5-1 Plan" sortKey="is_10b5_1" activeKey={sortKey} direction={sortDirection} onToggle={handleSortToggle} />
+              <th>Footnotes</th>
             </tr>
           </thead>
           <tbody>
@@ -231,6 +234,8 @@ export function InsiderTransactionsTable({
                       ) : null}
                     </div>
                   </td>
+                  <td>{formatInstrument(trade)}</td>
+                  <td>{formatOwnershipDescriptor(trade)}</td>
                   <td className="numeric-cell">{formatInteger(trade.shares)}</td>
                   <td className="numeric-cell">{formatCurrency(trade.price)}</td>
                   <td className="numeric-cell">{formatCurrency(trade.value)}</td>
@@ -240,6 +245,7 @@ export function InsiderTransactionsTable({
                       {trade.is_10b5_1 ? "Yes" : "No"}
                     </span>
                   </td>
+                  <td>{formatFootnoteTags(trade.footnote_tags)}</td>
                 </tr>
               );
             })}
@@ -375,6 +381,37 @@ function formatCurrency(value: number | null) {
     currency: "USD",
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function formatInstrument(trade: InsiderTradePayload) {
+  const kind = trade.is_derivative == null ? null : trade.is_derivative ? "Derivative" : "Non-derivative";
+  const title = trade.security_title?.trim() || null;
+  if (kind && title) {
+    return `${kind} · ${title}`;
+  }
+  return kind ?? title ?? "--";
+}
+
+function formatOwnershipDescriptor(trade: InsiderTradePayload) {
+  const ownership = trade.ownership_nature ? trade.ownership_nature : null;
+  if (!ownership && trade.exercise_price == null && !trade.expiration_date) {
+    return "--";
+  }
+  const extras = [
+    trade.exercise_price != null ? `Strike ${formatCurrency(trade.exercise_price)}` : null,
+    trade.expiration_date ? `Exp ${formatDate(trade.expiration_date)}` : null
+  ].filter(Boolean);
+  if (!ownership) {
+    return extras.join(" · ");
+  }
+  return extras.length ? `${ownership} · ${extras.join(" · ")}` : ownership;
+}
+
+function formatFootnoteTags(tags: string[] | null) {
+  if (!tags || !tags.length) {
+    return "--";
+  }
+  return tags.slice(0, 3).join(", ");
 }
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
