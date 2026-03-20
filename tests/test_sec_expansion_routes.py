@@ -80,7 +80,7 @@ def test_events_route_classifies_item_codes(monkeypatch):
             filing_date=date(2026, 3, 1),
             report_date=date(2026, 2, 28),
             primary_document="a8k.htm",
-            primary_doc_description="",
+            primary_doc_description="Item 9.01 Financial Statements and Exhibits. Exhibit 99.1 furnished.",
             items="2.02,9.01",
         )
     }
@@ -94,6 +94,7 @@ def test_events_route_classifies_item_codes(monkeypatch):
     assert payload["events"]
     assert payload["events"][0]["category"] == "Earnings"
     assert payload["events"][0]["form"] == "8-K"
+    assert payload["events"][0]["exhibit_references"] == ["99.1"]
 
 
 def test_filing_events_alias_route_returns_events(monkeypatch):
@@ -521,6 +522,142 @@ def test_beneficial_ownership_summary_endpoint_aggregates_cached_data(monkeypatc
     assert payload["summary"]["amendments"] == 1
     assert payload["summary"]["unique_reporting_persons"] == 1
     assert payload["summary"]["max_reported_percent"] == 8.5
+    assert payload["summary"]["chains_with_amendments"] == 1
+    assert payload["summary"]["amendments_with_delta"] == 1
+    assert payload["summary"]["ownership_increase_events"] == 1
+    assert payload["summary"]["ownership_decrease_events"] == 0
+    assert payload["summary"]["ownership_unchanged_events"] == 0
+    assert abs(payload["summary"]["largest_increase_pp"] - 0.4) < 1e-9
+    assert payload["summary"]["largest_decrease_pp"] is None
+
+
+def test_beneficial_ownership_route_includes_amendment_chain_metadata(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0007",
+                form="SC 13D",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 10),
+                report_date=date(2026, 3, 9),
+                is_amendment=False,
+                primary_document="sc13d.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/7/sc13d.htm",
+                summary="Beneficial ownership filing.",
+                parties=[
+                    SimpleNamespace(
+                        party_name="Example Capital LP",
+                        role="reporting_person",
+                        filer_cik="0001234567",
+                        shares_owned=2500000.0,
+                        percent_owned=8.1,
+                        event_date=date(2026, 3, 9),
+                        purpose="Item 4 text",
+                    )
+                ],
+            ),
+            SimpleNamespace(
+                accession_number="0008",
+                form="SC 13D/A",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 17),
+                report_date=date(2026, 3, 16),
+                is_amendment=True,
+                primary_document="sc13da.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/8/sc13da.htm",
+                summary="Beneficial ownership amendment filing.",
+                parties=[
+                    SimpleNamespace(
+                        party_name="Example Capital LP",
+                        role="reporting_person",
+                        filer_cik="0001234567",
+                        shares_owned=2600000.0,
+                        percent_owned=8.5,
+                        event_date=date(2026, 3, 16),
+                        purpose="Item 4 update",
+                    )
+                ],
+            ),
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/beneficial-ownership")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filings"]
+    amendment = next(item for item in payload["filings"] if item["is_amendment"])
+    assert amendment["amendment_sequence"] == 2
+    assert amendment["amendment_chain_size"] == 2
+    assert amendment["previous_accession_number"] == "0007"
+    assert amendment["previous_filing_date"] == "2026-03-10"
+    assert amendment["previous_percent_owned"] == 8.1
+    assert abs(amendment["percent_change_pp"] - 0.4) < 1e-9
+    assert amendment["change_direction"] == "increase"
+
+
+def test_beneficial_ownership_route_groups_missing_party_rows_by_document_token(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0010",
+                form="SC 13G/A",
+                base_form="SC 13G",
+                filing_date=date(2026, 2, 10),
+                report_date=date(2026, 2, 9),
+                is_amendment=True,
+                primary_document="tv0017-appleinc.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/10/tv0017-appleinc.htm",
+                summary="SCHEDULE 13G/A",
+                previous_accession_number=None,
+                amendment_sequence=None,
+                amendment_chain_size=None,
+                parties=[],
+            ),
+            SimpleNamespace(
+                accession_number="0011",
+                form="SC 13G/A",
+                base_form="SC 13G",
+                filing_date=date(2026, 3, 10),
+                report_date=date(2026, 3, 9),
+                is_amendment=True,
+                primary_document="tv0017-appleinc.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/11/tv0017-appleinc.htm",
+                summary="SCHEDULE 13G/A",
+                previous_accession_number=None,
+                amendment_sequence=None,
+                amendment_chain_size=None,
+                parties=[],
+            ),
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/beneficial-ownership")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["filings"]) == 2
+    by_accession = {item["accession_number"]: item for item in payload["filings"]}
+    earliest = by_accession["0010"]
+    latest = by_accession["0011"]
+
+    assert earliest["amendment_sequence"] == 1
+    assert earliest["amendment_chain_size"] == 2
+    assert latest["amendment_sequence"] == 2
+    assert latest["amendment_chain_size"] == 2
+    assert latest["previous_accession_number"] == "0010"
 
 
 def test_institutional_holdings_route_includes_manager_universe_and_amendment_fields(monkeypatch):
@@ -674,6 +811,50 @@ def test_serialize_insider_trade_includes_filing_metadata_fields():
     assert payload.source and payload.source.startswith("https://www.sec.gov/Archives")
 
 
+def test_form144_filings_route_returns_cached_rows(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_form144_cache_status",
+        lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_form144_filings",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000123-26-000444",
+                form="144",
+                filing_date=date(2026, 3, 19),
+                report_date=date(2026, 3, 19),
+                filer_name="Jane Insider",
+                relationship_to_issuer="Officer",
+                issuer_name="Apple Inc.",
+                security_title="Common Stock",
+                planned_sale_date=date(2026, 3, 29),
+                shares_to_be_sold=12500.0,
+                aggregate_market_value=2_500_000.0,
+                shares_owned_after_sale=490000.0,
+                broker_name="Alpha Brokerage",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/123/x144.xml",
+                summary="Form 144 planned sale by Jane Insider.",
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/form-144-filings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filings"]
+    row = payload["filings"][0]
+    assert row["form"] == "144"
+    assert row["filer_name"] == "Jane Insider"
+    assert row["planned_sale_date"] == "2026-03-29"
+    assert row["shares_to_be_sold"] == 12500.0
+
+
 def test_serialize_institutional_holding_includes_filing_metadata_fields():
     fund = SimpleNamespace(fund_name="Example Capital", fund_manager="Example Capital Management")
     holding = SimpleNamespace(
@@ -694,3 +875,243 @@ def test_serialize_institutional_holding_includes_filing_metadata_fields():
     assert payload.accession_number == "0000950123-26-001234"
     assert payload.filing_date == date(2026, 2, 14)
     assert payload.source and payload.source.startswith("https://www.sec.gov/Archives")
+
+
+def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "_load_filings_from_cache",
+        lambda *_args, **_kwargs: [
+            main_module.FilingPayload(
+                accession_number="0000001",
+                form="10-K",
+                filing_date=date(2026, 3, 10),
+                report_date=date(2025, 12, 31),
+                primary_document="annual.htm",
+                primary_doc_description="Annual report",
+                items=None,
+                source_url="https://www.sec.gov/Archives/edgar/data/1/1/annual.htm",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_filing_events",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000002",
+                form="8-K",
+                filing_date=date(2026, 3, 12),
+                report_date=date(2026, 3, 11),
+                items="2.02",
+                item_code="2.02",
+                category="Earnings",
+                primary_document="8k.htm",
+                primary_doc_description=None,
+                source_url="https://www.sec.gov/Archives/edgar/data/1/2/8k.htm",
+                summary="Earnings update.",
+                key_amounts=[],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_serialize_governance_filings",
+        lambda *_args, **_kwargs: [
+            main_module.GovernanceFilingPayload(
+                accession_number="0000003",
+                form="DEF 14A",
+                filing_date=date(2026, 3, 9),
+                report_date=date(2026, 3, 8),
+                primary_document="proxy.htm",
+                primary_doc_description=None,
+                source_url="https://www.sec.gov/Archives/edgar/data/1/3/proxy.htm",
+                summary="Proxy filing.",
+                meeting_date=None,
+                executive_comp_table_detected=False,
+                vote_item_count=0,
+                board_nominee_count=None,
+                key_amounts=[],
+                vote_outcomes=[],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000004",
+                form="SC 13D",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 13),
+                report_date=date(2026, 3, 12),
+                is_amendment=False,
+                primary_document="sc13d.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/4/sc13d.htm",
+                summary="Beneficial ownership filing.",
+                parties=[],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_insider_trades",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                insider_name="Jane Doe",
+                role="Chief Executive Officer",
+                transaction_date=date(2026, 3, 14),
+                filing_date=date(2026, 3, 15),
+                filing_type="4",
+                accession_number="0000005",
+                source="https://www.sec.gov/Archives/edgar/data/1/5/form4.xml",
+                action="BUY",
+                transaction_code="P",
+                shares=1000.0,
+                price=180.0,
+                value=180000.0,
+                ownership_after=500000.0,
+                is_10b5_1=False,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_institutional_holdings",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                fund=SimpleNamespace(
+                    fund_name="Example Fund",
+                    fund_cik="0001234567",
+                    fund_manager="Example Capital",
+                    manager_query="Example Capital",
+                    universe_source="curated",
+                ),
+                accession_number="0000006",
+                filing_form="13F-HR",
+                base_form="13F-HR",
+                is_amendment=False,
+                reporting_date=date(2025, 12, 31),
+                filing_date=date(2026, 2, 14),
+                shares_held=5000.0,
+                market_value=750000.0,
+                change_in_shares=500.0,
+                percent_change=10.0,
+                portfolio_weight=0.02,
+                put_call=None,
+                investment_discretion="SOLE",
+                voting_authority_sole=5000.0,
+                voting_authority_shared=0.0,
+                voting_authority_none=0.0,
+                source="https://www.sec.gov/Archives/edgar/data/1/6/infotable.xml",
+            )
+        ],
+    )
+    monkeypatch.setattr(main_module, "get_company_capital_markets_events", lambda *_args, **_kwargs: [])
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/activity-feed")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["entries"]
+    entry_types = {item["type"] for item in payload["entries"]}
+    assert "event" in entry_types
+    assert "governance" in entry_types
+    assert "ownership-change" in entry_types
+    assert "insider" in entry_types
+    assert "institutional" in entry_types
+
+
+def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "_load_filings_from_cache", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_serialize_governance_filings", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000100",
+                form="SC 13D",
+                base_form="SC 13D",
+                filing_date=date(2026, 3, 16),
+                report_date=date(2026, 3, 15),
+                is_amendment=False,
+                primary_document="sc13d.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/100/sc13d.htm",
+                summary="Beneficial ownership filing.",
+                parties=[
+                    SimpleNamespace(
+                        party_name="Example Capital LP",
+                        role="reporting_person",
+                        filer_cik="0001234567",
+                        shares_owned=2500000.0,
+                        percent_owned=12.3,
+                        event_date=date(2026, 3, 15),
+                        purpose="Item 4 text",
+                    )
+                ],
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_capital_markets_events",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000101",
+                form="NT 10-Q",
+                filing_date=date(2026, 3, 17),
+                report_date=date(2026, 3, 17),
+                primary_document="nt10q.htm",
+                primary_doc_description="",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/101/nt10q.htm",
+                summary="Late filing notice.",
+                event_type="Late Filing Notice",
+                security_type=None,
+                offering_amount=None,
+                shelf_size=None,
+                is_late_filer=True,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_insider_trades",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                insider_name="John Doe",
+                role="Chief Financial Officer",
+                transaction_date=date(2026, 3, 5),
+                filing_date=date(2026, 3, 6),
+                filing_type="4",
+                accession_number="0000102",
+                source="https://www.sec.gov/Archives/edgar/data/1/102/form4.xml",
+                action="SELL",
+                transaction_code="S",
+                shares=2000.0,
+                price=170.0,
+                value=340000.0,
+                ownership_after=100000.0,
+                is_10b5_1=False,
+            )
+        ],
+    )
+    monkeypatch.setattr(main_module, "get_company_institutional_holdings", lambda *_args, **_kwargs: [])
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/alerts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["alerts"]
+    assert payload["summary"]["high"] >= 1
+    titles = {item["title"] for item in payload["alerts"]}
+    assert "Large beneficial ownership stake reported" in titles
+    assert "Late filer notice" in titles

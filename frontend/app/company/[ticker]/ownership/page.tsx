@@ -13,10 +13,12 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { HedgeFundActivityTable } from "@/components/tables/hedge-fund-activity-table";
 import { Panel } from "@/components/ui/panel";
+import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyInstitutionalHoldingsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
+import { buildSmartMoneySummary } from "@/lib/smart-money";
 import type { CompanyInstitutionalHoldingsSummaryResponse } from "@/lib/types";
 
 export default function CompanyOwnershipPage() {
@@ -47,6 +49,18 @@ export default function CompanyOwnershipPage() {
     [institutionalHoldings]
   );
   const summary = summaryData?.summary ?? null;
+  const smartMoney = useMemo(() => buildSmartMoneySummary(institutionalHoldings), [institutionalHoldings]);
+  const investorScorecard = useMemo(
+    () =>
+      buildOwnershipScorecard({
+        totalRows: summary?.total_rows ?? institutionalHoldings.length,
+        uniqueManagers: summary?.unique_managers ?? 0,
+        amendedRows: summary?.amended_rows ?? 0,
+        latestQuarter: summary?.latest_reporting_date ?? latestReportingDate,
+        smartMoney
+      }),
+    [institutionalHoldings.length, latestReportingDate, smartMoney, summary?.amended_rows, summary?.latest_reporting_date, summary?.total_rows, summary?.unique_managers]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +127,17 @@ export default function CompanyOwnershipPage() {
         {summaryError ? <div className="text-muted">{summaryError}</div> : null}
       </Panel>
 
+      <Panel title="Plain-English Scorecard" subtitle="Simple read on whether institutional holders are adding, trimming, or staying mixed">
+        <PlainEnglishScorecard
+          title="Ownership Dashboard Scorecard"
+          label={investorScorecard.label}
+          tone={investorScorecard.tone}
+          summary={investorScorecard.summary}
+          explanation={investorScorecard.explanation}
+          chips={investorScorecard.chips}
+        />
+      </Panel>
+
       <Panel title="Smart Money Summary" subtitle="Quarter-over-quarter view of institutional positioning from 13F filings">
         <SmartMoneySummary
           holdings={institutionalHoldings}
@@ -156,4 +181,71 @@ function Metric({ label, value }: { label: string; value: string | null }) {
       <div className="metric-value">{value ?? "?"}</div>
     </div>
   );
+}
+
+function buildOwnershipScorecard({
+  totalRows,
+  uniqueManagers,
+  amendedRows,
+  latestQuarter,
+  smartMoney
+}: {
+  totalRows: number;
+  uniqueManagers: number;
+  amendedRows: number;
+  latestQuarter: string | null;
+  smartMoney: ReturnType<typeof buildSmartMoneySummary>;
+}) {
+  if (!smartMoney) {
+    return {
+      label: "Coverage pending",
+      tone: "low" as const,
+      summary: "There is not enough quarter-over-quarter 13F data here to form a clean institutional signal yet.",
+      explanation: "As more reporting periods are cached, this page will become better at showing whether funds are building or trimming positions.",
+      chips: [`${totalRows.toLocaleString()} tracked rows`, `${uniqueManagers.toLocaleString()} managers`]
+    };
+  }
+
+  if (smartMoney.sentiment === "bullish") {
+    return {
+      label: "Accumulation signal",
+      tone: "bullish" as const,
+      summary: "Institutional holders are leaning toward adding exposure.",
+      explanation: "More funds are increasing positions than cutting them, and the net dollar flow is positive. That usually means professional investors are getting more comfortable owning the stock.",
+      chips: [
+        `${smartMoney.fund_increasing} funds adding`,
+        `${smartMoney.fund_decreasing} trimming`,
+        `${amendedRows.toLocaleString()} amended filings`,
+        latestQuarter ? `latest quarter ${formatDate(latestQuarter)}` : "latest quarter pending"
+      ]
+    };
+  }
+
+  if (smartMoney.sentiment === "bearish") {
+    return {
+      label: "Distribution signal",
+      tone: "bearish" as const,
+      summary: "Institutional holders are leaning toward trimming exposure.",
+      explanation: "More funds are reducing positions than adding, and the net dollar flow is negative. That can signal weaker conviction or risk reduction by professional investors.",
+      chips: [
+        `${smartMoney.fund_increasing} funds adding`,
+        `${smartMoney.fund_decreasing} trimming`,
+        `${uniqueManagers.toLocaleString()} managers`,
+        latestQuarter ? `latest quarter ${formatDate(latestQuarter)}` : "latest quarter pending"
+      ]
+    };
+  }
+
+  return {
+    label: "Mixed positioning",
+    tone: "neutral" as const,
+    summary: "Institutional ownership looks active, but not clearly one-sided.",
+    explanation: "Funds are trading the name, but the available 13F changes do not point to a strong accumulation or distribution trend right now.",
+    chips: [
+      `${smartMoney.fund_increasing} funds adding`,
+      `${smartMoney.fund_decreasing} trimming`,
+      `${totalRows.toLocaleString()} tracked rows`,
+      latestQuarter ? `latest quarter ${formatDate(latestQuarter)}` : "latest quarter pending"
+    ]
+  };
 }

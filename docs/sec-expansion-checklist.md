@@ -66,7 +66,7 @@ Acceptance criteria:
 
 - [x] Add API route test for `GET /api/companies/{ticker}/filing-insights`.
 - [x] Add serializer tests for insider and institutional payloads.
-- [ ] Add frontend render tests for filing metadata cells if a frontend test harness exists.
+- [x] Add frontend render tests for filing metadata cells if a frontend test harness exists.
 
 Definition of done:
 

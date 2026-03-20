@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 import html
+import os
 import re
 from typing import Iterable
 from xml.etree import ElementTree
@@ -14,7 +15,10 @@ from sqlalchemy.orm import Session
 from app.models import BeneficialOwnershipParty, BeneficialOwnershipReport, Company
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
-SUPPORTED_BENEFICIAL_OWNERSHIP_FORMS = {"SC 13D", "SC 13D/A", "SC 13G", "SC 13G/A"}
+_BENEFICIAL_OWNERSHIP_FORM_PATTERN = re.compile(
+    r"^(?:SC\s+|SCHEDULE\s+)?(13D|13G)\s*(/A)?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(slots=True)
@@ -30,6 +34,10 @@ class BeneficialOwnershipNormalizedReport:
     source_url: str
     summary: str
     parties: tuple["BeneficialOwnershipNormalizedParty", ...] = ()
+    amendment_chain_key: str | None = None
+    previous_accession_number: str | None = None
+    amendment_sequence: int | None = None
+    amendment_chain_size: int | None = None
 
 
 @dataclass(slots=True)
@@ -50,11 +58,10 @@ def collect_beneficial_ownership_reports(
 ) -> list[BeneficialOwnershipNormalizedReport]:
     rows: list[BeneficialOwnershipNormalizedReport] = []
     for filing in filing_index.values():
-        form = (filing.form or "").upper()
-        if form not in SUPPORTED_BENEFICIAL_OWNERSHIP_FORMS:
+        normalized_form = _normalize_beneficial_ownership_form(filing.form)
+        if normalized_form is None:
             continue
-        base_form = "SC 13D" if form.startswith("SC 13D") else "SC 13G"
-        is_amendment = form.endswith("/A")
+        form, base_form, is_amendment = normalized_form
         source_url = _build_filing_document_url(cik, filing.accession_number, filing.primary_document)
         description = (filing.primary_doc_description or "").strip() or None
         summary = description or (
@@ -65,6 +72,16 @@ def collect_beneficial_ownership_reports(
             try:
                 _, document_payload = client.get_filing_document_text(cik, filing.accession_number, filing.primary_document)
                 parties = _extract_parties_from_document(document_payload)
+            except Exception:
+                parties = ()
+        if client is not None and not parties:
+            try:
+                _, submission_payload = client.get_filing_document_text(
+                    cik,
+                    filing.accession_number,
+                    f"{filing.accession_number.replace('-', '')}.txt",
+                )
+                parties = _extract_parties_from_submission_text(submission_payload)
             except Exception:
                 parties = ()
         rows.append(
@@ -82,8 +99,78 @@ def collect_beneficial_ownership_reports(
                 parties=parties,
             )
         )
+    _assign_amendment_chain_history(rows)
     rows.sort(key=lambda row: (row.filing_date or row.report_date or datetime.min.date(), row.accession_number), reverse=True)
     return rows
+
+
+def _normalize_beneficial_ownership_form(form: str | None) -> tuple[str, str, bool] | None:
+    normalized = re.sub(r"\s+", " ", (form or "").strip()).upper()
+    match = _BENEFICIAL_OWNERSHIP_FORM_PATTERN.fullmatch(normalized)
+    if not match:
+        return None
+
+    family = match.group(1).upper()
+    is_amendment = bool(match.group(2))
+    base_form = f"SC {family}"
+    canonical_form = f"{base_form}/A" if is_amendment else base_form
+    return canonical_form, base_form, is_amendment
+
+
+def _assign_amendment_chain_history(reports: list[BeneficialOwnershipNormalizedReport]) -> None:
+    chains: dict[str, list[BeneficialOwnershipNormalizedReport]] = {}
+    for report in reports:
+        chain_key = _build_amendment_chain_key(report)
+        report.amendment_chain_key = chain_key
+        chains.setdefault(chain_key, []).append(report)
+
+    for chain in chains.values():
+        chain.sort(key=lambda item: (item.filing_date or item.report_date or datetime.min.date(), item.accession_number))
+        chain_size = len(chain)
+        for index, report in enumerate(chain):
+            report.amendment_sequence = index + 1
+            report.amendment_chain_size = chain_size
+            report.previous_accession_number = chain[index - 1].accession_number if index > 0 else None
+
+
+def _build_amendment_chain_key(report: BeneficialOwnershipNormalizedReport) -> str:
+    ciks = sorted({party.filer_cik for party in report.parties if party.filer_cik})
+    if ciks:
+        return _truncate_chain_key(f"{report.base_form}:cik:{'|'.join(ciks)}")
+
+    names = sorted({_normalize_chain_name(party.party_name) for party in report.parties if party.party_name.strip()})
+    names = [name for name in names if name]
+    if names:
+        return _truncate_chain_key(f"{report.base_form}:name:{'|'.join(names)}")
+
+    document_token = _document_chain_token(report.primary_document)
+    if document_token:
+        return _truncate_chain_key(f"{report.base_form}:doc:{document_token}")
+
+    accession = report.accession_number.replace("-", "")
+    return _truncate_chain_key(f"{report.base_form}:accession:{accession}")
+
+
+def _normalize_chain_name(value: str) -> str:
+    lowered = value.strip().lower()
+    normalized = re.sub(r"\s+", " ", lowered)
+    return normalized
+
+
+def _truncate_chain_key(value: str) -> str:
+    if len(value) <= 180:
+        return value
+    return value[:180]
+
+
+def _document_chain_token(primary_document: str | None) -> str | None:
+    if not primary_document:
+        return None
+    stem, _ = os.path.splitext(primary_document)
+    normalized = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+    if len(normalized) < 4:
+        return None
+    return normalized[:96]
 
 
 def upsert_beneficial_ownership_reports(
@@ -109,6 +196,10 @@ def upsert_beneficial_ownership_reports(
                 primary_doc_description=report.primary_doc_description,
                 source_url=report.source_url,
                 summary=report.summary,
+                amendment_chain_key=report.amendment_chain_key,
+                previous_accession_number=report.previous_accession_number,
+                amendment_sequence=report.amendment_sequence,
+                amendment_chain_size=report.amendment_chain_size,
                 last_checked=checked_at,
             )
             .on_conflict_do_update(
@@ -123,6 +214,10 @@ def upsert_beneficial_ownership_reports(
                     "primary_doc_description": report.primary_doc_description,
                     "source_url": report.source_url,
                     "summary": report.summary,
+                    "amendment_chain_key": report.amendment_chain_key,
+                    "previous_accession_number": report.previous_accession_number,
+                    "amendment_sequence": report.amendment_sequence,
+                    "amendment_chain_size": report.amendment_chain_size,
                     "last_checked": checked_at,
                     "last_updated": checked_at,
                 },
@@ -174,6 +269,39 @@ def _extract_parties_from_document(document_payload: str) -> tuple[BeneficialOwn
     xml_parties = _extract_parties_from_xml(document_payload)
     if xml_parties:
         return xml_parties
+    return _extract_parties_from_text(document_payload)
+
+
+def _extract_parties_from_submission_text(document_payload: str) -> tuple[BeneficialOwnershipNormalizedParty, ...]:
+    if not document_payload:
+        return ()
+
+    parties: list[BeneficialOwnershipNormalizedParty] = []
+    seen_keys: set[tuple[str, str | None]] = set()
+
+    for match in re.finditer(
+        r"(?is)FILED\s+BY\s*:\s*.*?COMPANY\s+CONFORMED\s+NAME\s*:\s*(.{2,160}?)\s+CENTRAL\s+INDEX\s+KEY\s*:\s*(\d{5,10})",
+        document_payload,
+    ):
+        name = _clean_text(match.group(1))
+        filer_cik = _normalize_cik(match.group(2))
+        if not name:
+            continue
+        key = (name.lower(), filer_cik)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        parties.append(
+            BeneficialOwnershipNormalizedParty(
+                party_name=name,
+                role="reporting_person",
+                filer_cik=filer_cik,
+            )
+        )
+
+    if parties:
+        return tuple(parties)
+
     return _extract_parties_from_text(document_payload)
 
 
@@ -262,9 +390,9 @@ def _extract_parties_from_text(document_payload: str) -> tuple[BeneficialOwnersh
         normalize=_parse_number,
     )
     event_date = _first_match(
-        r"(?is)date\s+of\s+event\s+which\s+requires\s+filing\s+of\s+this\s+statement\s*[:\-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2})",
+        r"(?is)date\s+of\s+event\s+which\s+requires\s+filing\s+of\s+this\s+statement\s*[:\-]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{1,2}/[0-9]{1,2}/[0-9]{4})",
         plain_text,
-        normalize=_parse_iso_date,
+        normalize=_parse_flexible_date,
     )
     purpose = _extract_purpose_from_text(plain_text)
 
@@ -287,10 +415,14 @@ def _find_name_candidates(plain_text: str) -> list[str]:
     patterns = [
         r"(?im)^\s*name\s+of\s+reporting\s+person\s*[:\-]\s*(.{3,120})$",
         r"(?im)^\s*reporting\s+person\s*[:\-]\s*(.{3,120})$",
+        r"(?is)name\s+of\s+reporting\s+person\s*[:\-]\s*([A-Za-z0-9 ,.'()&-]{3,120})",
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, plain_text):
-            name = _clean_text(match.group(1))
+            raw_name = _clean_text(match.group(1))
+            if not raw_name:
+                continue
+            name = re.split(r"\b(?:CIK|IRS|ITEM\s+\d+)\b", raw_name, maxsplit=1, flags=re.IGNORECASE)[0].strip(" ;:,")
             if not name:
                 continue
             if any(token in name.lower() for token in ["irs", "identification", "check", "source"]):
@@ -354,6 +486,25 @@ def _parse_iso_date(value: str | None) -> date | None:
         return None
     try:
         return date.fromisoformat(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_flexible_date(value: str | None) -> date | None:
+    cleaned = _clean_text(value)
+    if not cleaned:
+        return None
+
+    iso_date = _parse_iso_date(cleaned)
+    if iso_date is not None:
+        return iso_date
+
+    match = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", cleaned)
+    if not match:
+        return None
+    month, day, year = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    try:
+        return date(year, month, day)
     except ValueError:
         return None
 

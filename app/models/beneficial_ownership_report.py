@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -23,6 +23,7 @@ class BeneficialOwnershipReport(Base):
         ),
         Index("ix_beneficial_ownership_reports_company_id", "company_id"),
         Index("ix_beneficial_ownership_reports_company_filing_date", "company_id", "filing_date"),
+        Index("ix_beneficial_ownership_reports_company_chain_key", "company_id", "amendment_chain_key"),
         Index("ix_beneficial_ownership_reports_company_last_checked", "company_id", "last_checked"),
     )
 
@@ -38,6 +39,10 @@ class BeneficialOwnershipReport(Base):
     primary_doc_description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_url: Mapped[str] = mapped_column(String(500), nullable=False)
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    amendment_chain_key: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    previous_accession_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    amendment_sequence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    amendment_chain_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

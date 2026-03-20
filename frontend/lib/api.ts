@@ -1,4 +1,6 @@
 import {
+  CompanyActivityFeedResponse,
+  CompanyAlertsResponse,
   CompanyCapitalRaisesResponse,
   CompanyCapitalMarketsSummaryResponse,
   CompanyFinancialsResponse,
@@ -8,6 +10,7 @@ import {
   CompanyFilingEventsSummaryResponse,
   CompanyFilingsResponse,
   CompanyFilingInsightsResponse,
+  CompanyForm144Response,
   CompanyGovernanceResponse,
   CompanyGovernanceSummaryResponse,
   CompanyInsiderTradesResponse,
@@ -102,6 +105,14 @@ export function getCompanyCapitalMarketsSummary(ticker: string): Promise<Company
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-markets/summary`);
 }
 
+export function getCompanyActivityFeed(ticker: string): Promise<CompanyActivityFeedResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/activity-feed`);
+}
+
+export function getCompanyAlerts(ticker: string): Promise<CompanyAlertsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/alerts`);
+}
+
 
 
 export function getCompanyFilingInsights(ticker: string): Promise<CompanyFilingInsightsResponse> {
@@ -110,6 +121,10 @@ export function getCompanyFilingInsights(ticker: string): Promise<CompanyFilingI
 
 export function getCompanyInsiderTrades(ticker: string): Promise<CompanyInsiderTradesResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/insider-trades`);
+}
+
+export function getCompanyForm144Filings(ticker: string): Promise<CompanyForm144Response> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/form-144-filings`);
 }
 
 export function getCompanyInstitutionalHoldings(ticker: string): Promise<CompanyInstitutionalHoldingsResponse> {

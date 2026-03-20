@@ -42,6 +42,7 @@ class FilingEvent(Base):
     source_url: Mapped[str] = mapped_column(String(500), nullable=False)
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
     key_amounts: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    exhibit_references: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

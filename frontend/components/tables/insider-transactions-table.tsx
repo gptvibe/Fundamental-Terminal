@@ -150,8 +150,8 @@ export function InsiderTransactionsTable({
 
         <div className="insider-toolbar-meta">
           <span>{filteredTrades.length} trades</span>
-          <span>{buyCount} buys</span>
-          <span>{sellCount} sells</span>
+          <span className="insider-toolbar-meta-buy">{buyCount} buys</span>
+          <span className="insider-toolbar-meta-sell">{sellCount} sells</span>
           <span>{refresh?.triggered ? "updating" : "up to date"}</span>
         </div>
       </div>

@@ -8,6 +8,7 @@ import type { FilingEventPayload } from "@/lib/types";
 
 const CATEGORY_COLORS: Record<string, string> = {
   Earnings: "#00E5FF",
+  Accounting: "#F97316",
   Leadership: "#FFD700",
   Deal: "#FF6B6B",
   Financing: "#7CFFCB",

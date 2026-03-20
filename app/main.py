@@ -4,6 +4,7 @@ import logging
 import asyncio
 import html
 import json
+import os
 import re
 import time
 from datetime import date as DateType, datetime, timezone
@@ -19,7 +20,7 @@ from app.config import settings
 from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
-from app.models import FinancialStatement, InsiderTrade, ModelRun, PriceHistory
+from app.models import FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -31,6 +32,8 @@ from app.services import (
     CompanyCacheSnapshot,
     get_company_financials,
     get_company_filing_insights,
+    get_company_form144_cache_status,
+    get_company_form144_filings,
     get_company_insider_trade_cache_status,
     get_company_insider_trades,
     get_company_institutional_holdings,
@@ -236,6 +239,30 @@ class CompanyInsiderTradesResponse(BaseModel):
     refresh: RefreshState
 
 
+class Form144FilingPayload(BaseModel):
+    accession_number: str
+    form: str
+    filing_date: DateType | None = None
+    report_date: DateType | None = None
+    filer_name: str | None = None
+    relationship_to_issuer: str | None = None
+    issuer_name: str | None = None
+    security_title: str | None = None
+    planned_sale_date: DateType | None = None
+    shares_to_be_sold: Number = None
+    aggregate_market_value: Number = None
+    shares_owned_after_sale: Number = None
+    broker_name: str | None = None
+    source_url: str
+    summary: str
+
+
+class CompanyForm144Response(BaseModel):
+    company: CompanyPayload | None
+    filings: list[Form144FilingPayload]
+    refresh: RefreshState
+
+
 class LargestInsiderTradePayload(BaseModel):
     insider: str
     type: Literal["BUY", "SELL", "OTHER"]
@@ -438,6 +465,13 @@ class BeneficialOwnershipFilingPayload(BaseModel):
     source_url: str
     summary: str
     parties: list[BeneficialOwnershipPartyPayload] = Field(default_factory=list)
+    previous_accession_number: str | None = None
+    amendment_sequence: int | None = None
+    amendment_chain_size: int | None = None
+    previous_filing_date: DateType | None = None
+    previous_percent_owned: Number = None
+    percent_change_pp: Number = None
+    change_direction: Literal["increase", "decrease", "unchanged", "new", "unknown"] | None = None
 
 
 class CompanyBeneficialOwnershipResponse(BaseModel):
@@ -455,6 +489,13 @@ class BeneficialOwnershipSummaryPayload(BaseModel):
     latest_filing_date: DateType | None = None
     latest_event_date: DateType | None = None
     max_reported_percent: Number = None
+    chains_with_amendments: int
+    amendments_with_delta: int
+    ownership_increase_events: int
+    ownership_decrease_events: int
+    ownership_unchanged_events: int
+    largest_increase_pp: Number = None
+    largest_decrease_pp: Number = None
 
 
 class CompanyBeneficialOwnershipSummaryResponse(BaseModel):
@@ -567,6 +608,7 @@ class FilingEventPayload(BaseModel):
     source_url: str
     summary: str
     key_amounts: list[float] = Field(default_factory=list)
+    exhibit_references: list[str] = Field(default_factory=list)
 
 
 class CompanyEventsResponse(BaseModel):
@@ -587,6 +629,48 @@ class FilingEventsSummaryPayload(BaseModel):
 class CompanyFilingEventsSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: FilingEventsSummaryPayload
+    refresh: RefreshState
+    error: str | None = None
+
+
+class ActivityFeedEntryPayload(BaseModel):
+    id: str
+    date: DateType | None = None
+    type: str
+    badge: str
+    title: str
+    detail: str
+    href: str | None = None
+
+
+class CompanyActivityFeedResponse(BaseModel):
+    company: CompanyPayload | None
+    entries: list[ActivityFeedEntryPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class AlertPayload(BaseModel):
+    id: str
+    level: Literal["high", "medium", "low"]
+    title: str
+    detail: str
+    source: str
+    date: DateType | None = None
+    href: str | None = None
+
+
+class AlertsSummaryPayload(BaseModel):
+    total: int
+    high: int
+    medium: int
+    low: int
+
+
+class CompanyAlertsResponse(BaseModel):
+    company: CompanyPayload | None
+    alerts: list[AlertPayload]
+    summary: AlertsSummaryPayload
     refresh: RefreshState
     error: str | None = None
 
@@ -900,6 +984,38 @@ def company_institutional_holdings_summary(
     )
 
 
+@app.get("/api/companies/{ticker}/form-144-filings", response_model=CompanyForm144Response)
+def company_form144_filings(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyForm144Response:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyForm144Response(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    form144_last_checked, form144_cache_state = get_company_form144_cache_status(session, snapshot.company)
+    filings = get_company_form144_filings(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=form144_cache_state)
+        if form144_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    return CompanyForm144Response(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, form144_last_checked),
+        ),
+        filings=[_serialize_form144_filing(filing) for filing in filings],
+        refresh=refresh,
+    )
+
+
 @app.get("/api/insiders/{ticker}", response_model=InsiderAnalyticsResponse)
 def insider_analytics(
     ticker: str,
@@ -1135,7 +1251,9 @@ def company_beneficial_ownership(
     # Serve from DB cache when available; fall back to live SEC submissions if empty.
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     if cached_reports:
-        filings = [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+        filings = _enrich_beneficial_ownership_amendment_history(
+            [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+        )
         return CompanyBeneficialOwnershipResponse(
             company=_serialize_company(snapshot),
             filings=filings,
@@ -1147,10 +1265,12 @@ def company_beneficial_ownership(
     try:
         submissions = client.get_submissions(snapshot.company.cik)
         filing_index = client.build_filing_index(submissions)
-        filings = [
-            _serialize_normalized_beneficial_ownership_report(report)
-            for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
-        ]
+        filings = _enrich_beneficial_ownership_amendment_history(
+            [
+                _serialize_normalized_beneficial_ownership_report(report)
+                for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
+            ]
+        )
         return CompanyBeneficialOwnershipResponse(
             company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"base_form", "is_amendment", "summary"})) for item in filings]) if filings else None),
             filings=filings,
@@ -1188,7 +1308,9 @@ def company_beneficial_ownership_summary(
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     if cached_reports:
-        filings = [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+        filings = _enrich_beneficial_ownership_amendment_history(
+            [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+        )
         return CompanyBeneficialOwnershipSummaryResponse(
             company=_serialize_company(snapshot),
             summary=_build_beneficial_ownership_summary(filings),
@@ -1200,10 +1322,12 @@ def company_beneficial_ownership_summary(
     try:
         submissions = client.get_submissions(snapshot.company.cik)
         filing_index = client.build_filing_index(submissions)
-        filings = [
-            _serialize_normalized_beneficial_ownership_report(report)
-            for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
-        ]
+        filings = _enrich_beneficial_ownership_amendment_history(
+            [
+                _serialize_normalized_beneficial_ownership_report(report)
+                for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
+            ]
+        )
         return CompanyBeneficialOwnershipSummaryResponse(
             company=_serialize_company(snapshot),
             summary=_build_beneficial_ownership_summary(filings),
@@ -1572,6 +1696,80 @@ def company_filing_events_summary(
         client.close()
 
 
+@app.get("/api/companies/{ticker}/activity-feed", response_model=CompanyActivityFeedResponse)
+def company_activity_feed(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyActivityFeedResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyActivityFeedResponse(
+            company=None,
+            entries=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    activity = _load_company_activity_data(session, snapshot)
+    entries = _build_activity_feed_entries(
+        filings=activity["filings"],
+        filing_events=activity["filing_events"],
+        governance_filings=activity["governance_filings"],
+        beneficial_filings=activity["beneficial_filings"],
+        insider_trades=activity["insider_trades"],
+        institutional_holdings=activity["institutional_holdings"],
+    )
+    return CompanyActivityFeedResponse(
+        company=_serialize_company(snapshot),
+        entries=entries,
+        refresh=refresh,
+        error=None,
+    )
+
+
+@app.get("/api/companies/{ticker}/alerts", response_model=CompanyAlertsResponse)
+def company_alerts(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyAlertsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyAlertsResponse(
+            company=None,
+            alerts=[],
+            summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    activity = _load_company_activity_data(session, snapshot)
+    alerts = _build_activity_alerts(
+        beneficial_filings=activity["beneficial_filings"],
+        capital_filings=activity["capital_filings"],
+        insider_trades=activity["insider_trades"],
+        institutional_holdings=activity["institutional_holdings"],
+    )
+    summary = AlertsSummaryPayload(
+        total=len(alerts),
+        high=sum(1 for alert in alerts if alert.level == "high"),
+        medium=sum(1 for alert in alerts if alert.level == "medium"),
+        low=sum(1 for alert in alerts if alert.level == "low"),
+    )
+    return CompanyAlertsResponse(
+        company=_serialize_company(snapshot),
+        alerts=alerts,
+        summary=summary,
+        refresh=refresh,
+        error=None,
+    )
+
+
 @app.get("/api/filings/{ticker}", response_model=list[FilingTimelineItemPayload])
 def filings_timeline(
     ticker: str,
@@ -1921,6 +2119,26 @@ def _serialize_insider_trade(trade: InsiderTrade) -> InsiderTradePayload:
     )
 
 
+def _serialize_form144_filing(filing: Form144Filing) -> Form144FilingPayload:
+    return Form144FilingPayload(
+        accession_number=filing.accession_number,
+        form=filing.form,
+        filing_date=filing.filing_date,
+        report_date=filing.report_date,
+        filer_name=filing.filer_name,
+        relationship_to_issuer=filing.relationship_to_issuer,
+        issuer_name=filing.issuer_name,
+        security_title=filing.security_title,
+        planned_sale_date=filing.planned_sale_date,
+        shares_to_be_sold=filing.shares_to_be_sold,
+        aggregate_market_value=filing.aggregate_market_value,
+        shares_owned_after_sale=filing.shares_owned_after_sale,
+        broker_name=filing.broker_name,
+        source_url=filing.source_url,
+        summary=filing.summary,
+    )
+
+
 def _serialize_insider_activity_summary(summary) -> InsiderActivitySummaryPayload:
     return InsiderActivitySummaryPayload(
         sentiment=summary.sentiment,
@@ -2072,6 +2290,7 @@ def _serialize_beneficial_ownership_filing(cik: str, filing: FilingMetadata) -> 
         source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
         summary=summary,
         parties=[],
+        previous_accession_number=None,
     )
 
 
@@ -2099,6 +2318,9 @@ def _serialize_cached_beneficial_ownership_report(report) -> BeneficialOwnership
             )
             for party in report.parties
         ],
+        previous_accession_number=getattr(report, "previous_accession_number", None),
+        amendment_sequence=getattr(report, "amendment_sequence", None),
+        amendment_chain_size=getattr(report, "amendment_chain_size", None),
     )
 
 
@@ -2126,6 +2348,9 @@ def _serialize_normalized_beneficial_ownership_report(report) -> BeneficialOwner
             )
             for party in report.parties
         ],
+        previous_accession_number=getattr(report, "previous_accession_number", None),
+        amendment_sequence=getattr(report, "amendment_sequence", None),
+        amendment_chain_size=getattr(report, "amendment_chain_size", None),
     )
 
 
@@ -2134,6 +2359,8 @@ def _build_beneficial_ownership_summary(
 ) -> BeneficialOwnershipSummaryPayload:
     if not filings:
         return _empty_beneficial_ownership_summary()
+
+    _enrich_beneficial_ownership_amendment_history(filings)
 
     unique_people = {
         party.party_name.strip().lower()
@@ -2154,6 +2381,33 @@ def _build_beneficial_ownership_summary(
         default=None,
     )
     amendments = sum(1 for filing in filings if filing.is_amendment)
+    chains_with_amendments = len(
+        {
+            key
+            for key, chain in _group_beneficial_ownership_chains(filings).items()
+            if len(chain) > 1 and any(item.is_amendment for item in chain)
+        }
+    )
+
+    amendments_with_delta = sum(
+        1
+        for filing in filings
+        if filing.is_amendment and filing.percent_change_pp is not None
+    )
+    ownership_increase_events = sum(1 for filing in filings if filing.change_direction == "increase")
+    ownership_decrease_events = sum(1 for filing in filings if filing.change_direction == "decrease")
+    ownership_unchanged_events = sum(1 for filing in filings if filing.change_direction == "unchanged")
+
+    positive_deltas = [
+        filing.percent_change_pp
+        for filing in filings
+        if filing.percent_change_pp is not None and filing.percent_change_pp > 0
+    ]
+    negative_deltas = [
+        filing.percent_change_pp
+        for filing in filings
+        if filing.percent_change_pp is not None and filing.percent_change_pp < 0
+    ]
 
     return BeneficialOwnershipSummaryPayload(
         total_filings=len(filings),
@@ -2163,6 +2417,13 @@ def _build_beneficial_ownership_summary(
         latest_filing_date=latest_filing_date,
         latest_event_date=latest_event_date,
         max_reported_percent=max_percent,
+        chains_with_amendments=chains_with_amendments,
+        amendments_with_delta=amendments_with_delta,
+        ownership_increase_events=ownership_increase_events,
+        ownership_decrease_events=ownership_decrease_events,
+        ownership_unchanged_events=ownership_unchanged_events,
+        largest_increase_pp=max(positive_deltas, default=None),
+        largest_decrease_pp=min(negative_deltas, default=None),
     )
 
 
@@ -2175,7 +2436,147 @@ def _empty_beneficial_ownership_summary() -> BeneficialOwnershipSummaryPayload:
         latest_filing_date=None,
         latest_event_date=None,
         max_reported_percent=None,
+        chains_with_amendments=0,
+        amendments_with_delta=0,
+        ownership_increase_events=0,
+        ownership_decrease_events=0,
+        ownership_unchanged_events=0,
+        largest_increase_pp=None,
+        largest_decrease_pp=None,
     )
+
+
+def _group_beneficial_ownership_chains(
+    filings: list[BeneficialOwnershipFilingPayload],
+) -> dict[str, list[BeneficialOwnershipFilingPayload]]:
+    chains: dict[str, list[BeneficialOwnershipFilingPayload]] = {}
+    for filing in filings:
+        key = _beneficial_ownership_chain_key(filing)
+        if key is None:
+            continue
+        chains.setdefault(key, []).append(filing)
+
+    for chain in chains.values():
+        chain.sort(
+            key=lambda item: (
+                item.filing_date or item.report_date or DateType.min,
+                item.accession_number or "",
+            )
+        )
+    return chains
+
+
+def _beneficial_ownership_chain_key(filing: BeneficialOwnershipFilingPayload) -> str | None:
+    for party in filing.parties:
+        name = (party.party_name or "").strip().lower()
+        if name:
+            return f"{filing.base_form}:name:{name}"
+        filer_cik = (party.filer_cik or "").strip()
+        if filer_cik:
+            return f"{filing.base_form}:cik:{filer_cik}"
+
+    accession = (filing.accession_number or "").strip()
+    document_token = _beneficial_ownership_document_token(filing.primary_document)
+    if document_token:
+        return f"{filing.base_form}:doc:{document_token}"
+    if accession:
+        return f"{filing.base_form}:accession:{accession}"
+    return None
+
+
+def _beneficial_ownership_document_token(primary_document: str | None) -> str | None:
+    if not primary_document:
+        return None
+    stem, _ = os.path.splitext(primary_document)
+    normalized = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")
+    if len(normalized) < 4:
+        return None
+    return normalized[:96]
+
+
+def _beneficial_ownership_primary_percent(filing: BeneficialOwnershipFilingPayload) -> float | None:
+    percents = [party.percent_owned for party in filing.parties if party.percent_owned is not None]
+    if not percents:
+        return None
+    return max(float(percent) for percent in percents)
+
+
+def _enrich_beneficial_ownership_amendment_history(
+    filings: list[BeneficialOwnershipFilingPayload],
+) -> list[BeneficialOwnershipFilingPayload]:
+    if not filings:
+        return filings
+
+    filing_by_accession = {
+        filing.accession_number: filing
+        for filing in filings
+        if filing.accession_number
+    }
+
+    for filing in filings:
+        previous_accession = (filing.previous_accession_number or "").strip() or None
+        if not previous_accession:
+            continue
+        previous_filing = filing_by_accession.get(previous_accession)
+        if previous_filing is None:
+            continue
+
+        filing.previous_filing_date = previous_filing.filing_date or previous_filing.report_date
+        previous_percent = _beneficial_ownership_primary_percent(previous_filing)
+        current_percent = _beneficial_ownership_primary_percent(filing)
+        filing.previous_percent_owned = previous_percent
+
+        if previous_percent is None or current_percent is None:
+            filing.change_direction = filing.change_direction or "unknown"
+            continue
+
+        percent_change = current_percent - previous_percent
+        filing.percent_change_pp = percent_change
+
+        if percent_change > 0:
+            filing.change_direction = "increase"
+        elif percent_change < 0:
+            filing.change_direction = "decrease"
+        else:
+            filing.change_direction = "unchanged"
+
+    for chain in _group_beneficial_ownership_chains(filings).values():
+        chain_size = len(chain)
+        for index, filing in enumerate(chain):
+            if filing.amendment_sequence is None:
+                filing.amendment_sequence = index + 1
+            if filing.amendment_chain_size is None:
+                filing.amendment_chain_size = chain_size
+
+            if filing.previous_accession_number:
+                continue
+
+            if index == 0:
+                filing.change_direction = filing.change_direction or ("unknown" if filing.is_amendment else "new")
+                continue
+
+            previous_filing = chain[index - 1]
+            filing.previous_accession_number = previous_filing.accession_number
+            filing.previous_filing_date = previous_filing.filing_date or previous_filing.report_date
+            previous_percent = _beneficial_ownership_primary_percent(previous_filing)
+            current_percent = _beneficial_ownership_primary_percent(filing)
+            filing.previous_percent_owned = previous_percent
+
+            if previous_percent is None or current_percent is None:
+                filing.change_direction = filing.change_direction or "unknown"
+                continue
+
+            percent_change = current_percent - previous_percent
+            filing.percent_change_pp = percent_change
+
+            if percent_change > 0:
+                filing.change_direction = "increase"
+            elif percent_change < 0:
+                filing.change_direction = "decrease"
+            else:
+                filing.change_direction = "unchanged"
+
+    return filings
 
 
 def _serialize_governance_filings(
@@ -2333,6 +2734,7 @@ def _serialize_filing_event(cik: str, filing: FilingMetadata) -> FilingEventPayl
         source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
         summary=summary,
         key_amounts=[],
+        exhibit_references=[],
     )
 
 
@@ -2350,6 +2752,7 @@ def _serialize_cached_filing_event(event) -> FilingEventPayload:
         source_url=event.source_url,
         summary=event.summary,
         key_amounts=[float(value) for value in (event.key_amounts or [])],
+        exhibit_references=[str(value) for value in (getattr(event, "exhibit_references", []) or [])],
     )
 
 
@@ -2367,6 +2770,7 @@ def _serialize_normalized_filing_event(event) -> FilingEventPayload:
         source_url=event.source_url,
         summary=event.summary,
         key_amounts=list(event.key_amounts),
+        exhibit_references=list(event.exhibit_references),
     )
 
 
@@ -2649,6 +3053,245 @@ def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
         latest_filing_date=None,
         max_offering_amount=None,
     )
+
+
+def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot) -> dict[str, Any]:
+    cached_filings = _load_filings_from_cache(snapshot.company.cik)
+    filings = cached_filings or _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
+    filing_events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    beneficial_filings = [
+        _serialize_cached_beneficial_ownership_report(report)
+        for report in get_company_beneficial_ownership_reports(session, snapshot.company.id)
+    ]
+    insider_trades = [_serialize_insider_trade(trade) for trade in get_company_insider_trades(session, snapshot.company.id, limit=80)]
+    institutional_holdings = [
+        _serialize_institutional_holding(holding)
+        for holding in get_company_institutional_holdings(session, snapshot.company.id, limit=80)
+    ]
+    capital_filings = [
+        _serialize_cached_capital_markets_event(event)
+        for event in get_company_capital_markets_events(session, snapshot.company.id)
+    ]
+
+    governance_filings: list[GovernanceFilingPayload] = []
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        governance_filings = _serialize_governance_filings(snapshot.company.cik, filing_index, client=client)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load governance filings for activity feed for '%s'", snapshot.company.ticker)
+        governance_filings = []
+    finally:
+        client.close()
+
+    return {
+        "filings": filings,
+        "filing_events": filing_events,
+        "governance_filings": governance_filings,
+        "beneficial_filings": beneficial_filings,
+        "insider_trades": insider_trades,
+        "institutional_holdings": institutional_holdings,
+        "capital_filings": capital_filings,
+    }
+
+
+def _build_activity_feed_entries(
+    *,
+    filings: list[FilingPayload],
+    filing_events: list[FilingEventPayload],
+    governance_filings: list[GovernanceFilingPayload],
+    beneficial_filings: list[BeneficialOwnershipFilingPayload],
+    insider_trades: list[InsiderTradePayload],
+    institutional_holdings: list[InstitutionalHoldingPayload],
+) -> list[ActivityFeedEntryPayload]:
+    entries: list[ActivityFeedEntryPayload] = []
+
+    for filing in filings[:40]:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"filing-{filing.accession_number or filing.source_url}",
+                date=filing.filing_date or filing.report_date,
+                type="filing",
+                badge=filing.form,
+                title=_filing_timeline_description(filing),
+                detail=filing.accession_number or "SEC filing",
+                href=filing.source_url,
+            )
+        )
+
+    for event in filing_events:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"event-{event.accession_number or event.source_url}-{event.item_code or 'na'}",
+                date=event.filing_date or event.report_date,
+                type="event",
+                badge=event.category,
+                title=event.summary,
+                detail=f"{event.form}{f' - Items {event.items}' if event.items else ''}",
+                href=event.source_url,
+            )
+        )
+
+    for filing in governance_filings:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"governance-{filing.accession_number or filing.source_url}",
+                date=filing.filing_date or filing.report_date,
+                type="governance",
+                badge=filing.form,
+                title=filing.summary,
+                detail=filing.accession_number or "Proxy filing",
+                href=filing.source_url,
+            )
+        )
+
+    for filing in beneficial_filings:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"ownership-{filing.accession_number or filing.source_url}",
+                date=filing.filing_date or filing.report_date,
+                type="ownership-change",
+                badge=filing.form,
+                title=filing.summary,
+                detail="Amendment" if filing.is_amendment else "Initial stake disclosure",
+                href=filing.source_url,
+            )
+        )
+
+    for trade in insider_trades[:40]:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"insider-{trade.accession_number or f'{trade.name}-{trade.date}'}",
+                date=trade.filing_date or trade.date,
+                type="insider",
+                badge=trade.action,
+                title=f"{trade.name} {trade.action.lower()} activity",
+                detail=f"{trade.role or 'Insider'}{f' - ${trade.value:,.0f}' if trade.value is not None else ''}",
+                href=trade.source,
+            )
+        )
+
+    for holding in institutional_holdings[:40]:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"institutional-{holding.accession_number or f'{holding.fund_name}-{holding.reporting_date}'}",
+                date=holding.filing_date or holding.reporting_date,
+                type="institutional",
+                badge=holding.base_form or holding.filing_form or "13F",
+                title=f"{holding.fund_name} updated holdings",
+                detail=(
+                    f"{holding.shares_held:,.0f} shares"
+                    if holding.shares_held is not None
+                    else "Tracked 13F position"
+                ),
+                href=holding.source,
+            )
+        )
+
+    entries.sort(
+        key=lambda item: (
+            item.date or DateType.min,
+            item.id,
+        ),
+        reverse=True,
+    )
+    return entries[:220]
+
+
+def _build_activity_alerts(
+    *,
+    beneficial_filings: list[BeneficialOwnershipFilingPayload],
+    capital_filings: list[CapitalRaisePayload],
+    insider_trades: list[InsiderTradePayload],
+    institutional_holdings: list[InstitutionalHoldingPayload],
+) -> list[AlertPayload]:
+    alerts: list[AlertPayload] = []
+
+    for filing in beneficial_filings[:30]:
+        max_percent = max((party.percent_owned for party in filing.parties if party.percent_owned is not None), default=None)
+        if max_percent is not None and max_percent >= 5:
+            alerts.append(
+                AlertPayload(
+                    id=f"alert-activist-{filing.accession_number or filing.source_url}",
+                    level="high" if max_percent >= 10 else "medium",
+                    title="Large beneficial ownership stake reported",
+                    detail=f"{filing.form} reported up to {max_percent:.2f}% beneficial ownership.",
+                    source="beneficial-ownership",
+                    date=filing.filing_date or filing.report_date,
+                    href=filing.source_url,
+                )
+            )
+
+    for filing in capital_filings[:40]:
+        if filing.is_late_filer:
+            alerts.append(
+                AlertPayload(
+                    id=f"alert-late-{filing.accession_number or filing.source_url}",
+                    level="high",
+                    title="Late filer notice",
+                    detail=f"{filing.form} indicates a delayed periodic filing.",
+                    source="capital-markets",
+                    date=filing.filing_date or filing.report_date,
+                    href=filing.source_url,
+                )
+            )
+            continue
+
+        if filing.event_type in {"Registration", "Prospectus"}:
+            size_hint = filing.offering_amount or filing.shelf_size
+            detail = "New financing-related filing detected."
+            if size_hint is not None:
+                detail = f"Potential financing of approximately ${size_hint:,.0f}."
+            alerts.append(
+                AlertPayload(
+                    id=f"alert-financing-{filing.accession_number or filing.source_url}",
+                    level="medium",
+                    title="Potential dilution or financing activity",
+                    detail=detail,
+                    source="capital-markets",
+                    date=filing.filing_date or filing.report_date,
+                    href=filing.source_url,
+                )
+            )
+
+    recent_buys = sum(1 for trade in insider_trades[:120] if (trade.action or "").upper() == "BUY")
+    recent_sells = sum(1 for trade in insider_trades[:120] if (trade.action or "").upper() == "SELL")
+    if recent_buys == 0 and recent_sells > 0:
+        alerts.append(
+            AlertPayload(
+                id="alert-insider-buy-drought",
+                level="medium",
+                title="Insider buying drought",
+                detail="Recent filings show sells without offsetting insider buys.",
+                source="insider-trades",
+                date=max((trade.filing_date or trade.date for trade in insider_trades if trade.filing_date or trade.date), default=None),
+                href=None,
+            )
+        )
+
+    for holding in institutional_holdings[:80]:
+        if holding.percent_change is not None and holding.percent_change <= -20:
+            alerts.append(
+                AlertPayload(
+                    id=f"alert-inst-exit-{holding.accession_number or f'{holding.fund_name}-{holding.reporting_date}'}",
+                    level="medium",
+                    title="Large institutional position reduction",
+                    detail=f"{holding.fund_name} reported a {holding.percent_change:.2f}% position change.",
+                    source="institutional-holdings",
+                    date=holding.filing_date or holding.reporting_date,
+                    href=holding.source,
+                )
+            )
+
+    alerts.sort(
+        key=lambda item: (
+            0 if item.level == "high" else 1 if item.level == "medium" else 2,
+            item.date or DateType.min,
+            item.id,
+        )
+    )
+    return alerts[:30]
 
 
 def _is_governance_form(form: str | None) -> bool:

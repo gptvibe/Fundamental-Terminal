@@ -16,10 +16,14 @@ EVENT_ITEM_LABELS: dict[str, str] = {
     "2.01": "Completion of Acquisition or Disposition of Assets",
     "2.02": "Results of Operations and Financial Condition",
     "2.03": "Creation of a Direct Financial Obligation",
+    "2.04": "Triggering Events That Accelerate or Increase a Direct Financial Obligation",
     "2.06": "Material Impairments",
     "3.01": "Notice of Delisting or Failure to Satisfy Listing Rule",
     "3.02": "Unregistered Sales of Equity Securities",
+    "4.01": "Changes in Registrant's Certifying Accountant",
+    "4.02": "Non-Reliance on Previously Issued Financial Statements",
     "5.02": "Departure/Election of Directors or Officers",
+    "5.03": "Amendments to Articles of Incorporation or Bylaws",
     "7.01": "Regulation FD Disclosure",
     "8.01": "Other Events",
     "9.01": "Financial Statements and Exhibits",
@@ -40,6 +44,7 @@ class NormalizedFilingEvent:
     source_url: str
     summary: str
     key_amounts: tuple[float, ...] = ()
+    exhibit_references: tuple[str, ...] = ()
 
 
 def collect_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> list[NormalizedFilingEvent]:
@@ -55,6 +60,7 @@ def collect_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> 
             item_tokens = ["UNSPECIFIED"]
 
         key_amounts = _extract_key_amounts(description)
+        exhibit_references = _extract_exhibit_references(item_tokens, description)
         for item_code in item_tokens:
             category = _classify_event(item_code, description)
             summary = _build_event_summary(item_code, description, key_amounts)
@@ -72,6 +78,7 @@ def collect_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> 
                     source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
                     summary=summary,
                     key_amounts=key_amounts,
+                    exhibit_references=exhibit_references,
                 )
             )
 
@@ -104,6 +111,7 @@ def upsert_filing_events(
                 source_url=event.source_url,
                 summary=event.summary,
                 key_amounts=list(event.key_amounts),
+                exhibit_references=list(event.exhibit_references),
                 last_checked=checked_at,
             )
             .on_conflict_do_update(
@@ -119,6 +127,7 @@ def upsert_filing_events(
                     "source_url": event.source_url,
                     "summary": event.summary,
                     "key_amounts": list(event.key_amounts),
+                    "exhibit_references": list(event.exhibit_references),
                     "last_checked": checked_at,
                     "last_updated": checked_at,
                 },
@@ -151,6 +160,8 @@ def _classify_event(item_code: str, description: str | None) -> str:
         return "Deal"
     if item_code in {"2.03", "2.04", "2.05", "2.06"}:
         return "Financing"
+    if item_code in {"4.01", "4.02"}:
+        return "Accounting"
     if item_code in {"5.02", "5.03", "5.05"}:
         return "Leadership"
     if item_code in {"3.01", "3.02", "3.03"}:
@@ -198,6 +209,28 @@ def _extract_key_amounts(description: str | None) -> tuple[float, ...]:
         if len(values) >= 3:
             break
     return tuple(values)
+
+
+def _extract_exhibit_references(item_tokens: list[str], description: str | None) -> tuple[str, ...]:
+    if not description:
+        return ()
+    has_item_901 = "9.01" in item_tokens
+    description_text = description.lower()
+    if not has_item_901 and "exhibit" not in description_text and " ex-" not in description_text:
+        return ()
+
+    references: list[str] = []
+    seen: set[str] = set()
+    pattern = re.compile(r"\b(?:exhibit|ex)\s*(?:no\.?\s*)?(?:-|:)?\s*([0-9]{1,3}(?:\.[0-9]{1,3})?)\b", re.IGNORECASE)
+    for match in pattern.finditer(description):
+        ref = match.group(1)
+        if ref in seen:
+            continue
+        seen.add(ref)
+        references.append(ref)
+        if len(references) >= 20:
+            break
+    return tuple(references)
 
 
 def _normalize_optional_text(value: str | None) -> str | None:

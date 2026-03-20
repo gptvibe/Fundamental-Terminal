@@ -8,27 +8,17 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyBeneficialOwnership, getCompanyEvents, getCompanyGovernance } from "@/lib/api";
-import { formatCompactNumber, formatDate } from "@/lib/format";
-import type { CompanyBeneficialOwnershipResponse, CompanyEventsResponse, CompanyGovernanceResponse } from "@/lib/types";
+import { getCompanyActivityFeed, getCompanyAlerts } from "@/lib/api";
+import { formatDate } from "@/lib/format";
+import type { CompanyActivityFeedResponse, CompanyAlertsResponse } from "@/lib/types";
 
-type FeedEntry = {
-  id: string;
-  date: string | null;
-  type: string;
-  badge: string;
-  title: string;
-  detail: string;
-  href?: string;
-};
+type AlertLevelFilter = "all" | "high" | "medium" | "low";
 
 export default function CompanySecFeedPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const {
     company,
-    insiderTrades,
-    institutionalHoldings,
     loading: workspaceLoading,
     refreshing,
     refreshState,
@@ -36,12 +26,12 @@ export default function CompanySecFeedPage() {
     connectionState,
     queueRefresh,
     reloadKey
-  } = useCompanyWorkspace(ticker, { includeInsiders: true, includeInstitutional: true });
-  const [eventsData, setEventsData] = useState<CompanyEventsResponse | null>(null);
-  const [governanceData, setGovernanceData] = useState<CompanyGovernanceResponse | null>(null);
-  const [ownershipData, setOwnershipData] = useState<CompanyBeneficialOwnershipResponse | null>(null);
+  } = useCompanyWorkspace(ticker);
+  const [activityData, setActivityData] = useState<CompanyActivityFeedResponse | null>(null);
+  const [alertsData, setAlertsData] = useState<CompanyAlertsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [alertLevelFilter, setAlertLevelFilter] = useState<AlertLevelFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -50,15 +40,13 @@ export default function CompanySecFeedPage() {
       try {
         setLoading(true);
         setError(null);
-        const [events, governance, ownership] = await Promise.all([
-          getCompanyEvents(ticker),
-          getCompanyGovernance(ticker),
-          getCompanyBeneficialOwnership(ticker),
+        const [activity, alerts] = await Promise.all([
+          getCompanyActivityFeed(ticker),
+          getCompanyAlerts(ticker),
         ]);
         if (!cancelled) {
-          setEventsData(events);
-          setGovernanceData(governance);
-          setOwnershipData(ownership);
+          setActivityData(activity);
+          setAlertsData(alerts);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -77,73 +65,14 @@ export default function CompanySecFeedPage() {
     };
   }, [reloadKey, ticker]);
 
-  const feed = useMemo<FeedEntry[]>(() => {
-    const entries: FeedEntry[] = [];
+  const feed = useMemo(() => activityData?.entries ?? [], [activityData?.entries]);
+  const filteredAlerts = useMemo(
+    () => (alertsData?.alerts ?? []).filter((alert) => alertLevelFilter === "all" || alert.level === alertLevelFilter),
+    [alertLevelFilter, alertsData?.alerts]
+  );
+  const topAlerts = useMemo(() => filteredAlerts.slice(0, 3), [filteredAlerts]);
 
-    for (const event of eventsData?.events ?? []) {
-      entries.push({
-        id: `event-${event.accession_number ?? event.source_url}`,
-        date: event.filing_date ?? event.report_date,
-        type: "event",
-        badge: event.category,
-        title: event.summary,
-        detail: `${event.form}${event.items ? ` · Items ${event.items}` : ""}`,
-        href: event.source_url,
-      });
-    }
-
-    for (const filing of governanceData?.filings ?? []) {
-      entries.push({
-        id: `gov-${filing.accession_number ?? filing.source_url}`,
-        date: filing.filing_date ?? filing.report_date,
-        type: "governance",
-        badge: filing.form,
-        title: filing.summary,
-        detail: filing.accession_number ?? "Proxy filing",
-        href: filing.source_url,
-      });
-    }
-
-    for (const filing of ownershipData?.filings ?? []) {
-      entries.push({
-        id: `owner-${filing.accession_number ?? filing.source_url}`,
-        date: filing.filing_date ?? filing.report_date,
-        type: "ownership-change",
-        badge: filing.form,
-        title: filing.summary,
-        detail: filing.is_amendment ? "Amendment" : "Initial stake disclosure",
-        href: filing.source_url,
-      });
-    }
-
-    for (const trade of insiderTrades.slice(0, 40)) {
-      entries.push({
-        id: `insider-${trade.accession_number ?? `${trade.name}-${trade.date}`}`,
-        date: trade.filing_date ?? trade.date,
-        type: "insider",
-        badge: trade.action,
-        title: `${trade.name} ${trade.action.toLowerCase()} activity`,
-        detail: `${trade.role ?? "Insider"}${trade.value !== null ? ` · ${formatCompactNumber(trade.value)}` : ""}`,
-        href: trade.source ?? undefined,
-      });
-    }
-
-    for (const holding of institutionalHoldings.slice(0, 40)) {
-      entries.push({
-        id: `inst-${holding.accession_number ?? `${holding.fund_name}-${holding.reporting_date}`}`,
-        date: holding.filing_date ?? holding.reporting_date,
-        type: "institutional",
-        badge: "13F",
-        title: `${holding.fund_name} reported updated holdings`,
-        detail: `${holding.shares_held !== null ? `${formatCompactNumber(holding.shares_held)} shares` : "Tracked position"}${holding.percent_change !== null ? ` · ${holding.percent_change.toFixed(2)}% change` : ""}`,
-        href: holding.source ?? undefined,
-      });
-    }
-
-    return entries.sort((left, right) => Date.parse(right.date ?? "1970-01-01") - Date.parse(left.date ?? "1970-01-01"));
-  }, [eventsData?.events, governanceData?.filings, insiderTrades, institutionalHoldings, ownershipData?.filings]);
-
-  const effectiveRefreshState = eventsData?.refresh ?? governanceData?.refresh ?? ownershipData?.refresh ?? refreshState;
+  const effectiveRefreshState = activityData?.refresh ?? refreshState;
   const latestDate = feed[0]?.date ?? null;
 
   return (
@@ -151,8 +80,8 @@ export default function CompanySecFeedPage() {
       rail={
         <CompanyUtilityRail
           ticker={ticker}
-          companyName={company?.name ?? eventsData?.company?.name ?? governanceData?.company?.name ?? ownershipData?.company?.name ?? null}
-          sector={company?.sector ?? eventsData?.company?.sector ?? governanceData?.company?.sector ?? ownershipData?.company?.sector ?? null}
+          companyName={company?.name ?? activityData?.company?.name ?? null}
+          sector={company?.sector ?? activityData?.company?.sector ?? null}
           refreshState={effectiveRefreshState}
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}
@@ -166,7 +95,7 @@ export default function CompanySecFeedPage() {
           statusLines={[
             `Feed entries: ${feed.length.toLocaleString()}`,
             `Latest SEC activity: ${latestDate ? formatDate(latestDate) : "Pending"}`,
-            `Insider trades loaded: ${insiderTrades.length.toLocaleString()} · 13F rows loaded: ${institutionalHoldings.length.toLocaleString()}`
+            `Sources unified: filings, events, governance, ownership, insiders, and 13F activity`
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -179,8 +108,89 @@ export default function CompanySecFeedPage() {
           <Metric label="Ticker" value={ticker} />
           <Metric label="Feed Entries" value={feed.length.toLocaleString()} />
           <Metric label="Latest Activity" value={latestDate ? formatDate(latestDate) : "Pending"} />
+          <Metric label="High Alerts" value={(alertsData?.summary.high ?? 0).toLocaleString()} />
           <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
         </div>
+      </Panel>
+
+      <Panel title="Priority Alerts" subtitle="Most important filing-driven signals from recent SEC activity">
+        {error ? (
+          <div className="text-muted">{error}</div>
+        ) : loading || workspaceLoading ? (
+          <div className="text-muted">Loading alerts...</div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {([
+                ["all", `All (${alertsData?.summary.total ?? 0})`],
+                ["high", `High (${alertsData?.summary.high ?? 0})`],
+                ["medium", `Medium (${alertsData?.summary.medium ?? 0})`],
+                ["low", `Low (${alertsData?.summary.low ?? 0})`],
+              ] as const).map(([level, label]) => (
+                <button
+                  key={level}
+                  type="button"
+                  className="pill"
+                  onClick={() => setAlertLevelFilter(level)}
+                  aria-pressed={alertLevelFilter === level}
+                  style={{
+                    cursor: "pointer",
+                    borderColor: alertLevelFilter === level ? "var(--accent)" : undefined,
+                    color: alertLevelFilter === level ? "var(--text)" : undefined,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {topAlerts.length ? topAlerts.map((alert) => {
+                const content = (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span className="pill">{alert.level}</span>
+                        <span className="pill">{alert.source}</span>
+                      </div>
+                      <div className="text-muted">{formatDate(alert.date)}</div>
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{alert.title}</div>
+                    <div className="text-muted" style={{ fontSize: 13 }}>{alert.detail}</div>
+                  </>
+                );
+
+                if (alert.href) {
+                  return (
+                    <a
+                      key={alert.id}
+                      href={alert.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="filing-link-card"
+                      style={{
+                        display: "grid",
+                        gap: 8,
+                        textDecoration: "none",
+                        borderColor: alert.level === "high" ? "rgba(255, 83, 83, 0.5)" : undefined,
+                      }}
+                    >
+                      {content}
+                    </a>
+                  );
+                }
+
+                return (
+                  <div
+                    key={alert.id}
+                    className="filing-link-card"
+                    style={{ display: "grid", gap: 8, borderColor: alert.level === "high" ? "rgba(255, 83, 83, 0.5)" : undefined }}
+                  >
+                    {content}
+                  </div>
+                );
+              }) : <div className="text-muted">No alerts in this severity filter.</div>}
+          </div>
+        )}
       </Panel>
 
       <Panel title="Chronological SEC Stream" subtitle="Events, proxy filings, stake disclosures, insider trades, and 13F updates in one timeline">

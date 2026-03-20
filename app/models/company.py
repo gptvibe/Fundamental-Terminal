@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.capital_markets_event import CapitalMarketsEvent
     from app.models.filing_event import FilingEvent
     from app.models.financial_statement import FinancialStatement
+    from app.models.form144_filing import Form144Filing
     from app.models.insider_trade import InsiderTrade
     from app.models.institutional_holding import InstitutionalHolding
     from app.models.model_run import ModelRun
@@ -39,6 +40,7 @@ class Company(Base):
     beneficial_ownership_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     filing_events_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     capital_markets_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    form144_filings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
         back_populates="company",
@@ -76,6 +78,11 @@ class Company(Base):
         passive_deletes=True,
     )
     capital_markets_events: Mapped[list["CapitalMarketsEvent"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    form144_filings: Mapped[list["Form144Filing"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

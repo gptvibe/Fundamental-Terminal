@@ -275,6 +275,13 @@ export interface BeneficialOwnershipFilingPayload {
   source_url: string;
   summary: string;
   parties: BeneficialOwnershipPartyPayload[];
+  previous_accession_number: string | null;
+  amendment_sequence: number | null;
+  amendment_chain_size: number | null;
+  previous_filing_date: string | null;
+  previous_percent_owned: number | null;
+  percent_change_pp: number | null;
+  change_direction: "increase" | "decrease" | "unchanged" | "new" | "unknown" | null;
 }
 
 export interface BeneficialOwnershipPartyPayload {
@@ -302,6 +309,13 @@ export interface BeneficialOwnershipSummaryPayload {
   latest_filing_date: string | null;
   latest_event_date: string | null;
   max_reported_percent: number | null;
+  chains_with_amendments: number;
+  amendments_with_delta: number;
+  ownership_increase_events: number;
+  ownership_decrease_events: number;
+  ownership_unchanged_events: number;
+  largest_increase_pp: number | null;
+  largest_decrease_pp: number | null;
 }
 
 export interface CompanyBeneficialOwnershipSummaryResponse {
@@ -375,6 +389,7 @@ export interface FilingEventPayload {
   source_url: string;
   summary: string;
   key_amounts: number[];
+  exhibit_references: string[];
 }
 
 export interface CompanyEventsResponse {
@@ -434,6 +449,48 @@ export interface CapitalMarketsSummaryPayload {
 export interface CompanyCapitalMarketsSummaryResponse {
   company: CompanyPayload | null;
   summary: CapitalMarketsSummaryPayload;
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface ActivityFeedEntryPayload {
+  id: string;
+  date: string | null;
+  type: string;
+  badge: string;
+  title: string;
+  detail: string;
+  href: string | null;
+}
+
+export interface CompanyActivityFeedResponse {
+  company: CompanyPayload | null;
+  entries: ActivityFeedEntryPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface AlertPayload {
+  id: string;
+  level: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  source: string;
+  date: string | null;
+  href: string | null;
+}
+
+export interface AlertsSummaryPayload {
+  total: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface CompanyAlertsResponse {
+  company: CompanyPayload | null;
+  alerts: AlertPayload[];
+  summary: AlertsSummaryPayload;
   refresh: RefreshState;
   error: string | null;
 }
@@ -512,5 +569,28 @@ export interface ConsoleEntry {
   level: "info" | "success" | "error";
   status: "queued" | "running" | "completed" | "failed";
   source: "backend" | "client";
+}
+
+export interface Form144FilingPayload {
+  accession_number: string | null;
+  form: string;
+  filing_date: string | null;
+  filer_name: string | null;
+  relationship_to_issuer: string | null;
+  issuer_name: string | null;
+  security_title: string | null;
+  planned_sale_date: string | null;
+  shares_to_be_sold: number | null;
+  aggregate_market_value: number | null;
+  shares_owned_after_sale: number | null;
+  broker_name: string | null;
+  source_url: string | null;
+  summary: string | null;
+}
+
+export interface CompanyForm144Response {
+  company: CompanyPayload | null;
+  filings: Form144FilingPayload[];
+  refresh: RefreshState;
 }
 

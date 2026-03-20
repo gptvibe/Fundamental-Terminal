@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart } from "recharts";
 
 import { BeneficialOwnershipFormChart } from "@/components/charts/beneficial-ownership-form-chart";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
+import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyBeneficialOwnership, getCompanyBeneficialOwnershipSummary } from "@/lib/api";
+import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatDate } from "@/lib/format";
 import type { CompanyBeneficialOwnershipResponse, CompanyBeneficialOwnershipSummaryResponse } from "@/lib/types";
 
@@ -70,6 +73,8 @@ export default function CompanyOwnershipChangesPage() {
   const latestFilingDate = filings[0]?.filing_date ?? filings[0]?.report_date ?? null;
   const amendments = filings.filter((filing) => filing.is_amendment).length;
   const initialFilings = filings.length - amendments;
+  const increaseEvents = filings.filter((filing) => filing.change_direction === "increase").length;
+  const decreaseEvents = filings.filter((filing) => filing.change_direction === "decrease").length;
   const formMix = useMemo(() => {
     const counts = new Map<string, number>();
     for (const filing of filings) {
@@ -77,6 +82,28 @@ export default function CompanyOwnershipChangesPage() {
     }
     return [...counts.entries()].map(([form, count]) => `${form}: ${count.toLocaleString()}`).join(" · ");
   }, [filings]);
+  const monthlyTimeline = useMemo(() => buildMonthlyTimeline(filings), [filings]);
+  const directionBreakdown = useMemo(() => buildDirectionBreakdown(filings), [filings]);
+  const signalQuality = useMemo(() => {
+    const totalAmendments = summary?.amendments ?? amendments;
+    const quantified = summary?.amendments_with_delta ?? filings.filter((filing) => filing.percent_change_pp != null).length;
+    const coverage = totalAmendments > 0 ? quantified / totalAmendments : 0;
+    return {
+      totalAmendments,
+      quantified,
+      coverage
+    };
+  }, [amendments, filings, summary?.amendments, summary?.amendments_with_delta]);
+  const investorScorecard = useMemo(
+    () => buildInvestorScorecard({
+      totalFilings: summary?.total_filings ?? filings.length,
+      amendmentChains: summary?.chains_with_amendments ?? 0,
+      increaseEvents: summary?.ownership_increase_events ?? increaseEvents,
+      decreaseEvents: summary?.ownership_decrease_events ?? decreaseEvents,
+      coverage: signalQuality.coverage
+    }),
+    [decreaseEvents, filings.length, increaseEvents, signalQuality.coverage, summary?.chains_with_amendments, summary?.ownership_decrease_events, summary?.ownership_increase_events, summary?.total_filings]
+  );
 
   return (
     <CompanyWorkspaceShell
@@ -121,11 +148,115 @@ export default function CompanyOwnershipChangesPage() {
             label="Latest Event Date"
             value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : "Pending"}
           />
+          <Metric label="Amendment Chains" value={(summary?.chains_with_amendments ?? 0).toLocaleString()} />
+          <Metric label="Increase Events" value={(summary?.ownership_increase_events ?? increaseEvents).toLocaleString()} />
+          <Metric label="Decrease Events" value={(summary?.ownership_decrease_events ?? decreaseEvents).toLocaleString()} />
+          <Metric
+            label="Largest Increase"
+            value={summary?.largest_increase_pp != null ? `${formatSignedNumber(summary.largest_increase_pp)} pp` : "Pending"}
+          />
+          <Metric
+            label="Largest Decrease"
+            value={summary?.largest_decrease_pp != null ? `${formatSignedNumber(summary.largest_decrease_pp)} pp` : "Pending"}
+          />
         </div>
       </Panel>
 
       <Panel title="Form Mix" subtitle="How many initial stake disclosures versus amendments are visible in SEC submissions">
         <BeneficialOwnershipFormChart filings={filings} />
+      </Panel>
+
+      <Panel title="Signal Visuals" subtitle="Quick trend views to spot ownership momentum without reading every filing">
+        {error || data?.error ? (
+          <div className="text-muted">{error ?? data?.error}</div>
+        ) : loading || workspaceLoading ? (
+          <div className="text-muted">Preparing stake-change visuals...</div>
+        ) : filings.length ? (
+          <div style={{ display: "grid", gap: 16 }}>
+            <PlainEnglishScorecard
+              title="Simple Activity Scorecard"
+              label={investorScorecard.label}
+              tone={investorScorecard.tone}
+              summary={investorScorecard.summary}
+              explanation={investorScorecard.explanation}
+              chips={[
+                `${(summary?.total_filings ?? filings.length).toLocaleString()} filings`,
+                `${(summary?.chains_with_amendments ?? 0).toLocaleString()} amendment chains`,
+                `${signalQuality.quantified.toLocaleString()} quantified deltas`
+              ]}
+            />
+
+            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+              <div className="metric-card" style={{ minHeight: 280 }}>
+                <div className="metric-label">Monthly Filing Pace</div>
+                <div className="text-muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                  More filings usually mean active stake updates or governance pressure.
+                </div>
+                <div style={{ width: "100%", height: 210 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={monthlyTimeline} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="month" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} />
+                      <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(11)} allowDecimals={false} />
+                      <Tooltip
+                        {...RECHARTS_TOOLTIP_PROPS}
+                        formatter={(value: number, name: string) => [value.toLocaleString(), name === "amendments" ? "Amendments" : "Initial filings"]}
+                      />
+                      <Bar dataKey="initials" name="Initial filings" stackId="filings" fill="#00E5FF" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="amendments" name="Amendments" stackId="filings" fill="#FFB020" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="metric-card" style={{ minHeight: 280 }}>
+                <div className="metric-label">Direction Breakdown</div>
+                <div className="text-muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                  Shows if disclosed ownership is mostly increasing, decreasing, or unclear.
+                </div>
+                <div style={{ width: "100%", height: 210 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={directionBreakdown} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} interval={0} />
+                      <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(11)} allowDecimals={false} />
+                      <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => value.toLocaleString()} />
+                      <Bar dataKey="count" name="Filings" fill="#5EEA9D" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            <div className="metric-card" style={{ display: "grid", gap: 10 }}>
+              <div className="metric-label">How To Read This (Plain English)</div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Initial filing: A person or fund reports a meaningful stake for the first time.
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Amendment: They update an earlier filing, often after changing position size or intent.
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Increase or decrease event: We measured a clear percentage-point change versus the prior filing.
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Unknown direction: SEC text did not provide enough structured numbers to quantify the change.
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Signal quality here: {signalQuality.quantified.toLocaleString()} of {signalQuality.totalAmendments.toLocaleString()} amendments have quantified deltas ({(signalQuality.coverage * 100).toFixed(1)}%).
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Practical tip: Treat this page as an early signal feed, then open the SEC filing link before making any investment decision.
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 220 }}>
+            <div className="grid-empty-kicker">Signal visuals</div>
+            <div className="grid-empty-title">No trend visuals yet</div>
+            <div className="grid-empty-copy">Visuals appear after the first 13D or 13G filings are cached for this company.</div>
+          </div>
+        )}
       </Panel>
 
       <Panel title="Filing Timeline" subtitle="Recent 13D and 13G activity with direct SEC document links">
@@ -148,10 +279,25 @@ export default function CompanyOwnershipChangesPage() {
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span className="pill">{filing.form}</span>
                     {filing.is_amendment ? <span className="pill">Amendment</span> : <span className="pill">Initial</span>}
+                    {filing.amendment_sequence != null && filing.amendment_chain_size != null ? (
+                      <span className="pill">Chain {filing.amendment_sequence}/{filing.amendment_chain_size}</span>
+                    ) : null}
+                    {filing.change_direction && filing.change_direction !== "new" && filing.change_direction !== "unknown" ? (
+                      <span className="pill">{filing.change_direction}</span>
+                    ) : null}
                   </div>
                   <div className="text-muted">{formatDate(filing.filing_date ?? filing.report_date)}</div>
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{filing.summary}</div>
+                {filing.is_amendment ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    {filing.percent_change_pp != null
+                      ? `Ownership change: ${formatSignedNumber(filing.percent_change_pp)} pp${filing.previous_percent_owned != null ? ` from ${filing.previous_percent_owned.toFixed(2)}%` : ""}`
+                      : "Ownership change: not quantifiable from this filing"}
+                    {filing.previous_filing_date ? ` · Previous filing ${formatDate(filing.previous_filing_date)}` : ""}
+                    {filing.previous_accession_number ? ` · Prior accession ${filing.previous_accession_number}` : ""}
+                  </div>
+                ) : null}
                 {filing.parties.length ? (
                   <div className="text-muted" style={{ fontSize: 13 }}>
                     {filing.parties.slice(0, 2).map((party) => {
@@ -190,4 +336,106 @@ function Metric({ label, value }: { label: string; value: string | null }) {
       <div className="metric-value">{value ?? "?"}</div>
     </div>
   );
+}
+
+function formatSignedNumber(value: number): string {
+  const rounded = Math.abs(value) >= 10 ? value.toFixed(1) : value.toFixed(2);
+  return value > 0 ? `+${rounded}` : rounded;
+}
+
+function buildMonthlyTimeline(filings: CompanyBeneficialOwnershipResponse["filings"]) {
+  const monthMap = new Map<string, { month: string; initials: number; amendments: number }>();
+
+  for (const filing of filings) {
+    const date = filing.filing_date ?? filing.report_date;
+    if (!date) {
+      continue;
+    }
+    const month = date.slice(0, 7);
+    const row = monthMap.get(month) ?? { month, initials: 0, amendments: 0 };
+    if (filing.is_amendment) {
+      row.amendments += 1;
+    } else {
+      row.initials += 1;
+    }
+    monthMap.set(month, row);
+  }
+
+  return [...monthMap.values()].sort((left, right) => left.month.localeCompare(right.month)).slice(-18);
+}
+
+function buildDirectionBreakdown(filings: CompanyBeneficialOwnershipResponse["filings"]) {
+  const counts = {
+    increase: 0,
+    decrease: 0,
+    unchanged: 0,
+    new: 0,
+    unknown: 0
+  };
+
+  for (const filing of filings) {
+    const direction = filing.change_direction ?? "unknown";
+    if (direction in counts) {
+      counts[direction as keyof typeof counts] += 1;
+    }
+  }
+
+  return [
+    { label: "Increase", count: counts.increase },
+    { label: "Decrease", count: counts.decrease },
+    { label: "Unchanged", count: counts.unchanged },
+    { label: "New", count: counts.new },
+    { label: "Unknown", count: counts.unknown }
+  ];
+}
+
+function buildInvestorScorecard({
+  totalFilings,
+  amendmentChains,
+  increaseEvents,
+  decreaseEvents,
+  coverage
+}: {
+  totalFilings: number;
+  amendmentChains: number;
+  increaseEvents: number;
+  decreaseEvents: number;
+  coverage: number;
+}) {
+  const directionalEvents = increaseEvents + decreaseEvents;
+  const netBias = increaseEvents - decreaseEvents;
+
+  if (totalFilings >= 40 || amendmentChains >= 8) {
+    return {
+      label: "High activity",
+      tone: "high" as const,
+      summary: "This company has a busy major-holder filing history.",
+      explanation:
+        netBias > 0
+          ? "There are many stake updates, and the measurable ones lean more toward ownership increases than decreases."
+          : netBias < 0
+            ? "There are many stake updates, and the measurable ones lean more toward ownership decreases than increases."
+            : "There are many stake updates, but the measurable ownership changes look mixed rather than one-sided."
+    };
+  }
+
+  if (directionalEvents >= 3 || coverage >= 0.25) {
+    return {
+      label: "Medium activity",
+      tone: "medium" as const,
+      summary: "There is enough filing movement here to watch for changes in big-holder conviction.",
+      explanation:
+        coverage >= 0.25
+          ? "A meaningful share of amendments can be quantified, so this page is useful for tracking whether major holders are adding or trimming."
+          : "Some stake changes are visible, but not enough to call this a strong trend yet."
+    };
+  }
+
+  return {
+    label: "Low activity",
+    tone: "low" as const,
+    summary: "This filing history looks relatively quiet or hard to quantify.",
+    explanation:
+      "That does not mean nothing is happening. It means there are fewer major-holder updates, or the SEC text does not provide enough structured numbers to measure them cleanly."
+  };
 }

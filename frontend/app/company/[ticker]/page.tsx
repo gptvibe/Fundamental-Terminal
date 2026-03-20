@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
@@ -15,7 +16,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
+import { getCompanyActivityFeed, getCompanyAlerts } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
+import type { CompanyActivityFeedResponse, CompanyAlertsResponse } from "@/lib/types";
 
 export default function CompanyOverviewPage() {
   const params = useParams<{ ticker: string }>();
@@ -33,6 +36,45 @@ export default function CompanyOverviewPage() {
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker, { includeChartConsole: true });
+  const [activityData, setActivityData] = useState<CompanyActivityFeedResponse | null>(null);
+  const [alertsData, setAlertsData] = useState<CompanyAlertsResponse | null>(null);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadActivity() {
+      try {
+        setActivityLoading(true);
+        setActivityError(null);
+        const [feed, alerts] = await Promise.all([
+          getCompanyActivityFeed(ticker),
+          getCompanyAlerts(ticker),
+        ]);
+        if (!cancelled) {
+          setActivityData(feed);
+          setAlertsData(alerts);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setActivityError(nextError instanceof Error ? nextError.message : "Unable to load activity feed");
+        }
+      } finally {
+        if (!cancelled) {
+          setActivityLoading(false);
+        }
+      }
+    }
+
+    void loadActivity();
+    return () => {
+      cancelled = true;
+    };
+  }, [ticker, reloadKey]);
+
+  const topAlerts = useMemo(() => (alertsData?.alerts ?? []).slice(0, 3), [alertsData?.alerts]);
+  const latestEntries = useMemo(() => (activityData?.entries ?? []).slice(0, 8), [activityData?.entries]);
 
   return (
     <CompanyWorkspaceShell
@@ -61,6 +103,62 @@ export default function CompanyOverviewPage() {
         >
           <Panel title="Risk & Red Flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals">
             <RiskRedFlagPanel ticker={ticker} financials={financials} reloadKey={reloadKey} />
+          </Panel>
+
+          <Panel title="Live Activity & Alerts" subtitle="Latest SEC activity with prioritized research alerts">
+            {activityError ? (
+              <div className="text-muted">{activityError}</div>
+            ) : activityLoading ? (
+              <div className="text-muted">Loading activity feed...</div>
+            ) : (
+              <div style={{ display: "grid", gap: 16 }}>
+                <div className="metric-grid">
+                  <Metric label="Feed Entries" value={(activityData?.entries.length ?? 0).toLocaleString()} />
+                  <Metric label="High Alerts" value={(alertsData?.summary.high ?? 0).toLocaleString()} />
+                  <Metric label="Medium Alerts" value={(alertsData?.summary.medium ?? 0).toLocaleString()} />
+                  <Metric label="Total Alerts" value={(alertsData?.summary.total ?? 0).toLocaleString()} />
+                </div>
+
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ fontWeight: 600, color: "var(--text)" }}>Top Alerts</div>
+                  {topAlerts.length ? topAlerts.map((alert) => (
+                    <AlertOrEntryCard
+                      key={alert.id}
+                      href={alert.href}
+                      borderColor={alert.level === "high" ? "rgba(255, 83, 83, 0.5)" : undefined}
+                      topLeft={
+                        <>
+                          <span className="pill">{alert.level}</span>
+                          <span className="pill">{alert.source}</span>
+                        </>
+                      }
+                      topRight={formatDate(alert.date)}
+                      title={alert.title}
+                      detail={alert.detail}
+                    />
+                  )) : <div className="text-muted">No alerts triggered from current cached SEC activity.</div>}
+                </div>
+
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ fontWeight: 600, color: "var(--text)" }}>Latest Timeline Entries</div>
+                  {latestEntries.length ? latestEntries.map((entry) => (
+                    <AlertOrEntryCard
+                      key={entry.id}
+                      href={entry.href}
+                      topLeft={
+                        <>
+                          <span className="pill">{entry.type}</span>
+                          <span className="pill">{entry.badge}</span>
+                        </>
+                      }
+                      topRight={formatDate(entry.date)}
+                      title={entry.title}
+                      detail={entry.detail}
+                    />
+                  )) : <div className="text-muted">No activity entries available yet.</div>}
+                </div>
+              </div>
+            )}
           </Panel>
         </CompanyUtilityRail>
       }
@@ -124,6 +222,53 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
     <div className={`summary-card accent-${accent}`}>
       <div className="summary-card-label">{label}</div>
       <div className="summary-card-value">{value}</div>
+    </div>
+  );
+}
+
+function AlertOrEntryCard({
+  href,
+  topLeft,
+  topRight,
+  title,
+  detail,
+  borderColor,
+}: {
+  href: string | null;
+  topLeft: ReactNode;
+  topRight: string;
+  title: string;
+  detail: string;
+  borderColor?: string;
+}) {
+  const content = (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{topLeft}</div>
+        <div className="text-muted">{topRight}</div>
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{title}</div>
+      <div className="text-muted" style={{ fontSize: 13 }}>{detail}</div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="filing-link-card"
+        style={{ display: "grid", gap: 8, textDecoration: "none", borderColor }}
+      >
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <div className="filing-link-card" style={{ display: "grid", gap: 8, borderColor }}>
+      {content}
     </div>
   );
 }

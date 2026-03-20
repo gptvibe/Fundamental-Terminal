@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
-from app.models import BeneficialOwnershipReport, Company, FinancialStatement, InsiderTrade
+from app.models import BeneficialOwnershipReport, Company, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -485,6 +485,26 @@ class NormalizedInsiderTrade:
 
 
 @dataclass(slots=True)
+class NormalizedForm144Filing:
+    accession_number: str
+    form: str
+    filing_date: date | None
+    report_date: date | None
+    transaction_index: int
+    filer_name: str | None
+    relationship_to_issuer: str | None
+    issuer_name: str | None
+    security_title: str | None
+    planned_sale_date: date | None
+    shares_to_be_sold: float | None
+    aggregate_market_value: float | None
+    shares_owned_after_sale: float | None
+    broker_name: str | None
+    source_url: str
+    summary: str
+
+
+@dataclass(slots=True)
 class IngestionResult:
     identifier: str
     company_id: int
@@ -493,6 +513,7 @@ class IngestionResult:
     status: str
     statements_written: int = 0
     insider_trades_written: int = 0
+    form144_filings_written: int = 0
     institutional_holdings_written: int = 0
     beneficial_ownership_written: int = 0
     price_points_written: int = 0
@@ -1153,6 +1174,63 @@ class EdgarIngestionService:
         _touch_company_insider_trades(session, company.id, checked_at)
         return trades_written
 
+    def _refresh_form144_filings(
+        self,
+        session: Session,
+        company: Company,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        *,
+        force: bool = False,
+    ) -> int:
+        existing_accessions = _existing_form144_accessions(session, company.id)
+        session.commit()
+        form144_filings = [
+            metadata
+            for metadata in filing_index.values()
+            if _base_form(metadata.form) == "144"
+        ]
+        form144_filings.sort(
+            key=lambda metadata: (
+                metadata.filing_date or date.min,
+                metadata.accession_number,
+            ),
+            reverse=True,
+        )
+        form144_filings = form144_filings[: settings.sec_form4_max_filings_per_refresh]
+
+        candidate_filings = form144_filings if force else [
+            metadata for metadata in form144_filings if metadata.accession_number not in existing_accessions
+        ]
+        if candidate_filings:
+            reporter.step("form144", f"Fetching {len(candidate_filings)} Form 144 filing(s)...")
+        else:
+            reporter.step("form144", "Checking cached Form 144 coverage...")
+
+        normalized_filings: list[NormalizedForm144Filing] = []
+        for metadata in candidate_filings:
+            source_url, payload = _load_form144_document(self.client, company.cik, metadata)
+            normalized_filings.extend(
+                _parse_form144_filings(
+                    payload=payload,
+                    source_url=source_url,
+                    filing_metadata=metadata,
+                )
+            )
+
+        reporter.step("database", "Saving Form 144 filings to database...")
+        filings_written = 0
+        if normalized_filings:
+            filings_written = _upsert_form144_filings(
+                session=session,
+                company=company,
+                normalized_filings=normalized_filings,
+                checked_at=checked_at,
+            )
+        _touch_company_form144_filings(session, company.id, checked_at)
+        return filings_written
+
     def refresh_company(
         self,
         identifier: str,
@@ -1186,6 +1264,7 @@ class EdgarIngestionService:
             latest_statement_checked = _latest_company_last_checked(session, local_company.id) if local_company else None
             latest_price_checked = get_company_price_last_checked(session, local_company.id) if local_company else None
             latest_insider_checked = _latest_insider_trade_last_checked(session, local_company) if local_company else None
+            latest_form144_checked = _latest_form144_last_checked(session, local_company) if local_company else None
             latest_institutional_checked = (
                 get_company_institutional_holdings_last_checked(session, local_company) if local_company else None
             )
@@ -1199,19 +1278,21 @@ class EdgarIngestionService:
             statements_fresh = latest_statement_checked is not None and latest_statement_checked >= freshness_cutoff
             prices_fresh = latest_price_checked is not None and latest_price_checked >= freshness_cutoff
             insider_fresh = latest_insider_checked is not None and latest_insider_checked >= freshness_cutoff
+            form144_fresh = latest_form144_checked is not None and latest_form144_checked >= freshness_cutoff
             institutional_fresh = (
                 latest_institutional_checked is not None and latest_institutional_checked >= freshness_cutoff
             )
             beneficial_fresh = (
                 latest_beneficial_checked is not None and latest_beneficial_checked >= freshness_cutoff
             )
-            effective_insider_fresh = insider_fresh or not refresh_insider_data
+            effective_insider_fresh = (insider_fresh and form144_fresh) or not refresh_insider_data
             effective_institutional_fresh = institutional_fresh or not refresh_institutional_data
             effective_beneficial_fresh = beneficial_fresh or not refresh_beneficial_ownership_data
 
             relevant_last_checked_values = [latest_statement_checked, latest_price_checked]
             if refresh_insider_data:
                 relevant_last_checked_values.append(latest_insider_checked)
+                relevant_last_checked_values.append(latest_form144_checked)
             if refresh_institutional_data:
                 relevant_last_checked_values.append(latest_institutional_checked)
             if refresh_beneficial_ownership_data:
@@ -1304,13 +1385,21 @@ class EdgarIngestionService:
                 and prices_fresh
                 and has_segment_breakdown_key
                 and effective_institutional_fresh
-                and not insider_fresh
+                and not effective_insider_fresh
             ):
                 session.commit()
-                active_reporter.step("sec", "Checking SEC for new Form 4 filings...")
+                active_reporter.step("sec", "Checking SEC for new Form 4/5 and Form 144 filings...")
                 submissions = self.client.get_submissions(local_company.cik)
                 filing_index = self.client.build_filing_index(submissions)
                 insider_trades_written = self._refresh_insider_trades(
+                    session=session,
+                    company=local_company,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=active_reporter,
+                    force=force,
+                )
+                form144_filings_written = self._refresh_form144_filings(
                     session=session,
                     company=local_company,
                     filing_index=filing_index,
@@ -1328,14 +1417,17 @@ class EdgarIngestionService:
                     status="fetched",
                     statements_written=0,
                     insider_trades_written=insider_trades_written,
+                    form144_filings_written=form144_filings_written,
                     institutional_holdings_written=0,
                     price_points_written=0,
                     fetched_from_sec=True,
                     last_checked=checked_at,
                     detail=(
-                        f"Cached {insider_trades_written} insider trades"
-                        if insider_trades_written
-                        else "Checked Form 4 filings; no new insider trades"
+                        (
+                            f"Cached {insider_trades_written} insider trades and {form144_filings_written} Form 144 filings"
+                            if insider_trades_written or form144_filings_written
+                            else "Checked Form 4/5 and Form 144 filings; no new insider activity records"
+                        )
                     ),
                 )
 
@@ -1485,8 +1577,17 @@ class EdgarIngestionService:
             session.commit()
 
             insider_trades_written = 0
-            if refresh_insider_data and (force or not insider_fresh):
+            form144_filings_written = 0
+            if refresh_insider_data and (force or not effective_insider_fresh):
                 insider_trades_written = self._refresh_insider_trades(
+                    session=session,
+                    company=company,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=active_reporter,
+                    force=force,
+                )
+                form144_filings_written = self._refresh_form144_filings(
                     session=session,
                     company=company,
                     filing_index=filing_index,
@@ -1569,11 +1670,16 @@ class EdgarIngestionService:
             active_reporter.complete("Refresh and compute complete.")
 
             detail_parts: list[str] = [f"Normalized {statements_written} filings"]
-            if refresh_insider_data and (force or not insider_fresh):
+            if refresh_insider_data and (force or not effective_insider_fresh):
                 detail_parts.append(
                     f"Cached {insider_trades_written} insider trades"
                     if insider_trades_written
                     else "Checked Form 4/5 filings"
+                )
+                detail_parts.append(
+                    f"Cached {form144_filings_written} Form 144 planned sale filing rows"
+                    if form144_filings_written
+                    else "Checked Form 144 filings"
                 )
             if refresh_institutional_data and (force or not institutional_fresh):
                 detail_parts.append(
@@ -1608,6 +1714,7 @@ class EdgarIngestionService:
                 status="fetched",
                 statements_written=statements_written + parsed_statements_written,
                 insider_trades_written=insider_trades_written,
+                form144_filings_written=form144_filings_written,
                 institutional_holdings_written=institutional_holdings_written,
                 beneficial_ownership_written=beneficial_ownership_written,
                 price_points_written=price_points_written,
@@ -1658,11 +1765,24 @@ def _existing_insider_trade_accessions(session: Session, company_id: int) -> set
     return {value for value in session.execute(statement).scalars() if value}
 
 
+def _existing_form144_accessions(session: Session, company_id: int) -> set[str]:
+    statement = select(Form144Filing.accession_number).where(Form144Filing.company_id == company_id).distinct()
+    return {value for value in session.execute(statement).scalars() if value}
+
+
 def _latest_insider_trade_last_checked(session: Session, company: Company) -> datetime | None:
     if company.insider_trades_last_checked is not None:
         return _normalize_datetime_value(company.insider_trades_last_checked)
 
     statement = select(func.max(InsiderTrade.last_checked)).where(InsiderTrade.company_id == company.id)
+    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _latest_form144_last_checked(session: Session, company: Company) -> datetime | None:
+    if company.form144_filings_last_checked is not None:
+        return _normalize_datetime_value(company.form144_filings_last_checked)
+
+    statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
     return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
 
 
@@ -1744,6 +1864,65 @@ def _upsert_insider_trades(
     return len(payload)
 
 
+def _upsert_form144_filings(
+    session: Session,
+    company: Company,
+    normalized_filings: list[NormalizedForm144Filing],
+    checked_at: datetime,
+) -> int:
+    if not normalized_filings:
+        return 0
+
+    payload = [
+        {
+            "company_id": company.id,
+            "accession_number": filing.accession_number,
+            "form": filing.form,
+            "filing_date": filing.filing_date,
+            "report_date": filing.report_date,
+            "transaction_index": filing.transaction_index,
+            "filer_name": filing.filer_name,
+            "relationship_to_issuer": filing.relationship_to_issuer,
+            "issuer_name": filing.issuer_name,
+            "security_title": filing.security_title,
+            "planned_sale_date": filing.planned_sale_date,
+            "shares_to_be_sold": filing.shares_to_be_sold,
+            "aggregate_market_value": filing.aggregate_market_value,
+            "shares_owned_after_sale": filing.shares_owned_after_sale,
+            "broker_name": filing.broker_name,
+            "source_url": filing.source_url,
+            "summary": filing.summary,
+            "last_checked": checked_at,
+        }
+        for filing in normalized_filings
+    ]
+
+    statement = insert(Form144Filing).values(payload)
+    statement = statement.on_conflict_do_update(
+        index_elements=["company_id", "accession_number", "transaction_index"],
+        set_={
+            "form": statement.excluded.form,
+            "filing_date": statement.excluded.filing_date,
+            "report_date": statement.excluded.report_date,
+            "filer_name": statement.excluded.filer_name,
+            "relationship_to_issuer": statement.excluded.relationship_to_issuer,
+            "issuer_name": statement.excluded.issuer_name,
+            "security_title": statement.excluded.security_title,
+            "planned_sale_date": statement.excluded.planned_sale_date,
+            "shares_to_be_sold": statement.excluded.shares_to_be_sold,
+            "aggregate_market_value": statement.excluded.aggregate_market_value,
+            "shares_owned_after_sale": statement.excluded.shares_owned_after_sale,
+            "broker_name": statement.excluded.broker_name,
+            "source_url": statement.excluded.source_url,
+            "summary": statement.excluded.summary,
+            "last_updated": func.now(),
+            "last_checked": statement.excluded.last_checked,
+        },
+    )
+    session.execute(statement)
+    return len(payload)
+
+
 def _touch_company_insider_trades(session: Session, company_id: int, checked_at: datetime) -> None:
     session.execute(
         update(InsiderTrade)
@@ -1755,6 +1934,211 @@ def _touch_company_insider_trades(session: Session, company_id: int, checked_at:
         .where(Company.id == company_id)
         .values(insider_trades_last_checked=checked_at)
     )
+
+
+def _touch_company_form144_filings(session: Session, company_id: int, checked_at: datetime) -> None:
+    session.execute(
+        update(Form144Filing)
+        .where(Form144Filing.company_id == company_id)
+        .values(last_checked=checked_at)
+    )
+    session.execute(
+        update(Company)
+        .where(Company.id == company_id)
+        .values(form144_filings_last_checked=checked_at)
+    )
+
+
+def _load_form144_document(client: EdgarClient, cik: str, filing_metadata: FilingMetadata) -> tuple[str, str]:
+    accession = filing_metadata.accession_number
+    primary_document = (filing_metadata.primary_document or "").strip()
+    if primary_document:
+        try:
+            return client.get_filing_document_text(cik, accession, primary_document)
+        except Exception:
+            logger.exception("Unable to fetch Form 144 primary document for accession %s", accession)
+
+    try:
+        directory_index = client.get_filing_directory_index(cik, accession)
+    except Exception:
+        logger.exception("Unable to fetch Form 144 directory index for accession %s", accession)
+        raise
+
+    candidates: list[str] = []
+    for item in directory_index.get("directory", {}).get("item", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or "/" in name:
+            continue
+        lower_name = name.lower()
+        if lower_name.endswith((".xml", ".htm", ".html", ".txt")):
+            candidates.append(name)
+
+    for name in sorted(set(candidates), key=lambda value: (0 if value.lower().endswith(".xml") else 1, len(value))):
+        try:
+            return client.get_filing_document_text(cik, accession, name)
+        except Exception:
+            continue
+
+    raise ValueError(f"Unable to load Form 144 document for accession {accession}")
+
+
+def _parse_form144_filings(
+    *,
+    payload: str,
+    source_url: str,
+    filing_metadata: FilingMetadata,
+) -> list[NormalizedForm144Filing]:
+    rows = _parse_form144_xml_rows(payload, source_url, filing_metadata)
+    if rows:
+        return rows
+    fallback = _parse_form144_text_row(payload, source_url, filing_metadata)
+    if fallback is None:
+        return []
+    return [fallback]
+
+
+def _parse_form144_xml_rows(
+    payload: str,
+    source_url: str,
+    filing_metadata: FilingMetadata,
+) -> list[NormalizedForm144Filing]:
+    try:
+        root = ET.fromstring(payload)
+    except ET.ParseError:
+        return []
+
+    filer_name = _xml_first_text(root, ["nameOfPersonForWhoseAccountTheSecuritiesAreToBeSold", "filerName", "name"])
+    relationship = _xml_first_text(root, ["relationshipToIssuer", "personRelationshipToIssuer", "relationship"])
+    issuer_name = _xml_first_text(root, ["issuerName", "nameOfIssuer"])
+    security_title = _xml_first_text(root, ["titleOfTheClassOfSecuritiesToBeSold", "titleOfSecuritiesToBeSold", "securityTitle"])
+    planned_sale_date = _parse_flexible_date(_xml_first_text(root, ["approximateDateOfSale", "dateOfSale", "dateOfTheSale"]))
+    shares_to_be_sold = _parse_optional_float(
+        _xml_first_text(root, ["numberOfSharesOrOtherUnitsToBeSold", "amountOfSecuritiesToBeSold", "numberOfSharesToBeSold"])
+    )
+    aggregate_market_value = _parse_optional_float(_xml_first_text(root, ["aggregateMarketValue", "marketValue"]))
+    shares_owned_after_sale = _parse_optional_float(
+        _xml_first_text(root, ["numberOfSharesOrOtherUnitsOutstanding", "sharesOwnedAfterSale", "amountOwnedAfterSale"])
+    )
+    broker_name = _xml_first_text(root, ["nameOfEachBrokerThroughWhomTheSecuritiesAreToBeOfferedOrSold", "brokerName"])
+
+    summary = (
+        f"Form 144 planned sale by {filer_name}."
+        if filer_name
+        else "Form 144 planned insider sale disclosure."
+    )
+
+    row = NormalizedForm144Filing(
+        accession_number=filing_metadata.accession_number,
+        form=_base_form(filing_metadata.form) or "144",
+        filing_date=filing_metadata.filing_date,
+        report_date=filing_metadata.report_date,
+        transaction_index=0,
+        filer_name=filer_name,
+        relationship_to_issuer=relationship,
+        issuer_name=issuer_name,
+        security_title=security_title,
+        planned_sale_date=planned_sale_date,
+        shares_to_be_sold=shares_to_be_sold,
+        aggregate_market_value=aggregate_market_value,
+        shares_owned_after_sale=shares_owned_after_sale,
+        broker_name=broker_name,
+        source_url=source_url,
+        summary=summary,
+    )
+    if not any([
+        row.filer_name,
+        row.issuer_name,
+        row.security_title,
+        row.planned_sale_date,
+        row.shares_to_be_sold,
+    ]):
+        return []
+    return [row]
+
+
+def _parse_form144_text_row(
+    payload: str,
+    source_url: str,
+    filing_metadata: FilingMetadata,
+) -> NormalizedForm144Filing | None:
+    plain = re.sub(r"<[^>]+>", "\n", payload)
+    plain = re.sub(r"\r", "", plain)
+    if not plain:
+        return None
+
+    filer_name = _regex_capture(plain, r"(?im)^\s*Name\s+of\s+Person\s+for\s+Whose\s+Account\s+the\s+Securities\s+Are\s+to\s+Be\s+Sold\s*[:\-]\s*(.+)$")
+    relationship = _regex_capture(plain, r"(?im)^\s*Relationship\s+to\s+Issuer\s*[:\-]\s*(.+)$")
+    issuer_name = _regex_capture(plain, r"(?im)^\s*Issuer\s+Name\s*[:\-]\s*(.+)$")
+    security_title = _regex_capture(plain, r"(?im)^\s*Title\s+of\s+the\s+Class\s+of\s+Securities\s+to\s+be\s+Sold\s*[:\-]\s*(.+)$")
+    planned_sale_date = _parse_flexible_date(
+        _regex_capture(plain, r"(?im)^\s*Approximate\s+Date\s+of\s+Sale\s*[:\-]\s*([0-9]{1,2}/[0-9]{1,2}/[0-9]{4}|[0-9]{4}-[0-9]{2}-[0-9]{2})")
+    )
+    shares_to_be_sold = _parse_optional_amount(
+        _regex_capture(plain, r"(?im)^\s*Number\s+of\s+Shares\s+or\s+Other\s+Units\s+to\s+Be\s+Sold\s*[:\-]\s*([$0-9,\.]+)")
+    )
+    aggregate_market_value = _parse_optional_amount(
+        _regex_capture(plain, r"(?im)^\s*Aggregate\s+Market\s+Value\s*[:\-]\s*([$0-9,\.]+)")
+    )
+
+    if not any([filer_name, issuer_name, security_title, planned_sale_date, shares_to_be_sold]):
+        return None
+
+    return NormalizedForm144Filing(
+        accession_number=filing_metadata.accession_number,
+        form=_base_form(filing_metadata.form) or "144",
+        filing_date=filing_metadata.filing_date,
+        report_date=filing_metadata.report_date,
+        transaction_index=0,
+        filer_name=filer_name,
+        relationship_to_issuer=relationship,
+        issuer_name=issuer_name,
+        security_title=security_title,
+        planned_sale_date=planned_sale_date,
+        shares_to_be_sold=shares_to_be_sold,
+        aggregate_market_value=aggregate_market_value,
+        shares_owned_after_sale=None,
+        broker_name=None,
+        source_url=source_url,
+        summary=f"Form 144 planned sale by {filer_name}." if filer_name else "Form 144 planned insider sale disclosure.",
+    )
+
+
+def _xml_first_text(root: ET.Element, candidate_tags: list[str]) -> str | None:
+    lowered_candidates = {tag.lower() for tag in candidate_tags}
+    for node in root.iter():
+        local_tag = node.tag.split("}")[-1].lower()
+        if local_tag in lowered_candidates:
+            text = _clean_text("".join(node.itertext()))
+            if text:
+                return text
+    return None
+
+
+def _regex_capture(value: str, pattern: str) -> str | None:
+    match = re.search(pattern, value, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return _clean_text(match.group(1))
+
+
+def _parse_flexible_date(value: Any) -> date | None:
+    cleaned = _clean_text(value)
+    if cleaned is None:
+        return None
+    try:
+        return _parse_date(cleaned)
+    except ValueError:
+        pass
+    match = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", cleaned)
+    if not match:
+        return None
+    month, day, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
 
 
 def _parse_form4_transactions(
@@ -1951,6 +2335,14 @@ def _parse_optional_float(value: Any) -> float | None:
         return float(str(value).replace(",", ""))
     except (TypeError, ValueError):
         return None
+
+
+def _parse_optional_amount(value: Any) -> float | None:
+    cleaned = _clean_text(value)
+    if cleaned is None:
+        return None
+    normalized = cleaned.replace("$", "")
+    return _parse_optional_float(normalized)
 
 
 def _clean_text(value: Any) -> str | None:
