@@ -95,7 +95,7 @@ export default function CompanySecFeedPage() {
           statusLines={[
             `Feed entries: ${feed.length.toLocaleString()}`,
             `Latest SEC activity: ${latestDate ? formatDate(latestDate) : "Pending"}`,
-            `Sources unified: filings, events, governance, ownership, insiders, and 13F activity`
+            `Sources unified: filings, events, governance, ownership, insider trades, Form 144 planned sales, and 13F activity`
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -193,7 +193,7 @@ export default function CompanySecFeedPage() {
         )}
       </Panel>
 
-      <Panel title="Chronological SEC Stream" subtitle="Events, proxy filings, stake disclosures, insider trades, and 13F updates in one timeline">
+      <Panel title="Chronological SEC Stream" subtitle="Events, proxy filings, stake disclosures, insider trades, Form 144 planned sales, and 13F updates in one timeline">
         {error ? (
           <div className="text-muted">{error}</div>
         ) : loading || workspaceLoading ? (
@@ -205,7 +205,7 @@ export default function CompanySecFeedPage() {
                 <>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      <span className="pill">{entry.type}</span>
+                      <span className="pill">{formatFeedEntryType(entry.type)}</span>
                       <span className="pill">{entry.badge}</span>
                     </div>
                     <div className="text-muted">{formatDate(entry.date)}</div>
@@ -249,4 +249,11 @@ function Metric({ label, value }: { label: string; value: string | null }) {
       <div className="metric-value">{value ?? "?"}</div>
     </div>
   );
+}
+
+function formatFeedEntryType(type: string): string {
+  if (type === "form144") {
+    return "planned-sale";
+  }
+  return type;
 }

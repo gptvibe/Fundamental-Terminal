@@ -32,7 +32,8 @@ export default function CompanyInsidersPage() {
     refreshState,
     consoleEntries,
     connectionState,
-    queueRefresh
+    queueRefresh,
+    reloadKey
   } = useCompanyWorkspace(ticker, { includeInsiders: true });
 
   const [form144Data, setForm144Data] = useState<CompanyForm144Response | null>(null);
@@ -48,7 +49,7 @@ export default function CompanyInsidersPage() {
       .catch((err: unknown) => { if (!cancelled) { setForm144Error(err instanceof Error ? err.message : "Unable to load Form 144 filings"); } })
       .finally(() => { if (!cancelled) setForm144Loading(false); });
     return () => { cancelled = true; };
-  }, [ticker]);
+  }, [ticker, reloadKey]);
   const latestTradeDate = useMemo(
     () => insiderTrades.reduce<string | null>((latest, row) => (!row.date || (latest && row.date <= latest) ? latest : row.date), null),
     [insiderTrades]

@@ -79,9 +79,12 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 - `/` for search, autocomplete, and trending tickers
 - `/company/[ticker]` — company overview with unified activity feed and priority alerts
 - `/company/[ticker]/financials` — financial statements, margin-trend chart, cash-flow waterfall, balance sheet, and segment breakdown
+- `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
+- `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
 - `/company/[ticker]/models` — DCF, health score, and scenario analysis
 - `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel
 - `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
+- `/company/[ticker]/ownership` — institutional holdings analytics and manager activity trends
 - `/company/[ticker]/stakes` — legacy path redirected to `/company/[ticker]/ownership-changes`
 - `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
 - `/company/[ticker]/events` — 8-K events classified by item code with category chart
@@ -143,6 +146,16 @@ GET  /api/companies/search?query=intel
 GET  /api/companies/search?ticker=AAPL
 GET  /api/companies/resolve?query=INTC
 GET  /api/companies/AAPL/financials
+GET  /api/companies/AAPL/filings
+GET  /api/companies/AAPL/filing-insights
+GET  /api/companies/AAPL/insider-trades
+GET  /api/companies/AAPL/form-144-filings
+GET  /api/companies/AAPL/institutional-holdings
+GET  /api/companies/AAPL/beneficial-ownership
+GET  /api/companies/AAPL/governance
+GET  /api/companies/AAPL/capital-markets
+GET  /api/companies/AAPL/activity-feed
+GET  /api/companies/AAPL/alerts
 POST /api/companies/AAPL/refresh
 GET  /api/companies/AAPL/models?model=dcf,dupont,piotroski
 ```

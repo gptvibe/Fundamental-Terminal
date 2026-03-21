@@ -374,7 +374,7 @@ Definition of done:
 
 ### Backend feed assembly
 
-- [x] Compose a unified feed from filing timeline, filing events, insider trades, 13F changes, beneficial ownership changes, governance updates, and capital markets events (assembled in `_load_company_activity_data` / `_build_activity_feed_entries` in `app/main.py`).
+- [x] Compose a unified feed from filing timeline, filing events, insider trades, Form 144 planned sales, 13F changes, beneficial ownership changes, governance updates, and capital markets events (assembled in `_load_company_activity_data` / `_build_activity_feed_entries` in `app/main.py`).
 
 ### Backend alerts
 
@@ -396,6 +396,7 @@ Definition of done:
 ### Frontend visualization
 
 - [x] Extend `frontend/app/company/[ticker]/page.tsx` with a unified activity feed and alerts panel.
+- [x] Ship `frontend/app/company/[ticker]/sec-feed/page.tsx` as a dedicated unified SEC timeline and alerts view.
 - [x] Severity styling (high/medium/low) and source badges.
 
 Acceptance criteria:

@@ -981,6 +981,29 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
     )
     monkeypatch.setattr(
         main_module,
+        "get_company_form144_filings",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000007",
+                form="144",
+                filing_date=date(2026, 3, 16),
+                report_date=date(2026, 3, 16),
+                filer_name="Jane Doe",
+                relationship_to_issuer="Officer",
+                issuer_name="Apple Inc.",
+                security_title="Common Stock",
+                planned_sale_date=date(2026, 3, 20),
+                shares_to_be_sold=10000.0,
+                aggregate_market_value=1820000.0,
+                shares_owned_after_sale=490000.0,
+                broker_name="Example Broker",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/7/x144.xml",
+                summary="Form 144 planned sale.",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
         "get_company_institutional_holdings",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
@@ -1024,7 +1047,11 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
     assert "governance" in entry_types
     assert "ownership-change" in entry_types
     assert "insider" in entry_types
+    assert "form144" in entry_types
     assert "institutional" in entry_types
+    form144_entry = next(item for item in payload["entries"] if item["type"] == "form144")
+    assert form144_entry["badge"] == "144"
+    assert "Planned sale 2026-03-20" in form144_entry["detail"]
 
 
 def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
@@ -1104,6 +1131,7 @@ def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
             )
         ],
     )
+    monkeypatch.setattr(main_module, "get_company_form144_filings", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_institutional_holdings", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)

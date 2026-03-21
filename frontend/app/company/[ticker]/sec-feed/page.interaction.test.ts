@@ -46,6 +46,15 @@ vi.mock("@/lib/api", () => ({
     company: { ticker: "ACME", cik: "0000001", name: "Acme Corp", sector: "Tech", market_sector: null, market_industry: null, last_checked: null, last_checked_financials: null, last_checked_prices: null, last_checked_insiders: null, last_checked_institutional: null, last_checked_filings: null, cache_state: "fresh" },
     entries: [
       {
+        id: "entry-144",
+        date: "2026-03-11",
+        type: "form144",
+        badge: "144",
+        title: "Jane Doe filed Form 144 planned sale",
+        detail: "Planned sale 2026-03-18 | Jane Doe | 12,500 shares | $2,500,000",
+        href: null,
+      },
+      {
         id: "entry-new",
         date: "2026-03-10",
         type: "event",
@@ -112,6 +121,9 @@ describe("CompanySecFeedPage interactions", () => {
     await waitFor(() => {
       expect(screen.getByText("High Priority Alert")).toBeTruthy();
     });
+
+    expect(screen.getByText("planned-sale")).toBeTruthy();
+    expect(screen.getByText("Jane Doe filed Form 144 planned sale")).toBeTruthy();
 
     const newest = screen.getByText("Newest Event");
     const older = screen.getByText("Older Event");

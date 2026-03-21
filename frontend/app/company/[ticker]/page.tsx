@@ -105,7 +105,7 @@ export default function CompanyOverviewPage() {
             <RiskRedFlagPanel ticker={ticker} financials={financials} reloadKey={reloadKey} />
           </Panel>
 
-          <Panel title="Live Activity & Alerts" subtitle="Latest SEC activity with prioritized research alerts">
+          <Panel title="Live Activity & Alerts" subtitle="Latest SEC activity including events, ownership changes, insider trades, Form 144 planned sales, and prioritized alerts">
             {activityError ? (
               <div className="text-muted">{activityError}</div>
             ) : activityLoading ? (
@@ -147,7 +147,7 @@ export default function CompanyOverviewPage() {
                       href={entry.href}
                       topLeft={
                         <>
-                          <span className="pill">{entry.type}</span>
+                          <span className="pill">{formatFeedEntryType(entry.type)}</span>
                           <span className="pill">{entry.badge}</span>
                         </>
                       }
@@ -206,6 +206,13 @@ export default function CompanyOverviewPage() {
       <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
     </CompanyWorkspaceShell>
   );
+}
+
+function formatFeedEntryType(type: string): string {
+  if (type === "form144") {
+    return "planned-sale";
+  }
+  return type;
 }
 
 function Metric({ label, value }: { label: string; value: number | string | null }) {

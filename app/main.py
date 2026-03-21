@@ -1734,6 +1734,7 @@ def company_activity_feed(
         governance_filings=activity["governance_filings"],
         beneficial_filings=activity["beneficial_filings"],
         insider_trades=activity["insider_trades"],
+        form144_filings=activity["form144_filings"],
         institutional_holdings=activity["institutional_holdings"],
     )
     return CompanyActivityFeedResponse(
@@ -3099,6 +3100,7 @@ def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot
         for report in get_company_beneficial_ownership_reports(session, snapshot.company.id)
     ]
     insider_trades = [_serialize_insider_trade(trade) for trade in get_company_insider_trades(session, snapshot.company.id, limit=80)]
+    form144_filings = [_serialize_form144_filing(filing) for filing in get_company_form144_filings(session, snapshot.company.id, limit=80)]
     institutional_holdings = [
         _serialize_institutional_holding(holding)
         for holding in get_company_institutional_holdings(session, snapshot.company.id, limit=80)
@@ -3126,6 +3128,7 @@ def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot
         "governance_filings": governance_filings,
         "beneficial_filings": beneficial_filings,
         "insider_trades": insider_trades,
+        "form144_filings": form144_filings,
         "institutional_holdings": institutional_holdings,
         "capital_filings": capital_filings,
     }
@@ -3138,6 +3141,7 @@ def _build_activity_feed_entries(
     governance_filings: list[GovernanceFilingPayload],
     beneficial_filings: list[BeneficialOwnershipFilingPayload],
     insider_trades: list[InsiderTradePayload],
+    form144_filings: list[Form144FilingPayload],
     institutional_holdings: list[InstitutionalHoldingPayload],
 ) -> list[ActivityFeedEntryPayload]:
     entries: list[ActivityFeedEntryPayload] = []
@@ -3207,6 +3211,22 @@ def _build_activity_feed_entries(
             )
         )
 
+    for filing in form144_filings[:40]:
+        title = "Form 144 planned sale filing"
+        if filing.filer_name:
+            title = f"{filing.filer_name} filed Form 144 planned sale"
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"form144-{filing.accession_number or filing.source_url}",
+                date=filing.filing_date or filing.planned_sale_date or filing.report_date,
+                type="form144",
+                badge="144",
+                title=title,
+                detail=_build_form144_feed_detail(filing),
+                href=filing.source_url,
+            )
+        )
+
     for holding in institutional_holdings[:40]:
         entries.append(
             ActivityFeedEntryPayload(
@@ -3232,6 +3252,25 @@ def _build_activity_feed_entries(
         reverse=True,
     )
     return entries[:220]
+
+
+def _build_form144_feed_detail(filing: Form144FilingPayload) -> str:
+    detail_parts: list[str] = []
+
+    if filing.planned_sale_date is not None:
+        detail_parts.append(f"Planned sale {filing.planned_sale_date.isoformat()}")
+    if filing.filer_name:
+        detail_parts.append(filing.filer_name)
+    if filing.shares_to_be_sold is not None:
+        detail_parts.append(f"{filing.shares_to_be_sold:,.0f} shares")
+    if filing.aggregate_market_value is not None:
+        detail_parts.append(f"${filing.aggregate_market_value:,.0f}")
+
+    if detail_parts:
+        return " | ".join(detail_parts)
+    if filing.summary:
+        return filing.summary
+    return "Planned insider sale filing"
 
 
 def _build_activity_alerts(
