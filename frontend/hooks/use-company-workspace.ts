@@ -320,22 +320,23 @@ async function loadCompanyWorkspaceData(
   let insiderError: string | null = null;
   let institutionalError: string | null = null;
 
-  if (options.includeInstitutional) {
-    try {
-      institutionalData = await getCompanyInstitutionalHoldings(ticker);
-      activeJobId = activeJobId ?? institutionalData.refresh.job_id;
-    } catch (nextError) {
-      institutionalError = asErrorMessage(nextError, "Unable to load institutional holdings");
-    }
+  const [institutionalResult, insiderResult] = await Promise.allSettled([
+    options.includeInstitutional ? getCompanyInstitutionalHoldings(ticker) : Promise.resolve(null),
+    options.includeInsiders ? getCompanyInsiderTrades(ticker) : Promise.resolve(null),
+  ]);
+
+  if (institutionalResult.status === "fulfilled") {
+    institutionalData = institutionalResult.value;
+    activeJobId = activeJobId ?? institutionalData?.refresh.job_id ?? null;
+  } else {
+    institutionalError = asErrorMessage(institutionalResult.reason, "Unable to load institutional holdings");
   }
 
-  if (options.includeInsiders) {
-    try {
-      insiderData = await getCompanyInsiderTrades(ticker);
-      activeJobId = activeJobId ?? insiderData.refresh.job_id;
-    } catch (nextError) {
-      insiderError = asErrorMessage(nextError, "Unable to load insider trades");
-    }
+  if (insiderResult.status === "fulfilled") {
+    insiderData = insiderResult.value;
+    activeJobId = activeJobId ?? insiderData?.refresh.job_id ?? null;
+  } else {
+    insiderError = asErrorMessage(insiderResult.reason, "Unable to load insider trades");
   }
 
   return {

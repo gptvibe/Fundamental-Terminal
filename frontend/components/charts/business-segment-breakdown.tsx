@@ -30,6 +30,8 @@ type SegmentPoint = {
   revenue: number;
   share: number | null;
   growth: number | null;
+  operatingIncome: number | null;
+  assets: number | null;
   color: string;
 };
 
@@ -91,6 +93,8 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
           segment.share_of_revenue ??
           (typeof totalRevenue === "number" && totalRevenue !== 0 ? currentRevenue / Math.abs(totalRevenue) : null),
         growth,
+        operatingIncome: segment.operating_income ?? null,
+        assets: segment.assets ?? null,
         color: SEGMENT_COLORS[index % SEGMENT_COLORS.length]
       } satisfies SegmentPoint;
     });
@@ -109,6 +113,25 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
 
   const growthChartData = useMemo(
     () => (selectedSegment ? [selectedSegment] : segmentPoints),
+    [segmentPoints, selectedSegment]
+  );
+
+  const hasMarginData = useMemo(
+    () => segmentPoints.some((segment) => segment.operatingIncome !== null),
+    [segmentPoints]
+  );
+
+  const marginChartData = useMemo(
+    () =>
+      (selectedSegment ? [selectedSegment] : segmentPoints).filter(
+        (segment) => segment.operatingIncome !== null
+      ).map((segment) => ({
+        ...segment,
+        operatingMargin:
+          segment.operatingIncome !== null && segment.revenue !== 0
+            ? segment.operatingIncome / segment.revenue
+            : null,
+      })),
     [segmentPoints, selectedSegment]
   );
 
@@ -136,6 +159,8 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
               revenue: otherRevenue,
               share: otherRevenue / (otherRevenue + selectedSegment.revenue),
               growth: null,
+              operatingIncome: null,
+              assets: null,
               color: "rgba(255,255,255,0.18)"
             } satisfies SegmentPoint
           ]
@@ -283,6 +308,46 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
           </ResponsiveContainer>
         </div>
       </div>
+
+      {hasMarginData ? (
+        <div className="segment-chart-card">
+          <div className="segment-section-title">Segment Operating Margin</div>
+          <div className="segment-section-subtitle">
+            Operating income as a percentage of reported segment revenue.
+          </div>
+          <div className="segment-chart-shell segment-chart-shell-bar">
+            <ResponsiveContainer>
+              <BarChart data={marginChartData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  stroke={CHART_AXIS_COLOR}
+                  tick={chartTick()}
+                  interval={0}
+                  angle={marginChartData.length > 3 ? -12 : 0}
+                  textAnchor={marginChartData.length > 3 ? "end" : "middle"}
+                  height={marginChartData.length > 3 ? 56 : 32}
+                />
+                <YAxis
+                  stroke={CHART_AXIS_COLOR}
+                  tick={chartTick()}
+                  tickFormatter={(value) => formatPercent(Number(value))}
+                />
+                <Tooltip content={<SegmentTooltip />} />
+                <Bar dataKey="operatingMargin" name="Op. Margin" radius={[8, 8, 0, 0]}
+                  onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
+                  {marginChartData.map((segment) => (
+                    <Cell
+                      key={segment.id}
+                      fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "#FF6B6B" : segment.color}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -355,6 +420,11 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
     return null;
   }
 
+  const operatingMargin =
+    point.operatingIncome !== null && typeof point.operatingIncome === "number" && point.revenue !== 0
+      ? point.operatingIncome / point.revenue
+      : null;
+
   return (
     <div className="segment-tooltip-card">
       <div className="segment-tooltip-title">{point.name}</div>
@@ -366,6 +436,24 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
         <span>Share</span>
         <strong>{formatPercent(point.share)}</strong>
       </div>
+      {point.operatingIncome !== null ? (
+        <div className="segment-tooltip-row">
+          <span>Op. Income</span>
+          <strong>{formatCompactNumber(point.operatingIncome)}</strong>
+        </div>
+      ) : null}
+      {operatingMargin !== null ? (
+        <div className="segment-tooltip-row">
+          <span>Op. Margin</span>
+          <strong>{formatPercent(operatingMargin)}</strong>
+        </div>
+      ) : null}
+      {point.assets !== null ? (
+        <div className="segment-tooltip-row">
+          <span>Assets</span>
+          <strong>{formatCompactNumber(point.assets)}</strong>
+        </div>
+      ) : null}
       <div className="segment-tooltip-row">
         <span>Growth</span>
         <strong>{formatPercent(point.growth)}</strong>

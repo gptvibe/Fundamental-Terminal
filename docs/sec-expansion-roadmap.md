@@ -141,9 +141,9 @@ Add mappings in `app/services/sec_edgar.py` for:
 
 Extend segment extraction where available:
 
-- segment operating income
-- geographic revenue
-- geographic assets
+- [x] segment operating income (captured from XBRL `OperatingIncomeLoss` with segment dimension and from HTML segment report tables — 2026-03-20)
+- [x] geographic revenue (kind=geographic already extracted; operating income enrichment now applies to geographic segments too)
+- [x] geographic assets (captured from XBRL `NoncurrentAssets`/`Assets` with segment dimension and from HTML parser — 2026-03-20)
 
 ### Persistence approach
 
@@ -390,11 +390,30 @@ Add components:
 - parser tests against multiple proxy statement formats
 - response contract tests for governance endpoints
 
-## Phase 6: Add 8-K Event Intelligence
+## Phase 6: Add 8-K Event Intelligence — **SHIPPED 2026-03-20**
 
 ### Outcome
 
 Turn raw 8-K filings into a classified event feed.
+
+### Status
+
+All backend and frontend items are complete. The event timeline with category filters now lives inside `filings/page.tsx` alongside the existing filing viewer. A dedicated `events/page.tsx` provides a full-screen event view. The overview page surfaces the same intelligence through the unified activity feed.
+
+### What shipped
+
+- `app/services/eight_k_events.py` — 8-K classification service
+- `filing_events` table and ORM model
+- `GET /api/companies/{ticker}/filing-events` and `/summary` endpoints
+- `FilingEventCategoryChart` component in `frontend/components/charts/`
+- `frontend/app/company/[ticker]/events/page.tsx` — dedicated event page
+- Event timeline panel added to `frontend/app/company/[ticker]/filings/page.tsx`
+- Category filter strip in the filings page (All / per-category toggle buttons)
+- "Live Activity & Alerts" panel on the overview page surfaces 8-K events via the activity feed
+
+### One remaining item
+
+- Route-level API test for `/filing-events` and `/filing-events/summary` endpoints — event-classification tests exist in `tests/test_eight_k_events.py` but the route contract tests are not yet written.
 
 ### SEC scope
 

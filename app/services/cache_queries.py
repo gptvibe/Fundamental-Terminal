@@ -45,6 +45,7 @@ def search_company_snapshots(
     ticker_prefix_pattern = f"{escaped_ticker_query}%"
     name_prefix_pattern = f"{escaped_name_query}%"
     name_contains_pattern = f"%{escaped_name_query}%"
+    cik_prefix_pattern = f"{escaped_cik_query}%" if escaped_cik_query else None
     cik_contains_pattern = f"%{escaped_cik_query}%" if escaped_cik_query else None
     ranking_clauses = []
     if padded_cik_query:
@@ -65,10 +66,9 @@ def search_company_snapshots(
     search_clauses = [
         Company.ticker.ilike(ticker_prefix_pattern, escape="\\"),
         Company.name.ilike(name_prefix_pattern, escape="\\"),
-        Company.name.ilike(name_contains_pattern, escape="\\"),
     ]
-    if cik_contains_pattern:
-        search_clauses.append(Company.cik.ilike(cik_contains_pattern, escape="\\"))
+    if cik_prefix_pattern:
+        search_clauses.append(Company.cik.ilike(cik_prefix_pattern, escape="\\"))
 
     statement = (
         select(Company, latest_checks.c.last_checked)
@@ -79,6 +79,25 @@ def search_company_snapshots(
     )
 
     rows = session.execute(statement).all()
+    if len(rows) >= limit or len(normalized_query) < 3:
+        return [_build_snapshot(company, last_checked) for company, last_checked in rows]
+
+    seen_ids = {company.id for company, _ in rows}
+    contains_clauses = [Company.name.ilike(name_contains_pattern, escape="\\")]
+    if cik_contains_pattern:
+        contains_clauses.append(Company.cik.ilike(cik_contains_pattern, escape="\\"))
+
+    contains_statement = (
+        select(Company, latest_checks.c.last_checked)
+        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
+        .where(or_(*contains_clauses))
+        .order_by(match_rank.asc(), func.length(Company.ticker).asc(), Company.ticker.asc())
+        .limit(limit - len(rows))
+    )
+    if seen_ids:
+        contains_statement = contains_statement.where(~Company.id.in_(seen_ids))
+
+    rows.extend(session.execute(contains_statement).all())
     return [_build_snapshot(company, last_checked) for company, last_checked in rows]
 
 

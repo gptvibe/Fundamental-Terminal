@@ -95,6 +95,14 @@ Acceptance criteria:
 - New metrics are normalized for representative 10-K and 10-Q filings.
 - Existing metrics continue to serialize unchanged.
 
+### Segment expansion (2026-03-20)
+
+- [x] Extend segment extraction in `app/services/sec_edgar.py` to capture per-segment `operating_income` and `assets` from both the XBRL companyfacts path (via `SEGMENT_SUPPLEMENTAL_TAGS`) and the HTML filing parser path.
+- [x] Add `operating_income` and `assets` fields to `FinancialSegmentPayload` in `app/main.py`.
+- [x] Add `operating_income` and `assets` fields to `FinancialSegmentPayload` in `frontend/lib/types.ts`.
+- [x] Add segment operating margin bar chart to `frontend/components/charts/business-segment-breakdown.tsx` (renders when data present).
+- [x] Show operating income, operating margin, and assets in segment tooltip.
+
 ### Response model updates
 
 - [x] Extend financial payload model in `app/main.py`.
@@ -281,32 +289,32 @@ Definition of done:
 
 ### Backend scaffolding
 
-- [ ] Create `app/services/eight_k_parser.py`.
-- [ ] Add migration for `filing_events`.
-- [ ] Add ORM model for filing events.
+- [x] Create `app/services/eight_k_parser.py`.
+- [x] Add migration for `filing_events`.
+- [x] Add ORM model for filing events.
 
 ### SEC ingestion
 
-- [ ] Classify 8-K item codes for at least:
-  - [ ] 1.01
-  - [ ] 2.02
-  - [ ] 2.06
-  - [ ] 5.02
-  - [ ] 8.01
-- [ ] Create normalized event summaries.
+- [x] Classify 8-K item codes for at least:
+  - [x] 1.01
+  - [x] 2.02
+  - [x] 2.06
+  - [x] 5.02
+  - [x] 8.01
+- [x] Create normalized event summaries.
 
 ### API contracts
 
-- [ ] Add `GET /api/companies/{ticker}/filing-events`.
-- [ ] Add `GET /api/companies/{ticker}/filing-events/summary`.
-- [ ] Add matching frontend API and types.
+- [x] Add `GET /api/companies/{ticker}/filing-events`.
+- [x] Add `GET /api/companies/{ticker}/filing-events/summary`.
+- [x] Add matching frontend API and types.
 
 ### Frontend visualization
 
-- [ ] Extend `frontend/app/company/[ticker]/filings/page.tsx` with an event timeline.
-- [ ] Add a reusable SEC activity feed component.
-- [ ] Add category filters.
-- [ ] Add a latest material events panel on `frontend/app/company/[ticker]/page.tsx`.
+- [x] Extend `frontend/app/company/[ticker]/filings/page.tsx` with an event timeline.
+- [x] Add a reusable SEC activity feed component (delivered as `frontend/app/company/[ticker]/events/page.tsx` with `FilingEventCategoryChart`).
+- [x] Add category filters (filter strip added to filings page, 2026-03-20).
+- [x] Add a latest material events panel on `frontend/app/company/[ticker]/page.tsx` (covered by "Live Activity & Alerts" panel using the activity feed).
 
 Acceptance criteria:
 
@@ -315,7 +323,7 @@ Acceptance criteria:
 
 ### Tests
 
-- [ ] Add event-classification tests for 8-K samples.
+- [x] Add event-classification tests for 8-K samples (see `tests/test_eight_k_events.py`).
 - [ ] Add API route tests for event endpoints.
 
 Definition of done:

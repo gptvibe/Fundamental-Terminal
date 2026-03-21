@@ -86,6 +86,8 @@ export interface FinancialSegmentPayload {
   kind: "business" | "geographic" | "other";
   revenue: number | null;
   share_of_revenue: number | null;
+  operating_income: number | null;
+  assets: number | null;
 }
 
 export interface PriceHistoryPoint {

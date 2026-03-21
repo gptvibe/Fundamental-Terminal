@@ -341,6 +341,16 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     ],
 }
 
+SEGMENT_SUPPLEMENTAL_TAGS: dict[str, list[tuple[str, list[str]]]] = {
+    "operating_income": [
+        ("us-gaap", ["OperatingIncomeLoss"]),
+        ("ifrs-full", ["ProfitLossFromOperatingActivities"]),
+    ],
+    "assets": [
+        ("us-gaap", ["NoncurrentAssets", "Assets"]),
+    ],
+}
+
 CAPEX_FACTS: list[tuple[str, list[str]]] = [
     (
         "us-gaap",
@@ -531,6 +541,7 @@ class StatementAccumulator:
     source: str = ""
     metric_candidates: dict[str, list[FactCandidate]] = field(default_factory=dict)
     segment_revenue_candidates: list[SegmentRevenueCandidate] = field(default_factory=list)
+    segment_supplemental: dict[tuple[date, str], dict[str, int | float]] = field(default_factory=dict)
     capex_candidates: list[FactCandidate] = field(default_factory=list)
     debt_issuance_candidates: list[FactCandidate] = field(default_factory=list)
     debt_repayment_candidates: list[FactCandidate] = field(default_factory=list)
@@ -786,6 +797,11 @@ class EdgarNormalizer:
             statements=statements,
             cik=cik,
         )
+        self._collect_segment_supplemental_candidates(
+            facts_root=facts_root,
+            filing_index=filing_index,
+            statements=statements,
+        )
         self._collect_capex_candidates(
             facts_root=facts_root,
             filing_index=filing_index,
@@ -962,6 +978,44 @@ class EdgarNormalizer:
 
                 tag_rank += 1
 
+    def _collect_segment_supplemental_candidates(
+        self,
+        facts_root: dict[str, Any],
+        filing_index: dict[str, FilingMetadata],
+        statements: dict[str, StatementAccumulator],
+    ) -> None:
+        for metric, taxonomy_groups in SEGMENT_SUPPLEMENTAL_TAGS.items():
+            for taxonomy, tags in taxonomy_groups:
+                taxonomy_root = facts_root.get(taxonomy, {})
+                if not isinstance(taxonomy_root, dict):
+                    continue
+                for tag in tags:
+                    fact_payload = taxonomy_root.get(tag, {})
+                    for observation in _iter_monetary_observations(fact_payload):
+                        dim = _pick_segment_dimension(observation.get("segment"))
+                        if dim is None:
+                            continue
+                        accession_number = observation.get("accn")
+                        if not accession_number:
+                            continue
+                        accumulator = statements.get(accession_number)
+                        if accumulator is None:
+                            continue
+                        filing_metadata = filing_index.get(accession_number)
+                        form = _base_form(observation.get("form") or (filing_metadata.form if filing_metadata else None))
+                        if form not in SUPPORTED_FORMS:
+                            continue
+                        raw_value = observation.get("val")
+                        if raw_value is None:
+                            continue
+                        period_end = _parse_date(observation.get("end")) or (filing_metadata.report_date if filing_metadata else None)
+                        if period_end is None:
+                            continue
+                        key: tuple[date, str] = (period_end, dim["segment_id"])
+                        entry = accumulator.segment_supplemental.setdefault(key, {})
+                        if metric not in entry:
+                            entry[metric] = _json_number(raw_value)
+
     def _collect_segment_revenue_candidates(
         self,
         facts_root: dict[str, Any],
@@ -1071,6 +1125,13 @@ class EdgarNormalizer:
             target_duration_days=target_duration_days,
             total_revenue=data.get("revenue"),
         )
+
+        if data["segment_breakdown"] and period_end is not None:
+            for segment in data["segment_breakdown"]:
+                key: tuple[date, str] = (period_end, segment["segment_id"])
+                supp = accumulator.segment_supplemental.get(key, {})
+                segment.setdefault("operating_income", supp.get("operating_income"))
+                segment.setdefault("assets", supp.get("assets"))
 
         if not any(value is not None for key, value in data.items() if key != "segment_breakdown"):
             return None
@@ -2774,6 +2835,8 @@ def _parse_segment_report_html(report_html: str, *, report_title: str = "") -> d
         return {}
 
     segments_by_period: dict[date, list[tuple[str, int | float]]] = {period_end: [] for period_end in header_dates}
+    oi_by_period: dict[date, list[tuple[str, int | float]]] = {period_end: [] for period_end in header_dates}
+    assets_by_period: dict[date, list[tuple[str, int | float]]] = {period_end: [] for period_end in header_dates}
     current_segment: str | None = None
 
     for row in table.find_all("tr"):
@@ -2792,14 +2855,26 @@ def _parse_segment_report_html(report_html: str, *, report_title: str = "") -> d
             current_segment = _normalize_segment_header_label(label)
             continue
 
-        if current_segment is None or not _is_revenue_metric_label(label):
+        if current_segment is None:
             continue
 
         value_cells = cells[1 : 1 + len(header_dates)]
-        for index, cell in enumerate(value_cells):
-            value = _parse_table_number(cell.get_text(" ", strip=True))
-            if value is not None and value > 0:
-                segments_by_period[header_dates[index]].append((current_segment, value))
+
+        if _is_revenue_metric_label(label):
+            for index, cell in enumerate(value_cells):
+                value = _parse_table_number(cell.get_text(" ", strip=True))
+                if value is not None and value > 0:
+                    segments_by_period[header_dates[index]].append((current_segment, value))
+        elif _is_operating_income_metric_label(label):
+            for index, cell in enumerate(value_cells):
+                value = _parse_table_number(cell.get_text(" ", strip=True))
+                if value is not None:
+                    oi_by_period[header_dates[index]].append((current_segment, value))
+        elif _is_asset_metric_label(label):
+            for index, cell in enumerate(value_cells):
+                value = _parse_table_number(cell.get_text(" ", strip=True))
+                if value is not None and value > 0:
+                    assets_by_period[header_dates[index]].append((current_segment, value))
 
     payload_by_period: dict[date, list[dict[str, Any]]] = {}
     for period_end, segment_rows in segments_by_period.items():
@@ -2812,6 +2887,17 @@ def _parse_segment_report_html(report_html: str, *, report_title: str = "") -> d
             continue
 
         total_revenue = sum(deduped.values())
+
+        oi_deduped: dict[str, int | float] = {}
+        for segment_name, value in oi_by_period.get(period_end, []):
+            if segment_name not in oi_deduped:
+                oi_deduped[segment_name] = value
+
+        assets_deduped: dict[str, int | float] = {}
+        for segment_name, value in assets_by_period.get(period_end, []):
+            if segment_name not in assets_deduped or value > assets_deduped[segment_name]:
+                assets_deduped[segment_name] = value
+
         payload_by_period[period_end] = [
             {
                 "segment_id": _normalize_identifier(segment_name),
@@ -2821,6 +2907,8 @@ def _parse_segment_report_html(report_html: str, *, report_title: str = "") -> d
                 "kind": kind,
                 "revenue": _json_number(value),
                 "share_of_revenue": _json_number(value / total_revenue) if total_revenue else None,
+                "operating_income": _json_number(oi_deduped[segment_name]) if segment_name in oi_deduped else None,
+                "assets": _json_number(assets_deduped[segment_name]) if segment_name in assets_deduped else None,
             }
             for segment_name, value in sorted(deduped.items(), key=lambda item: item[1], reverse=True)
         ]
@@ -2897,6 +2985,33 @@ def _is_revenue_metric_label(label: str) -> bool:
             "netrevenue",
         )
     )
+
+
+def _is_operating_income_metric_label(label: str) -> bool:
+    normalized_label = _normalize_identifier(label)
+    return normalized_label.startswith(
+        (
+            "operatingincome",
+            "operatingprofit",
+            "incomefromoperations",
+            "earningsfromoperations",
+            "segmentprofitloss",
+            "segmentoperating",
+            "profitlossfromsegment",
+        )
+    )
+
+
+def _is_asset_metric_label(label: str) -> bool:
+    normalized_label = _normalize_identifier(label)
+    return normalized_label in {
+        "assets",
+        "totalassets",
+        "longlivedassets",
+        "noncurrentassets",
+        "identifiableassets",
+        "segmentassets",
+    }
 
 
 def _clean_table_text(value: str) -> str:

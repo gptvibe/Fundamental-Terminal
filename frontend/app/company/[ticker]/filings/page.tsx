@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { clsx } from "clsx";
 
+import { FilingEventCategoryChart } from "@/components/charts/filing-event-category-chart";
 import { FilingDocumentViewer } from "@/components/filings/filing-document-viewer";
 import { FilingParserInsights } from "@/components/filings/filing-parser-insights";
 import { CompanyFilingsTimeline } from "@/components/filings/company-filings-timeline";
@@ -11,9 +13,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
+import { getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyFilingInsightsResponse, CompanyFilingsResponse } from "@/lib/types";
+import type { CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingsResponse } from "@/lib/types";
 
 export default function CompanyFilingsPage() {
   const params = useParams<{ ticker: string }>();
@@ -35,6 +37,10 @@ export default function CompanyFilingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSourceUrl, setSelectedSourceUrl] = useState<string | null>(null);
+  const [eventsData, setEventsData] = useState<CompanyEventsResponse | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +102,34 @@ export default function CompanyFilingsPage() {
     };
   }, [reloadKey, ticker]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadEvents() {
+      try {
+        setEventsLoading(true);
+        setEventsError(null);
+        const response = await getCompanyFilingEvents(ticker);
+        if (!cancelled) {
+          setEventsData(response);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setEventsError(nextError instanceof Error ? nextError.message : "Unable to load filing events");
+        }
+      } finally {
+        if (!cancelled) {
+          setEventsLoading(false);
+        }
+      }
+    }
+
+    void loadEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
   const insights = useMemo(() => (insightsData?.insights == null ? [] : insightsData.insights), [insightsData?.insights]);
   const pageCompany = company ?? data?.company ?? null;
   const filings = useMemo(() => data?.filings ?? [], [data?.filings]);
@@ -116,6 +150,16 @@ export default function CompanyFilingsPage() {
       .map(([form, count]) => ({ form, count }))
       .sort((left, right) => right.count - left.count || left.form.localeCompare(right.form));
   }, [filings]);
+  const allEvents = useMemo(() => eventsData?.events ?? [], [eventsData?.events]);
+  const eventCategories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const event of allEvents) seen.add(event.category);
+    return [...seen].sort();
+  }, [allEvents]);
+  const filteredEvents = useMemo(
+    () => (activeCategory ? allEvents.filter((e) => e.category === activeCategory) : allEvents),
+    [allEvents, activeCategory]
+  );
   const effectiveRefreshState = data?.refresh ?? refreshState;
   const sourceLabel = data?.timeline_source === "cached_financials" ? "Cached annual and quarterly filings" : "SEC submissions";
   const selectedFiling = useMemo(
@@ -207,6 +251,85 @@ export default function CompanyFilingsPage() {
             <div className="sparkline-note">Filing counts will appear here once recent SEC submissions are available.</div>
           )}
         </div>
+      </Panel>
+
+      <Panel title="8-K Event Activity" subtitle="Distribution of current reports by category so filing patterns are visible at a glance">
+        <FilingEventCategoryChart events={allEvents} />
+      </Panel>
+
+      <Panel
+        title="Material 8-K Events"
+        subtitle="Categorized timeline of current reports — use the filters to narrow to a specific event type"
+        aside={
+          eventCategories.length ? (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button
+                className={clsx("ticker-button", "filing-filter-button", activeCategory === null && "is-active")}
+                onClick={() => setActiveCategory(null)}
+              >
+                All
+              </button>
+              {eventCategories.map((cat) => (
+                <button
+                  key={cat}
+                  className={clsx("ticker-button", "filing-filter-button", activeCategory === cat && "is-active")}
+                  onClick={() => setActiveCategory((prev) => (prev === cat ? null : cat))}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          ) : undefined
+        }
+      >
+        {eventsError ?? eventsData?.error ? (
+          <div className="text-muted">{eventsError ?? eventsData?.error}</div>
+        ) : eventsLoading ? (
+          <div className="text-muted">Loading 8-K events...</div>
+        ) : filteredEvents.length ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            {filteredEvents.map((event) => (
+              <a
+                key={event.accession_number ?? `${event.form}-${event.filing_date ?? event.report_date ?? event.source_url}`}
+                href={event.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="filing-link-card"
+                style={{ display: "grid", gap: 8, textDecoration: "none" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="pill">{event.form}</span>
+                    <span className="pill">{event.category}</span>
+                    {event.item_code && event.item_code !== "UNSPECIFIED" ? <span className="pill">Item {event.item_code}</span> : null}
+                    {event.items ? <span className="pill">Items {event.items}</span> : null}
+                  </div>
+                  <div className="text-muted">{formatDate(event.filing_date ?? event.report_date)}</div>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{event.summary}</div>
+                {event.key_amounts.length ? (
+                  <div className="text-muted" style={{ fontSize: 13 }}>
+                    Key amounts: {event.key_amounts.slice(0, 3).map((a) => `$${Math.round(a).toLocaleString()}`).join(" · ")}
+                  </div>
+                ) : null}
+                <div className="text-muted" style={{ fontSize: 13 }}>
+                  {event.accession_number ?? "Accession pending"}
+                  {event.primary_document ? ` · ${event.primary_document}` : ""}
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 220 }}>
+            <div className="grid-empty-kicker">8-K event intelligence</div>
+            <div className="grid-empty-title">{activeCategory ? `No ${activeCategory} events` : "No 8-K events yet"}</div>
+            <div className="grid-empty-copy">
+              {activeCategory
+                ? `No current reports are classified under ${activeCategory}. Try a different category or clear the filter.`
+                : "This panel fills in once SEC submissions include current reports for the selected company."}
+            </div>
+          </div>
+        )}
       </Panel>
     </CompanyWorkspaceShell>
   );

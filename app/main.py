@@ -6,6 +6,7 @@ import html
 import json
 import os
 import re
+import threading
 import time
 from datetime import date as DateType, datetime, timezone
 from typing import Any, Literal
@@ -64,6 +65,9 @@ ALLOWED_SEC_EMBED_MIME_PREFIXES = ("text/html", "application/html", "application
 ALLOWED_SEC_EMBED_EXTENSIONS = (".htm", ".html", ".xhtml", ".txt")
 MAX_SEC_EMBED_BYTES = 5 * 1024 * 1024
 FILINGS_TIMELINE_TTL_SECONDS = settings.sec_filings_timeline_ttl_seconds
+SEARCH_RESPONSE_TTL_SECONDS = 60
+_search_response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_search_response_cache_lock = threading.Lock()
 
 
 class RefreshState(BaseModel):
@@ -111,6 +115,8 @@ class FinancialSegmentPayload(BaseModel):
     kind: Literal["business", "geographic", "other"] = "business"
     revenue: Number = None
     share_of_revenue: Number = None
+    operating_income: Number = None
+    assets: Number = None
 
 
 class FilingParserSegmentPayload(BaseModel):
@@ -754,6 +760,11 @@ def search_companies(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="query is required")
 
     normalized_query = _normalize_search_query(raw_query)
+    if not refresh:
+        cached_response = _get_cached_search_response(normalized_query)
+        if cached_response is not None:
+            return cached_response
+
     normalized_ticker = _normalize_ticker(normalized_query)
     normalized_cik = _normalize_cik_query(normalized_query)
     snapshots = search_company_snapshots(session, normalized_query)
@@ -794,11 +805,14 @@ def search_companies(
     else:
         refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
 
-    return CompanySearchResponse(
+    response = CompanySearchResponse(
         query=normalized_query,
         results=[_serialize_company(snapshot) for snapshot in snapshots],
         refresh=refresh_state,
     )
+    if not refresh:
+        _store_cached_search_response(normalized_query, response)
+    return response
 
 
 @app.get("/api/companies/resolve", response_model=CompanyResolutionResponse)
@@ -1898,6 +1912,25 @@ def _refresh_for_snapshot(background_tasks: BackgroundTasks, snapshot: CompanyCa
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _get_cached_search_response(query: str) -> CompanySearchResponse | None:
+    now = time.monotonic()
+    with _search_response_cache_lock:
+        cached = _search_response_cache.get(query)
+        if cached is None:
+            return None
+        expires_at, payload = cached
+        if expires_at <= now:
+            _search_response_cache.pop(query, None)
+            return None
+        return CompanySearchResponse.model_validate(payload)
+
+
+def _store_cached_search_response(query: str, response: CompanySearchResponse) -> None:
+    expires_at = time.monotonic() + SEARCH_RESPONSE_TTL_SECONDS
+    with _search_response_cache_lock:
+        _search_response_cache[query] = (expires_at, response.model_dump())
+
+
 def _resolve_cached_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:
     snapshot = get_company_snapshot(session, ticker)
     if snapshot is not None:
@@ -2043,6 +2076,8 @@ def _serialize_financial_segment(payload: dict[str, Any]) -> FinancialSegmentPay
         kind=payload.get("kind") if payload.get("kind") in {"business", "geographic", "other"} else "other",
         revenue=payload.get("revenue"),
         share_of_revenue=payload.get("share_of_revenue"),
+        operating_income=payload.get("operating_income"),
+        assets=payload.get("assets"),
     )
 
 
