@@ -77,8 +77,15 @@ npm run dev
 The frontend proxies backend requests through `/backend/*` and exposes:
 
 - `/` for search, autocomplete, and trending tickers
-- `/company/[ticker]` for financial statements and charts
-- `/company/[ticker]/models` for cached model outputs
+- `/company/[ticker]` — company overview with unified activity feed and priority alerts
+- `/company/[ticker]/financials` — financial statements, margin-trend chart, cash-flow waterfall, balance sheet, and segment breakdown
+- `/company/[ticker]/models` — DCF, health score, and scenario analysis
+- `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel
+- `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
+- `/company/[ticker]/stakes` — legacy path redirected to `/company/[ticker]/ownership-changes`
+- `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
+- `/company/[ticker]/events` — 8-K events classified by item code with category chart
+- `/company/[ticker]/sec-feed` — unified SEC activity feed across all filing types
 
 Search accepts either a ticker or a company name and shows an autocomplete dropdown with SEC-backed matches. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
 

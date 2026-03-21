@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { Bar, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, BarChart } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { BeneficialOwnershipFormChart } from "@/components/charts/beneficial-ownership-form-chart";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -15,6 +15,30 @@ import { getCompanyBeneficialOwnership, getCompanyBeneficialOwnershipSummary } f
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatDate } from "@/lib/format";
 import type { CompanyBeneficialOwnershipResponse, CompanyBeneficialOwnershipSummaryResponse } from "@/lib/types";
+
+interface OwnerRow {
+  key: string;
+  partyName: string;
+  role: string | null;
+  filingDate: string | null;
+  eventDate: string | null;
+  percentOwned: number | null;
+  sharesOwned: number | null;
+  percentChangePp: number | null;
+  changeDirection: string | null;
+  purpose: string | null;
+}
+
+interface ActivistSignal {
+  key: string;
+  form: string;
+  filingDate: string | null;
+  sourceUrl: string;
+  label: string;
+  changeDirection: string | null;
+  headline: string;
+  detail: string;
+}
 
 export default function CompanyOwnershipChangesPage() {
   const params = useParams<{ ticker: string }>();
@@ -84,6 +108,28 @@ export default function CompanyOwnershipChangesPage() {
   }, [filings]);
   const monthlyTimeline = useMemo(() => buildMonthlyTimeline(filings), [filings]);
   const directionBreakdown = useMemo(() => buildDirectionBreakdown(filings), [filings]);
+  const ownerRows = useMemo(() => buildOwnerRows(filings), [filings]);
+  const activistSignals = useMemo(() => buildActivistSignals(filings), [filings]);
+  const latestPurpose = useMemo(() => {
+    for (const filing of filings) {
+      for (const party of filing.parties) {
+        if (party.purpose?.trim()) {
+          return party.purpose.trim();
+        }
+      }
+    }
+    return null;
+  }, [filings]);
+  const latestPartyEventDate = useMemo(() => {
+    for (const filing of filings) {
+      for (const party of filing.parties) {
+        if (party.event_date) {
+          return party.event_date;
+        }
+      }
+    }
+    return null;
+  }, [filings]);
   const signalQuality = useMemo(() => {
     const totalAmendments = summary?.amendments ?? amendments;
     const quantified = summary?.amendments_with_delta ?? filings.filter((filing) => filing.percent_change_pp != null).length;
@@ -95,14 +141,24 @@ export default function CompanyOwnershipChangesPage() {
     };
   }, [amendments, filings, summary?.amendments, summary?.amendments_with_delta]);
   const investorScorecard = useMemo(
-    () => buildInvestorScorecard({
-      totalFilings: summary?.total_filings ?? filings.length,
-      amendmentChains: summary?.chains_with_amendments ?? 0,
-      increaseEvents: summary?.ownership_increase_events ?? increaseEvents,
-      decreaseEvents: summary?.ownership_decrease_events ?? decreaseEvents,
-      coverage: signalQuality.coverage
-    }),
-    [decreaseEvents, filings.length, increaseEvents, signalQuality.coverage, summary?.chains_with_amendments, summary?.ownership_decrease_events, summary?.ownership_increase_events, summary?.total_filings]
+    () =>
+      buildInvestorScorecard({
+        totalFilings: summary?.total_filings ?? filings.length,
+        amendmentChains: summary?.chains_with_amendments ?? 0,
+        increaseEvents: summary?.ownership_increase_events ?? increaseEvents,
+        decreaseEvents: summary?.ownership_decrease_events ?? decreaseEvents,
+        coverage: signalQuality.coverage
+      }),
+    [
+      decreaseEvents,
+      filings.length,
+      increaseEvents,
+      signalQuality.coverage,
+      summary?.chains_with_amendments,
+      summary?.ownership_decrease_events,
+      summary?.ownership_increase_events,
+      summary?.total_filings
+    ]
   );
 
   return (
@@ -140,25 +196,13 @@ export default function CompanyOwnershipChangesPage() {
           <Metric label="Initial Filings" value={(summary?.initial_filings ?? initialFilings).toLocaleString()} />
           <Metric label="Amendments" value={(summary?.amendments ?? amendments).toLocaleString()} />
           <Metric label="Reporting Persons" value={(summary?.unique_reporting_persons ?? 0).toLocaleString()} />
-          <Metric
-            label="Largest Reported Stake"
-            value={summary?.max_reported_percent != null ? `${summary.max_reported_percent.toFixed(2)}%` : "Pending"}
-          />
-          <Metric
-            label="Latest Event Date"
-            value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : "Pending"}
-          />
+          <Metric label="Largest Reported Stake" value={summary?.max_reported_percent != null ? `${summary.max_reported_percent.toFixed(2)}%` : "Pending"} />
+          <Metric label="Latest Event Date" value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : "Pending"} />
           <Metric label="Amendment Chains" value={(summary?.chains_with_amendments ?? 0).toLocaleString()} />
           <Metric label="Increase Events" value={(summary?.ownership_increase_events ?? increaseEvents).toLocaleString()} />
           <Metric label="Decrease Events" value={(summary?.ownership_decrease_events ?? decreaseEvents).toLocaleString()} />
-          <Metric
-            label="Largest Increase"
-            value={summary?.largest_increase_pp != null ? `${formatSignedNumber(summary.largest_increase_pp)} pp` : "Pending"}
-          />
-          <Metric
-            label="Largest Decrease"
-            value={summary?.largest_decrease_pp != null ? `${formatSignedNumber(summary.largest_decrease_pp)} pp` : "Pending"}
-          />
+          <Metric label="Largest Increase" value={summary?.largest_increase_pp != null ? `${formatSignedNumber(summary.largest_increase_pp)} pp` : "Pending"} />
+          <Metric label="Largest Decrease" value={summary?.largest_decrease_pp != null ? `${formatSignedNumber(summary.largest_decrease_pp)} pp` : "Pending"} />
         </div>
       </Panel>
 
@@ -182,7 +226,9 @@ export default function CompanyOwnershipChangesPage() {
               chips={[
                 `${(summary?.total_filings ?? filings.length).toLocaleString()} filings`,
                 `${(summary?.chains_with_amendments ?? 0).toLocaleString()} amendment chains`,
-                `${signalQuality.quantified.toLocaleString()} quantified deltas`
+                `${signalQuality.quantified.toLocaleString()} quantified deltas`,
+                latestPartyEventDate ? `latest event ${formatDate(latestPartyEventDate)}` : "latest event pending",
+                latestPurpose ? `purpose: ${truncateText(latestPurpose, 70)}` : "purpose signal pending"
               ]}
             />
 
@@ -230,18 +276,10 @@ export default function CompanyOwnershipChangesPage() {
 
             <div className="metric-card" style={{ display: "grid", gap: 10 }}>
               <div className="metric-label">How To Read This (Plain English)</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                Initial filing: A person or fund reports a meaningful stake for the first time.
-              </div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                Amendment: They update an earlier filing, often after changing position size or intent.
-              </div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                Increase or decrease event: We measured a clear percentage-point change versus the prior filing.
-              </div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                Unknown direction: SEC text did not provide enough structured numbers to quantify the change.
-              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>Initial filing: A person or fund reports a meaningful stake for the first time.</div>
+              <div className="text-muted" style={{ fontSize: 14 }}>Amendment: They update an earlier filing, often after changing position size or intent.</div>
+              <div className="text-muted" style={{ fontSize: 14 }}>Increase or decrease event: We measured a clear percentage-point change versus the prior filing.</div>
+              <div className="text-muted" style={{ fontSize: 14 }}>Unknown direction: SEC text did not provide enough structured numbers to quantify the change.</div>
               <div className="text-muted" style={{ fontSize: 14 }}>
                 Signal quality here: {signalQuality.quantified.toLocaleString()} of {signalQuality.totalAmendments.toLocaleString()} amendments have quantified deltas ({(signalQuality.coverage * 100).toFixed(1)}%).
               </div>
@@ -255,6 +293,91 @@ export default function CompanyOwnershipChangesPage() {
             <div className="grid-empty-kicker">Signal visuals</div>
             <div className="grid-empty-title">No trend visuals yet</div>
             <div className="grid-empty-copy">Visuals appear after the first 13D or 13G filings are cached for this company.</div>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Beneficial Owner Table" subtitle="Latest party-level signals, event dates, ownership stakes, and filing deltas">
+        {error || data?.error ? (
+          <div className="text-muted">{error ?? data?.error}</div>
+        ) : loading || workspaceLoading ? (
+          <div className="text-muted">Loading owner table...</div>
+        ) : ownerRows.length ? (
+          <div className="insider-table-shell">
+            <table className="insider-table">
+              <thead>
+                <tr>
+                  <th>Beneficial Owner</th>
+                  <th>Latest Event</th>
+                  <th>Latest Filing</th>
+                  <th>Role</th>
+                  <th className="align-right">Percent Owned</th>
+                  <th className="align-right">Shares Owned</th>
+                  <th className="align-right">Delta (pp)</th>
+                  <th>Direction</th>
+                  <th>Latest Purpose</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ownerRows.map((row) => (
+                  <tr key={row.key}>
+                    <td className="insider-name-cell">{row.partyName}</td>
+                    <td>{row.eventDate ? formatDate(row.eventDate) : "--"}</td>
+                    <td>{row.filingDate ? formatDate(row.filingDate) : "--"}</td>
+                    <td>{row.role ?? "--"}</td>
+                    <td className="numeric-cell">{row.percentOwned != null ? `${row.percentOwned.toFixed(2)}%` : "--"}</td>
+                    <td className="numeric-cell">{row.sharesOwned != null ? Math.round(row.sharesOwned).toLocaleString() : "--"}</td>
+                    <td className="numeric-cell">{row.percentChangePp != null ? `${formatSignedNumber(row.percentChangePp)} pp` : "--"}</td>
+                    <td>{row.changeDirection ? row.changeDirection.toUpperCase() : "--"}</td>
+                    <td>{row.purpose ? truncateText(row.purpose, 96) : "--"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 220 }}>
+            <div className="grid-empty-kicker">Owner table</div>
+            <div className="grid-empty-title">No beneficial-owner rows yet</div>
+            <div className="grid-empty-copy">Rows will appear after filings include party-level ownership details.</div>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Activist Signals" subtitle="Purpose language and large ownership deltas that could matter for governance pressure">
+        {error || data?.error ? (
+          <div className="text-muted">{error ?? data?.error}</div>
+        ) : loading || workspaceLoading ? (
+          <div className="text-muted">Loading activist signal panel...</div>
+        ) : activistSignals.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {activistSignals.map((signal) => (
+              <a
+                key={signal.key}
+                href={signal.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="filing-link-card"
+                style={{ display: "grid", gap: 8, textDecoration: "none" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <span className="pill">{signal.form}</span>
+                    <span className="pill">{signal.label}</span>
+                    {signal.changeDirection ? <span className="pill">{signal.changeDirection}</span> : null}
+                  </div>
+                  <div className="text-muted">{signal.filingDate ? formatDate(signal.filingDate) : "Pending"}</div>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{signal.headline}</div>
+                <div className="text-muted" style={{ fontSize: 13 }}>{signal.detail}</div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 220 }}>
+            <div className="grid-empty-kicker">Activist panel</div>
+            <div className="grid-empty-title">No high-conviction signals yet</div>
+            <div className="grid-empty-copy">This panel highlights clear purpose language and measurable stake moves when present in 13D/G filings.</div>
           </div>
         )}
       </Panel>
@@ -300,13 +423,18 @@ export default function CompanyOwnershipChangesPage() {
                 ) : null}
                 {filing.parties.length ? (
                   <div className="text-muted" style={{ fontSize: 13 }}>
-                    {filing.parties.slice(0, 2).map((party) => {
-                      const ownershipBits = [
-                        party.percent_owned != null ? `${party.percent_owned.toFixed(2)}%` : null,
-                        party.shares_owned != null ? `${Math.round(party.shares_owned).toLocaleString()} shares` : null
-                      ].filter(Boolean);
-                      return `${party.party_name}${ownershipBits.length ? ` (${ownershipBits.join(" · ")})` : ""}`;
-                    }).join(" · ")}
+                    {filing.parties
+                      .slice(0, 2)
+                      .map((party) => {
+                        const ownershipBits = [
+                          party.percent_owned != null ? `${party.percent_owned.toFixed(2)}%` : null,
+                          party.shares_owned != null ? `${Math.round(party.shares_owned).toLocaleString()} shares` : null,
+                          party.event_date ? `event ${formatDate(party.event_date)}` : null,
+                          party.purpose ? `purpose: ${truncateText(party.purpose, 80)}` : null
+                        ].filter(Boolean);
+                        return `${party.party_name}${ownershipBits.length ? ` (${ownershipBits.join(" · ")})` : ""}`;
+                      })
+                      .join(" · ")}
                     {filing.parties.length > 2 ? ` · +${filing.parties.length - 2} more` : ""}
                   </div>
                 ) : null}
@@ -438,4 +566,82 @@ function buildInvestorScorecard({
     explanation:
       "That does not mean nothing is happening. It means there are fewer major-holder updates, or the SEC text does not provide enough structured numbers to measure them cleanly."
   };
+}
+
+function buildOwnerRows(filings: CompanyBeneficialOwnershipResponse["filings"]): OwnerRow[] {
+  const rowsByParty = new Map<string, OwnerRow>();
+
+  for (const filing of filings) {
+    for (const party of filing.parties) {
+      const partyName = party.party_name?.trim();
+      if (!partyName) {
+        continue;
+      }
+      const key = partyName.toLowerCase();
+      if (rowsByParty.has(key)) {
+        continue;
+      }
+      rowsByParty.set(key, {
+        key,
+        partyName,
+        role: party.role,
+        filingDate: filing.filing_date ?? filing.report_date,
+        eventDate: party.event_date,
+        percentOwned: party.percent_owned,
+        sharesOwned: party.shares_owned,
+        percentChangePp: filing.percent_change_pp,
+        changeDirection: filing.change_direction,
+        purpose: party.purpose
+      });
+    }
+  }
+
+  return [...rowsByParty.values()].slice(0, 20);
+}
+
+function buildActivistSignals(filings: CompanyBeneficialOwnershipResponse["filings"]): ActivistSignal[] {
+  const signals: ActivistSignal[] = [];
+  const activistPattern = /activist|board|control|strateg|engage|proxy|nominee|sale|merger|capital/i;
+
+  for (const filing of filings) {
+    for (const party of filing.parties) {
+      const hasPurposeSignal = Boolean(party.purpose && activistPattern.test(party.purpose));
+      const delta = filing.percent_change_pp;
+      const hasDeltaSignal = delta != null && Math.abs(delta) >= 1;
+      if (!hasPurposeSignal && !hasDeltaSignal) {
+        continue;
+      }
+
+      const headlineBits = [party.party_name];
+      if (delta != null) {
+        headlineBits.push(`${formatSignedNumber(delta)} pp`);
+      }
+
+      signals.push({
+        key: `${filing.accession_number ?? filing.source_url}-${party.party_name}`,
+        form: filing.form,
+        filingDate: filing.filing_date ?? filing.report_date,
+        sourceUrl: filing.source_url,
+        label: hasPurposeSignal ? "Purpose Signal" : "Delta Signal",
+        changeDirection: filing.change_direction,
+        headline: headlineBits.join(" · "),
+        detail: [
+          party.event_date ? `Event date ${formatDate(party.event_date)}` : null,
+          party.percent_owned != null ? `${party.percent_owned.toFixed(2)}% reported ownership` : null,
+          party.purpose ? `Purpose: ${truncateText(party.purpose, 180)}` : null
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      });
+    }
+  }
+
+  return signals.slice(0, 10);
+}
+
+function truncateText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return `${value.slice(0, maxChars - 3).trimEnd()}...`;
 }

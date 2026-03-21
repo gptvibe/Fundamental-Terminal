@@ -70,6 +70,7 @@ def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
     monkeypatch.setattr(main_module, "EdgarClient", lambda: _FakeEdgarClient(filings))
     monkeypatch.setattr(main_module, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_capital_markets_events", lambda *_args, **_kwargs: [])
 
 
 def test_events_route_classifies_item_codes(monkeypatch):

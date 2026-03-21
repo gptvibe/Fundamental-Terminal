@@ -3092,7 +3092,7 @@ def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
 
 def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot) -> dict[str, Any]:
     cached_filings = _load_filings_from_cache(snapshot.company.cik)
-    filings = cached_filings or _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
+    filings = cached_filings if cached_filings is not None else _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
     filing_events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
     beneficial_filings = [
         _serialize_cached_beneficial_ownership_report(report)
@@ -3322,7 +3322,7 @@ def _build_activity_alerts(
     alerts.sort(
         key=lambda item: (
             0 if item.level == "high" else 1 if item.level == "medium" else 2,
-            item.date or DateType.min,
+            -(item.date.toordinal() if item.date else 0),
             item.id,
         )
     )

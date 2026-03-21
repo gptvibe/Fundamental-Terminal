@@ -292,7 +292,7 @@ Add query helpers in `app/services/cache_queries.py`.
 Add endpoints in `app/main.py`:
 
 - `GET /api/companies/{ticker}/beneficial-ownership`
-- `GET /api/beneficial-ownership/{ticker}/summary`
+- `GET /api/companies/{ticker}/beneficial-ownership/summary`
 
 ### Frontend pages and components
 
@@ -305,6 +305,12 @@ Add components:
 - `frontend/components/ownership/beneficial-owner-timeline.tsx`
 - `frontend/components/ownership/beneficial-owner-table.tsx`
 - `frontend/components/ownership/activist-signal-panel.tsx`
+
+Status as of 2026-03-21:
+
+- route and data contracts shipped
+- timeline shipped in `frontend/app/company/[ticker]/ownership-changes/page.tsx`
+- beneficial-owner table and activist signals shipped in `frontend/app/company/[ticker]/ownership-changes/page.tsx`
 
 ### UI to ship
 
@@ -616,22 +622,22 @@ Add components:
 ### Sprint 4
 
 - complete Phase 4
-- ship beneficial ownership tracking page
+- ship beneficial ownership tracking page (shipped)
 
 ### Sprint 5
 
 - complete Phase 5
-- ship governance page and proxy parsing
+- ship governance page and proxy parsing (core shipped; executive comp extraction deferred)
 
 ### Sprint 6
 
 - complete Phase 6 and Phase 7
-- ship event intelligence and capital-markets risk views
+- ship event intelligence and capital-markets risk views (shipped)
 
 ### Sprint 7
 
 - complete Phase 8
-- unify activity feed and alerts
+- unify activity feed and alerts (shipped)
 
 ## Prioritization By Investor Value
 
@@ -670,8 +676,8 @@ A dataset family is complete only when all of the following exist:
 
 If work starts now, implement these first:
 
-1. Add `GET /api/companies/{ticker}/filing-insights` in `app/main.py`.
-2. Expose missing Form 4 metadata in `_serialize_insider_trade`.
-3. Expose missing 13F metadata in `_serialize_institutional_holding`.
-4. Verify `frontend/lib/api.ts` and `frontend/lib/types.ts` match real backend payloads.
-5. Confirm the filings, insiders, and ownership pages render the newly exposed fields.
+1. Keep docs and routes aligned (`/ownership-changes` with `/stakes` redirect compatibility).
+2. Expand beneficial-ownership UX using existing payload fields (`purpose`, `event_date`, `percent_change_pp`).
+3. Build the reusable SEC fixture corpus across 13D/G, DEF 14A, 8-K, capital-markets filings, and Form 144.
+4. Use the fixture corpus to harden parser tests before broader parsing scope.
+5. Defer structured executive-compensation parsing until fixture coverage lands.

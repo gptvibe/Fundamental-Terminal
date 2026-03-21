@@ -71,6 +71,17 @@ export default function CompanyGovernancePage() {
   const definitiveCount = filings.filter((filing) => filing.form === "DEF 14A").length;
   const additionalCount = filings.length - definitiveCount;
 
+  // Proxy filings sorted newest-first, used for derived panels
+  const definitiveFilings = useMemo(
+    () => filings.filter((f) => f.form === "DEF 14A"),
+    [filings]
+  );
+  // Most recent filing with actual vote outcomes
+  const latestWithVotes = useMemo(
+    () => definitiveFilings.find((f) => f.vote_outcomes.length > 0) ?? null,
+    [definitiveFilings]
+  );
+
   return (
     <CompanyWorkspaceShell
       rail={
@@ -114,6 +125,76 @@ export default function CompanyGovernancePage() {
       <Panel title="Proxy Filing Mix" subtitle="How much of the visible governance record is definitive proxy versus supplemental material">
         <GovernanceFilingChart filings={filings} />
       </Panel>
+
+      <Panel title="Board & Meeting History" subtitle="Meeting date, board nominees, and exec comp signal from each definitive proxy">
+        {loading || workspaceLoading ? (
+          <div className="text-muted">Loading board history...</div>
+        ) : definitiveFilings.length ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  {(["Filed", "Meeting", "Nominees", "Vote Items", "Exec Comp"] as const).map((h) => (
+                    <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: "var(--text-muted)", fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {definitiveFilings.map((f) => (
+                  <tr key={f.accession_number ?? `${f.filing_date}-${f.source_url}`} style={{ borderBottom: "1px solid var(--border-subtle, var(--border))" }}>
+                    <td style={{ padding: "7px 10px", color: "var(--text)" }}>{formatDate(f.filing_date ?? f.report_date)}</td>
+                    <td style={{ padding: "7px 10px", color: f.meeting_date ? "var(--text)" : "var(--text-muted)" }}>{f.meeting_date ? formatDate(f.meeting_date) : "—"}</td>
+                    <td style={{ padding: "7px 10px", color: "var(--text)", textAlign: "right" }}>{f.board_nominee_count ?? "—"}</td>
+                    <td style={{ padding: "7px 10px", color: "var(--text)", textAlign: "right" }}>{f.vote_item_count || "—"}</td>
+                    <td style={{ padding: "7px 10px" }}>
+                      <span style={{ color: f.executive_comp_table_detected ? "#00FF41" : "var(--text-muted)" }}>
+                        {f.executive_comp_table_detected ? "Yes" : "No"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="text-muted" style={{ padding: "16px 0" }}>No definitive proxy filings parsed yet.</div>
+        )}
+      </Panel>
+
+      {latestWithVotes ? (
+        <Panel
+          title="Vote Outcomes"
+          subtitle={`Proposal-level ballot results — ${formatDate(latestWithVotes.filing_date ?? latestWithVotes.report_date)} DEF 14A`}
+        >
+          <div style={{ display: "grid", gap: 14 }}>
+            {latestWithVotes.vote_outcomes.map((outcome) => {
+              const total = (outcome.for_votes ?? 0) + (outcome.against_votes ?? 0) + (outcome.abstain_votes ?? 0);
+              const forPct = total > 0 && outcome.for_votes != null ? (outcome.for_votes / total) * 100 : null;
+              const againstPct = total > 0 && outcome.against_votes != null ? (outcome.against_votes / total) * 100 : null;
+              return (
+                <div key={outcome.proposal_number} style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
+                    <span>Prop {outcome.proposal_number}{outcome.title ? `: ${outcome.title}` : ""}</span>
+                    {forPct != null && <span style={{ color: "#00FF41", fontSize: 12 }}>{forPct.toFixed(1)}% For</span>}
+                  </div>
+                  {total > 0 ? (
+                    <div style={{ height: 8, borderRadius: 4, background: "var(--border)", overflow: "hidden", display: "flex" }}>
+                      {forPct != null && <div style={{ width: `${forPct}%`, background: "#00FF41", height: "100%" }} />}
+                      {againstPct != null && <div style={{ width: `${againstPct}%`, background: "#FF6B6B", height: "100%" }} />}
+                    </div>
+                  ) : null}
+                  <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-muted)" }}>
+                    {outcome.for_votes != null && <span style={{ color: "#00FF41" }}>For {outcome.for_votes.toLocaleString()}</span>}
+                    {outcome.against_votes != null && <span style={{ color: "#FF6B6B" }}>Against {outcome.against_votes.toLocaleString()}</span>}
+                    {outcome.abstain_votes != null && <span>Abstain {outcome.abstain_votes.toLocaleString()}</span>}
+                    {outcome.broker_non_votes != null && <span>Broker Non-Votes {outcome.broker_non_votes.toLocaleString()}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Panel>
+      ) : null}
 
       <Panel title="Proxy Timeline" subtitle="Recent governance-related filings with direct SEC document links">
         {error || data?.error ? (

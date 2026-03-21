@@ -6,6 +6,7 @@ import { BalanceSheetChart } from "@/components/charts/balance-sheet-chart";
 import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
+import { MarginTrendChart } from "@/components/charts/margin-trend-chart";
 import { OperatingCostStructureChart } from "@/components/charts/operating-cost-structure-chart";
 import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
 import { FinancialStatementsTable } from "@/components/company/financial-statements-table";
@@ -82,6 +83,10 @@ export default function CompanyFinancialsTabPage() {
 
       <Panel title="Cash Flow Waterfall" subtitle="Bridge from revenue to free cash flow and capital allocation over time">
         <CashFlowWaterfallChart financials={financials} />
+      </Panel>
+
+      <Panel title="Margin Trends" subtitle="Gross, operating, net, and free cash flow margins over time">
+        <MarginTrendChart financials={financials} />
       </Panel>
 
       <Panel title="Balance Sheet" subtitle="Assets versus liabilities over time">
