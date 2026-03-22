@@ -55,6 +55,7 @@ from app.services import (
 )
 from app.services.cache_queries import get_company_beneficial_ownership_reports
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
+from app.services.market_context import get_cached_market_context_status, get_market_context_snapshot
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
@@ -420,6 +421,8 @@ class PeerMetricsPayload(BaseModel):
     roic: Number = None
     shareholder_yield: Number = None
     implied_growth: Number = None
+    dcf_model_status: str | None = None
+    reverse_dcf_model_status: str | None = None
     valuation_band_percentile: Number = None
     revenue_history: list[PeerRevenuePointPayload] = Field(default_factory=list)
 
@@ -726,8 +729,45 @@ class CompanyActivityOverviewResponse(BaseModel):
     entries: list[ActivityFeedEntryPayload]
     alerts: list[AlertPayload]
     summary: AlertsSummaryPayload
+    market_context_status: dict[str, Any] | None = None
     refresh: RefreshState
     error: str | None = None
+
+
+class MarketCurvePointPayload(BaseModel):
+    tenor: str
+    rate: float
+    observation_date: DateType
+
+
+class MarketSlopePayload(BaseModel):
+    label: str
+    value: Number = None
+    long_tenor: str
+    short_tenor: str
+    observation_date: DateType | None = None
+
+
+class MarketFredSeriesPayload(BaseModel):
+    series_id: str
+    label: str
+    category: str
+    units: str
+    value: Number = None
+    observation_date: DateType | None = None
+    state: str
+
+
+class CompanyMarketContextResponse(BaseModel):
+    company: CompanyPayload | None
+    status: str
+    curve_points: list[MarketCurvePointPayload]
+    slope_2s10s: MarketSlopePayload
+    slope_3m10y: MarketSlopePayload
+    fred_series: list[MarketFredSeriesPayload]
+    provenance: dict[str, Any]
+    fetched_at: datetime
+    refresh: RefreshState
 
 
 class WatchlistSummaryRequest(BaseModel):
@@ -772,8 +812,11 @@ class WatchlistSummaryItemPayload(BaseModel):
     roic: Number = None
     shareholder_yield: Number = None
     implied_growth: Number = None
+    fair_value_gap_status: str | None = None
+    implied_growth_status: str | None = None
     valuation_band_percentile: Number = None
     balance_sheet_risk: Number = None
+    market_context_status: dict[str, Any] | None = None
 
 
 class WatchlistSummaryResponse(BaseModel):
@@ -1247,6 +1290,116 @@ def company_models(
     finally:
         if token is not None:
             dupont_model.reset_mode_override(token)
+
+
+@app.get("/api/companies/{ticker}/market-context", response_model=CompanyMarketContextResponse)
+def company_market_context(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyMarketContextResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyMarketContextResponse(
+            company=None,
+            status="insufficient_data",
+            curve_points=[],
+            slope_2s10s=MarketSlopePayload(label="2s10s", value=None, short_tenor="2y", long_tenor="10y", observation_date=None),
+            slope_3m10y=MarketSlopePayload(label="3m10y", value=None, short_tenor="3m", long_tenor="10y", observation_date=None),
+            fred_series=[],
+            provenance={
+                "treasury": {"status": "missing"},
+                "fred": {
+                    "enabled": bool(settings.fred_api_key),
+                    "status": "missing_api_key" if not settings.fred_api_key else "missing",
+                },
+            },
+            fetched_at=datetime.now(timezone.utc),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    context = get_market_context_snapshot()
+    return CompanyMarketContextResponse(
+        company=_serialize_company(snapshot),
+        status=context.status,
+        curve_points=[
+            MarketCurvePointPayload(tenor=point.tenor, rate=point.rate, observation_date=point.observation_date)
+            for point in context.curve_points
+        ],
+        slope_2s10s=MarketSlopePayload(
+            label=context.slope_2s10s.label,
+            value=context.slope_2s10s.value,
+            short_tenor=context.slope_2s10s.short_tenor,
+            long_tenor=context.slope_2s10s.long_tenor,
+            observation_date=context.slope_2s10s.observation_date,
+        ),
+        slope_3m10y=MarketSlopePayload(
+            label=context.slope_3m10y.label,
+            value=context.slope_3m10y.value,
+            short_tenor=context.slope_3m10y.short_tenor,
+            long_tenor=context.slope_3m10y.long_tenor,
+            observation_date=context.slope_3m10y.observation_date,
+        ),
+        fred_series=[
+            MarketFredSeriesPayload(
+                series_id=item.series_id,
+                label=item.label,
+                category=item.category,
+                units=item.units,
+                value=item.value,
+                observation_date=item.observation_date,
+                state=item.state,
+            )
+            for item in context.fred_series
+        ],
+        provenance=context.provenance,
+        fetched_at=context.fetched_at,
+        refresh=refresh,
+    )
+
+
+@app.get("/api/market-context", response_model=CompanyMarketContextResponse)
+def global_market_context() -> CompanyMarketContextResponse:
+    context = get_market_context_snapshot()
+    return CompanyMarketContextResponse(
+        company=None,
+        status=context.status,
+        curve_points=[
+            MarketCurvePointPayload(tenor=point.tenor, rate=point.rate, observation_date=point.observation_date)
+            for point in context.curve_points
+        ],
+        slope_2s10s=MarketSlopePayload(
+            label=context.slope_2s10s.label,
+            value=context.slope_2s10s.value,
+            short_tenor=context.slope_2s10s.short_tenor,
+            long_tenor=context.slope_2s10s.long_tenor,
+            observation_date=context.slope_2s10s.observation_date,
+        ),
+        slope_3m10y=MarketSlopePayload(
+            label=context.slope_3m10y.label,
+            value=context.slope_3m10y.value,
+            short_tenor=context.slope_3m10y.short_tenor,
+            long_tenor=context.slope_3m10y.long_tenor,
+            observation_date=context.slope_3m10y.observation_date,
+        ),
+        fred_series=[
+            MarketFredSeriesPayload(
+                series_id=item.series_id,
+                label=item.label,
+                category=item.category,
+                units=item.units,
+                value=item.value,
+                observation_date=item.observation_date,
+                state=item.state,
+            )
+            for item in context.fred_series
+        ],
+        provenance=context.provenance,
+        fetched_at=context.fetched_at,
+        refresh=RefreshState(triggered=False, reason="none", ticker=None, job_id=None),
+    )
 
 
 @app.get("/api/companies/{ticker}/peers", response_model=CompanyPeersResponse)
@@ -3182,6 +3335,7 @@ def _build_company_activity_overview_response(
             entries=[],
             alerts=[],
             summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+            market_context_status=get_cached_market_context_status(),
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             error=None,
         )
@@ -3208,6 +3362,7 @@ def _build_company_activity_overview_response(
         entries=entries,
         alerts=alerts,
         summary=_build_alerts_summary(alerts),
+        market_context_status=get_cached_market_context_status(),
         refresh=refresh,
         error=None,
     )
@@ -3620,11 +3775,15 @@ def _build_watchlist_summary_item(
     ratios_result = models.get("ratios").result if models.get("ratios") is not None and isinstance(models.get("ratios").result, dict) else {}
     ratios_values = ratios_result.get("values") if isinstance(ratios_result.get("values"), dict) else {}
     fair_value_per_share = _coerce_number(dcf_result.get("fair_value_per_share"), None)
-    fair_value_gap = (
-        ((fair_value_per_share - float(latest_price)) / float(latest_price))
-        if fair_value_per_share is not None and latest_price not in (None, 0)
-        else None
-    )
+    dcf_status = str(dcf_result.get("model_status") or dcf_result.get("status") or "unknown")
+    reverse_status = str(reverse_result.get("model_status") or reverse_result.get("status") or "unknown")
+    fair_value_gap = None
+    if dcf_status != "unsupported":
+        fair_value_gap = (
+            ((fair_value_per_share - float(latest_price)) / float(latest_price))
+            if fair_value_per_share is not None and latest_price not in (None, 0)
+            else None
+        )
 
     return WatchlistSummaryItemPayload(
         ticker=snapshot.company.ticker,
@@ -3643,9 +3802,12 @@ def _build_watchlist_summary_item(
         fair_value_gap=fair_value_gap,
         roic=_coerce_number(roic_result.get("roic"), None),
         shareholder_yield=_coerce_number(capital_result.get("shareholder_yield"), None),
-        implied_growth=_coerce_number(reverse_result.get("implied_growth"), None),
+        implied_growth=_coerce_number(reverse_result.get("implied_growth"), None) if reverse_status != "unsupported" else None,
+        fair_value_gap_status=dcf_status,
+        implied_growth_status=reverse_status,
         valuation_band_percentile=_coerce_number(reverse_result.get("valuation_band_percentile"), None),
         balance_sheet_risk=_coerce_number(ratios_values.get("net_debt_to_fcf") if isinstance(ratios_values, dict) else None, None),
+        market_context_status=get_cached_market_context_status(),
     )
 
 
@@ -3665,8 +3827,11 @@ def _build_missing_watchlist_summary_item(background_tasks: BackgroundTasks, tic
         roic=None,
         shareholder_yield=None,
         implied_growth=None,
+        fair_value_gap_status=None,
+        implied_growth_status=None,
         valuation_band_percentile=None,
         balance_sheet_risk=None,
+        market_context_status=get_cached_market_context_status(),
     )
 
 

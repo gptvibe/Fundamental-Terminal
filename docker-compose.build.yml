@@ -10,6 +10,7 @@ services:
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://host.docker.internal:6379/0}
       API_HOST: 0.0.0.0
       API_PORT: 8000
+      FRED_API_KEY: ${FRED_API_KEY:-}
     ports:
       - "8000:8000"
 
@@ -22,6 +23,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@host.docker.internal:5432/fundamentals}
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://host.docker.internal:6379/0}
+      FRED_API_KEY: ${FRED_API_KEY:-}
 
   sp500-prewarm:
     image: fundamental-terminal/backend:local
@@ -32,6 +34,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@host.docker.internal:5432/fundamentals}
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://host.docker.internal:6379/0}
+      FRED_API_KEY: ${FRED_API_KEY:-}
 
   frontend:
     image: fundamental-terminal/frontend:local

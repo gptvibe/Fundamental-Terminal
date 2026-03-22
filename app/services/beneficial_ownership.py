@@ -76,11 +76,7 @@ def collect_beneficial_ownership_reports(
                 parties = ()
         if client is not None and not parties:
             try:
-                _, submission_payload = client.get_filing_document_text(
-                    cik,
-                    filing.accession_number,
-                    f"{filing.accession_number.replace('-', '')}.txt",
-                )
+                _, submission_payload = _load_beneficial_submission_text(client, cik, filing)
                 parties = _extract_parties_from_submission_text(submission_payload)
             except Exception:
                 parties = ()
@@ -261,6 +257,39 @@ def _build_filing_document_url(cik: str, accession_number: str, primary_document
     if primary_document:
         return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{compact_accession}/{primary_document}"
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{str(cik).zfill(10)}.json#accn={accession_number}"
+
+
+def _load_beneficial_submission_text(
+    client: EdgarClient,
+    cik: str,
+    filing: FilingMetadata,
+) -> tuple[str, str]:
+    candidates: list[str] = []
+    try:
+        directory = client.get_filing_directory_index(cik, filing.accession_number)
+        for item in directory.get("directory", {}).get("item", []) or []:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name or "/" in name:
+                continue
+            lower_name = name.lower()
+            if lower_name.endswith(".txt"):
+                candidates.append(name)
+    except Exception:
+        candidates = []
+
+    fallback_txt = f"{filing.accession_number.replace('-', '')}.txt"
+    if fallback_txt not in candidates:
+        candidates.append(fallback_txt)
+
+    for name in candidates:
+        try:
+            return client.get_filing_document_text(cik, filing.accession_number, name)
+        except Exception:
+            continue
+
+    raise ValueError(f"Unable to load beneficial ownership submission text for accession {filing.accession_number}")
 
 
 def _extract_parties_from_document(document_payload: str) -> tuple[BeneficialOwnershipNormalizedParty, ...]:

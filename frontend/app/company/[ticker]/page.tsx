@@ -115,6 +115,7 @@ export default function CompanyOverviewPage() {
             `Price history points available: ${priceHistory.length.toLocaleString()}`,
             `Annual results available: ${fundamentalsTrendData.length.toLocaleString()}`,
             `${financials.filter((statement) => statement.segment_breakdown.length > 0).length.toLocaleString()} filings include segment detail`,
+            `Market context: ${formatMarketContextStatus(activityData?.market_context_status)}`,
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
@@ -224,6 +225,14 @@ export default function CompanyOverviewPage() {
       <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
     </CompanyWorkspaceShell>
   );
+}
+
+function formatMarketContextStatus(status: CompanyActivityOverviewResponse["market_context_status"]): string {
+  if (!status) {
+    return "Unavailable";
+  }
+  const observed = status.observation_date ? ` (${formatDate(status.observation_date)})` : "";
+  return `${status.label}${observed}`;
 }
 
 function formatFeedEntryType(type: string): string {

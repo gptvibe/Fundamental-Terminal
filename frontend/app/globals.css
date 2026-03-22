@@ -1006,6 +1006,28 @@ select {
     linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 97%, transparent));
 }
 
+.home-shell-dashboard {
+  grid-template-columns: 1fr;
+}
+
+.home-macro-panel {
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--cyan) 12%, transparent), transparent 36%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--gold) 10%, transparent), transparent 32%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.home-dashboard-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.home-launcher-panel {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 88%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
 .home-hero .panel-header {
   padding: 18px 18px 12px;
 }
@@ -1200,6 +1222,351 @@ select {
 
 .home-rail .panel-header {
   padding-bottom: 8px;
+}
+
+.econ-dashboard,
+.econ-summary-grid,
+.econ-chart-grid,
+.econ-signal-grid,
+.econ-hero-meta {
+  display: grid;
+  gap: 14px;
+}
+
+.econ-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 18px;
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 135%, transparent);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--green) 10%, transparent), transparent 35%),
+    linear-gradient(135deg, color-mix(in srgb, var(--panel-alt) 95%, transparent), color-mix(in srgb, var(--panel) 92%, transparent));
+}
+
+.econ-hero-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.econ-hero-title {
+  font-size: clamp(1.2rem, 1.8vw, 1.7rem);
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+  color: var(--surface-strong-text);
+  max-width: 26ch;
+}
+
+.econ-hero-meta {
+  align-content: start;
+  justify-items: start;
+}
+
+.econ-summary-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.econ-summary-card,
+.econ-chart-card,
+.econ-signal-card {
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 126%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.econ-summary-card {
+  display: grid;
+  gap: 8px;
+  padding: 15px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.econ-summary-card.tone-cyan {
+  background:
+    radial-gradient(circle at top right, rgba(0, 229, 255, 0.08), transparent 40%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.econ-summary-card.tone-gold {
+  background:
+    radial-gradient(circle at top right, rgba(247, 201, 72, 0.11), transparent 40%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.econ-summary-card.tone-green {
+  background:
+    radial-gradient(circle at top right, rgba(0, 255, 65, 0.08), transparent 40%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.econ-summary-card.tone-red {
+  background:
+    radial-gradient(circle at top right, rgba(255, 122, 89, 0.11), transparent 40%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.econ-summary-label,
+.econ-summary-detail {
+  color: var(--text-muted);
+}
+
+.econ-summary-label {
+  font-size: 0.74rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.econ-summary-value {
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--surface-strong-text);
+}
+
+.econ-summary-detail {
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.econ-chart-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.8fr);
+}
+
+.econ-chart-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 90%, transparent), color-mix(in srgb, var(--panel) 98%, transparent));
+}
+
+.econ-chart-card-wide {
+  min-width: 0;
+}
+
+.econ-chart-header {
+  display: grid;
+  gap: 8px;
+}
+
+.econ-chart-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.econ-chart-title {
+  font-size: 0.96rem;
+  font-weight: 600;
+  color: var(--surface-strong-text);
+}
+
+.econ-chart-shell {
+  width: 100%;
+  height: 360px;
+}
+
+.econ-curve-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.econ-curve-stat-card {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--cyan) 6%, transparent), transparent 42%),
+    color-mix(in srgb, var(--panel) 95%, transparent);
+}
+
+.econ-curve-stat-label,
+.econ-curve-stat-detail {
+  color: var(--text-muted);
+}
+
+.econ-curve-stat-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.econ-curve-stat-value {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--surface-strong-text);
+}
+
+.econ-curve-stat-detail {
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.econ-table-wrap {
+  overflow: auto;
+  max-height: 338px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 126%, transparent);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--cyan) 5%, transparent), transparent 42%),
+    color-mix(in srgb, var(--panel) 95%, transparent);
+}
+
+.econ-data-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.econ-data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 11px 14px;
+  text-align: left;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 94%, transparent);
+}
+
+.econ-data-table tbody tr {
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 88%, transparent);
+}
+
+.econ-data-table tbody tr:last-child {
+  border-bottom: 0;
+}
+
+.econ-data-table td {
+  padding: 13px 14px;
+  vertical-align: top;
+}
+
+.econ-data-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 130%, transparent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.econ-data-chip.tone-cyan {
+  color: color-mix(in srgb, var(--cyan) 76%, var(--text));
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+}
+
+.econ-data-chip.tone-gold {
+  color: color-mix(in srgb, var(--gold) 84%, var(--text));
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+}
+
+.econ-data-chip.tone-green {
+  color: color-mix(in srgb, var(--green) 82%, var(--text));
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+}
+
+.econ-data-chip.tone-red {
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+  background: color-mix(in srgb, var(--danger) 11%, transparent);
+}
+
+.econ-data-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--surface-strong-text);
+}
+
+.econ-data-subtitle,
+.econ-data-updated {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.econ-data-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--surface-strong-text);
+  white-space: nowrap;
+}
+
+.econ-data-signal {
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text) 88%, var(--text-muted));
+}
+
+.econ-table-toggle {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 13px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--surface-strong-text);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border-color: color-mix(in srgb, var(--cyan) 35%, var(--panel-border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cyan) 22%, transparent), color-mix(in srgb, var(--green) 14%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--panel-border) 70%, transparent);
+}
+
+.econ-table-toggle:hover {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--cyan) 28%, transparent), color-mix(in srgb, var(--green) 18%, transparent));
+}
+
+.econ-table-toggle:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--panel-border) 70%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--cyan) 22%, transparent);
+}
+
+.econ-signal-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.econ-signal-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--cyan) 6%, transparent), transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 92%, transparent), color-mix(in srgb, var(--panel) 97%, transparent));
+}
+
+.econ-signal-card .grid-empty-title {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.econ-signal-card .grid-empty-copy,
+.econ-hero .grid-empty-copy {
+  font-size: 0.88rem;
+  line-height: 1.6;
+}
+
+.econ-empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  border-radius: 14px;
+  border: 1px dashed color-mix(in srgb, var(--panel-border) 120%, transparent);
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px;
 }
 
 .home-shell .neon-green,
@@ -4137,8 +4504,23 @@ select {
   }
 
   .home-shell,
-  .home-hero-grid {
+  .home-hero-grid,
+  .home-dashboard-lower,
+  .econ-hero,
+  .econ-chart-grid {
     grid-template-columns: 1fr;
+  }
+
+  .econ-curve-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .econ-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .econ-signal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .financial-trend-inline {
@@ -4215,6 +4597,15 @@ select {
 @media (max-width: 640px) {
   .home-search-actions {
     grid-template-columns: 1fr;
+  }
+
+  .econ-summary-grid,
+  .econ-signal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .econ-chart-shell {
+    height: 260px;
   }
 
   .financial-trend-table {
@@ -4491,6 +4882,21 @@ select {
   .models-page-grid {
     grid-template-columns: 1fr;
   }
+
+  .home-dashboard-lower,
+  .econ-hero,
+  .econ-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .econ-summary-grid,
+  .econ-signal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .econ-chart-heading-row {
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 640px) {
@@ -4549,6 +4955,21 @@ select {
   .app-brand-mark {
     width: 40px;
     height: 40px;
+  }
+
+  .econ-summary-grid,
+  .econ-signal-grid,
+  .workflow-grid,
+  .model-guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .econ-data-table {
+    min-width: 640px;
+  }
+
+  .econ-curve-stats-grid {
+    grid-template-columns: 1fr;
   }
 
   .app-brand-logo {

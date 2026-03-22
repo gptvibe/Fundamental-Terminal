@@ -19,6 +19,7 @@ import {
   CompanyInstitutionalHoldingsResponse,
   CompanyInstitutionalHoldingsSummaryResponse,
   CompanyModelsResponse,
+  CompanyMarketContextResponse,
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
@@ -156,6 +157,14 @@ export function getCompanyModels(ticker: string, modelNames?: string[], options?
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`);
+}
+
+export function getCompanyMarketContext(ticker: string): Promise<CompanyMarketContextResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/market-context`);
+}
+
+export function getGlobalMarketContext(): Promise<CompanyMarketContextResponse> {
+  return fetchJson("/market-context");
 }
 
 export function getCompanyPeers(ticker: string, peers?: string[]): Promise<CompanyPeersResponse> {

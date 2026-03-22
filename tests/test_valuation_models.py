@@ -7,7 +7,7 @@ import app.model_engine.models.capital_allocation as capital_allocation_model
 import app.model_engine.models.dcf as dcf_model
 import app.model_engine.models.reverse_dcf as reverse_dcf_model
 import app.model_engine.models.roic as roic_model
-from app.model_engine.types import CompanyDataset, FinancialPoint
+from app.model_engine.types import CompanyDataset, FinancialPoint, MarketSnapshot
 
 
 def _mock_risk_free(*_args, **_kwargs):
@@ -32,13 +32,25 @@ def _point(year: int, data: dict[str, float | int | None]) -> FinancialPoint:
     )
 
 
-def _dataset(points: list[FinancialPoint]) -> CompanyDataset:
+def _dataset(points: list[FinancialPoint], *, price: float | None = 85.0, sector: str = "Technology") -> CompanyDataset:
     ordered = tuple(sorted(points, key=lambda item: item.period_end, reverse=True))
+    snapshot = (
+        MarketSnapshot(
+            latest_price=price,
+            price_date=date(2026, 3, 21),
+            price_source="yahoo_finance",
+        )
+        if price is not None
+        else None
+    )
     return CompanyDataset(
         company_id=1,
         ticker="ACME",
         name="Acme Corp",
-        sector="Technology",
+        sector=sector,
+        market_sector=sector,
+        market_industry="Software",
+        market_snapshot=snapshot,
         financials=ordered,
     )
 
@@ -151,24 +163,35 @@ def test_reverse_dcf_status_variants(monkeypatch):
     monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
     normal_points = _base_points()
-    normal_points[0].data["latest_price"] = 85
-    normal_result = reverse_dcf_model.compute(_dataset(normal_points))
+    normal_result = reverse_dcf_model.compute(_dataset(normal_points, price=85))
     assert normal_result["model_status"] in {"ok", "partial"}
 
     partial_points = _base_points()
-    partial_points[0].data["latest_price"] = 80
     partial_points[1].data["free_cash_flow"] = None
     partial_points[2].data["free_cash_flow"] = None
-    partial_result = reverse_dcf_model.compute(_dataset(partial_points))
+    partial_result = reverse_dcf_model.compute(_dataset(partial_points, price=80))
     assert partial_result["model_status"] in {"ok", "partial", "proxy"}
 
     insufficient_points = _base_points()
     insufficient_points[0].data["revenue"] = None
     insufficient_points[0].data["shares_outstanding"] = None
     insufficient_points[0].data["weighted_average_diluted_shares"] = None
-    insufficient_points[0].data["latest_price"] = None
-    insufficient_result = reverse_dcf_model.compute(_dataset(insufficient_points))
+    insufficient_result = reverse_dcf_model.compute(_dataset(insufficient_points, price=None))
     assert insufficient_result["model_status"] == "insufficient_data"
+
+
+def test_dcf_and_reverse_dcf_mark_financial_sector_unsupported(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+    monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    bank_dataset = _dataset(points, sector="Banks")
+
+    dcf_result = dcf_model.compute(bank_dataset)
+    reverse_result = reverse_dcf_model.compute(bank_dataset)
+
+    assert dcf_result["model_status"] == "unsupported"
+    assert reverse_result["model_status"] == "unsupported"
 
 
 def test_roic_status_variants(monkeypatch):

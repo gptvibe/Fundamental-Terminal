@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import SessionLocal, get_engine
 from app.model_engine.registry import CORE_MODEL_NAMES, MODEL_REGISTRY
-from app.model_engine.types import CompanyDataset, FinancialPoint, ModelDefinition
+from app.model_engine.types import CompanyDataset, FinancialPoint, MarketSnapshot, ModelDefinition
 from app.model_engine.utils import serialize_period
-from app.models import Company, FinancialStatement, ModelRun
+from app.models import Company, FinancialStatement, ModelRun, PriceHistory
 from app.services.risk_free_rate import get_latest_risk_free_rate
 from app.services.status_stream import JobReporter
 
@@ -50,7 +50,8 @@ class ModelEngine:
             raise ValueError(f"Company {company_id} does not exist")
 
         statements = _load_canonical_financials(self.session, company_id)
-        dataset = _build_company_dataset(company, statements)
+        market_snapshot = _load_latest_market_snapshot(self.session, company_id)
+        dataset = _build_company_dataset(company, statements, market_snapshot)
         if not dataset.financials:
             return []
 
@@ -184,7 +185,28 @@ def _load_canonical_financials(session: Session, company_id: int) -> list[Financ
     return list(session.execute(statement).scalars())
 
 
-def _build_company_dataset(company: Company, statements: list[FinancialStatement]) -> CompanyDataset:
+def _load_latest_market_snapshot(session: Session, company_id: int) -> MarketSnapshot | None:
+    statement = (
+        select(PriceHistory)
+        .where(PriceHistory.company_id == company_id)
+        .order_by(PriceHistory.trade_date.desc(), PriceHistory.last_updated.desc(), PriceHistory.id.desc())
+        .limit(1)
+    )
+    latest_price = session.execute(statement).scalar_one_or_none()
+    if latest_price is None:
+        return None
+    return MarketSnapshot(
+        latest_price=float(latest_price.close),
+        price_date=latest_price.trade_date,
+        price_source=latest_price.source,
+    )
+
+
+def _build_company_dataset(
+    company: Company,
+    statements: list[FinancialStatement],
+    market_snapshot: MarketSnapshot | None,
+) -> CompanyDataset:
     deduped: dict[tuple[object, ...], FinancialPoint] = {}
     for statement in statements:
         key = (statement.period_start, statement.period_end, statement.filing_type)
@@ -206,14 +228,20 @@ def _build_company_dataset(company: Company, statements: list[FinancialStatement
         ticker=company.ticker,
         name=company.name,
         sector=company.sector,
+        market_sector=company.market_sector,
+        market_industry=company.market_industry,
+        market_snapshot=market_snapshot,
         financials=financials,
     )
 
 
 def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -> dict[str, Any]:
     periods = [serialize_period(point) for point in dataset.financials]
+    market_snapshot_payload = _serialize_market_snapshot(dataset.market_snapshot)
     config = _model_config(definition)
     signature_input = {"periods": periods}
+    if market_snapshot_payload:
+        signature_input["market_snapshot"] = market_snapshot_payload
     if config:
         signature_input["config"] = config
     signature = hashlib.sha256(
@@ -225,7 +253,18 @@ def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -
         "statement_type": CANONICAL_STATEMENT_TYPE,
         "signature": signature,
         "config": config,
+        "market_snapshot": market_snapshot_payload,
         "periods": periods,
+    }
+
+
+def _serialize_market_snapshot(snapshot: MarketSnapshot | None) -> dict[str, Any]:
+    if snapshot is None:
+        return {}
+    return {
+        "latest_price": snapshot.latest_price,
+        "price_date": snapshot.price_date.isoformat() if snapshot.price_date is not None else None,
+        "price_source": snapshot.price_source,
     }
 
 

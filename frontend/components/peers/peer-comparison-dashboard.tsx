@@ -308,9 +308,9 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                         <td>{formatPercent(peer.roe)}</td>
                         <td>{formatPercent(peer.roic)}</td>
                         <td>{formatPercent(peer.revenue_growth)}</td>
-                        <td>{formatPercent(peer.implied_growth)}</td>
+                        <td>{formatValuationMetric(peer.implied_growth, peer.reverse_dcf_model_status)}</td>
                         <td>{formatPercent(peer.shareholder_yield)}</td>
-                        <td>{formatPercent(peer.fair_value_gap)}</td>
+                        <td>{formatValuationMetric(peer.fair_value_gap, peer.dcf_model_status)}</td>
                         <td>{formatPercent(peer.valuation_band_percentile)}</td>
                         <td>{formatScore(peer.piotroski_score)}</td>
                         <td>{formatSigned(peer.altman_z_score)}</td>
@@ -362,11 +362,11 @@ function peerMetricValue(
     case "roic":
       return peer.roic;
     case "implied_growth":
-      return peer.implied_growth;
+      return peer.reverse_dcf_model_status === "unsupported" ? null : peer.implied_growth;
     case "shareholder_yield":
       return peer.shareholder_yield;
     case "fair_value_gap":
-      return peer.fair_value_gap;
+      return peer.dcf_model_status === "unsupported" ? null : peer.fair_value_gap;
   }
 }
 
@@ -374,10 +374,17 @@ function buildBarData(peers: PeerMetricsPayload[]) {
   return peers.map((peer) => ({
     ticker: peer.ticker,
     is_focus: peer.is_focus,
-    fairValueGap: peer.fair_value_gap,
+    fairValueGap: peer.dcf_model_status === "unsupported" ? null : peer.fair_value_gap,
     roic: peer.roic,
     shareholderYield: peer.shareholder_yield
   }));
+}
+
+function formatValuationMetric(value: number | null, status: string | null | undefined): string {
+  if (status === "unsupported") {
+    return "Unsupported";
+  }
+  return formatPercent(value);
 }
 
 function buildRevenueLineData(history: PeerRevenuePoint[]) {

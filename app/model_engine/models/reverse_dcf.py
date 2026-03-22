@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import (
     annual_series,
@@ -10,14 +12,42 @@ from app.model_engine.utils import (
     status_explanation,
     status_from_data_quality,
     trust_summary,
+    valuation_applicability,
 )
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "reverse_dcf"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.1.0"
+
+PROJECTION_YEARS = 5
+MIN_SOLVE_GROWTH = -0.35
+MAX_SOLVE_GROWTH = 0.55
+SOLVE_ITERATIONS = 100
+HEATMAP_SHIFTS = (-0.03, -0.015, 0.0, 0.015, 0.03)
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
+    applicability = valuation_applicability(dataset)
+    if not applicability["is_supported"]:
+        risk_free = get_latest_risk_free_rate()
+        return {
+            "status": "unsupported",
+            "model_status": "unsupported",
+            "explanation": status_explanation("unsupported"),
+            "reason": "Reverse DCF is disabled for banks, insurers, REITs, and capital-markets-style financial firms.",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
+            "assumption_provenance": {
+                "risk_free_rate": {
+                    "source_name": risk_free.source_name,
+                    "tenor": risk_free.tenor,
+                    "observation_date": risk_free.observation_date.isoformat(),
+                    "rate_used": json_number(risk_free.rate_used),
+                },
+                "price_snapshot": _price_snapshot_payload(dataset),
+            },
+        }
+
     annuals = annual_series(dataset, limit=5)
     if not annuals:
         return {
@@ -25,18 +55,23 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "model_status": "insufficient_data",
             "explanation": status_explanation("insufficient_data"),
             "reason": "Annual financial history unavailable",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
         }
 
     latest = annuals[0]
     revenue = latest.data.get("revenue")
     operating_margin = safe_divide(latest.data.get("operating_income"), revenue)
     fcf_margin = safe_divide(latest.data.get("free_cash_flow"), revenue)
+    used_fcf_margin_proxy = False
+    if fcf_margin is None:
+        fcf_margin = safe_divide(latest.data.get("operating_cash_flow"), revenue)
+        used_fcf_margin_proxy = fcf_margin is not None
+
     shares = latest_non_null(dataset, "weighted_average_diluted_shares") or latest_non_null(dataset, "shares_outstanding")
 
-    price = latest.data.get("latest_price")
-    if price is None:
-        # Fall back to a directional proxy when live price is absent from the statement payload.
-        price = latest.data.get("eps")
+    market_snapshot = dataset.market_snapshot
+    price = market_snapshot.latest_price if market_snapshot is not None else None
 
     risk_free = get_latest_risk_free_rate()
     discount_rate = risk_free.rate_used + 0.055
@@ -48,7 +83,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         ["revenue", "operating_income", "free_cash_flow", "shares_outstanding", "weighted_average_diluted_shares"],
         years=3,
     )
-    proxy_used = latest.data.get("latest_price") is None
+    proxy_used = used_fcf_margin_proxy
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
@@ -56,25 +91,55 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     )
 
     if not can_directional:
+        reason = "Price/revenue/share inputs were insufficient for implied-growth inference"
+        if price in (None, 0):
+            reason = "Latest cached market price is unavailable; reverse DCF cannot infer implied growth without price."
         return {
             "status": "insufficient_data",
             "model_status": "insufficient_data",
             "explanation": status_explanation("insufficient_data"),
-            "reason": "Price/revenue/share inputs were insufficient for implied-growth inference",
+            "reason": reason,
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
         }
 
     market_cap = float(price) * float(shares)
-    implied_revenue_growth = max(-0.05, min(0.30, (discount_rate - terminal_growth) * 0.9))
-    implied_fcf_margin = fcf_margin if fcf_margin is not None else safe_divide(latest.data.get("operating_cash_flow"), revenue)
+    implied_fcf_margin = fcf_margin
+    if implied_fcf_margin is None:
+        return {
+            "status": "insufficient_data",
+            "model_status": "insufficient_data",
+            "explanation": status_explanation("insufficient_data"),
+            "reason": "Unable to determine base free-cash-flow margin from cached statements.",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
+        }
+
+    starting_fcf = float(revenue) * float(implied_fcf_margin)
+    solved_growth, solve_metadata = _solve_implied_growth(
+        target_market_cap=market_cap,
+        starting_fcf=starting_fcf,
+        discount_rate=discount_rate,
+        terminal_growth=terminal_growth,
+    )
 
     grid = []
-    for growth_shift in (-0.03, -0.015, 0.0, 0.015, 0.03):
-        for margin_shift in (-0.03, -0.015, 0.0, 0.015, 0.03):
+    for growth_shift in HEATMAP_SHIFTS:
+        for margin_shift in HEATMAP_SHIFTS:
+            growth = solved_growth + growth_shift
+            margin = float(implied_fcf_margin) + margin_shift
+            implied_market_cap = _equity_value_from_growth(
+                growth=growth,
+                starting_fcf=float(revenue) * margin,
+                discount_rate=discount_rate,
+                terminal_growth=terminal_growth,
+            )
+            value_gap = safe_divide(implied_market_cap - market_cap, market_cap)
             grid.append(
                 {
-                    "growth": json_number(implied_revenue_growth + growth_shift),
-                    "margin": json_number((implied_fcf_margin or 0.0) + margin_shift),
-                    "value_gap": json_number(-(growth_shift * 3 + margin_shift * 2)),
+                    "growth": json_number(growth),
+                    "margin": json_number(margin),
+                    "value_gap": json_number(value_gap),
                 }
             )
 
@@ -83,10 +148,13 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "model_status": status,
         "explanation": status_explanation(status),
         "confidence_summary": trust_summary(missing_fields=missing_fields, proxy_used=proxy_used),
-        "implied_growth": json_number(implied_revenue_growth),
+        "applicability": applicability,
+        "price_snapshot": _price_snapshot_payload(dataset),
+        "implied_growth": json_number(solved_growth),
         "implied_margin": json_number(implied_fcf_margin),
         "current_operating_margin": json_number(operating_margin),
         "market_cap_proxy": json_number(market_cap),
+        "solve_metadata": solve_metadata,
         "assumption_provenance": {
             "risk_free_rate": {
                 "source_name": risk_free.source_name,
@@ -94,6 +162,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "observation_date": risk_free.observation_date.isoformat(),
                 "rate_used": json_number(risk_free.rate_used),
             },
+            "price_snapshot": _price_snapshot_payload(dataset),
             "discount_rate_inputs": {
                 "discount_rate": json_number(discount_rate),
                 "terminal_growth": json_number(terminal_growth),
@@ -101,4 +170,110 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         },
         "heatmap": grid,
         "missing_required_fields_last_3y": missing_fields,
+    }
+
+
+def _price_snapshot_payload(dataset: CompanyDataset) -> dict[str, object]:
+    snapshot = dataset.market_snapshot
+    if snapshot is None:
+        return {
+            "latest_price": None,
+            "price_date": None,
+            "price_source": None,
+            "price_available": False,
+        }
+    return {
+        "latest_price": json_number(snapshot.latest_price),
+        "price_date": snapshot.price_date.isoformat() if snapshot.price_date is not None else None,
+        "price_source": snapshot.price_source,
+        "price_available": snapshot.latest_price is not None,
+    }
+
+
+def _equity_value_from_growth(
+    *,
+    growth: float,
+    starting_fcf: float,
+    discount_rate: float,
+    terminal_growth: float,
+) -> float:
+    projected_fcf = starting_fcf
+    present_value = 0.0
+    for year in range(1, PROJECTION_YEARS + 1):
+        taper_factor = year / PROJECTION_YEARS
+        year_growth = growth + (terminal_growth - growth) * taper_factor
+        projected_fcf *= 1 + year_growth
+        present_value += projected_fcf / ((1 + discount_rate) ** year)
+
+    if discount_rate <= terminal_growth:
+        return present_value
+
+    terminal_cash_flow = projected_fcf * (1 + terminal_growth)
+    terminal_value = terminal_cash_flow / (discount_rate - terminal_growth)
+    terminal_present_value = terminal_value / ((1 + discount_rate) ** PROJECTION_YEARS)
+    return present_value + terminal_present_value
+
+
+def _solve_implied_growth(
+    *,
+    target_market_cap: float,
+    starting_fcf: float,
+    discount_rate: float,
+    terminal_growth: float,
+) -> tuple[float, dict[str, Any]]:
+    def error(growth: float) -> float:
+        return _equity_value_from_growth(
+            growth=growth,
+            starting_fcf=starting_fcf,
+            discount_rate=discount_rate,
+            terminal_growth=terminal_growth,
+        ) - target_market_cap
+
+    low = MIN_SOLVE_GROWTH
+    high = MAX_SOLVE_GROWTH
+    low_error = error(low)
+    high_error = error(high)
+
+    if low_error == 0:
+        return low, {"method": "boundary", "iterations": 0, "residual": 0.0}
+    if high_error == 0:
+        return high, {"method": "boundary", "iterations": 0, "residual": 0.0}
+
+    if low_error * high_error > 0:
+        best_growth = low
+        best_residual = abs(low_error)
+        for index in range(1, 81):
+            candidate = low + (high - low) * (index / 80)
+            residual = abs(error(candidate))
+            if residual < best_residual:
+                best_growth = candidate
+                best_residual = residual
+        return best_growth, {
+            "method": "grid_approximation",
+            "iterations": 80,
+            "residual": json_number(best_residual),
+        }
+
+    for iteration in range(SOLVE_ITERATIONS):
+        mid = (low + high) / 2
+        mid_error = error(mid)
+        if abs(mid_error) <= max(target_market_cap * 1e-6, 1e-6):
+            return mid, {
+                "method": "bisection",
+                "iterations": iteration + 1,
+                "residual": json_number(abs(mid_error)),
+            }
+        if low_error * mid_error <= 0:
+            high = mid
+            high_error = mid_error
+        else:
+            low = mid
+            low_error = mid_error
+
+    solved = (low + high) / 2
+    residual = abs(error(solved))
+    return solved, {
+        "method": "bisection",
+        "iterations": SOLVE_ITERATIONS,
+        "residual": json_number(residual),
     }

@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 from typing import Any
 
 from app.model_engine.types import CompanyDataset, FinancialPoint
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
+UNSUPPORTED_FINANCIAL_KEYWORDS = (
+    "bank",
+    "banking",
+    "insurance",
+    "insurer",
+    "reit",
+    "real estate investment trust",
+    "capital market",
+    "capital markets",
+    "asset management",
+    "broker",
+    "brokerage",
+    "securities",
+    "financial services",
+    "investment banking",
+)
 
 
 def safe_divide(numerator: float | int | None, denominator: float | int | None) -> float | None:
@@ -141,6 +158,8 @@ def trust_summary(*, missing_fields: list[str], proxy_used: bool) -> str:
 
 
 def status_explanation(status: str) -> str:
+    if status == "unsupported":
+        return "This model is not applicable to this company's sector/industry profile."
     if status == "partial":
         return "This model used incomplete financial inputs; results are directional only."
     if status == "proxy":
@@ -148,3 +167,48 @@ def status_explanation(status: str) -> str:
     if status == "insufficient_data":
         return "Required base inputs were not sufficient to produce a directional output."
     return "View discount rate, terminal assumptions, and data provenance used in this result."
+
+
+def valuation_applicability(dataset: CompanyDataset) -> dict[str, Any]:
+    classification_fields = {
+        "sector": dataset.sector,
+        "market_sector": dataset.market_sector,
+        "market_industry": dataset.market_industry,
+    }
+
+    matches: list[dict[str, str]] = []
+    for field_name, raw_value in classification_fields.items():
+        normalized = _normalize_classification(raw_value)
+        if not normalized:
+            continue
+        for keyword in UNSUPPORTED_FINANCIAL_KEYWORDS:
+            if keyword in normalized:
+                matches.append(
+                    {
+                        "field": field_name,
+                        "value": str(raw_value),
+                        "keyword": keyword,
+                    }
+                )
+
+    if matches:
+        return {
+            "is_supported": False,
+            "reason": "Sector classification indicates a financial company where DCF-style valuation is structurally unreliable.",
+            "matches": matches,
+            "classification": classification_fields,
+        }
+
+    return {
+        "is_supported": True,
+        "reason": "No excluded financial-sector keywords found in available sector classifications.",
+        "matches": [],
+        "classification": classification_fields,
+    }
+
+
+def _normalize_classification(value: str | None) -> str:
+    if not value:
+        return ""
+    text = re.sub(r"[^a-z0-9]+", " ", value.lower())
+    return re.sub(r"\s+", " ", text).strip()

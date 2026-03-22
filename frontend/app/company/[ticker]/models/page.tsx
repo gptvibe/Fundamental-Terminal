@@ -12,15 +12,16 @@ import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
-import { getCompanyFinancials, getCompanyModels, refreshCompany } from "@/lib/api";
+import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyFinancialsResponse, CompanyModelsResponse, ModelPayload } from "@/lib/types";
+import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
+  marketContext: CompanyMarketContextResponse;
   activeJobId: string | null;
 }
 
@@ -42,6 +43,10 @@ const ModelDashboard = dynamic(
   () => import("@/components/models/model-dashboard").then((module) => module.ModelDashboard),
   { ssr: false }
 );
+const MarketContextPanel = dynamic(
+  () => import("@/components/models/market-context-panel").then((module) => module.MarketContextPanel),
+  { ssr: false }
+);
 
 type DupontMode = "auto" | "annual" | "ttm";
 
@@ -50,6 +55,7 @@ export default function CompanyModelsPage() {
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const [data, setData] = useState<CompanyModelsResponse | null>(null);
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
+  const [marketContext, setMarketContext] = useState<CompanyMarketContextResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -74,6 +80,7 @@ export default function CompanyModelsPage() {
         if (!cancelled) {
           setData(workspaceData.modelData);
           setFinancialData(workspaceData.financialData);
+          setMarketContext(workspaceData.marketContext);
           setActiveJobId(workspaceData.activeJobId);
         }
       } catch (nextError) {
@@ -114,6 +121,7 @@ export default function CompanyModelsPage() {
         setError(null);
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
+        setMarketContext(workspaceData.marketContext);
         setActiveJobId(workspaceData.activeJobId);
       })
       .catch((nextError) => {
@@ -150,6 +158,7 @@ export default function CompanyModelsPage() {
         setError(null);
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
+        setMarketContext(workspaceData.marketContext);
         setActiveJobId(workspaceData.activeJobId);
 
         if (workspaceData.activeJobId !== activeJobId) {
@@ -196,7 +205,7 @@ export default function CompanyModelsPage() {
         field: "result.status",
         headerName: "Status",
         minWidth: 130,
-        valueGetter: ({ data: row }) => row?.result?.status ?? "ready"
+        valueGetter: ({ data: row }) => row?.result?.model_status ?? row?.result?.status ?? "ready"
       }
     ],
     []
@@ -348,6 +357,10 @@ export default function CompanyModelsPage() {
         <DcfScenarioAnalysis ticker={ticker} dcfModel={dcfModel} financials={financialData?.financials ?? []} priceHistory={financialData?.price_history ?? []} />
       </Panel>
 
+      <Panel title="Market Context" subtitle={loading ? "Loading Treasury and macro context..." : "Official-source Treasury curve and optional FRED overlays"} className="models-page-span-full">
+        <MarketContextPanel context={marketContext} />
+      </Panel>
+
       <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, the Altman proxy, and ratios"} className="models-page-span-full">
         {hasModels ? <ModelDashboard models={models} /> : <div className="text-muted">No model results yet. Once financial data is ready, this page will fill in automatically.</div>}
       </Panel>
@@ -386,15 +399,17 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData] = await Promise.all([
+  const [modelData, financialData, marketContext] = await Promise.all([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
-    getCompanyFinancials(ticker)
+    getCompanyFinancials(ticker),
+    getCompanyMarketContext(ticker),
   ]);
 
   return {
     modelData,
     financialData,
-    activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id
+    marketContext,
+    activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id ?? marketContext.refresh.job_id
   };
 }
 

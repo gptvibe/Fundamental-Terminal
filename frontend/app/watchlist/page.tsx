@@ -264,13 +264,16 @@ export default function WatchlistPage() {
                     <strong>Coverage:</strong> {item.coverage.financial_periods.toLocaleString()} financial periods · {item.coverage.price_points.toLocaleString()} price points
                   </div>
                   <div className="watchlist-latest-item">
-                    <strong>Valuation gap:</strong> {formatPercent(item.fair_value_gap)} · <strong>ROIC:</strong> {formatPercent(item.roic)}
+                    <strong>Valuation gap:</strong> {formatValuationMetric(item.fair_value_gap, item.fair_value_gap_status)} · <strong>ROIC:</strong> {formatPercent(item.roic)}
                   </div>
                   <div className="watchlist-latest-item">
-                    <strong>Shareholder yield:</strong> {formatPercent(item.shareholder_yield)} · <strong>Implied growth:</strong> {formatPercent(item.implied_growth)}
+                    <strong>Shareholder yield:</strong> {formatPercent(item.shareholder_yield)} · <strong>Implied growth:</strong> {formatValuationMetric(item.implied_growth, item.implied_growth_status)}
                   </div>
                   <div className="watchlist-latest-item">
                     <strong>Balance-sheet risk:</strong> {formatSigned(item.balance_sheet_risk)} net debt / FCF
+                  </div>
+                  <div className="watchlist-latest-item">
+                    <strong>Market context:</strong> {formatMarketContextStatus(item.market_context_status)}
                   </div>
                 </div>
 
@@ -381,4 +384,19 @@ function getRefreshCopy(isStale: boolean, reason: string): string {
     return "Data is fresh";
   }
   return "Ready";
+}
+
+function formatValuationMetric(value: number | null, status: string | null | undefined): string {
+  if (status === "unsupported") {
+    return "Unsupported";
+  }
+  return formatPercent(value);
+}
+
+function formatMarketContextStatus(status: WatchlistSummaryItemPayload["market_context_status"]): string {
+  if (!status) {
+    return "Unavailable";
+  }
+  const observed = status.observation_date ? ` (${formatDate(status.observation_date)})` : "";
+  return `${status.label}${observed}`;
 }

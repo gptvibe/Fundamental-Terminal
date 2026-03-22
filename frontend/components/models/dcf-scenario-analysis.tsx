@@ -140,6 +140,16 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
 
   const dcfStatus = typeof dcfModel?.result?.model_status === "string" ? dcfModel.result.model_status : dcfModel?.result?.status;
 
+  if (dcfStatus === "unsupported") {
+    return (
+      <div className="grid-empty-state" style={{ minHeight: 260 }}>
+        <div className="grid-empty-kicker">Scenario engine</div>
+        <div className="grid-empty-title">DCF scenario analysis unsupported</div>
+        <div className="grid-empty-copy">This company is in a financial sector where DCF-style valuation is structurally inapplicable.</div>
+      </div>
+    );
+  }
+
   if (!dcfModel || !latestAnnual || !scenario) {
     return (
       <div className="grid-empty-state" style={{ minHeight: 260 }}>

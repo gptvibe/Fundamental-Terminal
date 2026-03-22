@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer } from "recharts";
 
-import { formatCompactNumber, formatPercent } from "@/lib/format";
+import { formatPercent } from "@/lib/format";
 import { formatPiotroskiDisplay as formatResolvedPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { FinancialPayload, ModelPayload, PriceHistoryPoint } from "@/lib/types";
 
@@ -32,10 +32,10 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
   return (
     <div className="investment-summary-shell">
       <div className="investment-summary-cards">
-        <SummaryCard label="DCF EV Proxy" value={formatCurrency(summary.dcfEnterpriseValueProxy)} accent="cyan" detail={summary.fairValueBasis} />
-        <SummaryCard label="Market Cap Proxy" value={formatCurrency(summary.marketCapProxy)} accent="gold" detail={summary.priceDateLabel} />
-        <SummaryCard label="Margin of Safety" value={formatPercent(summary.marginOfSafety)} accent={summary.marginOfSafety != null && summary.marginOfSafety >= 0 ? "green" : "red"} detail={summary.marginBand} />
-        <SummaryCard label="Valuation Rating" value={formatScore(summary.valuationRating)} accent={ratingAccent(summary.valuationRating)} detail={summary.valuationLabel} />
+        <SummaryCard label="DCF Fair Value / Share" value={formatCurrency(summary.fairValuePerShare)} accent="cyan" detail={summary.fairValueBasis} />
+        <SummaryCard label="Latest Price" value={formatCurrency(summary.latestPrice)} accent="gold" detail={summary.priceDateLabel} />
+        <SummaryCard label="Fair Value Gap" value={formatPercent(summary.marginOfSafety)} accent={summary.marginOfSafety != null && summary.marginOfSafety >= 0 ? "green" : "red"} detail={summary.marginBand} />
+        <SummaryCard label="Net Debt" value={formatCurrency(summary.netDebt)} accent="red" detail={summary.netDebtLabel} />
       </div>
 
       <div className="investment-summary-gauges">
@@ -55,6 +55,7 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
 
       <div className="investment-summary-inputs">
         <span className="pill">{ticker} summary</span>
+        <span className="pill">DCF state {summary.valuationStateLabel}</span>
         <span className="pill">Piotroski {summary.piotroskiDisplay}</span>
         <span className="pill">Altman Proxy {formatSigned(summary.altmanZScore)}</span>
         <span className="pill">Revenue Growth {formatPercent(summary.revenueGrowth)}</span>
@@ -128,13 +129,12 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
   const altman = asRecord(byName.altman_z?.result);
   const piotroskiState = resolvePiotroskiScoreState(piotroski);
 
-  const enterpriseValueProxy = safeNumber(dcf.enterprise_value_proxy);
+  const valuationState = normalizeModelState(dcf.model_status ?? dcf.status);
+  const fairValuePerShare = safeNumber(dcf.fair_value_per_share);
+  const netDebt = safeNumber(dcf.net_debt);
   const currentPrice = latestPrice?.close ?? null;
-  const sharesOutstanding = shareCount(current);
-  const marketCapProxy =
-    currentPrice !== null && sharesOutstanding !== null && sharesOutstanding > 0 ? currentPrice * sharesOutstanding : null;
   const marginOfSafety =
-    enterpriseValueProxy !== null && enterpriseValueProxy > 0 && marketCapProxy !== null ? (enterpriseValueProxy - marketCapProxy) / enterpriseValueProxy : null;
+    fairValuePerShare !== null && currentPrice !== null && currentPrice > 0 ? (fairValuePerShare - currentPrice) / currentPrice : null;
 
   const piotroskiScore = piotroskiState.score;
   const piotroskiDisplay = formatResolvedPiotroskiDisplay(piotroskiState);
@@ -149,8 +149,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
     computeDebtToEquity(current) ??
     deriveDebtToEquityFromRatios(safeNumber(ratioValues.liabilities_to_assets), safeNumber(ratioValues.equity_ratio));
 
-  const valuationRating =
-    marginOfSafety !== null ? clamp(scaleRange(marginOfSafety, -0.2, 0.35) ?? 0, 0, 10) : enterpriseValueProxy !== null && enterpriseValueProxy <= 0 ? 0 : 0;
+  const valuationRating = marginOfSafety !== null ? clamp(scaleRange(marginOfSafety, -0.2, 0.35) ?? 0, 0, 10) : 0;
   const financialStrengthRating = averageScore([
     scaleToTen(piotroskiScore, piotroskiState.scoreMax),
     altmanApproximate ? null : altmanToTen(altmanZScore),
@@ -167,8 +166,11 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
   ]);
 
   return {
-    dcfEnterpriseValueProxy: enterpriseValueProxy,
-    marketCapProxy,
+    fairValuePerShare,
+    latestPrice: currentPrice,
+    netDebt,
+    valuationState,
+    valuationStateLabel: formatModelState(valuationState),
     marginOfSafety,
     valuationRating,
     financialStrengthRating,
@@ -180,18 +182,16 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
     revenueGrowth,
     netMargin,
     debtToEquity,
-    fairValueBasis:
-      enterpriseValueProxy !== null
-        ? `Enterprise value proxy from cached DCF model${marketCapProxy !== null ? ` vs market cap proxy ${formatCompactNumber(marketCapProxy)}` : ""}`
-        : "Awaiting DCF enterprise value",
+    fairValueBasis: fairValuePerShare !== null ? "Derived from cached DCF equity value per share." : "Awaiting DCF fair value per share",
     priceDateLabel: latestPrice?.date ? `Latest close ${new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(latestPrice.date))}` : "Awaiting cached market price",
+    netDebtLabel: netDebt === null ? "Net debt unavailable" : "From latest cached DCF run",
     marginBand: valuationBandLabel(marginOfSafety),
     valuationLabel: valuationRatingLabel(valuationRating),
     gauges: [
       {
         label: "Valuation",
         score: valuationRating,
-        detail: `${valuationRatingLabel(valuationRating)} · MOS ${formatPercent(marginOfSafety)}`
+        detail: `${valuationRatingLabel(valuationRating)} · Gap ${formatPercent(marginOfSafety)}`
       },
       {
         label: "Financial Strength",
@@ -212,7 +212,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
     notes: [
       {
         title: "Valuation View",
-        copy: buildValuationSummary(marginOfSafety, enterpriseValueProxy, marketCapProxy)
+        copy: buildValuationSummary(marginOfSafety, fairValuePerShare, currentPrice, valuationState)
       },
       {
         title: "Financial Strength",
@@ -232,22 +232,43 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
 
 function buildValuationSummary(
   marginOfSafety: number | null,
-  enterpriseValueProxy: number | null,
-  marketCapProxy: number | null
+  fairValuePerShare: number | null,
+  latestPrice: number | null,
+  valuationState: string
 ) {
-  if (marginOfSafety === null || enterpriseValueProxy === null || marketCapProxy === null) {
-    return "DCF enterprise value proxy or market-cap proxy is not fully available yet, so the valuation call remains provisional until cached model and market inputs are complete.";
+  if (valuationState === "unsupported") {
+    return "DCF valuation is unsupported for this company classification, so fair-value gap is intentionally withheld.";
+  }
+  if (valuationState === "insufficient_data") {
+    return "DCF valuation is currently insufficient due to missing core inputs; refresh or new filings are required before a fair-value call.";
+  }
+  if (marginOfSafety === null || fairValuePerShare === null || latestPrice === null) {
+    return "DCF fair value per share or latest price is incomplete, so the valuation signal remains provisional until both are cached.";
   }
   if (marginOfSafety >= 0.25) {
-    return `DCF enterprise value proxy sits materially above market-cap proxy, suggesting a healthy valuation cushion.`;
+    return "DCF fair value per share sits materially above the latest cached price, suggesting a healthy valuation cushion.";
   }
   if (marginOfSafety >= 0.08) {
-    return `Market-cap proxy screens modestly below DCF enterprise value proxy, suggesting some upside but not a deep discount.`;
+    return "Latest price screens modestly below DCF fair value per share, suggesting some upside but not a deep discount.";
   }
   if (marginOfSafety >= -0.08) {
-    return `Market-cap proxy sits roughly in line with the DCF enterprise value proxy, so valuation looks balanced rather than obviously cheap.`;
+    return "Latest price sits roughly in line with DCF fair value per share, so valuation looks balanced rather than obviously cheap.";
   }
-  return `Market-cap proxy sits above the DCF enterprise value proxy, which points to a thinner safety cushion and a richer valuation setup.`;
+  return "Latest price sits above DCF fair value per share, which points to a thinner safety cushion and a richer valuation setup.";
+}
+
+function normalizeModelState(value: unknown): "ok" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown" {
+  if (value === "ok" || value === "partial" || value === "proxy" || value === "insufficient_data" || value === "unsupported") {
+    return value;
+  }
+  return "unknown";
+}
+
+function formatModelState(state: "ok" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown"): string {
+  if (state === "insufficient_data") {
+    return "insufficient_data";
+  }
+  return state;
 }
 
 function buildStrengthSummary(

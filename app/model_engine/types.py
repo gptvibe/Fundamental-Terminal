@@ -19,11 +19,21 @@ class FinancialPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class MarketSnapshot:
+    latest_price: float | None
+    price_date: date | None
+    price_source: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class CompanyDataset:
     company_id: int
     ticker: str
     name: str
     sector: str | None
+    market_sector: str | None
+    market_industry: str | None
+    market_snapshot: MarketSnapshot | None
     financials: tuple[FinancialPoint, ...]
 
 

@@ -190,6 +190,9 @@ def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focu
     roic_result = _model_result(models.get("roic"))
     capital_allocation_result = _model_result(models.get("capital_allocation"))
 
+    dcf_status = str(dcf_result.get("model_status") or dcf_result.get("status") or "unknown")
+    reverse_dcf_status = str(reverse_dcf_result.get("model_status") or reverse_dcf_result.get("status") or "unknown")
+
     latest_price_value = latest_price.close if latest_price is not None else None
     eps = _as_float(current_data.get("eps"))
     free_cash_flow = _as_float(current_data.get("free_cash_flow"))
@@ -211,12 +214,14 @@ def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focu
     piotroski_score_max = _as_float(piotroski_result.get("score_max")) or 9.0
     piotroski_score = _resolve_piotroski_score(piotroski_result, piotroski_available, piotroski_score_max)
     fair_value_per_share = _as_float(dcf_result.get("fair_value_per_share"))
-    fair_value_gap = _safe_divide(
-        fair_value_per_share - latest_price_value if fair_value_per_share is not None and latest_price_value is not None else None,
-        latest_price_value,
-    )
+    fair_value_gap = None
+    if dcf_status != "unsupported":
+        fair_value_gap = _safe_divide(
+            fair_value_per_share - latest_price_value if fair_value_per_share is not None and latest_price_value is not None else None,
+            latest_price_value,
+        )
     shareholder_yield = _as_float(capital_allocation_result.get("shareholder_yield"))
-    implied_growth = _as_float(reverse_dcf_result.get("implied_growth"))
+    implied_growth = _as_float(reverse_dcf_result.get("implied_growth")) if reverse_dcf_status != "unsupported" else None
     roic = _as_float(roic_result.get("roic"))
     valuation_band_percentile = _valuation_band_percentile(statements, latest_price_value, shares_outstanding, enterprise_value_proxy)
 
@@ -243,6 +248,8 @@ def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focu
         "roic": roic,
         "shareholder_yield": shareholder_yield,
         "implied_growth": implied_growth,
+        "dcf_model_status": dcf_status,
+        "reverse_dcf_model_status": reverse_dcf_status,
         "valuation_band_percentile": valuation_band_percentile,
         "revenue_history": _build_revenue_history(statements),
     }

@@ -11,11 +11,12 @@ from app.model_engine.utils import (
     status_explanation,
     status_from_data_quality,
     trust_summary,
+    valuation_applicability,
 )
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "2.0.0"
+MODEL_VERSION = "2.1.0"
 
 EQUITY_RISK_PREMIUM = 0.05
 BASE_COMPANY_RISK_PREMIUM = 0.01
@@ -34,6 +35,30 @@ REQUIRED_VALUATION_FIELDS = [
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
+    applicability = valuation_applicability(dataset)
+    if not applicability["is_supported"]:
+        risk_free = get_latest_risk_free_rate()
+        return {
+            "status": "unsupported",
+            "model_status": "unsupported",
+            "explanation": status_explanation("unsupported"),
+            "reason": "DCF is disabled for banks, insurers, REITs, and capital-markets-style financial firms.",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
+            "input_quality": {
+                "starting_cash_flow_proxied": False,
+                "capital_structure_proxied": False,
+            },
+            "assumption_provenance": {
+                "risk_free_rate": {
+                    "source_name": risk_free.source_name,
+                    "tenor": risk_free.tenor,
+                    "observation_date": risk_free.observation_date.isoformat(),
+                    "rate_used": json_number(risk_free.rate_used),
+                }
+            },
+        }
+
     annuals = annual_series(dataset, limit=5)
     if not annuals:
         return {
@@ -41,6 +66,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "model_status": "insufficient_data",
             "explanation": status_explanation("insufficient_data"),
             "reason": "Annual financial history unavailable",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
         }
 
     missing_fields = missing_fields_last_n_years(dataset, REQUIRED_VALUATION_FIELDS, years=3)
@@ -65,6 +92,12 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "model_status": "insufficient_data",
             "explanation": status_explanation("insufficient_data"),
             "reason": "Free cash flow history unavailable",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
+            "input_quality": {
+                "starting_cash_flow_proxied": used_proxy_fcf,
+                "capital_structure_proxied": False,
+            },
             "assumption_provenance": {
                 "risk_free_rate": {
                     "source_name": risk_free.source_name,
@@ -117,6 +150,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "model_status": "insufficient_data",
             "explanation": status_explanation("insufficient_data"),
             "reason": "Discount rate must exceed terminal growth rate",
+            "applicability": applicability,
+            "price_snapshot": _price_snapshot_payload(dataset),
         }
 
     terminal_cash_flow = projected_fcf * (1 + terminal_growth_rate)
@@ -144,7 +179,9 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     shares_outstanding = latest_non_null(dataset, "weighted_average_diluted_shares") or latest_non_null(dataset, "shares_outstanding")
     fair_value_per_share = safe_divide(equity_value, shares_outstanding)
 
-    proxy_used = used_proxy_fcf or capital_structure_incomplete
+    starting_cash_flow_proxied = used_proxy_fcf
+    capital_structure_proxied = capital_structure_incomplete
+    proxy_used = starting_cash_flow_proxied or capital_structure_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
@@ -164,6 +201,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "explanation": status_explanation(status),
         "status_flags": status_flags,
         "confidence_summary": confidence,
+        "applicability": applicability,
+        "price_snapshot": _price_snapshot_payload(dataset),
         "base_period_end": annuals[0].period_end.isoformat(),
         "historical_free_cash_flow": [
             {"period_end": point.period_end.isoformat(), "free_cash_flow": json_number(statement_value(point, "free_cash_flow"))}
@@ -183,6 +222,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "observation_date": risk_free.observation_date.isoformat(),
                 "rate_used": json_number(risk_free.rate_used),
             },
+            "price_snapshot": _price_snapshot_payload(dataset),
             "discount_rate_inputs": {
                 "risk_free_rate": json_number(risk_free.rate_used),
                 "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
@@ -202,4 +242,25 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "equity_value": json_number(equity_value),
         "fair_value_per_share": json_number(fair_value_per_share),
         "missing_required_fields_last_3y": missing_fields,
+        "input_quality": {
+            "starting_cash_flow_proxied": starting_cash_flow_proxied,
+            "capital_structure_proxied": capital_structure_proxied,
+        },
+    }
+
+
+def _price_snapshot_payload(dataset: CompanyDataset) -> dict[str, object]:
+    snapshot = dataset.market_snapshot
+    if snapshot is None:
+        return {
+            "latest_price": None,
+            "price_date": None,
+            "price_source": None,
+            "price_available": False,
+        }
+    return {
+        "latest_price": json_number(snapshot.latest_price),
+        "price_date": snapshot.price_date.isoformat() if snapshot.price_date is not None else None,
+        "price_source": snapshot.price_source,
+        "price_available": snapshot.latest_price is not None,
     }

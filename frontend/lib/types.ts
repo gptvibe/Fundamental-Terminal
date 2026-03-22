@@ -247,11 +247,77 @@ export interface ModelPayload {
   result: Record<string, unknown>;
 }
 
+export type ModelStatus = "ok" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown";
+
+export interface ValuationApplicabilityMatch {
+  field: string;
+  value: string;
+  keyword: string;
+}
+
+export interface ValuationApplicability {
+  is_supported: boolean;
+  reason: string;
+  matches: ValuationApplicabilityMatch[];
+  classification: Record<string, string | null>;
+}
+
+export interface PriceSnapshotMetadata {
+  latest_price: number | null;
+  price_date: string | null;
+  price_source: string | null;
+  price_available: boolean;
+}
+
 export interface CompanyModelsResponse {
   company: CompanyPayload | null;
   requested_models: string[];
   models: ModelPayload[];
   refresh: RefreshState;
+}
+
+export interface MarketCurvePointPayload {
+  tenor: string;
+  rate: number;
+  observation_date: string;
+}
+
+export interface MarketSlopePayload {
+  label: string;
+  value: number | null;
+  short_tenor: string;
+  long_tenor: string;
+  observation_date: string | null;
+}
+
+export interface MarketFredSeriesPayload {
+  series_id: string;
+  label: string;
+  category: string;
+  units: string;
+  value: number | null;
+  observation_date: string | null;
+  state: string;
+}
+
+export interface CompanyMarketContextResponse {
+  company: CompanyPayload | null;
+  status: string;
+  curve_points: MarketCurvePointPayload[];
+  slope_2s10s: MarketSlopePayload;
+  slope_3m10y: MarketSlopePayload;
+  fred_series: MarketFredSeriesPayload[];
+  provenance: Record<string, unknown>;
+  fetched_at: string;
+  refresh: RefreshState;
+}
+
+export interface MarketContextStatusPayload {
+  state: string;
+  label: string;
+  observation_date: string | null;
+  source: string;
+  treasury_status?: string;
 }
 
 export interface FilingPayload {
@@ -532,6 +598,7 @@ export interface CompanyActivityOverviewResponse {
   entries: ActivityFeedEntryPayload[];
   alerts: AlertPayload[];
   summary: AlertsSummaryPayload;
+  market_context_status?: MarketContextStatusPayload | null;
   refresh: RefreshState;
   error: string | null;
 }
@@ -578,8 +645,11 @@ export interface WatchlistSummaryItemPayload {
   roic: number | null;
   shareholder_yield: number | null;
   implied_growth: number | null;
+  fair_value_gap_status?: ModelStatus | null;
+  implied_growth_status?: ModelStatus | null;
   valuation_band_percentile: number | null;
   balance_sheet_risk: number | null;
+  market_context_status?: MarketContextStatusPayload | null;
 }
 
 export interface WatchlistSummaryResponse {
@@ -627,6 +697,8 @@ export interface PeerMetricsPayload {
   roic: number | null;
   shareholder_yield: number | null;
   implied_growth: number | null;
+  dcf_model_status?: ModelStatus | null;
+  reverse_dcf_model_status?: ModelStatus | null;
   valuation_band_percentile: number | null;
   revenue_history: PeerRevenuePoint[];
 }

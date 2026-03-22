@@ -46,6 +46,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       API_HOST: 0.0.0.0
       API_PORT: 8000
+      FRED_API_KEY: ${FRED_API_KEY:-}
       FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
       SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
       SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}
@@ -74,6 +75,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      FRED_API_KEY: ${FRED_API_KEY:-}
       WORKER_IDENTIFIERS: ${WORKER_IDENTIFIERS:-AAPL MSFT NVDA AMZN}
       WORKER_INTERVAL_SECONDS: ${WORKER_INTERVAL_SECONDS:-3600}
       FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
@@ -93,6 +95,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      FRED_API_KEY: ${FRED_API_KEY:-}
       FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
       SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
       SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}

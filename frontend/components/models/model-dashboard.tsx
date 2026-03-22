@@ -112,11 +112,14 @@ function renderModelContent(model: ModelPayload) {
 
 function DcfModelView({ model }: { model: ModelPayload }) {
   const result = asRecord(model.result);
-  if (result.status === "insufficient_data") {
+  if (isUnavailableStatus(result)) {
     return <StateMessage result={result} />;
   }
 
   const assumptions = asRecord(result.assumptions);
+  const priceSnapshot = asRecord(result.price_snapshot);
+  const applicability = asRecord(result.applicability);
+  const inputQuality = asRecord(result.input_quality);
   const historical = asArray(result.historical_free_cash_flow).map((entry) => ({
     period: String(entry.period_end ?? "—"),
     freeCashFlow: asNumber(entry.free_cash_flow)
@@ -183,7 +186,12 @@ function DcfModelView({ model }: { model: ModelPayload }) {
             { metric: "Terminal Growth", value: formatPercent(asNumber(assumptions.terminal_growth_rate)) },
             { metric: "Starting FCF Growth", value: formatPercent(asNumber(assumptions.starting_growth_rate)) },
             { metric: "Projection Years", value: String(assumptions.projection_years ?? "—") },
-            { metric: "Confidence Summary", value: String(result.confidence_summary ?? "—") }
+            { metric: "Confidence Summary", value: String(result.confidence_summary ?? "—") },
+            { metric: "Applicable", value: applicability.is_supported === false ? "No" : "Yes" },
+            { metric: "Price Source", value: String(priceSnapshot.price_source ?? "—") },
+            { metric: "Price Date", value: String(priceSnapshot.price_date ?? "—") },
+            { metric: "Starting FCF Proxied", value: inputQuality.starting_cash_flow_proxied ? "Yes" : "No" },
+            { metric: "Capital Structure Proxied", value: inputQuality.capital_structure_proxied ? "Yes" : "No" }
           ]}
         />
         <CompactTable
@@ -210,10 +218,12 @@ function DcfModelView({ model }: { model: ModelPayload }) {
 
 function ReverseDcfModelView({ model }: { model: ModelPayload }) {
   const result = asRecord(model.result);
-  if (result.status === "insufficient_data") {
+  if (isUnavailableStatus(result)) {
     return <StateMessage result={result} />;
   }
 
+  const priceSnapshot = asRecord(result.price_snapshot);
+  const solveMetadata = asRecord(result.solve_metadata);
   const heatmap = asArray(result.heatmap).map((item) => ({
     label: `${formatPercent(asNumber(item.growth))} / ${formatPercent(asNumber(item.margin))}`,
     value: asNumber(item.value_gap),
@@ -226,6 +236,9 @@ function ReverseDcfModelView({ model }: { model: ModelPayload }) {
           { label: "Implied Growth", value: formatPercent(asNumber(result.implied_growth)) },
           { label: "Implied Margin", value: formatPercent(asNumber(result.implied_margin)) },
           { label: "Current Operating Margin", value: formatPercent(asNumber(result.current_operating_margin)) },
+          { label: "Price Date", value: String(priceSnapshot.price_date ?? "—") },
+          { label: "Price Source", value: String(priceSnapshot.price_source ?? "—") },
+          { label: "Solve Method", value: String(solveMetadata.method ?? "—") },
           { label: "Confidence", value: String(result.confidence_summary ?? "—") },
         ]}
       />
@@ -253,7 +266,7 @@ function ReverseDcfModelView({ model }: { model: ModelPayload }) {
 
 function RoicModelView({ model }: { model: ModelPayload }) {
   const result = asRecord(model.result);
-  if (result.status === "insufficient_data") {
+  if (isUnavailableStatus(result)) {
     return <StateMessage result={result} />;
   }
   const trend = asArray(result.trend).map((item) => ({
@@ -294,7 +307,7 @@ function RoicModelView({ model }: { model: ModelPayload }) {
 
 function CapitalAllocationModelView({ model }: { model: ModelPayload }) {
   const result = asRecord(model.result);
-  if (result.status === "insufficient_data") {
+  if (isUnavailableStatus(result)) {
     return <StateMessage result={result} />;
   }
   const series = asArray(result.series).map((item) => ({
@@ -585,9 +598,19 @@ function FallbackModelView({ model }: { model: ModelPayload }) {
 }
 
 function StateMessage({ result }: { result: Record<string, unknown> }) {
+  const applicability = asRecord(result.applicability);
+  const matches = asArray(applicability.matches)
+    .map((item) => {
+      const field = typeof item.field === "string" ? item.field : "field";
+      const keyword = typeof item.keyword === "string" ? item.keyword : "keyword";
+      return `${field}: ${keyword}`;
+    })
+    .filter(Boolean);
+
   return (
     <div className="text-muted" style={{ lineHeight: 1.6 }}>
       {String(result.reason ?? "This model does not have enough normalized financial data yet.")}
+      {matches.length ? <div style={{ marginTop: 8 }}>Applicability flags: {matches.join(", ")}</div> : null}
     </div>
   );
 }
@@ -602,7 +625,15 @@ function StatusBadge({ status }: { status: string }) {
   if (status === "insufficient_data") {
     return <span className="pill">Insufficient data</span>;
   }
+  if (status === "unsupported") {
+    return <span className="pill">Unsupported</span>;
+  }
   return <span className="pill">OK</span>;
+}
+
+function isUnavailableStatus(result: Record<string, unknown>): boolean {
+  const status = String(result.model_status ?? result.status ?? "ok");
+  return status === "insufficient_data" || status === "unsupported";
 }
 
 function AssumptionProvenanceTable({ provenance }: { provenance: Record<string, unknown> }) {
