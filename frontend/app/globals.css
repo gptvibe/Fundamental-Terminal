@@ -1399,6 +1399,72 @@ select {
   gap: 10px;
 }
 
+.watchlist-snapshot-card {
+  display: grid;
+  gap: 12px;
+}
+
+.watchlist-page-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.watchlist-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.watchlist-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.watchlist-filter-row .ticker-button.is-active {
+  border-color: color-mix(in srgb, var(--cyan) 44%, var(--panel-border));
+  color: var(--surface-strong-text);
+  background: color-mix(in srgb, var(--cyan) 10%, var(--surface-soft));
+}
+
+.watchlist-card-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.watchlist-company-card {
+  gap: 14px;
+}
+
+.watchlist-alert-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.watchlist-latest-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.watchlist-latest-item {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.watchlist-latest-item strong {
+  color: var(--text);
+}
+
+.watchlist-action-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.watchlist-empty-state {
+  min-height: 220px;
+}
+
 .models-page-grid {
   display: grid;
   gap: 16px;
@@ -4339,6 +4405,10 @@ select {
   }
 
   .saved-company-card-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .watchlist-action-row {
     grid-template-columns: 1fr;
   }
 

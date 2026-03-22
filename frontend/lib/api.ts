@@ -1,5 +1,6 @@
 import {
   CompanyActivityFeedResponse,
+  CompanyActivityOverviewResponse,
   CompanyAlertsResponse,
   CompanyCapitalRaisesResponse,
   CompanyCapitalMarketsSummaryResponse,
@@ -21,6 +22,7 @@ import {
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
+  WatchlistSummaryResponse,
   FinancialHistoryPoint,
   RefreshQueuedResponse
 } from "@/lib/types";
@@ -118,6 +120,10 @@ export function getCompanyAlerts(ticker: string): Promise<CompanyAlertsResponse>
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/alerts`);
 }
 
+export function getCompanyActivityOverview(ticker: string): Promise<CompanyActivityOverviewResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/activity-overview`);
+}
+
 
 
 export function getCompanyFilingInsights(ticker: string): Promise<CompanyFilingInsightsResponse> {
@@ -160,6 +166,13 @@ export function getCompanyPeers(ticker: string, peers?: string[]): Promise<Compa
 export function refreshCompany(ticker: string, force = false): Promise<RefreshQueuedResponse> {
   const suffix = force ? "?force=true" : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/refresh${suffix}`, { method: "POST" });
+}
+
+export function getWatchlistSummary(tickers: string[]): Promise<WatchlistSummaryResponse> {
+  return fetchJson("/watchlist/summary", {
+    method: "POST",
+    body: JSON.stringify({ tickers }),
+  });
 }
 
 export async function getCompanyFinancialHistory(

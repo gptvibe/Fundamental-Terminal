@@ -283,6 +283,28 @@ Definition of done:
 
 - Governance is a first-class research surface. ✓ (proxy persistence deferred)
 
+## Cache-First Workflow Polish (2026-03-22)
+
+### Backend request-path policy
+
+- [x] Remove live SEC fallback from persisted company-data routes for governance, beneficial ownership, filing events, capital markets, activity feed, alerts, and watchlist summary.
+- [x] Add `GET /api/companies/{ticker}/activity-overview` with shared cached feed entries + alerts + summary + refresh metadata.
+- [x] Keep existing public routes (`activity-feed`, `alerts`) and serve them from the same shared cached activity bundle.
+
+### Watchlist summary performance
+
+- [x] Rework `POST /api/watchlist/summary` into a bulk cached aggregation path.
+- [x] Use aggregate count queries for financial and price coverage instead of loading full histories.
+- [x] Keep per-ticker failure tolerance with fallback payloads.
+
+### Frontend workflow and cost
+
+- [x] Consolidate overview and SEC feed activity calls to one `activity-overview` request.
+- [x] Remove extra overview-page Altman API fetch.
+- [x] Dynamically load heavy models-page components to reduce first-load JS.
+- [x] Keep saved companies and notes browser-only with no auth/backend persistence.
+- [x] Harden local JSON import/export UX: merge-by-default import, replace option, and clear-all confirmation.
+
 ## Sprint 6: 8-K Event Intelligence
 
 ### Backend scaffolding

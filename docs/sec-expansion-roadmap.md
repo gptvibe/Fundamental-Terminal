@@ -67,6 +67,7 @@ GET  /api/companies/{ticker}/capital-markets
 GET  /api/companies/{ticker}/capital-markets/summary
 GET  /api/companies/{ticker}/activity-feed
 GET  /api/companies/{ticker}/alerts
+GET  /api/companies/{ticker}/activity-overview
 ```
 
 ### Shipped frontend pages
@@ -89,6 +90,13 @@ GET  /api/companies/{ticker}/alerts
 
 - Browser-local watchlist and private notes are available without auth.
 - Local data can be exported/imported as `LocalUserData` JSON and cleared entirely from the saved-companies workflow.
+- Import is merge-by-default with an explicit replace option.
+
+### Cache-first request paths
+
+- Persisted company research routes are cache-first and do not block on live SEC fetches.
+- If data is stale or missing, routes return cached/empty payloads and queue refresh in the background.
+- Explicit live SEC utility routes remain available for direct utility workflows (filing search, filing embed view, financial-history/companyfacts).
 
 ---
 

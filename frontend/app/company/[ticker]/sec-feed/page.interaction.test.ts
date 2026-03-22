@@ -42,7 +42,7 @@ vi.mock("@/components/ui/status-pill", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  getCompanyActivityFeed: vi.fn(async () => ({
+  getCompanyActivityOverview: vi.fn(async () => ({
     company: { ticker: "ACME", cik: "0000001", name: "Acme Corp", sector: "Tech", market_sector: null, market_industry: null, last_checked: null, last_checked_financials: null, last_checked_prices: null, last_checked_insiders: null, last_checked_institutional: null, last_checked_filings: null, cache_state: "fresh" },
     entries: [
       {
@@ -73,11 +73,6 @@ vi.mock("@/lib/api", () => ({
         href: null,
       },
     ],
-    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
-    error: null,
-  })),
-  getCompanyAlerts: vi.fn(async () => ({
-    company: { ticker: "ACME", cik: "0000001", name: "Acme Corp", sector: "Tech", market_sector: null, market_industry: null, last_checked: null, last_checked_financials: null, last_checked_prices: null, last_checked_insiders: null, last_checked_institutional: null, last_checked_filings: null, cache_state: "fresh" },
     alerts: [
       {
         id: "alert-high",

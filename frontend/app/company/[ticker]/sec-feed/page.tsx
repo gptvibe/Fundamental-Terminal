@@ -8,9 +8,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyActivityFeed, getCompanyAlerts } from "@/lib/api";
+import { getCompanyActivityOverview } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyActivityFeedResponse, CompanyAlertsResponse } from "@/lib/types";
+import type { CompanyActivityOverviewResponse } from "@/lib/types";
 
 type AlertLevelFilter = "all" | "high" | "medium" | "low";
 
@@ -27,8 +27,7 @@ export default function CompanySecFeedPage() {
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker);
-  const [activityData, setActivityData] = useState<CompanyActivityFeedResponse | null>(null);
-  const [alertsData, setAlertsData] = useState<CompanyAlertsResponse | null>(null);
+  const [activityData, setActivityData] = useState<CompanyActivityOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [alertLevelFilter, setAlertLevelFilter] = useState<AlertLevelFilter>("all");
@@ -40,13 +39,9 @@ export default function CompanySecFeedPage() {
       try {
         setLoading(true);
         setError(null);
-        const [activity, alerts] = await Promise.all([
-          getCompanyActivityFeed(ticker),
-          getCompanyAlerts(ticker),
-        ]);
+        const activity = await getCompanyActivityOverview(ticker);
         if (!cancelled) {
           setActivityData(activity);
-          setAlertsData(alerts);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -67,8 +62,8 @@ export default function CompanySecFeedPage() {
 
   const feed = useMemo(() => activityData?.entries ?? [], [activityData?.entries]);
   const filteredAlerts = useMemo(
-    () => (alertsData?.alerts ?? []).filter((alert) => alertLevelFilter === "all" || alert.level === alertLevelFilter),
-    [alertLevelFilter, alertsData?.alerts]
+    () => (activityData?.alerts ?? []).filter((alert) => alertLevelFilter === "all" || alert.level === alertLevelFilter),
+    [alertLevelFilter, activityData?.alerts]
   );
   const topAlerts = useMemo(() => filteredAlerts.slice(0, 3), [filteredAlerts]);
 
@@ -108,7 +103,7 @@ export default function CompanySecFeedPage() {
           <Metric label="Ticker" value={ticker} />
           <Metric label="Feed Entries" value={feed.length.toLocaleString()} />
           <Metric label="Latest Activity" value={latestDate ? formatDate(latestDate) : "Pending"} />
-          <Metric label="High Alerts" value={(alertsData?.summary.high ?? 0).toLocaleString()} />
+          <Metric label="High Alerts" value={(activityData?.summary.high ?? 0).toLocaleString()} />
           <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
         </div>
       </Panel>
@@ -122,10 +117,10 @@ export default function CompanySecFeedPage() {
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {([
-                ["all", `All (${alertsData?.summary.total ?? 0})`],
-                ["high", `High (${alertsData?.summary.high ?? 0})`],
-                ["medium", `Medium (${alertsData?.summary.medium ?? 0})`],
-                ["low", `Low (${alertsData?.summary.low ?? 0})`],
+                ["all", `All (${activityData?.summary.total ?? 0})`],
+                ["high", `High (${activityData?.summary.high ?? 0})`],
+                ["medium", `Medium (${activityData?.summary.medium ?? 0})`],
+                ["low", `Low (${activityData?.summary.low ?? 0})`],
               ] as const).map(([level, label]) => (
                 <button
                   key={level}

@@ -135,6 +135,58 @@ def get_company_snapshot_by_cik(session: Session, cik: str) -> CompanyCacheSnaps
     return _build_snapshot(company, last_checked)
 
 
+def get_company_snapshots_by_ticker(session: Session, tickers: list[str]) -> dict[str, CompanyCacheSnapshot]:
+    if not tickers:
+        return {}
+
+    normalized_tickers = sorted({ticker.strip().upper() for ticker in tickers if ticker and ticker.strip()})
+    if not normalized_tickers:
+        return {}
+
+    latest_checks = _latest_checks_subquery()
+    statement = (
+        select(Company, latest_checks.c.last_checked)
+        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
+        .where(Company.ticker.in_(normalized_tickers))
+    )
+    rows = session.execute(statement).all()
+    return {company.ticker: _build_snapshot(company, last_checked) for company, last_checked in rows}
+
+
+def get_company_coverage_counts(session: Session, company_ids: list[int]) -> dict[int, dict[str, int]]:
+    if not company_ids:
+        return {}
+
+    normalized_ids = sorted({int(company_id) for company_id in company_ids})
+    if not normalized_ids:
+        return {}
+
+    financial_counts_statement = (
+        select(FinancialStatement.company_id, func.count())
+        .where(
+            FinancialStatement.company_id.in_(normalized_ids),
+            FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
+        )
+        .group_by(FinancialStatement.company_id)
+    )
+    financial_counts = {int(company_id): int(total) for company_id, total in session.execute(financial_counts_statement).all()}
+
+    price_counts_statement = (
+        select(PriceHistory.company_id, func.count())
+        .where(PriceHistory.company_id.in_(normalized_ids))
+        .group_by(PriceHistory.company_id)
+    )
+    price_counts = {int(company_id): int(total) for company_id, total in session.execute(price_counts_statement).all()}
+
+    result: dict[int, dict[str, int]] = {}
+    for company_id in normalized_ids:
+        result[company_id] = {
+            "financial_periods": financial_counts.get(company_id, 0),
+            "price_points": price_counts.get(company_id, 0),
+        }
+    return result
+
+
 def get_company_financials(session: Session, company_id: int) -> list[FinancialStatement]:
     statement = (
         select(FinancialStatement)

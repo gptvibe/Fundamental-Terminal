@@ -25,6 +25,7 @@ vi.mock("@/lib/app-toast", () => ({
 describe("HomeSavedCompaniesPanel", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   beforeEach(() => {
@@ -64,6 +65,7 @@ describe("HomeSavedCompaniesPanel", () => {
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
     HTMLAnchorElement.prototype.click = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(React.createElement(HomeSavedCompaniesPanel));
 

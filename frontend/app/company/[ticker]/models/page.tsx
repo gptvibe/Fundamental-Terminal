@@ -2,15 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
 
 import { DenseGrid } from "@/components/grid/dense-grid";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
-import { DcfScenarioAnalysis } from "@/components/models/dcf-scenario-analysis";
-import { FinancialHealthScore } from "@/components/models/financial-health-score";
-import { InvestmentSummaryPanel } from "@/components/models/investment-summary-panel";
-import { ModelDashboard } from "@/components/models/model-dashboard";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
@@ -28,6 +25,23 @@ interface ModelsWorkspaceData {
 }
 
 const REFRESH_POLL_INTERVAL_MS = 3000;
+
+const InvestmentSummaryPanel = dynamic(
+  () => import("@/components/models/investment-summary-panel").then((module) => module.InvestmentSummaryPanel),
+  { ssr: false }
+);
+const FinancialHealthScore = dynamic(
+  () => import("@/components/models/financial-health-score").then((module) => module.FinancialHealthScore),
+  { ssr: false }
+);
+const DcfScenarioAnalysis = dynamic(
+  () => import("@/components/models/dcf-scenario-analysis").then((module) => module.DcfScenarioAnalysis),
+  { ssr: false }
+);
+const ModelDashboard = dynamic(
+  () => import("@/components/models/model-dashboard").then((module) => module.ModelDashboard),
+  { ssr: false }
+);
 
 type DupontMode = "auto" | "annual" | "ttm";
 

@@ -519,6 +519,60 @@ export interface CompanyAlertsResponse {
   error: string | null;
 }
 
+export interface CompanyActivityOverviewResponse {
+  company: CompanyPayload | null;
+  entries: ActivityFeedEntryPayload[];
+  alerts: AlertPayload[];
+  summary: AlertsSummaryPayload;
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface WatchlistSummaryRequest {
+  tickers: string[];
+}
+
+export interface WatchlistLatestAlertPayload {
+  id: string;
+  level: "high" | "medium" | "low";
+  title: string;
+  source: string;
+  date: string | null;
+  href: string | null;
+}
+
+export interface WatchlistLatestActivityPayload {
+  id: string;
+  type: string;
+  badge: string;
+  title: string;
+  date: string | null;
+  href: string | null;
+}
+
+export interface WatchlistCoveragePayload {
+  financial_periods: number;
+  price_points: number;
+}
+
+export interface WatchlistSummaryItemPayload {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  cik: string | null;
+  last_checked: string | null;
+  refresh: RefreshState;
+  alert_summary: AlertsSummaryPayload;
+  latest_alert: WatchlistLatestAlertPayload | null;
+  latest_activity: WatchlistLatestActivityPayload | null;
+  coverage: WatchlistCoveragePayload;
+}
+
+export interface WatchlistSummaryResponse {
+  tickers: string[];
+  companies: WatchlistSummaryItemPayload[];
+}
+
 export interface PeerOptionPayload {
   ticker: string;
   name: string;

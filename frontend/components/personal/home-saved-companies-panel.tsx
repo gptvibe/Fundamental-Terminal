@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ChangeEvent } from "react";
+import { useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { useLocalUserData } from "@/hooks/use-local-user-data";
@@ -10,6 +10,7 @@ import { formatDate } from "@/lib/format";
 export function HomeSavedCompaniesPanel() {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
   const { savedCompanies, watchlistCount, noteCount, removeFromWatchlist, clearNote, exportData, importData, clearAll } = useLocalUserData();
 
   function handleExport() {
@@ -19,7 +20,8 @@ export function HomeSavedCompaniesPanel() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = "fundamental-terminal-local-user-data.json";
+      const timestamp = new Date().toISOString().replace(/[:]/g, "-");
+      anchor.download = `fundamental-terminal-local-user-data-${timestamp}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
       showAppToast({ message: "Saved companies exported as JSON.", tone: "info" });
@@ -36,9 +38,9 @@ export function HomeSavedCompaniesPanel() {
 
     try {
       const text = await file.text();
-      const imported = importData(text);
+      const imported = importData(text, { mode: importMode });
       showAppToast({
-        message: `Imported ${imported.watchlist.length.toLocaleString()} watchlist items and ${Object.keys(imported.notes).length.toLocaleString()} notes.`,
+        message: `${importMode === "merge" ? "Merged" : "Replaced with"} ${imported.watchlist.length.toLocaleString()} watchlist items and ${Object.keys(imported.notes).length.toLocaleString()} notes.`,
         tone: "info"
       });
     } catch (error) {
@@ -49,6 +51,10 @@ export function HomeSavedCompaniesPanel() {
   }
 
   function handleClearAll() {
+    const confirmed = window.confirm("Clear all saved companies and notes from this browser? This cannot be undone unless you exported a backup JSON.");
+    if (!confirmed) {
+      return;
+    }
     clearAll();
     showAppToast({ message: "Cleared all saved companies and notes from this browser.", tone: "info" });
   }
@@ -64,6 +70,9 @@ export function HomeSavedCompaniesPanel() {
         <div className="saved-companies-transfer-actions">
           <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
           <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
+        </div>
+        <div className="saved-companies-summary" style={{ marginTop: 12 }}>
+          <span className="pill">Import mode: merge (default)</span>
         </div>
         <input
           ref={importInputRef}
@@ -91,6 +100,28 @@ export function HomeSavedCompaniesPanel() {
         <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
         <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
         <button type="button" className="ticker-button" onClick={handleClearAll}>Clear All</button>
+      </div>
+
+      <div className="saved-companies-summary">
+        <span className="pill">Import behavior</span>
+        <label className="pill" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="radio"
+            name="import-mode"
+            checked={importMode === "merge"}
+            onChange={() => setImportMode("merge")}
+          />
+          Merge with existing
+        </label>
+        <label className="pill" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+          <input
+            type="radio"
+            name="import-mode"
+            checked={importMode === "replace"}
+            onChange={() => setImportMode("replace")}
+          />
+          Replace everything
+        </label>
       </div>
 
       <input

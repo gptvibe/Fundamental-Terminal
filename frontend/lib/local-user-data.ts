@@ -24,6 +24,8 @@ export interface LocalCompanySnapshot {
   sector?: string | null;
 }
 
+export type LocalImportMode = "merge" | "replace";
+
 export const LOCAL_USER_DATA_STORAGE_KEY = "ft-local-user-data";
 export const LOCAL_USER_DATA_EVENT = "ft:local-user-data";
 
@@ -213,7 +215,7 @@ export function exportLocalUserData(): LocalUserData {
   return normalizeLocalUserData(readLocalUserData());
 }
 
-export function importLocalUserData(rawJson: string): LocalUserData {
+export function importLocalUserData(rawJson: string, options?: { mode?: LocalImportMode }): LocalUserData {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson);
@@ -221,9 +223,21 @@ export function importLocalUserData(rawJson: string): LocalUserData {
     throw new Error("Import file is not valid JSON.");
   }
 
-  const normalized = normalizeLocalUserData(parsed);
-  writeLocalUserData(normalized);
-  return normalized;
+  const incoming = normalizeLocalUserData(parsed);
+  const mode = options?.mode ?? "merge";
+
+  const nextValue =
+    mode === "replace"
+      ? incoming
+      : updateLocalUserData((current) => ({
+          watchlist: normalizeWatchlist([...current.watchlist, ...incoming.watchlist]),
+          notes: normalizeNotes({ ...current.notes, ...incoming.notes }),
+        }));
+
+  if (mode === "replace") {
+    writeLocalUserData(nextValue);
+  }
+  return nextValue;
 }
 
 export function clearAllLocalUserData(): LocalUserData {

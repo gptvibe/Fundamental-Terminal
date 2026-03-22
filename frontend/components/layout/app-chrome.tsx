@@ -345,7 +345,7 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
 
         <div className="app-topbar-tools">
-          <button type="button" className="app-device-shortcut" onClick={() => router.push("/#saved-companies")} title="Open your browser-only saved list">
+          <button type="button" className="app-device-shortcut" onClick={() => router.push("/watchlist")} title="Open your browser-only saved list">
             Saved
             <span className="app-device-shortcut-count">{savedCompanyCount}</span>
           </button>

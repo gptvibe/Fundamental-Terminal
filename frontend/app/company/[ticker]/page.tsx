@@ -2,23 +2,46 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
-import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
-import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
-import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
-import { PriceFundamentalsModule } from "@/components/charts/price-fundamentals-module";
-import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
-import { FinancialHistorySection } from "@/components/company/financial-history-section";
-import { PeerComparisonDashboard } from "@/components/peers/peer-comparison-dashboard";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyActivityFeed, getCompanyAlerts } from "@/lib/api";
+import { getCompanyActivityOverview } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
-import type { CompanyActivityFeedResponse, CompanyAlertsResponse } from "@/lib/types";
+import type { CompanyActivityOverviewResponse } from "@/lib/types";
+
+const PriceFundamentalsModule = dynamic(
+  () => import("@/components/charts/price-fundamentals-module").then((module) => module.PriceFundamentalsModule),
+  { ssr: false }
+);
+const CashFlowWaterfallChart = dynamic(
+  () => import("@/components/charts/cash-flow-waterfall-chart").then((module) => module.CashFlowWaterfallChart),
+  { ssr: false }
+);
+const LiquidityCapitalChart = dynamic(
+  () => import("@/components/charts/liquidity-capital-chart").then((module) => module.LiquidityCapitalChart),
+  { ssr: false }
+);
+const ShareDilutionTrackerChart = dynamic(
+  () => import("@/components/charts/share-dilution-tracker-chart").then((module) => module.ShareDilutionTrackerChart),
+  { ssr: false }
+);
+const BusinessSegmentBreakdown = dynamic(
+  () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
+  { ssr: false }
+);
+const FinancialHistorySection = dynamic(
+  () => import("@/components/company/financial-history-section").then((module) => module.FinancialHistorySection),
+  { ssr: false }
+);
+const PeerComparisonDashboard = dynamic(
+  () => import("@/components/peers/peer-comparison-dashboard").then((module) => module.PeerComparisonDashboard),
+  { ssr: false }
+);
 
 export default function CompanyOverviewPage() {
   const params = useParams<{ ticker: string }>();
@@ -36,8 +59,7 @@ export default function CompanyOverviewPage() {
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker, { includeChartConsole: true });
-  const [activityData, setActivityData] = useState<CompanyActivityFeedResponse | null>(null);
-  const [alertsData, setAlertsData] = useState<CompanyAlertsResponse | null>(null);
+  const [activityData, setActivityData] = useState<CompanyActivityOverviewResponse | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState<string | null>(null);
 
@@ -48,13 +70,9 @@ export default function CompanyOverviewPage() {
       try {
         setActivityLoading(true);
         setActivityError(null);
-        const [feed, alerts] = await Promise.all([
-          getCompanyActivityFeed(ticker),
-          getCompanyAlerts(ticker),
-        ]);
+        const overview = await getCompanyActivityOverview(ticker);
         if (!cancelled) {
-          setActivityData(feed);
-          setAlertsData(alerts);
+          setActivityData(overview);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -73,7 +91,7 @@ export default function CompanyOverviewPage() {
     };
   }, [ticker, reloadKey]);
 
-  const topAlerts = useMemo(() => (alertsData?.alerts ?? []).slice(0, 3), [alertsData?.alerts]);
+  const topAlerts = useMemo(() => (activityData?.alerts ?? []).slice(0, 3), [activityData?.alerts]);
   const latestEntries = useMemo(() => (activityData?.entries ?? []).slice(0, 8), [activityData?.entries]);
 
   return (
@@ -102,7 +120,7 @@ export default function CompanyOverviewPage() {
           connectionState={connectionState}
         >
           <Panel title="Risk & Red Flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals">
-            <RiskRedFlagPanel ticker={ticker} financials={financials} reloadKey={reloadKey} />
+            <RiskRedFlagPanel financials={financials} />
           </Panel>
 
           <Panel title="Live Activity & Alerts" subtitle="Latest SEC activity including events, ownership changes, insider trades, Form 144 planned sales, and prioritized alerts">
@@ -114,9 +132,9 @@ export default function CompanyOverviewPage() {
               <div style={{ display: "grid", gap: 16 }}>
                 <div className="metric-grid">
                   <Metric label="Feed Entries" value={(activityData?.entries.length ?? 0).toLocaleString()} />
-                  <Metric label="High Alerts" value={(alertsData?.summary.high ?? 0).toLocaleString()} />
-                  <Metric label="Medium Alerts" value={(alertsData?.summary.medium ?? 0).toLocaleString()} />
-                  <Metric label="Total Alerts" value={(alertsData?.summary.total ?? 0).toLocaleString()} />
+                  <Metric label="High Alerts" value={(activityData?.summary.high ?? 0).toLocaleString()} />
+                  <Metric label="Medium Alerts" value={(activityData?.summary.medium ?? 0).toLocaleString()} />
+                  <Metric label="Total Alerts" value={(activityData?.summary.total ?? 0).toLocaleString()} />
                 </div>
 
                 <div style={{ display: "grid", gap: 12 }}>

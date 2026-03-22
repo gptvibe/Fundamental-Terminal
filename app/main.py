@@ -21,7 +21,7 @@ from app.config import settings
 from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
-from app.models import ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory
+from app.models import ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -31,6 +31,7 @@ from app.services import (
         get_company_filing_events,
         get_company_capital_markets_events,
     CompanyCacheSnapshot,
+    get_company_coverage_counts,
     get_company_executive_compensation,
     get_company_financials,
     get_company_filing_insights,
@@ -46,6 +47,7 @@ from app.services import (
     get_company_proxy_cache_status,
     get_company_proxy_statements,
     get_company_snapshot,
+    get_company_snapshots_by_ticker,
     get_company_snapshot_by_cik,
     queue_company_refresh,
     search_company_snapshots,
@@ -706,6 +708,60 @@ class CompanyAlertsResponse(BaseModel):
     error: str | None = None
 
 
+class CompanyActivityOverviewResponse(BaseModel):
+    company: CompanyPayload | None
+    entries: list[ActivityFeedEntryPayload]
+    alerts: list[AlertPayload]
+    summary: AlertsSummaryPayload
+    refresh: RefreshState
+    error: str | None = None
+
+
+class WatchlistSummaryRequest(BaseModel):
+    tickers: list[str] = Field(default_factory=list)
+
+
+class WatchlistLatestAlertPayload(BaseModel):
+    id: str
+    level: Literal["high", "medium", "low"]
+    title: str
+    source: str
+    date: DateType | None = None
+    href: str | None = None
+
+
+class WatchlistLatestActivityPayload(BaseModel):
+    id: str
+    type: str
+    badge: str
+    title: str
+    date: DateType | None = None
+    href: str | None = None
+
+
+class WatchlistCoveragePayload(BaseModel):
+    financial_periods: int
+    price_points: int
+
+
+class WatchlistSummaryItemPayload(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    cik: str | None = None
+    last_checked: datetime | None = None
+    refresh: RefreshState
+    alert_summary: AlertsSummaryPayload
+    latest_alert: WatchlistLatestAlertPayload | None = None
+    latest_activity: WatchlistLatestActivityPayload | None = None
+    coverage: WatchlistCoveragePayload
+
+
+class WatchlistSummaryResponse(BaseModel):
+    tickers: list[str]
+    companies: list[WatchlistSummaryItemPayload]
+
+
 _filings_timeline_cache: dict[str, tuple[float, list[FilingPayload]]] = {}
 try:
     import redis  # type: ignore
@@ -1286,46 +1342,16 @@ def company_beneficial_ownership(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-
-    # Serve from DB cache when available; fall back to live SEC submissions if empty.
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
-    if cached_reports:
-        filings = _enrich_beneficial_ownership_amendment_history(
-            [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
-        )
-        return CompanyBeneficialOwnershipResponse(
-            company=_serialize_company(snapshot),
-            filings=filings,
-            refresh=refresh,
-            error=None,
-        )
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        filings = _enrich_beneficial_ownership_amendment_history(
-            [
-                _serialize_normalized_beneficial_ownership_report(report)
-                for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
-            ]
-        )
-        return CompanyBeneficialOwnershipResponse(
-            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"base_form", "is_amendment", "summary"})) for item in filings]) if filings else None),
-            filings=filings,
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load beneficial ownership filings for '%s'", snapshot.company.ticker)
-        return CompanyBeneficialOwnershipResponse(
-            company=_serialize_company(snapshot),
-            filings=[],
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    filings = _enrich_beneficial_ownership_amendment_history(
+        [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+    )
+    return CompanyBeneficialOwnershipResponse(
+        company=_serialize_company(snapshot),
+        filings=filings,
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/beneficial-ownership/summary", response_model=CompanyBeneficialOwnershipSummaryResponse)
@@ -1346,43 +1372,15 @@ def company_beneficial_ownership_summary(
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
-    if cached_reports:
-        filings = _enrich_beneficial_ownership_amendment_history(
-            [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
-        )
-        return CompanyBeneficialOwnershipSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_beneficial_ownership_summary(filings),
-            refresh=refresh,
-            error=None,
-        )
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        filings = _enrich_beneficial_ownership_amendment_history(
-            [
-                _serialize_normalized_beneficial_ownership_report(report)
-                for report in collect_beneficial_ownership_reports(snapshot.company.cik, filing_index, client=client)
-            ]
-        )
-        return CompanyBeneficialOwnershipSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_beneficial_ownership_summary(filings),
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load beneficial ownership summary for '%s'", snapshot.company.ticker)
-        return CompanyBeneficialOwnershipSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_empty_beneficial_ownership_summary(),
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    filings = _enrich_beneficial_ownership_amendment_history(
+        [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+    )
+    return CompanyBeneficialOwnershipSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_beneficial_ownership_summary(filings),
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/governance", response_model=CompanyGovernanceResponse)
@@ -1402,28 +1400,13 @@ def company_governance(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        filings = _serialize_governance_filings(snapshot.company.cik, filing_index, client=client)
-        return CompanyGovernanceResponse(
-            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"summary"})) for item in filings]) if filings else None),
-            filings=filings,
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load governance filings for '%s'", snapshot.company.ticker)
-        return CompanyGovernanceResponse(
-            company=_serialize_company(snapshot),
-            filings=[],
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    filings = [_serialize_cached_proxy_statement(statement) for statement in get_company_proxy_statements(session, snapshot.company.id)]
+    return CompanyGovernanceResponse(
+        company=_serialize_company(snapshot),
+        filings=filings,
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/governance/summary", response_model=CompanyGovernanceSummaryResponse)
@@ -1443,27 +1426,13 @@ def company_governance_summary(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        filings = _serialize_governance_filings(snapshot.company.cik, filing_index, client=client)
-        return CompanyGovernanceSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_governance_summary(filings),
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load governance summary for '%s'", snapshot.company.ticker)
-        return CompanyGovernanceSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_empty_governance_summary(),
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    filings = [_serialize_cached_proxy_statement(statement) for statement in get_company_proxy_statements(session, snapshot.company.id)]
+    return CompanyGovernanceSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_governance_summary(filings),
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/executive-compensation", response_model=CompanyExecutiveCompensationResponse)
@@ -1485,76 +1454,20 @@ def company_executive_compensation(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-
-    # Prefer cached rows when available.
     cached_rows = get_company_executive_compensation(session, snapshot.company.id)
-    if cached_rows:
-        serialized = [_serialize_exec_comp_row(row) for row in cached_rows]
-        fiscal_years = sorted(
-            {row.fiscal_year for row in cached_rows if row.fiscal_year is not None},
-            reverse=True,
-        )
-        return CompanyExecutiveCompensationResponse(
-            company=_serialize_company(snapshot),
-            rows=serialized,
-            fiscal_years=fiscal_years,
-            source="cached",
-            refresh=refresh,
-            error=None,
-        )
-
-    # Live fallback: parse latest DEF 14A.
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        proxy_filings = sorted(
-            [item for item in filing_index.values() if _is_governance_form(item.form) and item.form == "DEF 14A"],
-            key=lambda item: (item.filing_date or DateType.min),
-            reverse=True,
-        )
-        rows: list[ExecCompRowPayload] = []
-        fiscal_years: list[int] = []
-        for filing in proxy_filings[:3]:
-            if not filing.primary_document:
-                continue
-            try:
-                _, payload = client.get_filing_document_text(
-                    snapshot.company.cik, filing.accession_number, filing.primary_document
-                )
-                signals = parse_proxy_filing_signals(payload)
-            except Exception:
-                continue
-            if signals.named_exec_rows:
-                rows = [_serialize_exec_comp_row_from_signals(r) for r in signals.named_exec_rows]
-                fiscal_years = sorted(
-                    {r.fiscal_year for r in signals.named_exec_rows if r.fiscal_year is not None},
-                    reverse=True,
-                )
-                break
-
-        return CompanyExecutiveCompensationResponse(
-            company=_serialize_company(snapshot),
-            rows=rows,
-            fiscal_years=fiscal_years,
-            source="live" if rows else "none",
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "Unable to load executive compensation for '%s'", snapshot.company.ticker
-        )
-        return CompanyExecutiveCompensationResponse(
-            company=_serialize_company(snapshot),
-            rows=[],
-            fiscal_years=[],
-            source="none",
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    serialized = [_serialize_exec_comp_row(row) for row in cached_rows]
+    fiscal_years = sorted(
+        {row.fiscal_year for row in cached_rows if row.fiscal_year is not None},
+        reverse=True,
+    )
+    return CompanyExecutiveCompensationResponse(
+        company=_serialize_company(snapshot),
+        rows=serialized,
+        fiscal_years=fiscal_years,
+        source="cached" if cached_rows else "none",
+        refresh=refresh,
+        error=None,
+    )
 
 
 REGISTRATION_FORMS = {
@@ -1603,43 +1516,13 @@ def company_capital_raises(
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
     cached_events = get_company_capital_markets_events(session, snapshot.company.id)
-    if cached_events:
-        filings = [_serialize_cached_capital_markets_event(event) for event in cached_events]
-        return CompanyCapitalRaisesResponse(
-            company=_serialize_company(snapshot),
-            filings=filings,
-            refresh=refresh,
-            error=None,
-        )
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        from app.services.capital_markets import collect_capital_markets_events
-
-        filings = [
-            _serialize_normalized_capital_markets_event(event)
-            for event in collect_capital_markets_events(snapshot.company.cik, filing_index)
-        ]
-        return CompanyCapitalRaisesResponse(
-            company=_serialize_company(snapshot),
-            filings=filings,
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "Unable to load capital raise filings for '%s'", snapshot.company.ticker
-        )
-        return CompanyCapitalRaisesResponse(
-            company=_serialize_company(snapshot),
-            filings=[],
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    filings = [_serialize_cached_capital_markets_event(event) for event in cached_events]
+    return CompanyCapitalRaisesResponse(
+        company=_serialize_company(snapshot),
+        filings=filings,
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/capital-markets", response_model=CompanyCapitalRaisesResponse)
@@ -1668,42 +1551,13 @@ def company_capital_markets_summary(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    cached_events = get_company_capital_markets_events(session, snapshot.company.id)
-    if cached_events:
-        rows = [_serialize_cached_capital_markets_event(event) for event in cached_events]
-        return CompanyCapitalMarketsSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_capital_markets_summary(rows),
-            refresh=refresh,
-            error=None,
-        )
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        from app.services.capital_markets import collect_capital_markets_events
-
-        rows = [
-            _serialize_normalized_capital_markets_event(event)
-            for event in collect_capital_markets_events(snapshot.company.cik, filing_index)
-        ]
-        return CompanyCapitalMarketsSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_capital_markets_summary(rows),
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load capital markets summary for '%s'", snapshot.company.ticker)
-        return CompanyCapitalMarketsSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_empty_capital_markets_summary(),
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    rows = [_serialize_cached_capital_markets_event(event) for event in get_company_capital_markets_events(session, snapshot.company.id)]
+    return CompanyCapitalMarketsSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_capital_markets_summary(rows),
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/events", response_model=CompanyEventsResponse)
@@ -1723,43 +1577,13 @@ def company_events(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-
-    cached_events = get_company_filing_events(session, snapshot.company.id)
-    if cached_events:
-        events = [_serialize_cached_filing_event(event) for event in cached_events]
-        return CompanyEventsResponse(
-            company=_serialize_company(snapshot),
-            events=events,
-            refresh=refresh,
-            error=None,
-        )
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        from app.services.eight_k_events import collect_filing_events
-
-        events = [
-            _serialize_normalized_filing_event(event)
-            for event in collect_filing_events(snapshot.company.cik, filing_index)
-        ]
-        return CompanyEventsResponse(
-            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked([FilingPayload(**item.model_dump(exclude={"category", "summary", "item_code", "key_amounts"})) for item in events]) if events else None),
-            events=events,
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load 8-K events for '%s'", snapshot.company.ticker)
-        return CompanyEventsResponse(
-            company=_serialize_company(snapshot),
-            events=[],
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    return CompanyEventsResponse(
+        company=_serialize_company(snapshot),
+        events=events,
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/filing-events", response_model=CompanyEventsResponse)
@@ -1788,42 +1612,13 @@ def company_filing_events_summary(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    cached_events = get_company_filing_events(session, snapshot.company.id)
-    if cached_events:
-        rows = [_serialize_cached_filing_event(event) for event in cached_events]
-        return CompanyFilingEventsSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_filing_events_summary(rows),
-            refresh=refresh,
-            error=None,
-        )
-
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        from app.services.eight_k_events import collect_filing_events
-
-        rows = [
-            _serialize_normalized_filing_event(event)
-            for event in collect_filing_events(snapshot.company.cik, filing_index)
-        ]
-        return CompanyFilingEventsSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_build_filing_events_summary(rows),
-            refresh=refresh,
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load filing event summary for '%s'", snapshot.company.ticker)
-        return CompanyFilingEventsSummaryResponse(
-            company=_serialize_company(snapshot),
-            summary=_empty_filing_events_summary(),
-            refresh=refresh,
-            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
-        )
-    finally:
-        client.close()
+    rows = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    return CompanyFilingEventsSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_filing_events_summary(rows),
+        refresh=refresh,
+        error=None,
+    )
 
 
 @app.get("/api/companies/{ticker}/activity-feed", response_model=CompanyActivityFeedResponse)
@@ -1832,32 +1627,12 @@ def company_activity_feed(
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyActivityFeedResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyActivityFeedResponse(
-            company=None,
-            entries=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            error=None,
-        )
-
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    activity = _load_company_activity_data(session, snapshot)
-    entries = _build_activity_feed_entries(
-        filings=activity["filings"],
-        filing_events=activity["filing_events"],
-        governance_filings=activity["governance_filings"],
-        beneficial_filings=activity["beneficial_filings"],
-        insider_trades=activity["insider_trades"],
-        form144_filings=activity["form144_filings"],
-        institutional_holdings=activity["institutional_holdings"],
-    )
+    overview = _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
     return CompanyActivityFeedResponse(
-        company=_serialize_company(snapshot),
-        entries=entries,
-        refresh=refresh,
-        error=None,
+        company=overview.company,
+        entries=overview.entries,
+        refresh=overview.refresh,
+        error=overview.error,
     )
 
 
@@ -1867,38 +1642,61 @@ def company_alerts(
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyAlertsResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyAlertsResponse(
-            company=None,
-            alerts=[],
-            summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            error=None,
-        )
-
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    activity = _load_company_activity_data(session, snapshot)
-    alerts = _build_activity_alerts(
-        beneficial_filings=activity["beneficial_filings"],
-        capital_filings=activity["capital_filings"],
-        insider_trades=activity["insider_trades"],
-        institutional_holdings=activity["institutional_holdings"],
-    )
-    summary = AlertsSummaryPayload(
-        total=len(alerts),
-        high=sum(1 for alert in alerts if alert.level == "high"),
-        medium=sum(1 for alert in alerts if alert.level == "medium"),
-        low=sum(1 for alert in alerts if alert.level == "low"),
-    )
+    overview = _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
     return CompanyAlertsResponse(
-        company=_serialize_company(snapshot),
-        alerts=alerts,
-        summary=summary,
-        refresh=refresh,
-        error=None,
+        company=overview.company,
+        alerts=overview.alerts,
+        summary=overview.summary,
+        refresh=overview.refresh,
+        error=overview.error,
     )
+
+
+@app.get("/api/companies/{ticker}/activity-overview", response_model=CompanyActivityOverviewResponse)
+def company_activity_overview(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyActivityOverviewResponse:
+    return _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
+
+
+@app.post("/api/watchlist/summary", response_model=WatchlistSummaryResponse)
+def watchlist_summary(
+    payload: WatchlistSummaryRequest,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> WatchlistSummaryResponse:
+    normalized_tickers = _normalize_watchlist_tickers(payload.tickers)
+    if len(normalized_tickers) > 50:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A maximum of 50 tickers is allowed")
+
+    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+    coverage_counts = get_company_coverage_counts(
+        session,
+        [snapshot.company.id for snapshot in snapshots_by_ticker.values()],
+    )
+
+    companies: list[WatchlistSummaryItemPayload] = []
+    for ticker in normalized_tickers:
+        snapshot = snapshots_by_ticker.get(ticker)
+        if snapshot is None:
+            companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+            continue
+        try:
+            companies.append(
+                _build_watchlist_summary_item(
+                    session,
+                    background_tasks,
+                    ticker,
+                    snapshot=snapshot,
+                    coverage_counts=coverage_counts.get(snapshot.company.id),
+                )
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
+            companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+    return WatchlistSummaryResponse(tickers=normalized_tickers, companies=companies)
 
 
 @app.get("/api/filings/{ticker}", response_model=list[FilingTimelineItemPayload])
@@ -3239,36 +3037,89 @@ def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
     )
 
 
-def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot) -> dict[str, Any]:
+def _build_company_activity_overview_response(
+    *,
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session,
+) -> CompanyActivityOverviewResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyActivityOverviewResponse(
+            company=None,
+            entries=[],
+            alerts=[],
+            summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    activity = _load_company_activity_data(session, snapshot)
+    entries = _build_activity_feed_entries(
+        filings=activity["filings"],
+        filing_events=activity["filing_events"],
+        governance_filings=activity["governance_filings"],
+        beneficial_filings=activity["beneficial_filings"],
+        insider_trades=activity["insider_trades"],
+        form144_filings=activity["form144_filings"],
+        institutional_holdings=activity["institutional_holdings"],
+    )
+    alerts = _build_activity_alerts(
+        beneficial_filings=activity["beneficial_filings"],
+        capital_filings=activity["capital_filings"],
+        insider_trades=activity["insider_trades"],
+        institutional_holdings=activity["institutional_holdings"],
+    )
+    return CompanyActivityOverviewResponse(
+        company=_serialize_company(snapshot),
+        entries=entries,
+        alerts=alerts,
+        summary=_build_alerts_summary(alerts),
+        refresh=refresh,
+        error=None,
+    )
+
+
+def _build_alerts_summary(alerts: list[AlertPayload]) -> AlertsSummaryPayload:
+    return AlertsSummaryPayload(
+        total=len(alerts),
+        high=sum(1 for alert in alerts if alert.level == "high"),
+        medium=sum(1 for alert in alerts if alert.level == "medium"),
+        low=sum(1 for alert in alerts if alert.level == "low"),
+    )
+
+
+def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot, *, compact: bool = False) -> dict[str, Any]:
     cached_filings = _load_filings_from_cache(snapshot.company.cik)
-    filings = cached_filings if cached_filings is not None else _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
-    filing_events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    fallback_filings = _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
+    filings = cached_filings if cached_filings is not None else fallback_filings
+    if compact:
+        filings = filings[:24]
+
+    filing_events = [
+        _serialize_cached_filing_event(event)
+        for event in get_company_filing_events(session, snapshot.company.id, limit=80 if compact else 300)
+    ]
     beneficial_filings = [
         _serialize_cached_beneficial_ownership_report(report)
-        for report in get_company_beneficial_ownership_reports(session, snapshot.company.id)
+        for report in get_company_beneficial_ownership_reports(session, snapshot.company.id, limit=80 if compact else 200)
     ]
-    insider_trades = [_serialize_insider_trade(trade) for trade in get_company_insider_trades(session, snapshot.company.id, limit=80)]
-    form144_filings = [_serialize_form144_filing(filing) for filing in get_company_form144_filings(session, snapshot.company.id, limit=80)]
+    insider_trades = [_serialize_insider_trade(trade) for trade in get_company_insider_trades(session, snapshot.company.id, limit=80 if compact else 200)]
+    form144_filings = [_serialize_form144_filing(filing) for filing in get_company_form144_filings(session, snapshot.company.id, limit=80 if compact else 200)]
     institutional_holdings = [
         _serialize_institutional_holding(holding)
-        for holding in get_company_institutional_holdings(session, snapshot.company.id, limit=80)
+        for holding in get_company_institutional_holdings(session, snapshot.company.id, limit=80 if compact else 200)
     ]
     capital_filings = [
         _serialize_cached_capital_markets_event(event)
-        for event in get_company_capital_markets_events(session, snapshot.company.id)
+        for event in get_company_capital_markets_events(session, snapshot.company.id, limit=80 if compact else 200)
     ]
-
-    governance_filings: list[GovernanceFilingPayload] = []
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        governance_filings = _serialize_governance_filings(snapshot.company.cik, filing_index, client=client)
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load governance filings for activity feed for '%s'", snapshot.company.ticker)
-        governance_filings = []
-    finally:
-        client.close()
+    governance_filings = [
+        _serialize_cached_proxy_statement(statement)
+        for statement in get_company_proxy_statements(session, snapshot.company.id, limit=40 if compact else 60)
+    ]
 
     return {
         "filings": filings,
@@ -3280,6 +3131,47 @@ def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot
         "institutional_holdings": institutional_holdings,
         "capital_filings": capital_filings,
     }
+
+
+def _serialize_cached_proxy_statement(statement: ProxyStatement) -> GovernanceFilingPayload:
+    return GovernanceFilingPayload(
+        accession_number=statement.accession_number,
+        form=statement.form,
+        filing_date=statement.filing_date,
+        report_date=statement.report_date,
+        primary_document=statement.primary_document,
+        primary_doc_description=None,
+        source_url=statement.source_url,
+        summary=_governance_summary_line(statement.form, _proxy_statement_signals(statement)),
+        meeting_date=statement.meeting_date,
+        executive_comp_table_detected=bool(statement.executive_comp_table_detected),
+        vote_item_count=statement.vote_item_count,
+        board_nominee_count=statement.board_nominee_count,
+        key_amounts=[],
+        vote_outcomes=[
+            GovernanceVoteOutcomePayload(
+                proposal_number=item.proposal_number,
+                title=item.title,
+                for_votes=item.for_votes,
+                against_votes=item.against_votes,
+                abstain_votes=item.abstain_votes,
+                broker_non_votes=item.broker_non_votes,
+            )
+            for item in statement.vote_results
+        ],
+    )
+
+
+def _proxy_statement_signals(statement: ProxyStatement) -> ProxyFilingSignals:
+    return ProxyFilingSignals(
+        meeting_date=statement.meeting_date,
+        executive_comp_table_detected=bool(statement.executive_comp_table_detected),
+        vote_item_count=statement.vote_item_count,
+        board_nominee_count=statement.board_nominee_count,
+        key_amounts=(),
+        vote_outcomes=(),
+        named_exec_rows=(),
+    )
 
 
 def _build_activity_feed_entries(
@@ -3514,6 +3406,122 @@ def _build_activity_alerts(
         )
     )
     return alerts[:30]
+
+
+def _normalize_watchlist_tickers(raw_tickers: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_ticker in raw_tickers:
+        ticker = _normalize_ticker(raw_ticker or "")
+        if not ticker:
+            continue
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        normalized.append(ticker)
+    return normalized
+
+
+def _build_watchlist_summary_item(
+    session: Session,
+    background_tasks: BackgroundTasks,
+    ticker: str,
+    *,
+    snapshot: CompanyCacheSnapshot | None = None,
+    coverage_counts: dict[str, int] | None = None,
+) -> WatchlistSummaryItemPayload:
+    snapshot = snapshot or _resolve_cached_company_snapshot(session, ticker)
+    if snapshot is None:
+        return _build_missing_watchlist_summary_item(background_tasks, ticker)
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+
+    financial_periods = int((coverage_counts or {}).get("financial_periods", 0))
+    price_points = int((coverage_counts or {}).get("price_points", 0))
+
+    alerts: list[AlertPayload] = []
+    entries: list[ActivityFeedEntryPayload] = []
+    try:
+        activity = _load_company_activity_data(session, snapshot, compact=True)
+        alerts = _build_activity_alerts(
+            beneficial_filings=activity["beneficial_filings"],
+            capital_filings=activity["capital_filings"],
+            insider_trades=activity["insider_trades"],
+            institutional_holdings=activity["institutional_holdings"],
+        )
+        entries = _build_activity_feed_entries(
+            filings=activity["filings"],
+            filing_events=activity["filing_events"],
+            governance_filings=activity["governance_filings"],
+            beneficial_filings=activity["beneficial_filings"],
+            insider_trades=activity["insider_trades"],
+            form144_filings=activity["form144_filings"],
+            institutional_holdings=activity["institutional_holdings"],
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load watchlist activity summary for '%s'", snapshot.company.ticker)
+
+    alert_summary = _build_alerts_summary(alerts)
+
+    latest_alert = alerts[0] if alerts else None
+    latest_activity = entries[0] if entries else None
+
+    return WatchlistSummaryItemPayload(
+        ticker=snapshot.company.ticker,
+        name=snapshot.company.name,
+        sector=snapshot.company.sector,
+        cik=snapshot.company.cik,
+        last_checked=snapshot.last_checked,
+        refresh=refresh,
+        alert_summary=alert_summary,
+        latest_alert=_serialize_watchlist_latest_alert(latest_alert),
+        latest_activity=_serialize_watchlist_latest_activity(latest_activity),
+        coverage=WatchlistCoveragePayload(
+            financial_periods=financial_periods,
+            price_points=price_points,
+        ),
+    )
+
+
+def _build_missing_watchlist_summary_item(background_tasks: BackgroundTasks, ticker: str) -> WatchlistSummaryItemPayload:
+    return WatchlistSummaryItemPayload(
+        ticker=ticker,
+        name=None,
+        sector=None,
+        cik=None,
+        last_checked=None,
+        refresh=_trigger_refresh(background_tasks, ticker, reason="missing"),
+        alert_summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+        latest_alert=None,
+        latest_activity=None,
+        coverage=WatchlistCoveragePayload(financial_periods=0, price_points=0),
+    )
+
+
+def _serialize_watchlist_latest_alert(alert: AlertPayload | None) -> WatchlistLatestAlertPayload | None:
+    if alert is None:
+        return None
+    return WatchlistLatestAlertPayload(
+        id=alert.id,
+        level=alert.level,
+        title=alert.title,
+        source=alert.source,
+        date=alert.date,
+        href=alert.href,
+    )
+
+
+def _serialize_watchlist_latest_activity(entry: ActivityFeedEntryPayload | None) -> WatchlistLatestActivityPayload | None:
+    if entry is None:
+        return None
+    return WatchlistLatestActivityPayload(
+        id=entry.id,
+        type=entry.type,
+        badge=entry.badge,
+        title=entry.title,
+        date=entry.date,
+        href=entry.href,
+    )
 
 
 def _is_governance_form(form: str | None) -> bool:

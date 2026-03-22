@@ -39,14 +39,9 @@ vi.mock("@/components/ui/status-pill", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  getCompanyActivityFeed: vi.fn(async () => ({
+  getCompanyActivityOverview: vi.fn(async () => ({
     company: null,
     entries: [],
-    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
-    error: null,
-  })),
-  getCompanyAlerts: vi.fn(async () => ({
-    company: null,
     alerts: [],
     summary: { total: 0, high: 0, medium: 0, low: 0 },
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },

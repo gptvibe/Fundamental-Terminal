@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { StatusConsole } from "@/components/console/status-console";
 import { HomeSavedCompaniesPanel } from "@/components/personal/home-saved-companies-panel";
+import { HomeWatchlistSnapshot } from "@/components/personal/home-watchlist-snapshot";
 import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplete-menu";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -375,6 +376,10 @@ export default function HomePage() {
       </div>
 
       <div className="home-rail">
+        <Panel title="Watchlist Snapshot" subtitle="Quick jump into your multi-company workspace">
+          <HomeWatchlistSnapshot />
+        </Panel>
+
         <div id="saved-companies">
           <Panel title="Your Saved Companies" subtitle="Watchlist entries and private notes stay only on this browser on this device.">
             <HomeSavedCompaniesPanel />

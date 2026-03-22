@@ -16,6 +16,7 @@ import {
   type LocalCompanySnapshot,
   type LocalCompanyNote,
   type LocalUserData,
+  type LocalImportMode,
   type LocalWatchlistItem
 } from "@/lib/local-user-data";
 
@@ -45,7 +46,7 @@ interface UseLocalUserDataResult {
   saveNote: (snapshot: LocalCompanySnapshot, note: string) => void;
   clearNote: (ticker: string) => void;
   exportData: () => LocalUserData;
-  importData: (rawJson: string) => LocalUserData;
+  importData: (rawJson: string, options?: { mode?: LocalImportMode }) => LocalUserData;
   clearAll: () => void;
   syncMetadata: (snapshot: LocalCompanySnapshot) => void;
 }
@@ -115,7 +116,7 @@ export function useLocalUserData(): UseLocalUserDataResult {
     clearCompanyNote(ticker);
   }, []);
   const exportData = useCallback(() => exportLocalUserData(), []);
-  const importData = useCallback((rawJson: string) => importLocalUserData(rawJson), []);
+  const importData = useCallback((rawJson: string, options?: { mode?: LocalImportMode }) => importLocalUserData(rawJson, options), []);
   const clearAll = useCallback(() => {
     clearAllLocalUserData();
   }, []);

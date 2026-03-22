@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
-import { getCompanyModels } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
-import type { FinancialPayload, ModelPayload } from "@/lib/types";
+import type { FinancialPayload } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
@@ -20,47 +19,11 @@ type RiskAlert = {
 };
 
 interface RiskRedFlagPanelProps {
-  ticker: string;
   financials: FinancialPayload[];
-  reloadKey?: string;
 }
 
-export function RiskRedFlagPanel({ ticker, financials, reloadKey }: RiskRedFlagPanelProps) {
-  const [altmanModel, setAltmanModel] = useState<ModelPayload | null>(null);
-  const [loadingAltman, setLoadingAltman] = useState(true);
-  const [altmanError, setAltmanError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadAltman() {
-      try {
-        setLoadingAltman(true);
-        setAltmanError(null);
-        const response = await getCompanyModels(ticker, ["altman_z"]);
-        if (!cancelled) {
-          const nextModel = response.models.find((model) => model.model_name.toLowerCase() === "altman_z") ?? null;
-          setAltmanModel(nextModel);
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setAltmanError(nextError instanceof Error ? nextError.message : "Unable to load Altman model cache");
-          setAltmanModel(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingAltman(false);
-        }
-      }
-    }
-
-    void loadAltman();
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker, reloadKey]);
-
-  const alerts = useMemo(() => buildRiskAlerts(financials, altmanModel, loadingAltman, altmanError), [altmanError, altmanModel, financials, loadingAltman]);
+export function RiskRedFlagPanel({ financials }: RiskRedFlagPanelProps) {
+  const alerts = useMemo(() => buildRiskAlerts(financials), [financials]);
   const sortedAlerts = useMemo(() => [...alerts].sort((left, right) => severityRank(left.level) - severityRank(right.level)), [alerts]);
   const activeAlerts = sortedAlerts.filter((alert) => alert.level === "high" || alert.level === "medium");
   const backgroundAlerts = sortedAlerts.filter((alert) => alert.level === "clear" || alert.level === "muted");
@@ -151,10 +114,7 @@ function levelLabel(level: AlertLevel): string {
 }
 
 function buildRiskAlerts(
-  financials: FinancialPayload[],
-  altmanModel: ModelPayload | null,
-  loadingAltman: boolean,
-  altmanError: string | null
+  financials: FinancialPayload[]
 ): RiskAlert[] {
   const annuals = financials.filter((statement) => ANNUAL_FORMS.has(statement.filing_type));
 
@@ -164,7 +124,7 @@ function buildRiskAlerts(
     detectIncreasingDebt(annuals),
     detectFallingMargins(annuals),
     detectShareDilution(annuals),
-    detectLowAltmanZ(financials, altmanModel, loadingAltman, altmanError)
+    detectLowAltmanZ(financials)
   ];
 }
 
@@ -328,39 +288,12 @@ function detectShareDilution(annuals: FinancialPayload[]): RiskAlert {
 }
 
 function detectLowAltmanZ(
-  financials: FinancialPayload[],
-  altmanModel: ModelPayload | null,
-  loadingAltman: boolean,
-  altmanError: string | null
+  financials: FinancialPayload[]
 ): RiskAlert {
-  if (loadingAltman) {
-    return mutedAlert("low-altman-z", "Altman Z Proxy", "Loading the cached Altman model from PostgreSQL...");
-  }
-  if (altmanError) {
-    return mutedAlert("low-altman-z", "Altman Z Proxy", altmanError);
-  }
-
-  const altmanResult = asRecord(altmanModel?.result);
-  const modelZScore = asNumber(altmanResult.z_score_approximate);
-  const zScore = modelZScore ?? fallbackAltmanZ(financials);
-  const periodEnd =
-    (typeof altmanModel?.result?.period_end === "string" ? altmanModel.result.period_end : null) ??
-    financials.find((statement) => ANNUAL_FORMS.has(statement.filing_type))?.period_end ??
-    financials[0]?.period_end ??
-    null;
+  const zScore = fallbackAltmanZ(financials);
+  const periodEnd = financials.find((statement) => ANNUAL_FORMS.has(statement.filing_type))?.period_end ?? financials[0]?.period_end ?? null;
   if (zScore == null) {
-    return mutedAlert("low-altman-z", "Altman Z Proxy", "The cached model does not have enough inputs to estimate the Altman proxy yet.");
-  }
-
-  if (modelZScore === null || isApproximateAltman(altmanResult)) {
-    return {
-      key: "low-altman-z",
-      title: "Altman Z Proxy",
-      level: "muted",
-      icon: "…",
-      explanation: "This estimate uses a partial Altman proxy, so the classic 1.8 and 3.0 distress cutoffs do not apply to it.",
-      metric: `${periodEnd ? `${formatDate(periodEnd)} · ` : ""}Z proxy ≈ ${zScore.toFixed(2)}`
-    };
+    return mutedAlert("low-altman-z", "Altman Z Proxy", "Not enough cached fundamentals to estimate the Altman proxy yet.");
   }
 
   if (zScore < 1.8) {
@@ -436,20 +369,6 @@ function growthRate(current: number | null | undefined, previous: number | null 
     return null;
   }
   return (current - previous) / Math.abs(previous);
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function isApproximateAltman(result: Record<string, unknown>): boolean {
-  const status = typeof result.status === "string" ? result.status : null;
-  const missingFactors = Array.isArray(result.missing_factors) ? result.missing_factors.length : 0;
-  return status === "approximate" || missingFactors > 0;
 }
 
 function fallbackAltmanZ(financials: FinancialPayload[]): number | null {

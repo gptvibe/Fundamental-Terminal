@@ -95,6 +95,7 @@ Personal workspace behavior:
 
 - Watchlist saves and private notes are stored in browser-local `LocalUserData` only (no account and no backend persistence).
 - Users can export/import this local data as JSON from the saved-companies panel and clear all local saves.
+- Import is merge-by-default (with an explicit replace option), and clear-all requires confirmation.
 
 Search accepts either a ticker or a company name and shows an autocomplete dropdown with SEC-backed matches. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
 
@@ -173,6 +174,7 @@ GET  /api/companies/AAPL/executive-compensation
 GET  /api/companies/AAPL/peers
 GET  /api/companies/AAPL/activity-feed
 GET  /api/companies/AAPL/alerts
+GET  /api/companies/AAPL/activity-overview
 GET  /api/companies/AAPL/models?model=dcf,dupont,piotroski
 GET  /api/jobs/{job_id}/events
 GET  /api/insiders/AAPL
@@ -182,7 +184,12 @@ GET  /api/search_filings?form=8-K&ticker=AAPL
 POST /api/companies/AAPL/refresh
 ```
 
-The API serves cached PostgreSQL data only. If cached data is missing or stale, it returns the cached payload and queues the data fetcher in the background.
+Cache-first request-path policy:
+
+- Company research surfaces backed by persisted tables are cache-first and do not perform live SEC fetches on the request path.
+- This includes governance, beneficial ownership, filing events, capital markets, activity feed, alerts, and watchlist summary.
+- If cached data is missing or stale, the API returns the cached (or empty) payload and queues refresh in the background.
+- Explicit live SEC utility routes remain available for direct SEC use cases, including `/api/companies/{ticker}/financial-history`, `/api/filings/{ticker}`, `/api/search_filings`, and `/api/companies/{ticker}/filings/view`.
 
 Queue a background refresh manually:
 

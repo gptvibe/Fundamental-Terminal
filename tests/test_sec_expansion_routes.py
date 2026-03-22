@@ -71,8 +71,51 @@ def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
     })
     monkeypatch.setattr(main_module, "EdgarClient", lambda: _FakeEdgarClient(filings))
     monkeypatch.setattr(main_module, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_capital_markets_events", lambda *_args, **_kwargs: [])
+
+    cached_filing_events = []
+    cached_capital_events = []
+    for item in filings.values():
+        form = (item.form or "").upper()
+        if form == "8-K":
+            cached_filing_events.append(
+                SimpleNamespace(
+                    accession_number=item.accession_number,
+                    form=form,
+                    filing_date=item.filing_date,
+                    report_date=item.report_date,
+                    items=item.items,
+                    item_code=(item.items or "").split(",")[0].strip() or None,
+                    category=main_module._classify_filing_event(item.items, item.primary_doc_description),
+                    primary_document=item.primary_document,
+                    primary_doc_description=item.primary_doc_description,
+                    source_url=main_module._build_filing_document_url("0000320193", item.accession_number, item.primary_document),
+                    summary=item.primary_doc_description or "Current report with event-driven disclosure.",
+                    key_amounts=[],
+                    exhibit_references=["99.1"] if "99.1" in (item.primary_doc_description or "") else [],
+                )
+            )
+
+        if form in main_module.REGISTRATION_FORMS or form.startswith("NT "):
+            cached_capital_events.append(
+                SimpleNamespace(
+                    accession_number=item.accession_number,
+                    form=form,
+                    filing_date=item.filing_date,
+                    report_date=item.report_date,
+                    primary_document=item.primary_document,
+                    primary_doc_description=item.primary_doc_description,
+                    source_url=main_module._build_filing_document_url("0000320193", item.accession_number, item.primary_document),
+                    summary=item.primary_doc_description or "Registration or prospectus filing.",
+                    event_type="Late Filing Notice" if form.startswith("NT ") else "Registration",
+                    security_type=None,
+                    offering_amount=None,
+                    shelf_size=None,
+                    is_late_filer=form.startswith("NT "),
+                )
+            )
+
+    monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: cached_filing_events)
+    monkeypatch.setattr(main_module, "get_company_capital_markets_events", lambda *_args, **_kwargs: cached_capital_events)
 
 
 def test_events_route_classifies_item_codes(monkeypatch):
@@ -386,6 +429,25 @@ def test_governance_route_filters_proxy_forms(monkeypatch):
         ),
     }
     _install_common_overrides(monkeypatch, filings)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0002",
+                form="DEF 14A",
+                filing_date=date(2026, 2, 15),
+                report_date=date(2026, 2, 10),
+                meeting_date=None,
+                board_nominee_count=None,
+                vote_item_count=0,
+                executive_comp_table_detected=False,
+                primary_document="proxy.htm",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+                vote_results=[],
+            )
+        ],
+    )
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/governance")
@@ -411,24 +473,31 @@ def test_governance_route_includes_deterministic_parser_signals(monkeypatch):
     _install_common_overrides(monkeypatch, filings)
     monkeypatch.setattr(
         main_module,
-        "parse_proxy_filing_signals",
-        lambda *_args, **_kwargs: main_module.ProxyFilingSignals(
-            meeting_date=date(2026, 5, 20),
-            executive_comp_table_detected=True,
-            vote_item_count=3,
-            board_nominee_count=9,
-            key_amounts=(1250000.0,),
-            vote_outcomes=(
-                main_module.ProxyVoteOutcome(
-                    proposal_number=1,
-                    title="Election of Directors",
-                    for_votes=100000,
-                    against_votes=5000,
-                    abstain_votes=1200,
-                    broker_non_votes=9500,
-                ),
-            ),
-        ),
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0002",
+                form="DEF 14A",
+                filing_date=date(2026, 2, 15),
+                report_date=date(2026, 2, 10),
+                meeting_date=date(2026, 5, 20),
+                board_nominee_count=9,
+                vote_item_count=3,
+                executive_comp_table_detected=True,
+                primary_document="proxy.htm",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+                vote_results=[
+                    SimpleNamespace(
+                        proposal_number=1,
+                        title="Election of Directors",
+                        for_votes=100000,
+                        against_votes=5000,
+                        abstain_votes=1200,
+                        broker_non_votes=9500,
+                    )
+                ],
+            )
+        ],
     )
 
     client = TestClient(app)
@@ -440,7 +509,7 @@ def test_governance_route_includes_deterministic_parser_signals(monkeypatch):
     assert payload["filings"][0]["executive_comp_table_detected"] is True
     assert payload["filings"][0]["vote_item_count"] == 3
     assert payload["filings"][0]["board_nominee_count"] == 9
-    assert payload["filings"][0]["key_amounts"] == [1250000.0]
+    assert payload["filings"][0]["key_amounts"] == []
     assert payload["filings"][0]["vote_outcomes"][0]["proposal_number"] == 1
     assert payload["filings"][0]["vote_outcomes"][0]["for_votes"] == 100000
 
@@ -460,24 +529,21 @@ def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
     _install_common_overrides(monkeypatch, filings)
     monkeypatch.setattr(
         main_module,
-        "_serialize_governance_filings",
+        "get_company_proxy_statements",
         lambda *_args, **_kwargs: [
-            main_module.GovernanceFilingPayload(
+            SimpleNamespace(
                 accession_number="0002",
                 form="DEF 14A",
                 filing_date=date(2026, 2, 15),
                 report_date=date(2026, 2, 10),
-                primary_document="proxy.htm",
-                primary_doc_description=None,
-                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
-                summary="Deterministic summary.",
                 meeting_date=date(2026, 5, 20),
-                executive_comp_table_detected=True,
-                vote_item_count=3,
                 board_nominee_count=9,
-                key_amounts=[1250000.0],
-                vote_outcomes=[
-                    main_module.GovernanceVoteOutcomePayload(
+                vote_item_count=3,
+                executive_comp_table_detected=True,
+                primary_document="proxy.htm",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+                vote_results=[
+                    SimpleNamespace(
                         proposal_number=1,
                         title="Election of Directors",
                         for_votes=100000,
@@ -507,18 +573,26 @@ def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
 
 
 def test_beneficial_ownership_route_flags_amendments(monkeypatch):
-    filings = {
-        "0004": FilingMetadata(
-            accession_number="0004",
-            form="SC 13D/A",
-            filing_date=date(2026, 1, 20),
-            report_date=date(2026, 1, 18),
-            primary_document="sc13da.htm",
-            primary_doc_description=None,
-            items=None,
-        )
-    }
-    _install_common_overrides(monkeypatch, filings)
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_beneficial_ownership_reports",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0004",
+                form="SC 13D/A",
+                base_form="SC 13D",
+                filing_date=date(2026, 1, 20),
+                report_date=date(2026, 1, 18),
+                is_amendment=True,
+                primary_document="sc13da.htm",
+                primary_doc_description=None,
+                source_url="https://www.sec.gov/Archives/edgar/data/1/4/sc13da.htm",
+                summary="Beneficial ownership amendment filing.",
+                parties=[],
+            )
+        ],
+    )
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/beneficial-ownership")
@@ -576,57 +650,17 @@ def test_beneficial_ownership_route_includes_cached_party_details(monkeypatch):
     assert party["percent_owned"] == 8.1
 
 
-def test_beneficial_ownership_route_live_fallback_includes_parsed_parties(monkeypatch):
-    filings = {
-        "0004": FilingMetadata(
-            accession_number="0004",
-            form="SC 13D",
-            filing_date=date(2026, 1, 20),
-            report_date=date(2026, 1, 18),
-            primary_document="sc13d.htm",
-            primary_doc_description=None,
-            items=None,
-        )
-    }
-    _install_common_overrides(monkeypatch, filings)
-    monkeypatch.setattr(
-        main_module,
-        "collect_beneficial_ownership_reports",
-        lambda *_args, **_kwargs: [
-            BeneficialOwnershipNormalizedReport(
-                accession_number="0004",
-                form="SC 13D",
-                base_form="SC 13D",
-                filing_date=date(2026, 1, 20),
-                report_date=date(2026, 1, 18),
-                is_amendment=False,
-                primary_document="sc13d.htm",
-                primary_doc_description=None,
-                source_url="https://www.sec.gov/Archives/edgar/data/1/4/sc13d.htm",
-                summary="Beneficial ownership filing.",
-                parties=(
-                    BeneficialOwnershipNormalizedParty(
-                        party_name="Atlas Capital",
-                        role="reporting_person",
-                        filer_cik="0001111111",
-                        shares_owned=1200000.0,
-                        percent_owned=5.2,
-                        event_date=date(2026, 1, 18),
-                        purpose="Item 4 text",
-                    ),
-                ),
-            )
-        ],
-    )
+def test_beneficial_ownership_route_returns_empty_when_cache_missing(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/beneficial-ownership")
 
     assert response.status_code == 200
     payload = response.json()
-    party = payload["filings"][0]["parties"][0]
-    assert party["party_name"] == "Atlas Capital"
-    assert party["percent_owned"] == 5.2
+    assert payload["filings"] == []
+    assert payload["error"] is None
 
 
 def test_beneficial_ownership_summary_endpoint_aggregates_cached_data(monkeypatch):
@@ -1051,6 +1085,8 @@ def test_serialize_institutional_holding_includes_filing_metadata_fields():
 
 def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
     _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         main_module,
         "_load_filings_from_cache",
@@ -1089,23 +1125,20 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
     )
     monkeypatch.setattr(
         main_module,
-        "_serialize_governance_filings",
+        "get_company_proxy_statements",
         lambda *_args, **_kwargs: [
-            main_module.GovernanceFilingPayload(
+            SimpleNamespace(
                 accession_number="0000003",
                 form="DEF 14A",
                 filing_date=date(2026, 3, 9),
                 report_date=date(2026, 3, 8),
-                primary_document="proxy.htm",
-                primary_doc_description=None,
-                source_url="https://www.sec.gov/Archives/edgar/data/1/3/proxy.htm",
-                summary="Proxy filing.",
                 meeting_date=None,
-                executive_comp_table_detected=False,
-                vote_item_count=0,
                 board_nominee_count=None,
-                key_amounts=[],
-                vote_outcomes=[],
+                vote_item_count=0,
+                executive_comp_table_detected=False,
+                primary_document="proxy.htm",
+                source_url="https://www.sec.gov/Archives/edgar/data/1/3/proxy.htm",
+                vote_results=[],
             )
         ],
     )
@@ -1227,9 +1260,10 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
 
 def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
     _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "_load_filings_from_cache", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "_serialize_governance_filings", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         main_module,
         "get_company_beneficial_ownership_reports",
@@ -1388,59 +1422,161 @@ def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
         assert ceo["option_awards"] is None
 
 
-    def test_executive_compensation_route_live_fallback_from_parsed_proxy(monkeypatch):
-        """When cache is empty but a DEF 14A exists the endpoint falls back to live parsing."""
-        filings = {
-            "0099": FilingMetadata(
-                accession_number="0099",
-                form="DEF 14A",
-                filing_date=date(2025, 3, 6),
-                report_date=date(2025, 3, 6),
-                primary_document="def14a.htm",
-                primary_doc_description="Definitive proxy statement",
-                items=None,
-            )
-        }
-        _install_common_overrides(monkeypatch, filings)
+    def test_executive_compensation_route_returns_none_when_cache_missing(monkeypatch):
+        """When cache is empty the endpoint remains cache-first and returns source='none'."""
+        _install_common_overrides(monkeypatch, {})
         monkeypatch.setattr(main_module, "get_company_executive_compensation", lambda *_args, **_kwargs: [])
-        monkeypatch.setattr(
-            main_module,
-            "parse_proxy_filing_signals",
-            lambda *_args, **_kwargs: main_module.ProxyFilingSignals(
-                meeting_date=date(2025, 5, 22),
-                executive_comp_table_detected=True,
-                vote_item_count=3,
-                board_nominee_count=9,
-                key_amounts=(1_250_000.0,),
-                vote_outcomes=(),
-                named_exec_rows=(
-                    ExecCompRow(
-                        executive_name="Alice Wang",
-                        executive_title="Chief Executive Officer",
-                        fiscal_year=2024,
-                        salary=1_400_000.0,
-                        bonus=400_000.0,
-                        stock_awards=7_000_000.0,
-                        option_awards=None,
-                        non_equity_incentive=1_800_000.0,
-                        other_compensation=75_000.0,
-                        total_compensation=10_675_000.0,
-                    ),
-                ),
-            ),
-        )
 
         client = TestClient(app)
         response = client.get("/api/companies/AAPL/executive-compensation")
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["source"] == "live"
+        assert payload["source"] == "none"
         assert payload["error"] is None
-        assert len(payload["rows"]) == 1
-        assert payload["fiscal_years"] == [2024]
+        assert payload["rows"] == []
+        assert payload["fiscal_years"] == []
 
-        row = payload["rows"][0]
-        assert row["executive_name"] == "Alice Wang"
-        assert row["salary"] == 1_400_000.0
-        assert row["total_compensation"] == 10_675_000.0
+
+def test_watchlist_summary_endpoint_normalizes_dedupes_and_ignores_blank_tickers(monkeypatch):
+    observed: list[str] = []
+    snapshots = {
+        "AAPL": _snapshot("AAPL", "0000320193"),
+        "MSFT": _snapshot("MSFT", "0000789019"),
+        "TSLA": _snapshot("TSLA", "0001318605"),
+    }
+
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: snapshots)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {
+            snapshots["AAPL"].company.id: {"financial_periods": 0, "price_points": 0},
+            snapshots["MSFT"].company.id: {"financial_periods": 0, "price_points": 0},
+            snapshots["TSLA"].company.id: {"financial_periods": 0, "price_points": 0},
+        },
+    )
+
+    def _fake_item(_session, _background_tasks, ticker: str, **_kwargs):
+        observed.append(ticker)
+        return main_module.WatchlistSummaryItemPayload(
+            ticker=ticker,
+            name=f"{ticker} Inc.",
+            sector="Technology",
+            cik="0000000000",
+            last_checked=None,
+            refresh=RefreshState(triggered=False, reason="fresh", ticker=ticker, job_id=None),
+            alert_summary=main_module.AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+            latest_alert=None,
+            latest_activity=None,
+            coverage=main_module.WatchlistCoveragePayload(financial_periods=0, price_points=0),
+        )
+
+    monkeypatch.setattr(main_module, "_build_watchlist_summary_item", _fake_item)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/watchlist/summary",
+        json={"tickers": [" aapl ", "", "AAPL", " msft ", " ", "MSFT", "tsla"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == ["AAPL", "MSFT", "TSLA"]
+    assert observed == ["AAPL", "MSFT", "TSLA"]
+    assert [item["ticker"] for item in payload["companies"]] == ["AAPL", "MSFT", "TSLA"]
+
+
+def test_watchlist_summary_endpoint_rejects_more_than_50_tickers():
+    client = TestClient(app)
+    tickers = [f"T{i}" for i in range(51)]
+    response = client.post("/api/watchlist/summary", json={"tickers": tickers})
+
+    assert response.status_code == 422
+    assert "maximum of 50" in response.json()["detail"].lower()
+
+
+def test_watchlist_summary_endpoint_tolerates_activity_data_failures(monkeypatch):
+    snap = _snapshot("AAPL", "0000320193")
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snap})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(main_module, "_load_company_activity_data", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["aapl"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == ["AAPL"]
+    assert len(payload["companies"]) == 1
+
+    item = payload["companies"][0]
+    assert item["ticker"] == "AAPL"
+    assert item["name"] == "Apple Inc."
+    assert item["sector"] == "Technology"
+    assert item["cik"] == "0000320193"
+    assert item["coverage"]["financial_periods"] == 2
+    assert item["coverage"]["price_points"] == 3
+    assert item["alert_summary"] == {"total": 0, "high": 0, "medium": 0, "low": 0}
+    assert item["latest_alert"] is None
+    assert item["latest_activity"] is None
+
+
+def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monkeypatch):
+    snapshots = {
+        "AAPL": _snapshot("AAPL", "0000320193"),
+        "MSFT": _snapshot("MSFT", "0000789019"),
+    }
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: snapshots)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {
+            snapshots["AAPL"].company.id: {"financial_periods": 2, "price_points": 3},
+            snapshots["MSFT"].company.id: {"financial_periods": 2, "price_points": 3},
+        },
+    )
+
+    def _fake_item(_session, _background_tasks, ticker: str, **_kwargs):
+        if ticker == "MSFT":
+            raise RuntimeError("broken ticker payload")
+        return main_module.WatchlistSummaryItemPayload(
+            ticker=ticker,
+            name=f"{ticker} Inc.",
+            sector="Technology",
+            cik="0000000000",
+            last_checked=None,
+            refresh=RefreshState(triggered=False, reason="fresh", ticker=ticker, job_id=None),
+            alert_summary=main_module.AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+            latest_alert=None,
+            latest_activity=None,
+            coverage=main_module.WatchlistCoveragePayload(financial_periods=2, price_points=3),
+        )
+
+    monkeypatch.setattr(main_module, "_build_watchlist_summary_item", _fake_item)
+    monkeypatch.setattr(main_module, "_trigger_refresh", lambda *_args, **_kwargs: RefreshState(triggered=True, reason="missing", ticker="MSFT", job_id="job-2"))
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["AAPL", "MSFT"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == ["AAPL", "MSFT"]
+    assert len(payload["companies"]) == 2
+
+    aapl_item = payload["companies"][0]
+    msft_item = payload["companies"][1]
+    assert aapl_item["ticker"] == "AAPL"
+    assert aapl_item["coverage"] == {"financial_periods": 2, "price_points": 3}
+    assert msft_item["ticker"] == "MSFT"
+    assert msft_item["name"] is None
+    assert msft_item["alert_summary"] == {"total": 0, "high": 0, "medium": 0, "low": 0}
