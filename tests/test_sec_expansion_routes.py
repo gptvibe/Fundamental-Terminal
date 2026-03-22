@@ -54,6 +54,11 @@ def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
     monkeypatch.setattr(main_module, "_trigger_refresh", lambda *_args, **_kwargs: RefreshState(triggered=True, reason="missing", ticker="AAPL", job_id="job-1"))
+    monkeypatch.setattr(
+        main_module,
+        "get_company_proxy_cache_status",
+        lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"),
+    )
     monkeypatch.setattr(main_module, "_serialize_company", lambda *_args, **_kwargs: {
         "ticker": "AAPL",
         "cik": "0000320193",
@@ -570,6 +575,21 @@ def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
     assert summary["filings_with_vote_items"] == 1
     assert summary["latest_meeting_date"] == "2026-05-20"
     assert summary["max_vote_item_count"] == 3
+
+
+def test_governance_endpoint_triggers_refresh_when_proxy_cache_missing(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_proxy_cache_status", lambda *_args, **_kwargs: (None, "missing"))
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/governance")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filings"] == []
+    assert payload["refresh"]["triggered"] is True
+    assert payload["refresh"]["reason"] == "missing"
 
 
 def test_beneficial_ownership_route_flags_amendments(monkeypatch):

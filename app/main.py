@@ -1441,8 +1441,11 @@ def company_governance(
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    filings = [_serialize_cached_proxy_statement(statement) for statement in get_company_proxy_statements(session, snapshot.company.id)]
+    refresh = _refresh_for_governance(background_tasks, session, snapshot)
+    cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
+    filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
+    if not filings:
+        filings = _load_live_governance_filings(snapshot.company.cik)
     return CompanyGovernanceResponse(
         company=_serialize_company(snapshot),
         filings=filings,
@@ -1467,8 +1470,11 @@ def company_governance_summary(
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    filings = [_serialize_cached_proxy_statement(statement) for statement in get_company_proxy_statements(session, snapshot.company.id)]
+    refresh = _refresh_for_governance(background_tasks, session, snapshot)
+    cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
+    filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
+    if not filings:
+        filings = _load_live_governance_filings(snapshot.company.cik)
     return CompanyGovernanceSummaryResponse(
         company=_serialize_company(snapshot),
         summary=_build_governance_summary(filings),
@@ -1495,18 +1501,22 @@ def company_executive_compensation(
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_governance(background_tasks, session, snapshot)
     cached_rows = get_company_executive_compensation(session, snapshot.company.id)
-    serialized = [_serialize_exec_comp_row(row) for row in cached_rows]
-    fiscal_years = sorted(
-        {row.fiscal_year for row in cached_rows if row.fiscal_year is not None},
-        reverse=True,
-    )
+    source = "cached" if cached_rows else "none"
+    if cached_rows:
+        serialized = [_serialize_exec_comp_row(row) for row in cached_rows]
+    else:
+        serialized = _load_live_exec_comp_rows(snapshot.company.cik)
+        if serialized:
+            source = "live"
+
+    fiscal_years = sorted({row.fiscal_year for row in serialized if row.fiscal_year is not None}, reverse=True)
     return CompanyExecutiveCompensationResponse(
         company=_serialize_company(snapshot),
         rows=serialized,
         fiscal_years=fiscal_years,
-        source="cached" if cached_rows else "none",
+        source=source,
         refresh=refresh,
         error=None,
     )
@@ -1874,6 +1884,21 @@ def _refresh_for_snapshot(background_tasks: BackgroundTasks, snapshot: CompanyCa
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_governance(
+    background_tasks: BackgroundTasks,
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+) -> RefreshState:
+    if snapshot.cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+
+    _last_checked, proxy_cache_state = get_company_proxy_cache_status(session, snapshot.company)
+    if proxy_cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=proxy_cache_state)
+
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _get_cached_search_response(query: str) -> CompanySearchResponse | None:
     now = time.monotonic()
     with _search_response_cache_lock:
@@ -1956,7 +1981,7 @@ def _trigger_refresh(
     reason: Literal["manual", "missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=False)
+    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=(reason == "missing"))
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
@@ -2606,6 +2631,57 @@ def _serialize_governance_filings(
                 signals = ProxyFilingSignals()
         rows.append(_serialize_governance_filing(cik, filing, signals=signals))
     return rows
+
+
+def _load_live_governance_filings(cik: str) -> list[GovernanceFilingPayload]:
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(cik)
+        filing_index = client.build_filing_index(submissions)
+        return _serialize_governance_filings(cik, filing_index, client=client)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load live governance filings for CIK %s", cik)
+        return []
+    finally:
+        client.close()
+
+
+def _load_live_exec_comp_rows(cik: str) -> list[ExecCompRowPayload]:
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(cik)
+        filing_index = client.build_filing_index(submissions)
+        filtered = [item for item in filing_index.values() if _is_governance_form(item.form)]
+        ordered = sorted(
+            filtered,
+            key=lambda item: (item.filing_date or DateType.min, item.report_date or DateType.min, item.accession_number),
+            reverse=True,
+        )
+        rows: list[ExecCompRowPayload] = []
+        seen_keys: set[tuple[str, int | None]] = set()
+        for filing in ordered[:12]:
+            if not filing.primary_document:
+                continue
+            try:
+                _source, payload = client.get_filing_document_text(cik, filing.accession_number, filing.primary_document)
+                signals = parse_proxy_filing_signals(payload)
+            except Exception:
+                continue
+
+            for row in signals.named_exec_rows:
+                key = (row.executive_name.strip().lower(), row.fiscal_year)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                rows.append(_serialize_exec_comp_row_from_signals(row))
+
+        rows.sort(key=lambda item: (item.fiscal_year or 0, item.total_compensation or 0), reverse=True)
+        return rows
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load live executive compensation rows for CIK %s", cik)
+        return []
+    finally:
+        client.close()
 
 
 def _serialize_governance_filing(
