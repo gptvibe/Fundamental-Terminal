@@ -92,3 +92,59 @@ def serialize_period(point: FinancialPoint) -> dict[str, Any]:
 
 def iso_date(value: date | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def latest_non_null(dataset: CompanyDataset, key: str, *, annual_only: bool = True) -> float | None:
+    points = annual_series(dataset) if annual_only else list(dataset.financials)
+    for point in points:
+        value = statement_value(point, key)
+        if value is not None:
+            return float(value)
+    return None
+
+
+def missing_fields_last_n_years(dataset: CompanyDataset, required_fields: list[str], *, years: int = 3) -> list[str]:
+    annuals = annual_series(dataset, limit=years)
+    if not annuals:
+        return list(required_fields)
+
+    missing: list[str] = []
+    for key in required_fields:
+        if any(statement_value(point, key) is None for point in annuals):
+            missing.append(key)
+    return missing
+
+
+def status_from_data_quality(
+    *,
+    missing_fields: list[str],
+    proxy_used: bool,
+    can_compute_directional: bool,
+) -> str:
+    if not can_compute_directional:
+        return "insufficient_data"
+    if proxy_used:
+        return "proxy"
+    if len(missing_fields) >= 2:
+        return "partial"
+    return "ok"
+
+
+def trust_summary(*, missing_fields: list[str], proxy_used: bool) -> str:
+    if proxy_used:
+        return "Low trust: proxy substitutions were required for core assumptions."
+    if len(missing_fields) >= 2:
+        return "Medium-low trust: multiple required valuation inputs were missing across recent fiscal years."
+    if missing_fields:
+        return "Medium trust: one required valuation input was intermittently missing in recent periods."
+    return "Higher trust: core valuation inputs were present across recent fiscal years."
+
+
+def status_explanation(status: str) -> str:
+    if status == "partial":
+        return "This model used incomplete financial inputs; results are directional only."
+    if status == "proxy":
+        return "This model used approximation logic where direct inputs were unavailable."
+    if status == "insufficient_data":
+        return "Required base inputs were not sufficient to produce a directional output."
+    return "View discount rate, terminal assumptions, and data provenance used in this result."

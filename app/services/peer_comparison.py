@@ -13,7 +13,7 @@ from app.services.cache_queries import CompanyCacheSnapshot, get_company_financi
 from app.services.sec_edgar import ANNUAL_FORMS, CANONICAL_STATEMENT_TYPE
 
 
-PEER_MODEL_NAMES = ["ratios", "dupont", "piotroski", "altman_z"]
+PEER_MODEL_NAMES = ["ratios", "dupont", "piotroski", "altman_z", "dcf", "reverse_dcf", "roic", "capital_allocation"]
 DEFAULT_MAX_PEERS = 4
 MAX_AVAILABLE_COMPANIES = 10
 
@@ -85,6 +85,8 @@ def build_peer_comparison(
             "ev_to_ebit": "Approximate EV/EBIT using market cap plus total liabilities as the enterprise-value proxy and operating income as EBIT.",
             "price_to_free_cash_flow": "Uses cached shares outstanding when available, otherwise derives a share-count proxy from net income and EPS.",
             "piotroski": "Piotroski in peer views uses the reported 9-point score when complete; otherwise it scales the available signals proportionally so partial filings still appear in the chart.",
+            "fair_value_gap": "Fair value gap uses model fair value per share relative to latest cached price; positive values indicate implied undervaluation.",
+            "valuation_band_percentile": "Valuation-band percentile combines where current P/E, P/FCF, and EV/EBIT proxy sit within each company's recent historical range.",
         },
     }
 
@@ -183,6 +185,10 @@ def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focu
     dupont_result = _model_result(models.get("dupont"))
     piotroski_result = _model_result(models.get("piotroski"))
     altman_result = _model_result(models.get("altman_z"))
+    dcf_result = _model_result(models.get("dcf"))
+    reverse_dcf_result = _model_result(models.get("reverse_dcf"))
+    roic_result = _model_result(models.get("roic"))
+    capital_allocation_result = _model_result(models.get("capital_allocation"))
 
     latest_price_value = latest_price.close if latest_price is not None else None
     eps = _as_float(current_data.get("eps"))
@@ -204,6 +210,15 @@ def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focu
     piotroski_available = _as_float(piotroski_result.get("available_criteria"))
     piotroski_score_max = _as_float(piotroski_result.get("score_max")) or 9.0
     piotroski_score = _resolve_piotroski_score(piotroski_result, piotroski_available, piotroski_score_max)
+    fair_value_per_share = _as_float(dcf_result.get("fair_value_per_share"))
+    fair_value_gap = _safe_divide(
+        fair_value_per_share - latest_price_value if fair_value_per_share is not None and latest_price_value is not None else None,
+        latest_price_value,
+    )
+    shareholder_yield = _as_float(capital_allocation_result.get("shareholder_yield"))
+    implied_growth = _as_float(reverse_dcf_result.get("implied_growth"))
+    roic = _as_float(roic_result.get("roic"))
+    valuation_band_percentile = _valuation_band_percentile(statements, latest_price_value, shares_outstanding, enterprise_value_proxy)
 
     return {
         "ticker": snapshot.company.ticker,
@@ -224,6 +239,11 @@ def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focu
         "revenue_growth": revenue_growth,
         "piotroski_score": piotroski_score,
         "altman_z_score": _as_float(altman_result.get("z_score_approximate")),
+        "fair_value_gap": fair_value_gap,
+        "roic": roic,
+        "shareholder_yield": shareholder_yield,
+        "implied_growth": implied_growth,
+        "valuation_band_percentile": valuation_band_percentile,
         "revenue_history": _build_revenue_history(statements),
     }
 
@@ -373,3 +393,59 @@ def _shares_outstanding(data: dict[str, Any]) -> float | None:
     if derived_value is None or derived_value <= 0:
         return None
     return derived_value
+
+
+def _valuation_band_percentile(
+    statements: list[FinancialStatement],
+    latest_price: float | None,
+    shares_outstanding: float | None,
+    latest_enterprise_value_proxy: float | None,
+) -> float | None:
+    if latest_price is None:
+        return None
+
+    preferred = [statement for statement in statements if statement.filing_type in ANNUAL_FORMS] or statements
+    if len(preferred) < 3:
+        return None
+
+    pe_history: list[float] = []
+    pfcf_history: list[float] = []
+    evebit_history: list[float] = []
+    for statement in preferred[:8]:
+        data = dict(statement.data or {})
+        eps = _as_float(data.get("eps"))
+        fcf = _as_float(data.get("free_cash_flow"))
+        liabilities = _as_float(data.get("total_liabilities"))
+        op_income = _as_float(data.get("operating_income"))
+        shares = _shares_outstanding(data) or shares_outstanding
+        market_cap = latest_price * shares if shares is not None else None
+        enterprise_value_proxy = market_cap + liabilities if market_cap is not None and liabilities is not None else None
+        pe = _safe_divide(latest_price, eps)
+        pfcf = _safe_divide(market_cap, fcf)
+        evebit = _safe_divide(enterprise_value_proxy, op_income)
+        if pe is not None:
+            pe_history.append(pe)
+        if pfcf is not None:
+            pfcf_history.append(pfcf)
+        if evebit is not None:
+            evebit_history.append(evebit)
+
+    latest_pe = pe_history[0] if pe_history else None
+    latest_pfcf = pfcf_history[0] if pfcf_history else None
+    latest_evebit = _safe_divide(latest_enterprise_value_proxy, _as_float((preferred[0].data or {}).get("operating_income")))
+
+    percentiles: list[float] = []
+    percentiles.extend(_single_percentile(latest_pe, pe_history))
+    percentiles.extend(_single_percentile(latest_pfcf, pfcf_history))
+    percentiles.extend(_single_percentile(latest_evebit, evebit_history))
+    if not percentiles:
+        return None
+    return sum(percentiles) / len(percentiles)
+
+
+def _single_percentile(current: float | None, values: list[float]) -> list[float]:
+    if current is None or len(values) < 3:
+        return []
+    ordered = sorted(values)
+    less_or_equal = sum(1 for value in ordered if value <= current)
+    return [less_or_equal / len(ordered)]

@@ -7,10 +7,11 @@ import { Panel } from "@/components/ui/panel";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { getWatchlistSummary, refreshCompany } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatPercent } from "@/lib/format";
 import type { WatchlistSummaryItemPayload } from "@/lib/types";
 
-type WatchlistFilter = "all" | "attention" | "stale" | "no-note";
+type WatchlistFilter = "all" | "attention" | "stale" | "no-note" | "undervalued" | "quality" | "capital-return" | "balance-risk";
+type WatchlistSort = "attention" | "undervaluation" | "quality" | "capital-return" | "balance-risk";
 
 interface WatchlistRow extends WatchlistSummaryItemPayload {
   notePreview: string | null;
@@ -18,11 +19,17 @@ interface WatchlistRow extends WatchlistSummaryItemPayload {
   isStale: boolean;
 }
 
+const REFRESH_POLL_INTERVAL_MS = 3000;
+
 const FILTERS: Array<{ key: WatchlistFilter; label: string }> = [
   { key: "all", label: "All" },
   { key: "attention", label: "Needs attention" },
   { key: "stale", label: "Stale" },
   { key: "no-note", label: "No note" },
+  { key: "undervalued", label: "Undervalued" },
+  { key: "quality", label: "Quality" },
+  { key: "capital-return", label: "Capital return" },
+  { key: "balance-risk", label: "Balance risk" },
 ];
 
 export default function WatchlistPage() {
@@ -33,10 +40,15 @@ export default function WatchlistPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<WatchlistFilter>("all");
   const [refreshingTicker, setRefreshingTicker] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<WatchlistSort>("attention");
 
   const watchlistTickers = useMemo(
     () => watchlist.map((item) => item.ticker.trim().toUpperCase()).filter(Boolean),
     [watchlist]
+  );
+  const hasPendingRefresh = useMemo(
+    () => rows.some((item) => Boolean(item.refresh.triggered && item.refresh.job_id)),
+    [rows]
   );
 
   useEffect(() => {
@@ -58,19 +70,7 @@ export default function WatchlistPage() {
           return;
         }
 
-        const withNotes = response.companies.map((item) => {
-          const note = notesByTicker[item.ticker]?.note ?? "";
-          const hasNote = Boolean(note.trim());
-          const stale = item.refresh.reason === "stale" || item.refresh.reason === "missing";
-          return {
-            ...item,
-            notePreview: hasNote ? truncateNote(note) : null,
-            hasNote,
-            isStale: stale,
-          } satisfies WatchlistRow;
-        });
-
-        setRows(withNotes.sort(compareRows));
+        setRows(toWatchlistRows(response.companies, notesByTicker));
       } catch (nextError) {
         if (!cancelled) {
           setError(nextError instanceof Error ? nextError.message : "Unable to load watchlist summary");
@@ -89,18 +89,70 @@ export default function WatchlistPage() {
     };
   }, [notesByTicker, watchlistTickers]);
 
+  useEffect(() => {
+    if (!watchlistTickers.length || !hasPendingRefresh) {
+      return;
+    }
+
+    let cancelled = false;
+    let pending = false;
+
+    const poll = async () => {
+      if (pending) {
+        return;
+      }
+
+      pending = true;
+      try {
+        const response = await getWatchlistSummary(watchlistTickers);
+        if (cancelled) {
+          return;
+        }
+        setRows(toWatchlistRows(response.companies, notesByTicker));
+        setError(null);
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : "Unable to auto-refresh watchlist summary");
+        }
+      } finally {
+        pending = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, REFRESH_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [hasPendingRefresh, notesByTicker, watchlistTickers]);
+
   const filteredRows = useMemo(() => {
     if (filter === "all") {
-      return rows;
+      return sortRows(rows, sortBy);
     }
     if (filter === "attention") {
-      return rows.filter((item) => item.alert_summary.high > 0 || item.alert_summary.medium > 0);
+      return sortRows(rows.filter((item) => item.alert_summary.high > 0 || item.alert_summary.medium > 0), sortBy);
     }
     if (filter === "stale") {
-      return rows.filter((item) => item.isStale);
+      return sortRows(rows.filter((item) => item.isStale), sortBy);
     }
-    return rows.filter((item) => !item.hasNote);
-  }, [filter, rows]);
+    if (filter === "undervalued") {
+      return sortRows(rows.filter((item) => (item.fair_value_gap ?? -1) > 0), sortBy);
+    }
+    if (filter === "quality") {
+      return sortRows(rows.filter((item) => (item.roic ?? -1) > 0.12), sortBy);
+    }
+    if (filter === "capital-return") {
+      return sortRows(rows.filter((item) => (item.shareholder_yield ?? -1) > 0.01), sortBy);
+    }
+    if (filter === "balance-risk") {
+      return sortRows(rows.filter((item) => (item.balance_sheet_risk ?? 0) > 3), sortBy);
+    }
+    return sortRows(rows.filter((item) => !item.hasNote), sortBy);
+  }, [filter, rows, sortBy]);
 
   async function handleRefresh(ticker: string) {
     try {
@@ -108,18 +160,7 @@ export default function WatchlistPage() {
       await refreshCompany(ticker);
       showAppToast({ message: `${ticker} refresh queued.`, tone: "info" });
       const response = await getWatchlistSummary(watchlistTickers);
-      const withNotes = response.companies.map((item) => {
-        const note = notesByTicker[item.ticker]?.note ?? "";
-        const hasNote = Boolean(note.trim());
-        const stale = item.refresh.reason === "stale" || item.refresh.reason === "missing";
-        return {
-          ...item,
-          notePreview: hasNote ? truncateNote(note) : null,
-          hasNote,
-          isStale: stale,
-        } satisfies WatchlistRow;
-      });
-      setRows(withNotes.sort(compareRows));
+      setRows(toWatchlistRows(response.companies, notesByTicker));
     } catch (nextError) {
       showAppToast({
         message: nextError instanceof Error ? nextError.message : `Unable to refresh ${ticker}`,
@@ -141,6 +182,16 @@ export default function WatchlistPage() {
             <span className="pill">{watchlistTickers.length} tracked</span>
             <span className="pill">{rows.filter((item) => item.alert_summary.high > 0 || item.alert_summary.medium > 0).length} need attention</span>
             <span className="pill">{rows.filter((item) => item.isStale).length} stale</span>
+            <span className="pill">{rows.filter((item) => (item.fair_value_gap ?? -1) > 0).length} undervalued</span>
+          </div>
+          <div className="watchlist-filter-row">
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as WatchlistSort)} aria-label="Sort watchlist">
+              <option value="attention">Sort: Attention</option>
+              <option value="undervaluation">Sort: Undervaluation</option>
+              <option value="quality">Sort: Quality</option>
+              <option value="capital-return">Sort: Capital return</option>
+              <option value="balance-risk">Sort: Balance-sheet risk</option>
+            </select>
           </div>
           <div className="watchlist-filter-row" role="tablist" aria-label="Watchlist filters">
             {FILTERS.map((item) => (
@@ -212,6 +263,15 @@ export default function WatchlistPage() {
                   <div className="watchlist-latest-item">
                     <strong>Coverage:</strong> {item.coverage.financial_periods.toLocaleString()} financial periods · {item.coverage.price_points.toLocaleString()} price points
                   </div>
+                  <div className="watchlist-latest-item">
+                    <strong>Valuation gap:</strong> {formatPercent(item.fair_value_gap)} · <strong>ROIC:</strong> {formatPercent(item.roic)}
+                  </div>
+                  <div className="watchlist-latest-item">
+                    <strong>Shareholder yield:</strong> {formatPercent(item.shareholder_yield)} · <strong>Implied growth:</strong> {formatPercent(item.implied_growth)}
+                  </div>
+                  <div className="watchlist-latest-item">
+                    <strong>Balance-sheet risk:</strong> {formatSigned(item.balance_sheet_risk)} net debt / FCF
+                  </div>
                 </div>
 
                 <div className="saved-company-card-actions watchlist-action-row">
@@ -245,6 +305,23 @@ export default function WatchlistPage() {
   );
 }
 
+function toWatchlistRows(
+  companies: WatchlistSummaryItemPayload[],
+  notesByTicker: Record<string, { note?: string } | undefined>
+): WatchlistRow[] {
+  return companies.map((item) => {
+    const note = notesByTicker[item.ticker]?.note ?? "";
+    const hasNote = Boolean(note.trim());
+    const stale = item.refresh.reason === "stale" || item.refresh.reason === "missing";
+    return {
+      ...item,
+      notePreview: hasNote ? truncateNote(note) : null,
+      hasNote,
+      isStale: stale,
+    } satisfies WatchlistRow;
+  });
+}
+
 function truncateNote(note: string): string {
   const compact = note.trim().replace(/\s+/g, " ");
   if (compact.length <= 160) {
@@ -264,6 +341,33 @@ function compareRows(left: WatchlistRow, right: WatchlistRow): number {
     return left.isStale ? -1 : 1;
   }
   return left.ticker.localeCompare(right.ticker);
+}
+
+function sortRows(rows: WatchlistRow[], sortBy: WatchlistSort): WatchlistRow[] {
+  const copy = [...rows];
+  if (sortBy === "attention") {
+    return copy.sort(compareRows);
+  }
+  if (sortBy === "undervaluation") {
+    return copy.sort((left, right) => (right.fair_value_gap ?? -999) - (left.fair_value_gap ?? -999));
+  }
+  if (sortBy === "quality") {
+    return copy.sort((left, right) => (right.roic ?? -999) - (left.roic ?? -999));
+  }
+  if (sortBy === "capital-return") {
+    return copy.sort((left, right) => (right.shareholder_yield ?? -999) - (left.shareholder_yield ?? -999));
+  }
+  return copy.sort((left, right) => (left.balance_sheet_risk ?? 999) - (right.balance_sheet_risk ?? 999));
+}
+
+function formatSigned(value: number | null): string {
+  if (value === null) {
+    return "—";
+  }
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+    signDisplay: "exceptZero",
+  }).format(value);
 }
 
 function getRefreshCopy(isStale: boolean, reason: string): string {

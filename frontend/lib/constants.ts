@@ -40,6 +40,21 @@ export const MODEL_GUIDE: ModelGuideEntry[] = [
     key: "ratios",
     label: "Ratios",
     locationSummary: "Model Analytics"
+  },
+  {
+    key: "reverse_dcf",
+    label: "Reverse DCF",
+    locationSummary: "Valuation Workbench and Model Analytics"
+  },
+  {
+    key: "roic",
+    label: "ROIC",
+    locationSummary: "Valuation Workbench and Model Analytics"
+  },
+  {
+    key: "capital_allocation",
+    label: "Capital Allocation",
+    locationSummary: "Valuation Workbench and Model Analytics"
   }
 ];
 

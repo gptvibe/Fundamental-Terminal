@@ -138,6 +138,8 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
     };
   }, [controls, defaults, latestPrice]);
 
+  const dcfStatus = typeof dcfModel?.result?.model_status === "string" ? dcfModel.result.model_status : dcfModel?.result?.status;
+
   if (!dcfModel || !latestAnnual || !scenario) {
     return (
       <div className="grid-empty-state" style={{ minHeight: 260 }}>
@@ -150,6 +152,13 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
 
   return (
     <div className="dcf-scenario-shell">
+      {dcfStatus === "partial" || dcfStatus === "proxy" ? (
+        <div className="text-muted" style={{ marginBottom: 10 }}>
+          {dcfStatus === "partial"
+            ? "Partial inputs: This model used incomplete financial inputs; results are directional only."
+            : "Proxy output: This model used approximation logic where direct inputs were unavailable."}
+        </div>
+      ) : null}
       <div className="dcf-scenario-grid">
         <div className="dcf-control-panel">
           <div className="dcf-control-header">

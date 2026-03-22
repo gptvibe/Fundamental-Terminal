@@ -151,6 +151,54 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
         ("us-gaap", ["InventoryNet"]),
         ("ifrs-full", ["Inventories"]),
     ],
+    "cash_and_cash_equivalents": [
+        (
+            "us-gaap",
+            [
+                "CashAndCashEquivalentsAtCarryingValue",
+                "Cash",
+                "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "CashAndCashEquivalents",
+            ],
+        ),
+    ],
+    "short_term_investments": [
+        (
+            "us-gaap",
+            [
+                "ShortTermInvestments",
+                "MarketableSecuritiesCurrent",
+                "AvailableForSaleSecuritiesCurrent",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "CurrentInvestments",
+                "ShorttermInvestments",
+            ],
+        ),
+    ],
+    "cash_and_short_term_investments": [
+        (
+            "us-gaap",
+            [
+                "CashCashEquivalentsAndShortTermInvestments",
+                "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalentsAndShortTermInvestments",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "CashAndShorttermInvestments",
+            ],
+        ),
+    ],
     "accounts_receivable": [
         (
             "us-gaap",
@@ -164,6 +212,22 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
             [
                 "TradeAndOtherCurrentReceivables",
                 "CurrentTradeReceivables",
+            ],
+        ),
+    ],
+    "accounts_payable": [
+        (
+            "us-gaap",
+            [
+                "AccountsPayableCurrent",
+                "AccountsPayableTradeCurrent",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "TradeAndOtherCurrentPayables",
+                "CurrentTradePayables",
             ],
         ),
     ],
@@ -184,6 +248,23 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
             ],
         ),
     ],
+    "current_debt": [
+        (
+            "us-gaap",
+            [
+                "DebtCurrent",
+                "LongTermDebtCurrent",
+                "ShortTermBorrowings",
+                "CommercialPaper",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "CurrentBorrowings",
+            ],
+        ),
+    ],
     "long_term_debt": [
         (
             "us-gaap",
@@ -201,6 +282,22 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
             ],
         ),
     ],
+    "stockholders_equity": [
+        (
+            "us-gaap",
+            [
+                "StockholdersEquity",
+                "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "Equity",
+                "EquityAttributableToOwnersOfParent",
+            ],
+        ),
+    ],
     "lease_liabilities": [
         (
             "us-gaap",
@@ -215,6 +312,23 @@ CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
             [
                 "LeaseLiabilitiesNoncurrent",
                 "LeaseLiabilities",
+            ],
+        ),
+    ],
+    "depreciation_and_amortization": [
+        (
+            "us-gaap",
+            [
+                "DepreciationDepletionAndAmortization",
+                "DepreciationAmortizationAndAccretionNet",
+                "DepreciationAndAmortization",
+            ],
+        ),
+        (
+            "ifrs-full",
+            [
+                "DepreciationAmortisationAndImpairment",
+                "DepreciationAndAmortisationExpense",
             ],
         ),
     ],
@@ -1116,6 +1230,12 @@ class EdgarNormalizer:
             data["free_cash_flow"] = _json_number(data["operating_cash_flow"] - abs(capex_candidate.value))
         else:
             data["free_cash_flow"] = None
+
+        if data.get("cash_and_short_term_investments") is None:
+            cash = data.get("cash_and_cash_equivalents")
+            short_term = data.get("short_term_investments")
+            if cash is not None and short_term is not None:
+                data["cash_and_short_term_investments"] = _json_number(float(cash) + float(short_term))
 
         data["segment_breakdown"] = _select_segment_breakdown(
             candidates=accumulator.segment_revenue_candidates,

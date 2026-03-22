@@ -21,7 +21,7 @@ Execution checklist:
 
 ---
 
-## Shipped As Of 2026-03-21
+## Shipped As Of 2026-03-22
 
 The following phases are fully complete. Their build details have been removed from this document. See `docs/sec-expansion-checklist.md` for the task-level record.
 
@@ -35,6 +35,7 @@ The following phases are fully complete. Their build details have been removed f
 | 6 | 8-K event intelligence — classification, filing-events table, events page, category chart | ✓ Shipped |
 | 7 | Dilution and capital-raise monitoring — S-1/S-3/424B/NT filings, capital-markets page | ✓ Shipped |
 | 8 | Unified activity feed and alerts — activity-feed and alerts routes, sec-feed page, Form 144 in feed | ✓ Shipped |
+| 9 | Valuation workbench depth — trust-aware DCF, Treasury risk-free input, reverse DCF, ROIC, capital allocation, peers/watchlist decision metrics | ✓ Shipped |
 
 ### Core backend entry points
 
@@ -74,7 +75,7 @@ GET  /api/companies/{ticker}/activity-overview
 
 - `/company/[ticker]` — overview with unified activity feed, priority alerts, and financial visuals
 - `/company/[ticker]/financials` — financial statements, charts, and segment breakdown
-- `/company/[ticker]/peers` — dedicated peer comparison workspace with focus ticker plus up to 4 peers
+- `/company/[ticker]/peers` — decision comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile
 - `/company/[ticker]/filings` — filing timeline, filing-event classification, and parser insights
 - `/company/[ticker]/insiders` — Form 4 analytics, signal quality, role breakdown, and Form 144 planned sales
 - `/company/[ticker]/ownership` — institutional holdings analytics, conviction heatmap, and turnover
@@ -83,7 +84,7 @@ GET  /api/companies/{ticker}/activity-overview
 - `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
 - `/company/[ticker]/events` — 8-K events classified by item code with category chart
 - `/company/[ticker]/sec-feed` — unified SEC activity timeline and prioritized alerts
-- `/company/[ticker]/models` — DCF, health score, and scenario analysis
+- `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
 - `/company/[ticker]/stakes` — redirects to `/company/[ticker]/ownership-changes`
 
 ### Shipped personal workflow
@@ -102,15 +103,9 @@ GET  /api/companies/{ticker}/activity-overview
 
 ## Remaining Work
 
-No user-visible SEC dataset families from Phases 1-8 remain open.
+Core SEC dataset expansion and valuation-workbench depth are now shipped through Phase 9.
 
-Financial coverage note:
-
-- Capital allocation is covered by the shipped cash-flow waterfall and share-dilution visuals.
-- Balance-sheet risk is covered by the shipped balance-sheet, liquidity/capital, and financial-quality panels.
-- Margin and financial-summary coverage is shipped on `/company/[ticker]/financials`.
-
-Future roadmap work should prioritize discoverability and workflow durability over adding another ingestion family.
+Future roadmap work should prioritize model calibration quality, interaction telemetry-guided UX iteration, and performance hardening over adding new ingestion families.
 
 ---
 

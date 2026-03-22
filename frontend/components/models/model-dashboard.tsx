@@ -28,7 +28,7 @@ import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { ModelPayload } from "@/lib/types";
 
-const MODEL_ORDER = ["dcf", "dupont", "piotroski", "altman_z", "ratios"];
+const MODEL_ORDER = ["dcf", "reverse_dcf", "roic", "capital_allocation", "dupont", "piotroski", "altman_z", "ratios"];
 const CHART_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#7CFFB2", "#64D2FF", "#F6C945"];
 
 export function ModelDashboard({ models }: { models: ModelPayload[] }) {
@@ -52,6 +52,8 @@ export function ModelDashboard({ models }: { models: ModelPayload[] }) {
 }
 
 function ModelSection({ model }: { model: ModelPayload }) {
+  const status = String(model.result.model_status ?? model.result.status ?? "ok");
+  const explanation = String(model.result.explanation ?? "View discount rate, terminal assumptions, and data provenance used in this result.");
   return (
     <section
       style={{
@@ -72,8 +74,14 @@ function ModelSection({ model }: { model: ModelPayload }) {
             v{model.model_version} · computed {formatDate(model.created_at)}
           </div>
         </div>
-        <span className="pill">{String(model.result.status ?? "ready")}</span>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <StatusBadge status={status} />
+          <span className="pill" title="View discount rate, terminal assumptions, and data provenance used in this result.">
+            Assumptions visible
+          </span>
+        </div>
       </div>
+      {status !== "ok" ? <div className="text-muted">{explanation}</div> : null}
       {renderModelContent(model)}
     </section>
   );
@@ -83,6 +91,12 @@ function renderModelContent(model: ModelPayload) {
   switch (model.model_name) {
     case "dcf":
       return <DcfModelView model={model} />;
+    case "reverse_dcf":
+      return <ReverseDcfModelView model={model} />;
+    case "roic":
+      return <RoicModelView model={model} />;
+    case "capital_allocation":
+      return <CapitalAllocationModelView model={model} />;
     case "dupont":
       return <DupontModelView model={model} />;
     case "piotroski":
@@ -98,7 +112,7 @@ function renderModelContent(model: ModelPayload) {
 
 function DcfModelView({ model }: { model: ModelPayload }) {
   const result = asRecord(model.result);
-  if (result.status !== "ok") {
+  if (result.status === "insufficient_data") {
     return <StateMessage result={result} />;
   }
 
@@ -122,10 +136,14 @@ function DcfModelView({ model }: { model: ModelPayload }) {
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
         metrics={[
-          { label: "Enterprise Value", value: formatCompactNumber(asNumber(result.enterprise_value_proxy)) },
+          { label: "Enterprise Value", value: formatCompactNumber(asNumber(result.enterprise_value)) },
+          { label: "Equity Value", value: formatCompactNumber(asNumber(result.equity_value)) },
+          { label: "Fair Value / Share", value: formatCompactNumber(asNumber(result.fair_value_per_share)) },
+          { label: "Net Debt", value: formatCompactNumber(asNumber(result.net_debt)) },
           { label: "PV Cash Flows", value: formatCompactNumber(asNumber(result.present_value_of_cash_flows)) },
           { label: "Terminal PV", value: formatCompactNumber(asNumber(result.terminal_value_present_value)) },
-          { label: "Discount Rate", value: formatPercent(asNumber(assumptions.discount_rate)) }
+          { label: "Discount Rate", value: formatPercent(asNumber(assumptions.discount_rate)) },
+          { label: "Confidence", value: String(result.confidence_summary ?? "—") }
         ]}
       />
 
@@ -164,7 +182,8 @@ function DcfModelView({ model }: { model: ModelPayload }) {
             { metric: "Discount Rate", value: formatPercent(asNumber(assumptions.discount_rate)) },
             { metric: "Terminal Growth", value: formatPercent(asNumber(assumptions.terminal_growth_rate)) },
             { metric: "Starting FCF Growth", value: formatPercent(asNumber(assumptions.starting_growth_rate)) },
-            { metric: "Projection Years", value: String(assumptions.projection_years ?? "—") }
+            { metric: "Projection Years", value: String(assumptions.projection_years ?? "—") },
+            { metric: "Confidence Summary", value: String(result.confidence_summary ?? "—") }
           ]}
         />
         <CompactTable
@@ -183,6 +202,132 @@ function DcfModelView({ model }: { model: ModelPayload }) {
           }))}
         />
       </div>
+
+      <AssumptionProvenanceTable provenance={asRecord(result.assumption_provenance)} />
+    </div>
+  );
+}
+
+function ReverseDcfModelView({ model }: { model: ModelPayload }) {
+  const result = asRecord(model.result);
+  if (result.status === "insufficient_data") {
+    return <StateMessage result={result} />;
+  }
+
+  const heatmap = asArray(result.heatmap).map((item) => ({
+    label: `${formatPercent(asNumber(item.growth))} / ${formatPercent(asNumber(item.margin))}`,
+    value: asNumber(item.value_gap),
+  }));
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <MetricStrip
+        metrics={[
+          { label: "Implied Growth", value: formatPercent(asNumber(result.implied_growth)) },
+          { label: "Implied Margin", value: formatPercent(asNumber(result.implied_margin)) },
+          { label: "Current Operating Margin", value: formatPercent(asNumber(result.current_operating_margin)) },
+          { label: "Confidence", value: String(result.confidence_summary ?? "—") },
+        ]}
+      />
+
+      <ChartShell title="Reverse DCF Heatmap (Growth / Margin)">
+        <ResponsiveContainer>
+          <BarChart data={heatmap}>
+            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+            <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(10)} interval={0} angle={-24} textAnchor="end" height={86} />
+            <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} />
+            <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? value.toFixed(3) : value} />
+            <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+              {heatmap.map((entry, index) => (
+                <Cell key={`${entry.label}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
+
+      <AssumptionProvenanceTable provenance={asRecord(result.assumption_provenance)} />
+    </div>
+  );
+}
+
+function RoicModelView({ model }: { model: ModelPayload }) {
+  const result = asRecord(model.result);
+  if (result.status === "insufficient_data") {
+    return <StateMessage result={result} />;
+  }
+  const trend = asArray(result.trend).map((item) => ({
+    period: String(item.period_end ?? "—"),
+    roic: asNumber(item.roic),
+    reinvestment: asNumber(item.reinvestment_rate),
+    spread: asNumber(item.spread_vs_capital_cost),
+  }));
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <MetricStrip
+        metrics={[
+          { label: "ROIC", value: formatPercent(asNumber(result.roic)) },
+          { label: "Incremental ROIC", value: formatPercent(asNumber(result.incremental_roic)) },
+          { label: "Reinvestment", value: formatPercent(asNumber(result.reinvestment_rate)) },
+          { label: "Spread", value: formatPercent(asNumber(result.spread_vs_capital_cost_proxy)) },
+        ]}
+      />
+      <ChartShell title="ROIC Trend">
+        <ResponsiveContainer>
+          <LineChart data={trend}>
+            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+            <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
+            <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(v) => formatPercent(Number(v))} />
+            <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? formatPercent(value) : value} />
+            <Legend wrapperStyle={chartLegendStyle()} />
+            <Line dataKey="roic" name="ROIC" stroke="#00FF41" strokeWidth={2} dot={{ r: 2 }} />
+            <Line dataKey="reinvestment" name="Reinvestment" stroke="#00E5FF" strokeWidth={2} dot={{ r: 2 }} />
+            <Line dataKey="spread" name="Spread" stroke="#FFD700" strokeWidth={2} dot={{ r: 2 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </ChartShell>
+      <AssumptionProvenanceTable provenance={asRecord(result.assumption_provenance)} />
+    </div>
+  );
+}
+
+function CapitalAllocationModelView({ model }: { model: ModelPayload }) {
+  const result = asRecord(model.result);
+  if (result.status === "insufficient_data") {
+    return <StateMessage result={result} />;
+  }
+  const series = asArray(result.series).map((item) => ({
+    period: String(item.period_end ?? "—"),
+    dividends: asNumber(item.dividends),
+    buybacks: asNumber(item.buybacks),
+    sbc: asNumber(item.stock_based_compensation),
+  }));
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <MetricStrip
+        metrics={[
+          { label: "Shareholder Yield", value: formatPercent(asNumber(result.shareholder_yield)) },
+          { label: "Net Distribution", value: formatCompactNumber(asNumber(result.net_shareholder_distribution)) },
+          { label: "Debt Financing Signal", value: formatCompactNumber(asNumber(result.debt_financing_signal)) },
+          { label: "Confidence", value: String(result.confidence_summary ?? "—") },
+        ]}
+      />
+      <ChartShell title="Capital Allocation Stack">
+        <ResponsiveContainer>
+          <BarChart data={series}>
+            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+            <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
+            <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(v) => formatCompactNumber(Number(v))} />
+            <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? formatCompactNumber(value) : value} />
+            <Legend wrapperStyle={chartLegendStyle()} />
+            <Bar dataKey="dividends" stackId="cap" name="Dividends" fill="#00FF41" />
+            <Bar dataKey="buybacks" stackId="cap" name="Buybacks" fill="#00E5FF" />
+            <Bar dataKey="sbc" stackId="cap" name="SBC" fill="#FF6B6B" />
+          </BarChart>
+        </ResponsiveContainer>
+      </ChartShell>
     </div>
   );
 }
@@ -447,6 +592,45 @@ function StateMessage({ result }: { result: Record<string, unknown> }) {
   );
 }
 
+function StatusBadge({ status }: { status: string }) {
+  if (status === "partial") {
+    return <span className="pill" title="This model used incomplete financial inputs; results are directional only.">Partial inputs</span>;
+  }
+  if (status === "proxy") {
+    return <span className="pill" title="This model used approximation logic where direct inputs were unavailable.">Proxy output</span>;
+  }
+  if (status === "insufficient_data") {
+    return <span className="pill">Insufficient data</span>;
+  }
+  return <span className="pill">OK</span>;
+}
+
+function AssumptionProvenanceTable({ provenance }: { provenance: Record<string, unknown> }) {
+  const riskFree = asRecord(provenance.risk_free_rate);
+  const discountInputs = asRecord(provenance.discount_rate_inputs);
+  const terminal = asRecord(provenance.terminal_assumptions);
+  if (!Object.keys(riskFree).length && !Object.keys(discountInputs).length && !Object.keys(terminal).length) {
+    return null;
+  }
+  return (
+    <CompactTable
+      title="Assumption Provenance"
+      columns={[
+        { key: "metric", label: "Metric" },
+        { key: "value", label: "Value", align: "right" },
+      ]}
+      rows={[
+        { metric: "Risk-free source", value: String(riskFree.source_name ?? "—") },
+        { metric: "Observation date", value: String(riskFree.observation_date ?? "—") },
+        { metric: "Tenor", value: String(riskFree.tenor ?? "—") },
+        { metric: "Risk-free rate", value: formatPercent(asNumber(riskFree.rate_used)) },
+        { metric: "Discount input", value: formatPercent(asNumber(discountInputs.discount_rate ?? discountInputs.risk_free_rate)) },
+        { metric: "Terminal growth", value: formatPercent(asNumber(terminal.terminal_growth_rate ?? discountInputs.terminal_growth)) },
+      ]}
+    />
+  );
+}
+
 function MetricStrip({ metrics }: { metrics: Array<{ label: string; value: string }> }) {
   return (
     <div className="metric-grid">
@@ -591,7 +775,11 @@ function formatRatioMetric(metric: string, value: number | null): string {
     return "—";
   }
 
-  if (metric === "asset_turnover") {
+  if (metric === "asset_turnover" || metric === "interest_coverage" || metric === "net_debt_to_fcf") {
+    return formatMultiple(value);
+  }
+
+  if (metric === "cash_conversion") {
     return formatMultiple(value);
   }
 

@@ -35,6 +35,13 @@ Captured from the local app with `INTC` as the demo company.
 - `net_income`
 - `total_assets`
 - `total_liabilities`
+- `cash_and_cash_equivalents`
+- `short_term_investments`
+- `cash_and_short_term_investments`
+- `current_debt`
+- `stockholders_equity`
+- `accounts_payable`
+- `depreciation_and_amortization`
 - `operating_cash_flow`
 - `free_cash_flow`
 
@@ -79,10 +86,10 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 - `/` for search, autocomplete, and trending tickers
 - `/company/[ticker]` — company overview with unified activity feed, priority alerts, and quick peer comparison
 - `/company/[ticker]/financials` — dedicated financial workspace with statements, margin trends, cash-flow waterfall, liquidity/capital, balance-sheet history, and quality summary
-- `/company/[ticker]/peers` — dedicated peer-comparison workspace (focus company plus up to 4 peers with reset-to-default behavior)
+- `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
 - `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
 - `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
-- `/company/[ticker]/models` — DCF, health score, and scenario analysis
+- `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
 - `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel, executive pay table, and pay trend chart
 - `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
 - `/company/[ticker]/ownership` — institutional holdings analytics and manager activity trends
@@ -175,7 +182,7 @@ GET  /api/companies/AAPL/peers
 GET  /api/companies/AAPL/activity-feed
 GET  /api/companies/AAPL/alerts
 GET  /api/companies/AAPL/activity-overview
-GET  /api/companies/AAPL/models?model=dcf,dupont,piotroski
+GET  /api/companies/AAPL/models?model=dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios
 GET  /api/jobs/{job_id}/events
 GET  /api/insiders/AAPL
 GET  /api/ownership/AAPL
@@ -218,6 +225,9 @@ Additional environment variables:
 - `SEC_13F_EXTRA_MANAGERS="Manager One,Manager Two"` provides optional manager names used only when `SEC_13F_UNIVERSE_MODE=expanded`
 - `SEC_MAX_RETRIES=3` and `SEC_RETRY_BACKOFF_SECONDS=0.5` for SEC request retries
 - `MARKET_MAX_RETRIES=3` and `MARKET_RETRY_BACKOFF_SECONDS=0.5` for market data retries
+- `TREASURY_YIELD_CURVE_CSV_URL` for no-key U.S. Treasury 10-year risk-free rate input
+- `TREASURY_MAX_RETRIES=3` and `TREASURY_RETRY_BACKOFF_SECONDS=0.5` for Treasury fetch retries
+- `VALUATION_WORKBENCH_ENABLED=true` to enable reverse DCF/ROIC/capital-allocation model surfaces
 
 To pin a specific release, change these in `.env`:
 
@@ -310,10 +320,11 @@ Useful options:
 
 - Core `ratios` are precomputed automatically whenever canonical financial data is saved.
 - Cached model results are stored in PostgreSQL with `model_version` and reused until financial inputs change.
+- DCF/reverse-DCF/ROIC assumptions include Treasury-direct 10-year risk-free input with 24-hour cache and provenance metadata.
 
 Run model computations from cached PostgreSQL data only:
 
 ```bash
-python -m app.model_engine.worker AAPL --models dcf,dupont,piotroski,altman_z,ratios
+python -m app.model_engine.worker AAPL --models dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios
 ```
 

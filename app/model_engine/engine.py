@@ -15,6 +15,7 @@ from app.model_engine.registry import CORE_MODEL_NAMES, MODEL_REGISTRY
 from app.model_engine.types import CompanyDataset, FinancialPoint, ModelDefinition
 from app.model_engine.utils import serialize_period
 from app.models import Company, FinancialStatement, ModelRun
+from app.services.risk_free_rate import get_latest_risk_free_rate
 from app.services.status_stream import JobReporter
 
 logger = logging.getLogger(__name__)
@@ -60,7 +61,8 @@ class ModelEngine:
 
         for definition in definitions:
             if reporter is not None and reporter.enabled:
-                reporter.step("models", f"Running {definition.name} v{definition.version}…")
+                stage = "valuation" if definition.name in {"dcf", "reverse_dcf", "roic", "capital_allocation"} else "models"
+                reporter.step(stage, f"Running {definition.name} v{definition.version}…")
             input_payload = _build_input_payload(dataset, definition)
             cached_run = _latest_model_run(self.session, company_id, definition)
             if not force and cached_run is not None and _matching_signature(cached_run.input_periods, input_payload):
@@ -232,6 +234,16 @@ def _model_config(definition: ModelDefinition) -> dict[str, Any]:
         from app.model_engine.models import dupont as dupont_model
 
         return {"mode": dupont_model.get_mode()}
+    if definition.name in {"dcf", "reverse_dcf", "roic"}:
+        snapshot = get_latest_risk_free_rate()
+        return {
+            "risk_free_rate": {
+                "source_name": snapshot.source_name,
+                "tenor": snapshot.tenor,
+                "observation_date": snapshot.observation_date.isoformat(),
+                "rate_used": snapshot.rate_used,
+            }
+        }
     return {}
 
 

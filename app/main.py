@@ -165,11 +165,18 @@ class FinancialPayload(BaseModel):
     interest_expense: Number = None
     income_tax_expense: Number = None
     inventory: Number = None
+    cash_and_cash_equivalents: Number = None
+    short_term_investments: Number = None
+    cash_and_short_term_investments: Number = None
     accounts_receivable: Number = None
+    accounts_payable: Number = None
     goodwill_and_intangibles: Number = None
+    current_debt: Number = None
     long_term_debt: Number = None
+    stockholders_equity: Number = None
     lease_liabilities: Number = None
     operating_cash_flow: Number = None
+    depreciation_and_amortization: Number = None
     capex: Number = None
     acquisitions: Number = None
     debt_changes: Number = None
@@ -351,6 +358,7 @@ class OwnershipAnalyticsResponse(BaseModel):
 
 
 class ModelPayload(BaseModel):
+    schema_version: str = "2.0"
     model_name: str
     model_version: str
     created_at: datetime
@@ -408,6 +416,11 @@ class PeerMetricsPayload(BaseModel):
     revenue_growth: Number = None
     piotroski_score: Number = None
     altman_z_score: Number = None
+    fair_value_gap: Number = None
+    roic: Number = None
+    shareholder_yield: Number = None
+    implied_growth: Number = None
+    valuation_band_percentile: Number = None
     revenue_history: list[PeerRevenuePointPayload] = Field(default_factory=list)
 
 
@@ -755,6 +768,12 @@ class WatchlistSummaryItemPayload(BaseModel):
     latest_alert: WatchlistLatestAlertPayload | None = None
     latest_activity: WatchlistLatestActivityPayload | None = None
     coverage: WatchlistCoveragePayload
+    fair_value_gap: Number = None
+    roic: Number = None
+    shareholder_yield: Number = None
+    implied_growth: Number = None
+    valuation_band_percentile: Number = None
+    balance_sheet_risk: Number = None
 
 
 class WatchlistSummaryResponse(BaseModel):
@@ -1173,6 +1192,12 @@ def company_models(
 ) -> CompanyModelsResponse:
     normalized_ticker = _normalize_ticker(ticker)
     requested_models = _parse_requested_models(model)
+    if not settings.valuation_workbench_enabled:
+        requested_models = [
+            item
+            for item in requested_models
+            if item not in {"reverse_dcf", "roic", "capital_allocation"}
+        ]
     normalized_mode = (dupont_mode or "").lower() or None
     if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
@@ -1201,6 +1226,17 @@ def company_models(
             snapshot.company.id,
             requested_models or None,
             config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+        )
+        status_counts: dict[str, int] = {}
+        for model_run in models:
+            result = model_run.result if isinstance(model_run.result, dict) else {}
+            model_status = str(result.get("model_status") or result.get("status") or "unknown")
+            status_counts[model_status] = status_counts.get(model_status, 0) + 1
+        logging.getLogger(__name__).info(
+            "TELEMETRY model_view ticker=%s models=%s status_counts=%s",
+            snapshot.company.ticker,
+            ",".join(requested_models) if requested_models else "all",
+            status_counts,
         )
         return CompanyModelsResponse(
             company=_serialize_company(snapshot),
@@ -1238,6 +1274,12 @@ def company_peers(
     financials = get_company_financials(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     payload = build_peer_comparison(session, snapshot.company.ticker, selected_tickers=selected_tickers)
+    logging.getLogger(__name__).info(
+        "TELEMETRY peer_view ticker=%s selected=%s count=%s",
+        snapshot.company.ticker,
+        selected_tickers,
+        len(payload.get("peers") or []) if payload else 0,
+    )
     if payload is None:
         return CompanyPeersResponse(
             company=None,
@@ -1696,6 +1738,11 @@ def watchlist_summary(
         except Exception:
             logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
             companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+    logging.getLogger(__name__).info(
+        "TELEMETRY watchlist_summary tickers=%s companies=%s",
+        len(normalized_tickers),
+        len(companies),
+    )
     return WatchlistSummaryResponse(tickers=normalized_tickers, companies=companies)
 
 
@@ -1963,11 +2010,18 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         interest_expense=data.get("interest_expense"),
         income_tax_expense=data.get("income_tax_expense"),
         inventory=data.get("inventory"),
+        cash_and_cash_equivalents=data.get("cash_and_cash_equivalents"),
+        short_term_investments=data.get("short_term_investments"),
+        cash_and_short_term_investments=data.get("cash_and_short_term_investments"),
         accounts_receivable=data.get("accounts_receivable"),
+        accounts_payable=data.get("accounts_payable"),
         goodwill_and_intangibles=data.get("goodwill_and_intangibles"),
+        current_debt=data.get("current_debt"),
         long_term_debt=data.get("long_term_debt"),
+        stockholders_equity=data.get("stockholders_equity"),
         lease_liabilities=data.get("lease_liabilities"),
         operating_cash_flow=data.get("operating_cash_flow"),
+        depreciation_and_amortization=data.get("depreciation_and_amortization"),
         capex=data.get("capex"),
         acquisitions=data.get("acquisitions"),
         debt_changes=data.get("debt_changes"),
@@ -2184,6 +2238,7 @@ def _build_institutional_holdings_summary(rows: list[InstitutionalHoldingPayload
 
 def _serialize_model(model_run: ModelRun) -> ModelPayload:
     return ModelPayload(
+        schema_version="2.0",
         model_name=model_run.model_name,
         model_version=model_run.model_version,
         created_at=model_run.created_at,
@@ -3466,6 +3521,35 @@ def _build_watchlist_summary_item(
     latest_alert = alerts[0] if alerts else None
     latest_activity = entries[0] if entries else None
 
+    models: dict[str, ModelRun] = {}
+    latest_price = None
+    try:
+        models = {
+            model.model_name.lower(): model
+            for model in get_company_models(
+                session,
+                snapshot.company.id,
+                model_names=["dcf", "roic", "reverse_dcf", "capital_allocation", "ratios"],
+            )
+        }
+        latest_price_series = get_company_price_history(session, snapshot.company.id)
+        latest_price = latest_price_series[-1].close if latest_price_series else None
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load watchlist model metrics for '%s'", snapshot.company.ticker)
+
+    dcf_result = models.get("dcf").result if models.get("dcf") is not None and isinstance(models.get("dcf").result, dict) else {}
+    roic_result = models.get("roic").result if models.get("roic") is not None and isinstance(models.get("roic").result, dict) else {}
+    reverse_result = models.get("reverse_dcf").result if models.get("reverse_dcf") is not None and isinstance(models.get("reverse_dcf").result, dict) else {}
+    capital_result = models.get("capital_allocation").result if models.get("capital_allocation") is not None and isinstance(models.get("capital_allocation").result, dict) else {}
+    ratios_result = models.get("ratios").result if models.get("ratios") is not None and isinstance(models.get("ratios").result, dict) else {}
+    ratios_values = ratios_result.get("values") if isinstance(ratios_result.get("values"), dict) else {}
+    fair_value_per_share = _coerce_number(dcf_result.get("fair_value_per_share"), None)
+    fair_value_gap = (
+        ((fair_value_per_share - float(latest_price)) / float(latest_price))
+        if fair_value_per_share is not None and latest_price not in (None, 0)
+        else None
+    )
+
     return WatchlistSummaryItemPayload(
         ticker=snapshot.company.ticker,
         name=snapshot.company.name,
@@ -3480,6 +3564,12 @@ def _build_watchlist_summary_item(
             financial_periods=financial_periods,
             price_points=price_points,
         ),
+        fair_value_gap=fair_value_gap,
+        roic=_coerce_number(roic_result.get("roic"), None),
+        shareholder_yield=_coerce_number(capital_result.get("shareholder_yield"), None),
+        implied_growth=_coerce_number(reverse_result.get("implied_growth"), None),
+        valuation_band_percentile=_coerce_number(reverse_result.get("valuation_band_percentile"), None),
+        balance_sheet_risk=_coerce_number(ratios_values.get("net_debt_to_fcf") if isinstance(ratios_values, dict) else None, None),
     )
 
 
@@ -3495,7 +3585,26 @@ def _build_missing_watchlist_summary_item(background_tasks: BackgroundTasks, tic
         latest_alert=None,
         latest_activity=None,
         coverage=WatchlistCoveragePayload(financial_periods=0, price_points=0),
+        fair_value_gap=None,
+        roic=None,
+        shareholder_yield=None,
+        implied_growth=None,
+        valuation_band_percentile=None,
+        balance_sheet_risk=None,
     )
+
+
+def _coerce_number(primary: Any, secondary: Any) -> Number:
+    value = primary if primary is not None else secondary
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not number == number:
+        return None
+    return number
 
 
 def _serialize_watchlist_latest_alert(alert: AlertPayload | None) -> WatchlistLatestAlertPayload | None:

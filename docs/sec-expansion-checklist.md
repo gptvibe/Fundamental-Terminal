@@ -7,6 +7,48 @@
 - Keep backend and frontend types in sync before merging.
 - Prefer small pull requests grouped by one page or one dataset family.
 
+## Sprint 9: Valuation Workbench Depth (Shipped 2026-03-22)
+
+### Valuation foundations
+
+- [x] Extend canonical SEC normalization/serialization with:
+  - [x] `cash_and_cash_equivalents`
+  - [x] `short_term_investments`
+  - [x] `cash_and_short_term_investments`
+  - [x] `current_debt`
+  - [x] `stockholders_equity`
+  - [x] `accounts_payable`
+  - [x] `depreciation_and_amortization`
+- [x] Add parser and serializer tests for expanded valuation fields.
+
+### External no-key risk-free input
+
+- [x] Add Treasury-direct 10-year risk-free fetch path (no API key).
+- [x] Cache latest successful Treasury snapshot for 24 hours.
+- [x] Add retry/backoff and cached fallback behavior on temporary failures.
+- [x] Expose source/tenor/observation date/rate in model assumption provenance.
+
+### Trust-aware model outputs
+
+- [x] Add explicit model statuses (`ok | partial | proxy | insufficient_data`) and explanation strings.
+- [x] Mark models partial when >=2 canonical required inputs are missing across recent fiscal years.
+- [x] Mark models proxy when substitutions/approximations are used.
+- [x] Upgrade DCF output to enterprise value, net debt, equity value, fair value per share, and confidence summary.
+
+### New models and ratios
+
+- [x] Add `reverse_dcf` model output (with implied growth and heatmap payload).
+- [x] Add `roic` model output (ROIC, incremental ROIC, reinvestment, spread vs capital-cost proxy).
+- [x] Add `capital_allocation` model output (dividends, buybacks, debt changes, SBC, shareholder yield).
+- [x] Expand ratio outputs with investor-grade metrics (`interest_coverage`, `cash_conversion`, `capex_intensity`, `sbc_to_revenue`, `net_debt_to_fcf`, `payout_ratio`).
+- [x] Add backend tests for normal/partial/insufficient scenarios for new models.
+
+### Decision workflows
+
+- [x] Extend peers payload/UI with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile.
+- [x] Extend watchlist payload/UI with triage metrics for undervaluation, quality, capital return, and balance-sheet risk.
+- [x] Add frontend sort/filter tests for watchlist decision triage behavior.
+
 ## Sprint 1: Existing SEC Data Visibility Gaps
 
 ### Backend API contracts

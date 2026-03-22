@@ -10,10 +10,11 @@ from app.model_engine.utils import (
     previous_comparable_statement,
     safe_divide,
     statement_value,
+    status_explanation,
 )
 
 MODEL_NAME = "ratios"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.1.0"
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -41,10 +42,33 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "revenue_growth": growth_rate(statement_value(current, "revenue"), statement_value(previous, "revenue") if previous else None),
         "net_income_growth": growth_rate(statement_value(current, "net_income"), statement_value(previous, "net_income") if previous else None),
         "free_cash_flow_growth": growth_rate(statement_value(current, "free_cash_flow"), statement_value(previous, "free_cash_flow") if previous else None),
+        "interest_coverage": safe_divide(statement_value(current, "operating_income"), abs(float(statement_value(current, "interest_expense"))) if statement_value(current, "interest_expense") not in (None, 0) else None),
+        "cash_conversion": safe_divide(statement_value(current, "operating_cash_flow"), statement_value(current, "net_income")),
+        "capex_intensity": safe_divide(statement_value(current, "capex"), statement_value(current, "revenue")),
+        "sbc_to_revenue": safe_divide(statement_value(current, "stock_based_compensation"), statement_value(current, "revenue")),
+        "net_debt_to_fcf": safe_divide(
+            (
+                float(statement_value(current, "current_debt") or 0)
+                + float(statement_value(current, "long_term_debt") or 0)
+                - float(statement_value(current, "cash_and_short_term_investments") or 0)
+            )
+            if any(
+                statement_value(current, key) is not None
+                for key in ("current_debt", "long_term_debt", "cash_and_short_term_investments")
+            )
+            else None,
+            statement_value(current, "free_cash_flow"),
+        ),
+        "payout_ratio": safe_divide(abs(float(statement_value(current, "dividends"))) if statement_value(current, "dividends") is not None else None, statement_value(current, "net_income")),
     }
 
+    missing_count = sum(1 for value in ratios.values() if value is None)
+    status = "ok" if missing_count == 0 else "partial"
+
     return {
-        "status": "ok",
+        "status": status,
+        "model_status": status,
+        "explanation": status_explanation(status),
         "period_end": current.period_end.isoformat(),
         "filing_type": current.filing_type,
         "previous_period_end": previous.period_end.isoformat() if previous else None,

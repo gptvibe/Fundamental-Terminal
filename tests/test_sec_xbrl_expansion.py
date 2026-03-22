@@ -95,6 +95,32 @@ def test_edgar_normalizer_maps_new_xbrl_metrics():
                         ]
                     }
                 },
+                "CashAndCashEquivalentsAtCarryingValue": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accn,
+                                "form": "10-K",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 150,
+                            }
+                        ]
+                    }
+                },
+                "ShortTermInvestments": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accn,
+                                "form": "10-K",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 50,
+                            }
+                        ]
+                    }
+                },
                 "AccountsReceivableNetCurrent": {
                     "units": {
                         "USD": [
@@ -104,6 +130,32 @@ def test_edgar_normalizer_maps_new_xbrl_metrics():
                                 "end": "2025-12-31",
                                 "filed": "2026-02-20",
                                 "val": 60,
+                            }
+                        ]
+                    }
+                },
+                "AccountsPayableCurrent": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accn,
+                                "form": "10-K",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 55,
+                            }
+                        ]
+                    }
+                },
+                "LongTermDebtCurrent": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accn,
+                                "form": "10-K",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 75,
                             }
                         ]
                     }
@@ -134,6 +186,19 @@ def test_edgar_normalizer_maps_new_xbrl_metrics():
                         ]
                     }
                 },
+                "StockholdersEquity": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accn,
+                                "form": "10-K",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 1800,
+                            }
+                        ]
+                    }
+                },
                 "OperatingLeaseLiability": {
                     "units": {
                         "USD": [
@@ -143,6 +208,20 @@ def test_edgar_normalizer_maps_new_xbrl_metrics():
                                 "end": "2025-12-31",
                                 "filed": "2026-02-20",
                                 "val": 44,
+                            }
+                        ]
+                    }
+                },
+                "DepreciationDepletionAndAmortization": {
+                    "units": {
+                        "USD": [
+                            {
+                                "accn": accn,
+                                "form": "10-K",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 70,
                             }
                         ]
                     }
@@ -197,10 +276,17 @@ def test_edgar_normalizer_maps_new_xbrl_metrics():
     assert data["interest_expense"] == 15
     assert data["income_tax_expense"] == 25
     assert data["inventory"] == 40
+    assert data["cash_and_cash_equivalents"] == 150
+    assert data["short_term_investments"] == 50
+    assert data["cash_and_short_term_investments"] == 200
     assert data["accounts_receivable"] == 60
+    assert data["accounts_payable"] == 55
     assert data["goodwill_and_intangibles"] == 210
+    assert data["current_debt"] == 75
     assert data["long_term_debt"] == 320
+    assert data["stockholders_equity"] == 1800
     assert data["lease_liabilities"] == 44
+    assert data["depreciation_and_amortization"] == 70
     assert data["stock_based_compensation"] == 33
     assert data["weighted_average_diluted_shares"] == 999
 
@@ -230,11 +316,18 @@ def test_serialize_financial_includes_expanded_fields():
             "interest_expense": 15,
             "income_tax_expense": 25,
             "inventory": 40,
+            "cash_and_cash_equivalents": 150,
+            "short_term_investments": 50,
+            "cash_and_short_term_investments": 200,
             "accounts_receivable": 60,
+            "accounts_payable": 55,
             "goodwill_and_intangibles": 210,
+            "current_debt": 75,
             "long_term_debt": 320,
+            "stockholders_equity": 1800,
             "lease_liabilities": 44,
             "operating_cash_flow": 310,
+            "depreciation_and_amortization": 70,
             "capex": 90,
             "acquisitions": None,
             "debt_changes": -10,
@@ -257,9 +350,16 @@ def test_serialize_financial_includes_expanded_fields():
     assert payload.interest_expense == 15
     assert payload.income_tax_expense == 25
     assert payload.inventory == 40
+    assert payload.cash_and_cash_equivalents == 150
+    assert payload.short_term_investments == 50
+    assert payload.cash_and_short_term_investments == 200
     assert payload.accounts_receivable == 60
+    assert payload.accounts_payable == 55
     assert payload.goodwill_and_intangibles == 210
+    assert payload.current_debt == 75
     assert payload.long_term_debt == 320
+    assert payload.stockholders_equity == 1800
     assert payload.lease_liabilities == 44
+    assert payload.depreciation_and_amortization == 70
     assert payload.stock_based_compensation == 33
     assert payload.weighted_average_diluted_shares == 999

@@ -60,11 +60,18 @@ export interface FinancialPayload {
   interest_expense: number | null;
   income_tax_expense: number | null;
   inventory: number | null;
+  cash_and_cash_equivalents: number | null;
+  short_term_investments: number | null;
+  cash_and_short_term_investments: number | null;
   accounts_receivable: number | null;
+  accounts_payable: number | null;
   goodwill_and_intangibles: number | null;
+  current_debt: number | null;
   long_term_debt: number | null;
+  stockholders_equity: number | null;
   lease_liabilities: number | null;
   operating_cash_flow: number | null;
+  depreciation_and_amortization: number | null;
   capex: number | null;
   acquisitions: number | null;
   debt_changes: number | null;
@@ -232,6 +239,7 @@ export interface CompanyInstitutionalHoldingsSummaryResponse {
 }
 
 export interface ModelPayload {
+  schema_version?: string;
   model_name: string;
   model_version: string;
   created_at: string;
@@ -566,6 +574,12 @@ export interface WatchlistSummaryItemPayload {
   latest_alert: WatchlistLatestAlertPayload | null;
   latest_activity: WatchlistLatestActivityPayload | null;
   coverage: WatchlistCoveragePayload;
+  fair_value_gap: number | null;
+  roic: number | null;
+  shareholder_yield: number | null;
+  implied_growth: number | null;
+  valuation_band_percentile: number | null;
+  balance_sheet_risk: number | null;
 }
 
 export interface WatchlistSummaryResponse {
@@ -609,6 +623,11 @@ export interface PeerMetricsPayload {
   revenue_growth: number | null;
   piotroski_score: number | null;
   altman_z_score: number | null;
+  fair_value_gap: number | null;
+  roic: number | null;
+  shareholder_yield: number | null;
+  implied_growth: number | null;
+  valuation_band_percentile: number | null;
   revenue_history: PeerRevenuePoint[];
 }
 

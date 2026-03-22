@@ -67,8 +67,15 @@ class Settings:
     sec_cache_prune_max_entries: int = _int_env("SEC_CACHE_PRUNE_MAX_ENTRIES", 5000, minimum=0)
     market_max_retries: int = _int_env("MARKET_MAX_RETRIES", 3, minimum=1)
     market_retry_backoff_seconds: float = _float_env("MARKET_RETRY_BACKOFF_SECONDS", 0.5)
+    treasury_yield_curve_csv_url: str = os.getenv(
+        "TREASURY_YIELD_CURVE_CSV_URL",
+        "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv?type=daily_treasury_yield_curve&field_tdr_date_value=all",
+    )
+    treasury_max_retries: int = _int_env("TREASURY_MAX_RETRIES", 3, minimum=1)
+    treasury_retry_backoff_seconds: float = _float_env("TREASURY_RETRY_BACKOFF_SECONDS", 0.5)
     freshness_window_hours: int = _int_env("FRESHNESS_WINDOW_HOURS", 24, minimum=1)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()
+    valuation_workbench_enabled: bool = os.getenv("VALUATION_WORKBENCH_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
 
 
 settings = Settings()

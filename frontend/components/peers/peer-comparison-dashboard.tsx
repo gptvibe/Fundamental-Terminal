@@ -173,7 +173,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
 
           <div className="peer-chart-card">
             <div className="peer-section-title">Quality Radar</div>
-            <div className="peer-section-subtitle">ROE, revenue growth, Piotroski score, and the Altman proxy normalized for quick visual comparison.</div>
+            <div className="peer-section-subtitle">ROIC, implied growth, shareholder yield, and fair-value gap normalized for decision-grade peer comparison.</div>
             <div className="peer-chart-shell peer-chart-tall">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={radarData} outerRadius="70%">
@@ -199,29 +199,29 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
           </div>
 
           <div className="peer-chart-card">
-            <div className="peer-section-title">Valuation Multiples</div>
-            <div className="peer-section-subtitle">Horizontal comparison of P/E, EV/EBIT proxy, and price to free cash flow.</div>
+            <div className="peer-section-title">Valuation + Return Signals</div>
+            <div className="peer-section-subtitle">Fair value gap, ROIC, and shareholder yield across the peer set.</div>
             <div className="peer-chart-shell peer-chart-medium">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={barData} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} horizontal={false} />
-                  <XAxis type="number" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatAxisMultiple} />
+                  <XAxis type="number" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatPercentAxis} />
                   <YAxis dataKey="ticker" type="category" width={64} tick={{ fill: CHART_LEGEND_COLOR, fontSize: 12 }} />
                   <Tooltip content={<BarTooltip />} />
                   <Legend wrapperStyle={chartLegendStyle()} />
-                  <Bar dataKey="pe" name="P/E" radius={[0, 8, 8, 0]}>
+                  <Bar dataKey="fairValueGap" name="Fair Value Gap" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
-                      <Cell key={`${entry.ticker}-pe`} fill={entry.is_focus ? "#00FF41" : "rgba(0,255,65,0.55)"} />
+                      <Cell key={`${entry.ticker}-fvg`} fill={entry.is_focus ? "#00FF41" : "rgba(0,255,65,0.55)"} />
                     ))}
                   </Bar>
-                  <Bar dataKey="evToEbit" name="EV/EBIT*" radius={[0, 8, 8, 0]}>
+                  <Bar dataKey="roic" name="ROIC" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
-                      <Cell key={`${entry.ticker}-ev`} fill={entry.is_focus ? "#00E5FF" : "rgba(0,229,255,0.55)"} />
+                      <Cell key={`${entry.ticker}-roic`} fill={entry.is_focus ? "#00E5FF" : "rgba(0,229,255,0.55)"} />
                     ))}
                   </Bar>
-                  <Bar dataKey="priceToFcf" name="P/FCF" radius={[0, 8, 8, 0]}>
+                  <Bar dataKey="shareholderYield" name="Shareholder Yield" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
-                      <Cell key={`${entry.ticker}-fcf`} fill={entry.is_focus ? "#FFD700" : "rgba(255,215,0,0.55)"} />
+                      <Cell key={`${entry.ticker}-sy`} fill={entry.is_focus ? "#FFD700" : "rgba(255,215,0,0.55)"} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -279,7 +279,12 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                       <th>EV/EBIT*</th>
                       <th>P/FCF</th>
                       <th>ROE</th>
+                      <th>ROIC</th>
                       <th>Revenue Growth</th>
+                      <th>Implied Growth</th>
+                      <th>Shareholder Yield</th>
+                      <th>Fair Value Gap</th>
+                      <th>Band Percentile</th>
                       <th>Piotroski</th>
                       <th>Altman Proxy</th>
                       <th>Price</th>
@@ -301,7 +306,12 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                         <td>{formatMultiple(peer.ev_to_ebit)}</td>
                         <td>{formatMultiple(peer.price_to_free_cash_flow)}</td>
                         <td>{formatPercent(peer.roe)}</td>
+                        <td>{formatPercent(peer.roic)}</td>
                         <td>{formatPercent(peer.revenue_growth)}</td>
+                        <td>{formatPercent(peer.implied_growth)}</td>
+                        <td>{formatPercent(peer.shareholder_yield)}</td>
+                        <td>{formatPercent(peer.fair_value_gap)}</td>
+                        <td>{formatPercent(peer.valuation_band_percentile)}</td>
                         <td>{formatScore(peer.piotroski_score)}</td>
                         <td>{formatSigned(peer.altman_z_score)}</td>
                         <td>{formatCurrency(peer.latest_price)}</td>
@@ -330,10 +340,10 @@ function buildTickerColorMap(peers: PeerMetricsPayload[]): Record<string, string
 
 function buildRadarData(peers: PeerMetricsPayload[]) {
   const metrics = [
-    { key: "roe", label: "ROE", normalize: (value: number | null) => clamp((value ?? 0) * 220, 0, 100) },
-    { key: "revenue_growth", label: "Revenue Growth", normalize: (value: number | null) => clamp((value ?? 0) * 180 + 30, 0, 100) },
-    { key: "piotroski_score", label: "Piotroski", normalize: (value: number | null) => clamp(((value ?? 0) / 9) * 100, 0, 100) },
-    { key: "altman_z_score", label: "Altman Proxy", normalize: (value: number | null) => clamp(((value ?? 0) / 5) * 100, 0, 100) }
+    { key: "roic", label: "ROIC", normalize: (value: number | null) => clamp((value ?? 0) * 250, 0, 100) },
+    { key: "implied_growth", label: "Implied Growth", normalize: (value: number | null) => clamp((value ?? 0) * 200 + 40, 0, 100) },
+    { key: "shareholder_yield", label: "Shareholder Yield", normalize: (value: number | null) => clamp((value ?? 0) * 350 + 30, 0, 100) },
+    { key: "fair_value_gap", label: "Fair Value Gap", normalize: (value: number | null) => clamp((value ?? 0) * 200 + 50, 0, 100) }
   ] as const;
 
   return metrics.map((metric) => ({
@@ -346,17 +356,17 @@ function buildRadarData(peers: PeerMetricsPayload[]) {
 
 function peerMetricValue(
   peer: PeerMetricsPayload,
-  key: "roe" | "revenue_growth" | "piotroski_score" | "altman_z_score"
+  key: "roic" | "implied_growth" | "shareholder_yield" | "fair_value_gap"
 ): number | null {
   switch (key) {
-    case "roe":
-      return peer.roe;
-    case "revenue_growth":
-      return peer.revenue_growth;
-    case "piotroski_score":
-      return peer.piotroski_score;
-    case "altman_z_score":
-      return peer.altman_z_score;
+    case "roic":
+      return peer.roic;
+    case "implied_growth":
+      return peer.implied_growth;
+    case "shareholder_yield":
+      return peer.shareholder_yield;
+    case "fair_value_gap":
+      return peer.fair_value_gap;
   }
 }
 
@@ -364,9 +374,9 @@ function buildBarData(peers: PeerMetricsPayload[]) {
   return peers.map((peer) => ({
     ticker: peer.ticker,
     is_focus: peer.is_focus,
-    pe: peer.pe,
-    evToEbit: peer.ev_to_ebit,
-    priceToFcf: peer.price_to_free_cash_flow
+    fairValueGap: peer.fair_value_gap,
+    roic: peer.roic,
+    shareholderYield: peer.shareholder_yield
   }));
 }
 
@@ -458,6 +468,10 @@ function formatMultiple(value: number | null | undefined): string {
 
 function formatAxisMultiple(value: number): string {
   return `${value.toFixed(0)}x`;
+}
+
+function formatPercentAxis(value: number): string {
+  return `${(value * 100).toFixed(0)}%`;
 }
 
 function formatMiniPercent(value: number): string {

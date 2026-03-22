@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from app.model_engine.types import CompanyDataset
+from app.model_engine.utils import (
+    annual_series,
+    json_number,
+    safe_divide,
+    status_explanation,
+    status_from_data_quality,
+    trust_summary,
+)
+from app.services.risk_free_rate import get_latest_risk_free_rate
+
+MODEL_NAME = "roic"
+MODEL_VERSION = "1.0.0"
+
+
+def compute(dataset: CompanyDataset) -> dict[str, object]:
+    annuals = annual_series(dataset, limit=4)
+    if len(annuals) < 2:
+        return {
+            "status": "insufficient_data",
+            "model_status": "insufficient_data",
+            "explanation": status_explanation("insufficient_data"),
+            "reason": "Need at least two annual statements for ROIC trend",
+        }
+
+    risk_free = get_latest_risk_free_rate()
+    capital_cost_proxy = risk_free.rate_used + 0.045
+
+    trend: list[dict[str, object]] = []
+    roic_values: list[float] = []
+    reinvestment_values: list[float] = []
+    incremental_roic: float | None = None
+    proxy_used = False
+    missing_fields: set[str] = set()
+
+    for point in reversed(annuals):
+        data = point.data or {}
+        nopat = None
+        if data.get("operating_income") is not None:
+            tax_rate_proxy = safe_divide(data.get("income_tax_expense"), data.get("operating_income"))
+            effective_tax = 0.21 if tax_rate_proxy is None else max(0.0, min(0.40, float(tax_rate_proxy)))
+            nopat = float(data.get("operating_income")) * (1 - effective_tax)
+        else:
+            missing_fields.add("operating_income")
+
+        invested_capital = None
+        if data.get("stockholders_equity") is not None and (data.get("current_debt") is not None or data.get("long_term_debt") is not None):
+            invested_capital = float(data.get("stockholders_equity")) + float(data.get("current_debt") or 0) + float(data.get("long_term_debt") or 0)
+            cash = data.get("cash_and_short_term_investments")
+            if cash is not None:
+                invested_capital -= float(cash)
+        else:
+            missing_fields.update({"stockholders_equity", "current_debt", "long_term_debt"})
+
+        roic = safe_divide(nopat, invested_capital)
+        if roic is not None:
+            roic_values.append(float(roic))
+
+        reinvestment = safe_divide(data.get("capex"), data.get("operating_cash_flow"))
+        if reinvestment is not None:
+            reinvestment_values.append(float(reinvestment))
+        else:
+            proxy_used = True
+
+        trend.append(
+            {
+                "period_end": point.period_end.isoformat(),
+                "roic": json_number(roic),
+                "reinvestment_rate": json_number(reinvestment),
+                "spread_vs_capital_cost": json_number(None if roic is None else float(roic) - capital_cost_proxy),
+            }
+        )
+
+    if len(roic_values) >= 2:
+        roic_delta = roic_values[-1] - roic_values[0]
+        capital_base_delta = 1.0
+        if capital_base_delta != 0:
+            incremental_roic = roic_delta / capital_base_delta
+
+    can_directional = bool(roic_values)
+    status = status_from_data_quality(
+        missing_fields=sorted(missing_fields),
+        proxy_used=proxy_used,
+        can_compute_directional=can_directional,
+    )
+
+    return {
+        "status": status,
+        "model_status": status,
+        "explanation": status_explanation(status),
+        "confidence_summary": trust_summary(missing_fields=sorted(missing_fields), proxy_used=proxy_used),
+        "roic": json_number(roic_values[-1] if roic_values else None),
+        "incremental_roic": json_number(incremental_roic),
+        "reinvestment_rate": json_number(reinvestment_values[-1] if reinvestment_values else None),
+        "spread_vs_capital_cost_proxy": json_number(None if not roic_values else roic_values[-1] - capital_cost_proxy),
+        "capital_cost_proxy": json_number(capital_cost_proxy),
+        "trend": trend,
+        "assumption_provenance": {
+            "risk_free_rate": {
+                "source_name": risk_free.source_name,
+                "tenor": risk_free.tenor,
+                "observation_date": risk_free.observation_date.isoformat(),
+                "rate_used": json_number(risk_free.rate_used),
+            }
+        },
+        "missing_required_fields_last_3y": sorted(missing_fields),
+    }
