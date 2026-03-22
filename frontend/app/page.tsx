@@ -21,19 +21,34 @@ import type { CompanyPayload, CompanySearchResponse, RefreshState } from "@/lib/
 const HOW_IT_WORKS_STEPS = [
   {
     title: "Enter a company",
-    copy: "Type a stock ticker, company name, or CIK and open the company workspace or the valuation models page."
+    copy: "Search by ticker, company, or CIK, then open Workspace or Models."
   },
   {
-    title: "We fetch the source data",
-    copy: "The app checks SEC filings first, layers in saved market data, and refreshes anything missing or out of date."
+    title: "SEC-first data checks",
+    copy: "We validate the company and check cached SEC and market data freshness."
   },
   {
-    title: "The calculations run automatically",
-    copy: "Financial data is processed in the background and the available models are calculated for that ticker."
+    title: "Background refresh runs",
+    copy: "Missing or stale inputs are fetched and model calculations run automatically."
   },
   {
-    title: "Charts and tables fill in",
-    copy: "Once the refresh finishes, the financial views and model visuals update on their own."
+    title: "Pages populate",
+    copy: "Statements, filings, and model visuals fill in as jobs complete."
+  }
+];
+
+const HOME_VALUE_CUES = [
+  {
+    title: "SEC-first signal",
+    copy: "Filings and company fundamentals are prioritized before model output."
+  },
+  {
+    title: "Fast route handoff",
+    copy: "Move directly from search into Workspace or Valuation Models in one step."
+  },
+  {
+    title: "Transparent refresh",
+    copy: "Live status and job logs keep long-running refreshes visible."
   }
 ];
 
@@ -41,22 +56,22 @@ const WHERE_TO_LOOK = [
   {
     title: "Company Workspace",
     accentClass: "neon-green",
-    copy: "Use this page for statements, historical financial data, and company-level views."
+    copy: "Statements, history, and core company context."
   },
   {
     title: "Filings",
     accentClass: "neon-cyan",
-    copy: "Use this page for the SEC-first timeline of recent 10-K, 10-Q, 8-K, and related filing history."
+    copy: "SEC timeline for 10-K, 10-Q, 8-K, and related filings."
   },
   {
     title: "Valuation Models",
     accentClass: "neon-gold",
-    copy: "Use this page for DCF, DuPont, Piotroski, Altman Z, ratios, and the model charts."
+    copy: "DCF, quality, solvency, ratio, and scoring views."
   },
   {
     title: "Live Updates",
     accentClass: "neon-cyan",
-    copy: "Use this panel whenever a new ticker needs time to fetch data and finish the calculations."
+    copy: "Track SEC fetches and model jobs while data is loading."
   }
 ];
 
@@ -237,8 +252,8 @@ export default function HomePage() {
     <div className="home-shell">
       <h1 className="sr-only">Fundamental Terminal Home</h1>
       <Panel
-        title="Start Here"
-        subtitle="Type a ticker, company, or CIK. We pull SEC filings first, refresh anything stale, then fill in the charts, filing timeline, and model pages. This can take a little while."
+        title="Research Starts Here"
+        subtitle="Search once, then jump into Workspace or Models. SEC-first checks and refresh jobs run automatically when needed."
         className="home-hero"
       >
         <div className="home-hero-grid">
@@ -291,8 +306,8 @@ export default function HomePage() {
               </div>
             </label>
 
-            <div className="home-hero-note">
-              Type a ticker like `AAPL`, a company name like `Apple`, or a CIK like `CIK: 0000320193`. If the SEC cannot resolve it, the search box turns red.
+            <div className="home-hero-note home-search-note">
+              Use ticker, company, or CIK. If SEC resolution fails, the input turns red.
             </div>
 
             {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
@@ -316,36 +331,34 @@ export default function HomePage() {
           <div className="home-hero-side">
             {data ? <StatusPill state={data.refresh} /> : <span className="pill">Ready for a search</span>}
 
-            <div className="metric-grid">
-              <div className="metric-card">
-                <div className="metric-label">Ticker</div>
-                <div className="metric-value neon-cyan">{displayTicker}</div>
+            <div className="home-status-preview">
+              <div className="home-status-preview-header">
+                <span className="metric-label">Status Preview</span>
+                <span className="home-status-preview-ticker">{displayTicker}</span>
               </div>
-              <div className="metric-card">
-                <div className="metric-label">Match</div>
-                <div className="metric-value neon-green">{bestMatch?.ticker ?? (loading ? "Checking" : "Pending")}</div>
+              <div className="home-status-preview-name">
+                {bestMatch ? bestMatch.name : loading ? "Checking local matches" : "Awaiting a resolved company"}
               </div>
-              <div className="metric-card">
-                <div className="metric-label">Models</div>
-                <div className="metric-value neon-gold">{MODEL_GUIDE.length}</div>
+              <div className="home-status-preview-meta">
+                {bestMatch?.sector ? bestMatch.sector : "Sector will appear after match"}
               </div>
+              <div className="pill">{refreshLabel}</div>
             </div>
 
-            <div className="home-hero-note">
-              {bestMatch
-                ? `${bestMatch.name}${bestMatch.sector ? ` - ${bestMatch.sector}` : ""}`
-                : loading
-                  ? "Checking local matches and SEC availability."
-                  : "Use the dropdown suggestions or press Open to validate the ticker against the SEC."}
+            <div className="home-value-grid">
+              {HOME_VALUE_CUES.map((cue) => (
+                <div key={cue.title} className="home-value-card">
+                  <div className="grid-empty-kicker">{cue.title}</div>
+                  <div className="grid-empty-copy">{cue.copy}</div>
+                </div>
+              ))}
             </div>
-
-            <div className="pill">{refreshLabel}</div>
           </div>
         </div>
       </Panel>
 
       <div className="home-main-column">
-        <Panel title="What Happens Next" subtitle="The app handles the data fetch and model runs in the background">
+        <Panel title="What Happens Next" subtitle="Background jobs fetch data and populate pages while you continue exploring.">
           <div className="workflow-grid">
             {HOW_IT_WORKS_STEPS.map((step, index) => (
               <div key={step.title} className="workflow-card">
@@ -356,12 +369,10 @@ export default function HomePage() {
             ))}
           </div>
 
-          <div className="sparkline-note">
-            New tickers and stale data can take a little longer because SEC data, saved market data, and model calculations run before the charts update.
-          </div>
+          <div className="sparkline-note">First-time tickers may take longer while filing data, price history, and model inputs are refreshed.</div>
         </Panel>
 
-        <Panel title="Available Models" subtitle="Open Valuation Models to see these sections. You do not need to know the formulas.">
+        <Panel title="Available Models" subtitle="Open Valuation Models to review these modules.">
           <div className="model-guide-grid">
             {MODEL_GUIDE.map((model) => (
               <div key={model.key} className="model-guide-card">
@@ -371,29 +382,29 @@ export default function HomePage() {
             ))}
           </div>
 
-          <div className="sparkline-note">Every model section fills in automatically after the ticker finishes refreshing.</div>
+          <div className="sparkline-note">Model modules populate automatically after refresh completes.</div>
         </Panel>
       </div>
 
       <div className="home-rail">
-        <Panel title="Watchlist Snapshot" subtitle="Quick jump into your multi-company workspace">
+        <Panel title="Watchlist Snapshot" subtitle="Quick launch into your multi-company workspace.">
           <HomeWatchlistSnapshot />
         </Panel>
 
         <div id="saved-companies">
-          <Panel title="Your Saved Companies" subtitle="Watchlist entries and private notes stay only on this browser on this device.">
+          <Panel title="Saved Companies" subtitle="Private list and notes stored on this browser.">
             <HomeSavedCompaniesPanel />
           </Panel>
         </div>
 
         <Panel
           title="Live Updates"
-          subtitle={recentJob ? `Latest background refresh for ${recentJob.ticker}` : "Watch SEC fetches and background calculations when a ticker needs fresh data"}
+          subtitle={recentJob ? `Latest refresh: ${recentJob.ticker}` : "Monitor SEC fetches and model jobs for active refreshes."}
         >
           <StatusConsole entries={consoleEntries} connectionState={connectionState} />
         </Panel>
 
-        <Panel title="Trending" subtitle="Popular starting points">
+        <Panel title="Trending" subtitle="Popular starting points.">
           <div className="home-trending-list">
             {TRENDING_TICKERS.map((item, index) => (
               <button
@@ -412,14 +423,14 @@ export default function HomePage() {
           </div>
         </Panel>
 
-        <Panel title="Where To Look" subtitle="Use these pages once the ticker is loaded">
+        <Panel title="Where To Look" subtitle="Use these sections after a ticker resolves.">
           <div className="home-notes-stack">
             {WHERE_TO_LOOK.map((note) => (
               <div key={note.title} className="pill">
                 <span className={note.accentClass}>{note.title}</span> {note.copy}
               </div>
             ))}
-            <div className="sparkline-note">If a page is still filling in, keep this dashboard open and watch Live Updates until the refresh finishes.</div>
+            <div className="sparkline-note">If a page is still loading, keep this view open and monitor Live Updates.</div>
           </div>
         </Panel>
       </div>

@@ -8,7 +8,12 @@ import { AppChrome } from "@/components/layout/app-chrome";
 
 export const metadata: Metadata = {
   title: "Fundamental Terminal",
-  description: "SEC-first fundamental terminal built with Next.js"
+  description: "SEC-first fundamental terminal built with Next.js",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+    apple: "/logo.svg"
+  }
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

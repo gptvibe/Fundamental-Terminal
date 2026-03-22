@@ -4,6 +4,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
+import { AppLogo } from "@/components/layout/app-logo";
 import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplete-menu";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
@@ -39,6 +40,7 @@ export function AppChrome({ children }: AppChromeProps) {
   const toastTimeoutRef = useRef<number | null>(null);
   const { savedCompanyCount } = useLocalUserData();
   const workspace = useMemo(() => deriveWorkspace(pathname), [pathname]);
+  const isHomeRoute = pathname === "/";
   const isCompanyRoute = pathname?.startsWith("/company/") ?? false;
   const normalizedSearchText = useMemo(() => normalizeSearchText(searchText), [searchText]);
   const trimmedSearchText = normalizedSearchText.trim();
@@ -255,7 +257,7 @@ export function AppChrome({ children }: AppChromeProps) {
   }
 
   return (
-    <div className={`app-shell${isCompanyRoute ? " is-company-route" : ""}`}>
+    <div className={`app-shell${isCompanyRoute ? " is-company-route" : ""}${isHomeRoute ? " is-home-route" : ""}`}>
       {toast ? (
         <div className="app-toast-stack" aria-live="assertive" aria-atomic="true">
           <div className={`app-toast is-${toast.tone ?? "info"}`} role="alert">
@@ -264,10 +266,10 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
       ) : null}
 
-      <header className="app-topbar">
+      <header className={`app-topbar${isHomeRoute ? " is-home-route" : ""}`}>
         <button onClick={() => router.push("/")} className="app-brand" aria-label="Go to home">
           <span className="app-brand-mark" aria-hidden="true">
-            <span className="app-brand-mark-text">FT</span>
+            <AppLogo className="app-brand-logo" />
           </span>
           <span className="app-brand-copy">
             <span className="app-brand-kicker">Research Platform</span>
@@ -280,10 +282,12 @@ export function AppChrome({ children }: AppChromeProps) {
         </button>
 
         <div className="app-topbar-center">
-          <div className="app-workspace-pill" aria-label="Current workspace">
-            <span className="app-workspace-pill-label">Workspace</span>
-            <span className="app-workspace-pill-value">{workspace.label}</span>
-          </div>
+          {!isHomeRoute ? (
+            <div className="app-workspace-pill" aria-label="Current workspace">
+              <span className="app-workspace-pill-label">Workspace</span>
+              <span className="app-workspace-pill-value">{workspace.label}</span>
+            </div>
+          ) : null}
 
           <form
             ref={searchFormRef}
@@ -295,7 +299,7 @@ export function AppChrome({ children }: AppChromeProps) {
           >
             <div className="app-topbar-search-copy">
               <span className="app-topbar-search-label">
-                $TICKER or company
+                {isHomeRoute ? "$TICKER, company, or CIK" : "$TICKER or company"}
                 <span className="app-keycap">/</span>
                 to focus
               </span>
@@ -344,7 +348,7 @@ export function AppChrome({ children }: AppChromeProps) {
           </form>
         </div>
 
-        <div className="app-topbar-tools">
+        <div className={`app-topbar-tools${isHomeRoute ? " is-home-route" : ""}`}>
           <button type="button" className="app-device-shortcut" onClick={() => router.push("/watchlist")} title="Open your browser-only saved list">
             Saved
             <span className="app-device-shortcut-count">{savedCompanyCount}</span>

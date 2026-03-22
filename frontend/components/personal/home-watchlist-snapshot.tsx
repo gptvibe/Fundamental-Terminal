@@ -12,9 +12,7 @@ export function HomeWatchlistSnapshot() {
     <div className="watchlist-snapshot-card">
       <div className="grid-empty-kicker">Watchlist workspace</div>
       <div className="grid-empty-title">Track multiple companies in one place</div>
-      <div className="grid-empty-copy">
-        Open your local watchlist workspace to triage alerts, review latest activity, and jump directly into each company workspace.
-      </div>
+      <div className="grid-empty-copy">Open your local workspace to review activity and jump directly into each company page.</div>
 
       <div className="saved-companies-summary">
         <span className="pill">{watchlistCount} watchlist</span>

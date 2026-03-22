@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Fundamental Terminal logo">
+  <rect x="6" y="6" width="52" height="52" rx="14" fill="#141a20" stroke="#2f3c4b" stroke-width="2"/>
+  <path d="M18 43h8V23h20v-7H18z" fill="#ecf2f8"/>
+  <path d="M34 28h12v7H34z" fill="#ecf2f8"/>
+  <path d="M39 28h7v21h-7z" fill="#ecf2f8"/>
+  <circle cx="50" cy="16" r="3" fill="#f0b429"/>
+</svg>

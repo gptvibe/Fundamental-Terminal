@@ -64,9 +64,7 @@ export function HomeSavedCompaniesPanel() {
       <div className="saved-companies-empty">
         <div className="grid-empty-kicker">Saved on this device</div>
         <div className="grid-empty-title">Your list is empty for now</div>
-        <div className="grid-empty-copy">
-          Open any company page, then use <span className="neon-green">Save to My Watchlist</span> or write a quick note. Data stays only in this browser unless you export it as JSON.
-        </div>
+        <div className="grid-empty-copy">Open any company, save it to your watchlist, or add a private note. Everything stays on this browser unless you export JSON.</div>
         <div className="saved-companies-transfer-actions">
           <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
           <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
@@ -88,7 +86,7 @@ export function HomeSavedCompaniesPanel() {
 
   return (
     <div className="saved-companies-shell">
-      <div className="device-panel-privacy">Stored only on this browser on this device. Export JSON to back it up or move it.</div>
+    <div className="device-panel-privacy">Stored only on this browser. Export JSON for backup or transfer.</div>
 
       <div className="saved-companies-summary">
         <span className="pill">{savedCompanies.length} companies</span>
