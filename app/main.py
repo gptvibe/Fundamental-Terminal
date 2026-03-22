@@ -21,7 +21,7 @@ from app.config import settings
 from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
-from app.models import FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory
+from app.models import ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -31,6 +31,7 @@ from app.services import (
         get_company_filing_events,
         get_company_capital_markets_events,
     CompanyCacheSnapshot,
+    get_company_executive_compensation,
     get_company_financials,
     get_company_filing_insights,
     get_company_form144_cache_status,
@@ -42,6 +43,8 @@ from app.services import (
     get_company_models,
     get_company_price_cache_status,
     get_company_price_history,
+    get_company_proxy_cache_status,
+    get_company_proxy_statements,
     get_company_snapshot,
     get_company_snapshot_by_cik,
     queue_company_refresh,
@@ -50,7 +53,7 @@ from app.services import (
 )
 from app.services.cache_queries import get_company_beneficial_ownership_reports
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
-from app.services.proxy_parser import ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
+from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -597,6 +600,28 @@ class GovernanceSummaryPayload(BaseModel):
 class CompanyGovernanceSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: GovernanceSummaryPayload
+    refresh: RefreshState
+    error: str | None = None
+
+
+class ExecCompRowPayload(BaseModel):
+    executive_name: str
+    executive_title: str | None = None
+    fiscal_year: int | None = None
+    salary: float | None = None
+    bonus: float | None = None
+    stock_awards: float | None = None
+    option_awards: float | None = None
+    non_equity_incentive: float | None = None
+    other_compensation: float | None = None
+    total_compensation: float | None = None
+
+
+class CompanyExecutiveCompensationResponse(BaseModel):
+    company: CompanyPayload | None
+    rows: list[ExecCompRowPayload]
+    fiscal_years: list[int]
+    source: str  # "cached" | "live" | "none"
     refresh: RefreshState
     error: str | None = None
 
@@ -1434,6 +1459,97 @@ def company_governance_summary(
         return CompanyGovernanceSummaryResponse(
             company=_serialize_company(snapshot),
             summary=_empty_governance_summary(),
+            refresh=refresh,
+            error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/executive-compensation", response_model=CompanyExecutiveCompensationResponse)
+def company_executive_compensation(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyExecutiveCompensationResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyExecutiveCompensationResponse(
+            company=None,
+            rows=[],
+            fiscal_years=[],
+            source="none",
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+
+    # Prefer cached rows when available.
+    cached_rows = get_company_executive_compensation(session, snapshot.company.id)
+    if cached_rows:
+        serialized = [_serialize_exec_comp_row(row) for row in cached_rows]
+        fiscal_years = sorted(
+            {row.fiscal_year for row in cached_rows if row.fiscal_year is not None},
+            reverse=True,
+        )
+        return CompanyExecutiveCompensationResponse(
+            company=_serialize_company(snapshot),
+            rows=serialized,
+            fiscal_years=fiscal_years,
+            source="cached",
+            refresh=refresh,
+            error=None,
+        )
+
+    # Live fallback: parse latest DEF 14A.
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        proxy_filings = sorted(
+            [item for item in filing_index.values() if _is_governance_form(item.form) and item.form == "DEF 14A"],
+            key=lambda item: (item.filing_date or DateType.min),
+            reverse=True,
+        )
+        rows: list[ExecCompRowPayload] = []
+        fiscal_years: list[int] = []
+        for filing in proxy_filings[:3]:
+            if not filing.primary_document:
+                continue
+            try:
+                _, payload = client.get_filing_document_text(
+                    snapshot.company.cik, filing.accession_number, filing.primary_document
+                )
+                signals = parse_proxy_filing_signals(payload)
+            except Exception:
+                continue
+            if signals.named_exec_rows:
+                rows = [_serialize_exec_comp_row_from_signals(r) for r in signals.named_exec_rows]
+                fiscal_years = sorted(
+                    {r.fiscal_year for r in signals.named_exec_rows if r.fiscal_year is not None},
+                    reverse=True,
+                )
+                break
+
+        return CompanyExecutiveCompensationResponse(
+            company=_serialize_company(snapshot),
+            rows=rows,
+            fiscal_years=fiscal_years,
+            source="live" if rows else "none",
+            refresh=refresh,
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to load executive compensation for '%s'", snapshot.company.ticker
+        )
+        return CompanyExecutiveCompensationResponse(
+            company=_serialize_company(snapshot),
+            rows=[],
+            fiscal_years=[],
+            source="none",
             refresh=refresh,
             error="SEC submissions are temporarily unavailable. Try refreshing again shortly.",
         )
@@ -2698,6 +2814,38 @@ def _governance_summary_line(form_display: str, signals: ProxyFilingSignals) -> 
         segments.append("executive compensation table detected")
 
     return "; ".join(segments) + "."
+
+
+def _serialize_exec_comp_row(db_row: ExecutiveCompensation) -> ExecCompRowPayload:
+    """Serialize a cached ExecutiveCompensation ORM row to the API payload."""
+    return ExecCompRowPayload(
+        executive_name=db_row.executive_name,
+        executive_title=db_row.executive_title,
+        fiscal_year=db_row.fiscal_year,
+        salary=db_row.salary,
+        bonus=db_row.bonus,
+        stock_awards=db_row.stock_awards,
+        option_awards=db_row.option_awards,
+        non_equity_incentive=db_row.non_equity_incentive,
+        other_compensation=db_row.other_compensation,
+        total_compensation=db_row.total_compensation,
+    )
+
+
+def _serialize_exec_comp_row_from_signals(row: ExecCompRow) -> ExecCompRowPayload:
+    """Serialize an ExecCompRow dataclass (live-parsed) to the API payload."""
+    return ExecCompRowPayload(
+        executive_name=row.executive_name,
+        executive_title=row.executive_title,
+        fiscal_year=row.fiscal_year,
+        salary=row.salary,
+        bonus=row.bonus,
+        stock_awards=row.stock_awards,
+        option_awards=row.option_awards,
+        non_equity_incentive=row.non_equity_incentive,
+        other_compensation=row.other_compensation,
+        total_compensation=row.total_compensation,
+    )
 
 
 def _build_governance_summary(filings: list[GovernanceFilingPayload]) -> GovernanceSummaryPayload:

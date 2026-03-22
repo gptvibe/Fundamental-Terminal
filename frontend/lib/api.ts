@@ -3,6 +3,7 @@ import {
   CompanyAlertsResponse,
   CompanyCapitalRaisesResponse,
   CompanyCapitalMarketsSummaryResponse,
+  CompanyExecutiveCompensationResponse,
   CompanyFinancialsResponse,
   CompanyBeneficialOwnershipResponse,
   CompanyBeneficialOwnershipSummaryResponse,
@@ -79,6 +80,10 @@ export function getCompanyGovernance(ticker: string): Promise<CompanyGovernanceR
 
 export function getCompanyGovernanceSummary(ticker: string): Promise<CompanyGovernanceSummaryResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/governance/summary`);
+}
+
+export function getCompanyExecutiveCompensation(ticker: string): Promise<CompanyExecutiveCompensationResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/executive-compensation`);
 }
 
 export function getCompanyEvents(ticker: string): Promise<CompanyEventsResponse> {

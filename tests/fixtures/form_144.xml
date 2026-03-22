@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ownershipDocument>
+  <issuerInformation>
+    <issuerName>ACME Corporation</issuerName>
+    <issuerCIK>0000111111</issuerCIK>
+  </issuerInformation>
+  <filerInformation>
+    <filerName>JOHN Q. INSIDER</filerName>
+    <relationship>Director</relationship>
+  </filerInformation>
+  <securitiesToBeSold>
+    <issuerName>ACME Corporation</issuerName>
+    <titleOfSecurities>Common Stock</titleOfSecurities>
+    <dateOfSale>2026-04-15</dateOfSale>
+    <numberOfShares>50000</numberOfShares>
+    <aggregateMarketValue>9250000</aggregateMarketValue>
+    <approximateDateOfSale>April 15, 2026</approximateDateOfSale>
+    <sharesOwnedAfterSale>185000</sharesOwnedAfterSale>
+    <nameOfBroker>Goldman Sachs</nameOfBroker>
+  </securitiesToBeSold>
+</ownershipDocument>

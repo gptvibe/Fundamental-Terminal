@@ -31,7 +31,7 @@ The following phases are fully complete. Their build details have been removed f
 | 2 | Expand XBRL fundamentals and segment visuals (canonical metrics, segment operating income, geographic assets, segment mix chart) | ✓ Shipped |
 | 3 | Deepen insider and 13F analysis (signal quality, role breakdown, conviction heatmap, new/exited positions) | ✓ Shipped |
 | 4 | Beneficial ownership tracking — SC 13D/G, ownership-changes page, activist signals | ✓ Shipped |
-| 5 | Proxy and governance — DEF 14A, vote outcomes, board history (`governance/page.tsx`) | ✓ Shipped (executive-comp persistence deferred — see below) |
+| 5 | Proxy and governance — DEF 14A, vote outcomes, board history, executive pay table and trend chart (`governance/page.tsx`) | ✓ Shipped |
 | 6 | 8-K event intelligence — classification, filing-events table, events page, category chart | ✓ Shipped |
 | 7 | Dilution and capital-raise monitoring — S-1/S-3/424B/NT filings, capital-markets page | ✓ Shipped |
 | 8 | Unified activity feed and alerts — activity-feed and alerts routes, sec-feed page, Form 144 in feed | ✓ Shipped |
@@ -60,6 +60,7 @@ GET  /api/companies/{ticker}/beneficial-ownership
 GET  /api/companies/{ticker}/beneficial-ownership/summary
 GET  /api/companies/{ticker}/governance
 GET  /api/companies/{ticker}/governance/summary
+GET  /api/companies/{ticker}/executive-compensation
 GET  /api/companies/{ticker}/filing-events
 GET  /api/companies/{ticker}/filing-events/summary
 GET  /api/companies/{ticker}/capital-markets
@@ -72,63 +73,36 @@ GET  /api/companies/{ticker}/alerts
 
 - `/company/[ticker]` — overview with unified activity feed, priority alerts, and financial visuals
 - `/company/[ticker]/financials` — financial statements, charts, and segment breakdown
+- `/company/[ticker]/peers` — dedicated peer comparison workspace with focus ticker plus up to 4 peers
 - `/company/[ticker]/filings` — filing timeline, filing-event classification, and parser insights
 - `/company/[ticker]/insiders` — Form 4 analytics, signal quality, role breakdown, and Form 144 planned sales
 - `/company/[ticker]/ownership` — institutional holdings analytics, conviction heatmap, and turnover
 - `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) timeline, owner table, and activist signals
-- `/company/[ticker]/governance` — DEF 14A filings, vote outcomes, and board history
+- `/company/[ticker]/governance` — DEF 14A filings, vote outcomes, board history, executive pay table, and pay trend chart
 - `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
 - `/company/[ticker]/events` — 8-K events classified by item code with category chart
 - `/company/[ticker]/sec-feed` — unified SEC activity timeline and prioritized alerts
 - `/company/[ticker]/models` — DCF, health score, and scenario analysis
 - `/company/[ticker]/stakes` — redirects to `/company/[ticker]/ownership-changes`
 
+### Shipped personal workflow
+
+- Browser-local watchlist and private notes are available without auth.
+- Local data can be exported/imported as `LocalUserData` JSON and cleared entirely from the saved-companies workflow.
+
 ---
 
 ## Remaining Work
 
-### Deferred: Structured Executive Compensation Persistence
+No user-visible SEC dataset families from Phases 1-8 remain open.
 
-**Blocked on:** fixture corpus for representative DEF 14A formats.
+Financial coverage note:
 
-The governance page detects the presence of an executive compensation table (`executive_comp_table_detected` flag) but does not parse or persist structured row-level compensation data.
+- Capital allocation is covered by the shipped cash-flow waterfall and share-dilution visuals.
+- Balance-sheet risk is covered by the shipped balance-sheet, liquidity/capital, and financial-quality panels.
+- Margin and financial-summary coverage is shipped on `/company/[ticker]/financials`.
 
-Work needed when unblocked:
-
-- Add migrations for `proxy_statements`, `executive_compensation`, and `proxy_vote_results` tables.
-- Add ORM models under `app/models/`.
-- Extend `parse_proxy_filing_signals` to extract named-executive rows into structured data.
-- Add `GET /api/companies/{ticker}/executive-compensation` endpoint.
-- Add executive pay table and pay trend chart to `governance/page.tsx`.
-
-### Deferred: SEC Fixture Corpus
-
-A reusable directory of representative SEC filings is needed to harden parsers before broadening ingestion scope.
-
-Fixtures needed:
-
-- 10-K, 10-Q
-- 8-K (multiple item-code families)
-- Form 4
-- 13F information table
-- SC 13D, SC 13G
-- DEF 14A (multiple layouts for executive compensation extraction)
-- S-3, 424B
-- NT 10-K / NT 10-Q
-- Form 144
-
-Until this lands, avoid broadening parser scope into edge-case filing formats.
-
-### Partially Complete: Segment And Fundamentals Visuals
-
-These frontend components from Phase 2 are still pending:
-
-- `frontend/components/charts/financial-margin-trend-chart.tsx`
-- `frontend/components/charts/capital-allocation-chart.tsx`
-- `frontend/components/charts/balance-sheet-risk-chart.tsx`
-- `frontend/components/company/financial-quality-summary.tsx`
-
-The segment mix chart, cash flow waterfall, liquidity chart, share dilution tracker, and price-fundamentals module are all shipped.
+Future roadmap work should prioritize discoverability and workflow durability over adding another ingestion family.
 
 ---
 

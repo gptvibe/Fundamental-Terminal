@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { GovernanceFilingChart } from "@/components/charts/governance-filing-chart";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -9,9 +10,15 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyGovernance, getCompanyGovernanceSummary } from "@/lib/api";
-import { formatDate } from "@/lib/format";
-import type { CompanyGovernanceResponse, CompanyGovernanceSummaryResponse } from "@/lib/types";
+import { getCompanyExecutiveCompensation, getCompanyGovernance, getCompanyGovernanceSummary } from "@/lib/api";
+import { formatCompactNumber, formatDate } from "@/lib/format";
+import { RECHARTS_TOOLTIP_PROPS, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
+import type {
+  CompanyExecutiveCompensationResponse,
+  CompanyGovernanceResponse,
+  CompanyGovernanceSummaryResponse,
+  ExecCompRowPayload,
+} from "@/lib/types";
 
 export default function CompanyGovernancePage() {
   const params = useParams<{ ticker: string }>();
@@ -28,6 +35,7 @@ export default function CompanyGovernancePage() {
   } = useCompanyWorkspace(ticker);
   const [data, setData] = useState<CompanyGovernanceResponse | null>(null);
   const [summaryData, setSummaryData] = useState<CompanyGovernanceSummaryResponse | null>(null);
+  const [execCompData, setExecCompData] = useState<CompanyExecutiveCompensationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,13 +46,15 @@ export default function CompanyGovernancePage() {
       try {
         setLoading(true);
         setError(null);
-        const [response, summary] = await Promise.all([
+        const [response, summary, execComp] = await Promise.all([
           getCompanyGovernance(ticker),
-          getCompanyGovernanceSummary(ticker)
+          getCompanyGovernanceSummary(ticker),
+          getCompanyExecutiveCompensation(ticker),
         ]);
         if (!cancelled) {
           setData(response);
           setSummaryData(summary);
+          setExecCompData(execComp);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -70,6 +80,24 @@ export default function CompanyGovernancePage() {
   const latestFilingDate = filings[0]?.filing_date ?? filings[0]?.report_date ?? null;
   const definitiveCount = filings.filter((filing) => filing.form === "DEF 14A").length;
   const additionalCount = filings.length - definitiveCount;
+
+  // Exec comp derived state
+  const execRows = useMemo(() => execCompData?.rows ?? [], [execCompData]);
+  const execFiscalYears = useMemo(() => execCompData?.fiscal_years ?? [], [execCompData]);
+
+  // Pay trend data: for each fiscal year, pick the highest total_compensation in the dataset
+  const payTrendData = useMemo(() => {
+    if (!execRows.length) return [];
+    const byYear = new Map<number, number>();
+    for (const row of execRows) {
+      if (row.fiscal_year == null || row.total_compensation == null) continue;
+      const prev = byYear.get(row.fiscal_year) ?? 0;
+      if (row.total_compensation > prev) byYear.set(row.fiscal_year, row.total_compensation);
+    }
+    return Array.from(byYear.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([year, total]) => ({ year, total }));
+  }, [execRows]);
 
   // Proxy filings sorted newest-first, used for derived panels
   const definitiveFilings = useMemo(
@@ -196,8 +224,86 @@ export default function CompanyGovernancePage() {
         </Panel>
       ) : null}
 
-      <Panel title="Proxy Timeline" subtitle="Recent governance-related filings with direct SEC document links">
-        {error || data?.error ? (
+      {/* Executive Compensation Table */}
+      <Panel
+        title="Executive Compensation"
+        subtitle={
+          execFiscalYears.length
+            ? `Named-executive pay — fiscal year${execFiscalYears.length > 1 ? "s" : ""} ${execFiscalYears.join(", ")}`
+            : "Named-executive pay from Summary Compensation Table"
+        }
+      >
+        {loading || workspaceLoading ? (
+          <div className="text-muted">Loading executive compensation data...</div>
+        ) : execRows.length ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                  {(["Executive", "Title", "Year", "Salary", "Bonus", "Stock Awards", "Option Awards", "Non-Equity", "Other", "Total"] as const).map((h) => (
+                    <th key={h} style={{ padding: "6px 10px", textAlign: h === "Executive" || h === "Title" ? "left" : "right", color: "var(--text-muted)", fontWeight: 500, whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {execRows.map((row, i) => (
+                  <tr key={`${row.executive_name}-${row.fiscal_year ?? i}`} style={{ borderBottom: "1px solid var(--border-subtle, var(--border))" }}>
+                    <td style={{ padding: "7px 10px", color: "var(--text)", fontWeight: 500, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.executive_name}</td>
+                    <td style={{ padding: "7px 10px", color: "var(--text-muted)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.executive_title ?? "—"}</td>
+                    <td style={{ padding: "7px 10px", color: "var(--text)", textAlign: "right" }}>{row.fiscal_year ?? "—"}</td>
+                    <CompCell value={row.salary} />
+                    <CompCell value={row.bonus} />
+                    <CompCell value={row.stock_awards} />
+                    <CompCell value={row.option_awards} />
+                    <CompCell value={row.non_equity_incentive} />
+                    <CompCell value={row.other_compensation} />
+                    <CompCell value={row.total_compensation} highlight />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {execCompData?.source === "live" && (
+              <div className="text-muted" style={{ fontSize: 12, paddingTop: 8 }}>
+                Live-parsed from latest DEF 14A · not yet persisted
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 140 }}>
+            <div className="grid-empty-kicker">Compensation</div>
+            <div className="grid-empty-title">No named-executive pay rows extracted yet</div>
+            <div className="grid-empty-copy">Executive pay rows will appear here once a DEF 14A with a Summary Compensation Table has been parsed.</div>
+          </div>
+        )}
+      </Panel>
+
+      {/* Pay Trend Chart */}
+      {payTrendData.length >= 2 && (
+        <Panel
+          title="Pay Trend"
+          subtitle="Highest reported total compensation per fiscal year across all named executives"
+        >
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={payTrendData} margin={{ top: 8, right: 16, left: 8, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
+              <XAxis dataKey="year" tick={chartTick()} axisLine={false} tickLine={false} />
+              <YAxis
+                tick={chartTick()}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={(v: number) => formatCompactNumber(v) ?? ""}
+              />
+              <Tooltip
+                {...RECHARTS_TOOLTIP_PROPS}
+                formatter={(value: number) => [`$${Math.round(value).toLocaleString()}`, "Peak Total"]}
+              />
+              <Bar dataKey="total" fill="#00FF41" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
+
+      <Panel title="Proxy Timeline" subtitle="Recent governance-related filings with direct SEC document links">        {error || data?.error ? (
           <div className="text-muted">{error ?? data?.error}</div>
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Loading governance activity...</div>
@@ -270,5 +376,13 @@ function Metric({ label, value }: { label: string; value: string | null }) {
       <div className="metric-label">{label}</div>
       <div className="metric-value">{value ?? "?"}</div>
     </div>
+  );
+}
+
+function CompCell({ value, highlight }: { value: number | null; highlight?: boolean }) {
+  return (
+    <td style={{ padding: "7px 10px", textAlign: "right", color: highlight ? "var(--text)" : "var(--text-muted)", fontWeight: highlight ? 600 : 400 }}>
+      {value != null ? `$${Math.round(value).toLocaleString()}` : "—"}
+    </td>
   );
 }

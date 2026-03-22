@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ownershipDocument>
+  <issuer>
+    <issuerCik>0000789019</issuerCik>
+    <issuerName>Microsoft Corporation</issuerName>
+    <issuerTradingSymbol>MSFT</issuerTradingSymbol>
+  </issuer>
+  <reportingOwner>
+    <reportingOwnerId>
+      <rptOwnerCik>0009876543</rptOwnerCik>
+      <rptOwnerName>JASSY ANDREW R</rptOwnerName>
+    </reportingOwnerId>
+    <reportingOwnerRelationship>
+      <isDirector>true</isDirector>
+      <isOfficer>false</isOfficer>
+      <isTenPercentOwner>false</isTenPercentOwner>
+      <isOther>false</isOther>
+    </reportingOwnerRelationship>
+  </reportingOwner>
+  <derivativeTable>
+    <derivativeTransaction>
+      <securityTitle>
+        <value>Employee Stock Option (right to buy)</value>
+      </securityTitle>
+      <conversionOrExercisePrice>
+        <value>142.00</value>
+      </conversionOrExercisePrice>
+      <transactionDate>
+        <value>2025-02-18</value>
+      </transactionDate>
+      <transactionCoding>
+        <transactionFormType>4</transactionFormType>
+        <transactionCode>M</transactionCode>
+        <equitySwapInvolved>0</equitySwapInvolved>
+      </transactionCoding>
+      <transactionAmounts>
+        <transactionShares>
+          <value>50000</value>
+        </transactionShares>
+        <transactionPricePerShare>
+          <value>142.00</value>
+        </transactionPricePerShare>
+        <transactionAcquiredDisposedCode>
+          <value>A</value>
+        </transactionAcquiredDisposedCode>
+      </transactionAmounts>
+      <exerciseDate>
+        <value>2027-01-01</value>
+      </exerciseDate>
+      <expirationDate>
+        <value>2032-02-18</value>
+      </expirationDate>
+      <underlyingSecurity>
+        <underlyingSecurityTitle>
+          <value>Common Stock</value>
+        </underlyingSecurityTitle>
+        <underlyingSecurityShares>
+          <value>50000</value>
+        </underlyingSecurityShares>
+      </underlyingSecurity>
+      <postTransactionAmounts>
+        <sharesOwnedFollowingTransaction>
+          <value>150000</value>
+        </sharesOwnedFollowingTransaction>
+      </postTransactionAmounts>
+      <ownershipNature>
+        <directOrIndirectOwnership>
+          <value>D</value>
+        </directOrIndirectOwnership>
+      </ownershipNature>
+    </derivativeTransaction>
+  </derivativeTable>
+</ownershipDocument>

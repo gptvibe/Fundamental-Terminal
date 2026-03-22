@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { useLocalUserData } from "@/hooks/use-local-user-data";
@@ -8,7 +9,49 @@ import { formatDate } from "@/lib/format";
 
 export function HomeSavedCompaniesPanel() {
   const router = useRouter();
-  const { savedCompanies, watchlistCount, noteCount, removeFromWatchlist, clearNote } = useLocalUserData();
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const { savedCompanies, watchlistCount, noteCount, removeFromWatchlist, clearNote, exportData, importData, clearAll } = useLocalUserData();
+
+  function handleExport() {
+    try {
+      const payload = exportData();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "fundamental-terminal-local-user-data.json";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      showAppToast({ message: "Saved companies exported as JSON.", tone: "info" });
+    } catch (error) {
+      showAppToast({ message: error instanceof Error ? error.message : "Unable to export saved companies.", tone: "danger" });
+    }
+  }
+
+  async function handleImport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const imported = importData(text);
+      showAppToast({
+        message: `Imported ${imported.watchlist.length.toLocaleString()} watchlist items and ${Object.keys(imported.notes).length.toLocaleString()} notes.`,
+        tone: "info"
+      });
+    } catch (error) {
+      showAppToast({ message: error instanceof Error ? error.message : "Unable to import JSON file.", tone: "danger" });
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  function handleClearAll() {
+    clearAll();
+    showAppToast({ message: "Cleared all saved companies and notes from this browser.", tone: "info" });
+  }
 
   if (!savedCompanies.length) {
     return (
@@ -16,21 +59,48 @@ export function HomeSavedCompaniesPanel() {
         <div className="grid-empty-kicker">Saved on this device</div>
         <div className="grid-empty-title">Your list is empty for now</div>
         <div className="grid-empty-copy">
-          Open any company page, then use <span className="neon-green">Save to My Watchlist</span> or write a quick note. Everything stays on this browser and does not need an account.
+          Open any company page, then use <span className="neon-green">Save to My Watchlist</span> or write a quick note. Data stays only in this browser unless you export it as JSON.
         </div>
+        <div className="saved-companies-transfer-actions">
+          <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
+          <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
+        </div>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept="application/json,.json"
+          onChange={handleImport}
+          style={{ display: "none" }}
+          aria-label="Import saved companies JSON"
+        />
       </div>
     );
   }
 
   return (
     <div className="saved-companies-shell">
-      <div className="device-panel-privacy">Stored only on this browser on this device</div>
+      <div className="device-panel-privacy">Stored only on this browser on this device. Export JSON to back it up or move it.</div>
 
       <div className="saved-companies-summary">
         <span className="pill">{savedCompanies.length} companies</span>
         <span className="pill">{watchlistCount} watchlist saves</span>
         <span className="pill">{noteCount} private notes</span>
       </div>
+
+      <div className="saved-companies-transfer-actions">
+        <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
+        <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
+        <button type="button" className="ticker-button" onClick={handleClearAll}>Clear All</button>
+      </div>
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json,.json"
+        onChange={handleImport}
+        style={{ display: "none" }}
+        aria-label="Import saved companies JSON"
+      />
 
       <div className="saved-companies-list">
         {savedCompanies.map((item) => (

@@ -116,16 +116,16 @@ Acceptance criteria:
 
 ### Frontend components
 
-- [ ] Add a margin trend chart component under `frontend/components/charts/`.
-- [ ] Add a capital allocation chart component under `frontend/components/charts/`.
-- [ ] Add a balance-sheet risk chart component under `frontend/components/charts/`.
+- [x] Add a margin trend chart component under `frontend/components/charts/` (shipped as `margin-trend-chart.tsx`).
+- [x] Add a capital allocation chart component under `frontend/components/charts/` (covered by `cash-flow-waterfall-chart.tsx` and `share-dilution-tracker-chart.tsx`).
+- [x] Add a balance-sheet risk chart component under `frontend/components/charts/` (covered by `balance-sheet-chart.tsx` and `liquidity-capital-chart.tsx`).
 - [x] Add a segment mix chart component under `frontend/components/charts/`.
-- [ ] Add a financial quality summary component under `frontend/components/company/`.
+- [x] Add a financial quality summary component under `frontend/components/company/`.
 
 ### Frontend page integration
 
 - [x] Extend `frontend/app/company/[ticker]/page.tsx` with new financial summary visuals.
-- [ ] Decide whether to add a dedicated financials page or keep visual expansion on the overview page.
+- [x] Decide whether to add a dedicated financials page or keep visual expansion on the overview page (dedicated page shipped at `frontend/app/company/[ticker]/financials/page.tsx`).
 
 Acceptance criteria:
 
@@ -244,21 +244,21 @@ Definition of done:
 ### Backend scaffolding
 
 - [x] Create `app/services/proxy_parser.py` (live-derived via `parse_proxy_filing_signals`).
-- [ ] Add migrations for persistent `proxy_statements`, `executive_compensation`, `proxy_vote_results` tables (deferred — currently live-derived, not cached).
-- [ ] Add ORM models under `app/models/` for proxy persistence (deferred).
+- [x] Add migrations for persistent `proxy_statements`, `executive_compensation`, `proxy_vote_results` tables.
+- [x] Add ORM models under `app/models/` for proxy persistence.
 
 ### SEC ingestion
 
 - [x] Detect and ingest `DEF 14A` filings.
 - [x] Parse meeting date and source URL.
 - [x] Parse high-level vote outcomes when available.
-- [ ] Parse named executive compensation table into structured rows (deferred — `executive_comp_table_detected` flag only).
+- [x] Parse named executive compensation table into structured rows (via `_extract_exec_comp_rows` in `proxy_parser.py`).
 
 ### API contracts
 
 - [x] Add `GET /api/companies/{ticker}/governance`.
 - [x] Add `GET /api/companies/{ticker}/governance/summary`.
-- [ ] Add `GET /api/companies/{ticker}/executive-compensation` (deferred).
+- [x] Add `GET /api/companies/{ticker}/executive-compensation`.
 - [x] Add matching frontend API and types.
 
 ### Frontend visualization
@@ -266,8 +266,8 @@ Definition of done:
 - [x] Add `frontend/app/company/[ticker]/governance/page.tsx`.
 - [x] Add board & meeting history table.
 - [x] Add vote outcomes panel with visual for/against bars.
-- [ ] Add executive pay table (deferred — awaiting structured ingestion).
-- [ ] Add pay trend chart (deferred).
+- [x] Add executive pay table.
+- [x] Add pay trend chart.
 
 Acceptance criteria:
 
@@ -417,9 +417,9 @@ Definition of done:
 
 ### Data quality and fixtures
 
-- [ ] Create a reusable SEC fixture directory for representative filings.
-- [ ] Add fixtures for 10-K, 10-Q, 8-K, Form 4, 13F, 13D, 13G, DEF 14A, S-3, and NT filings.
-- [ ] Add parser test coverage before broadening production ingestion.
+- [x] Create a reusable SEC fixture directory for representative filings (see `tests/fixtures/`).
+- [x] Add fixtures for 8-K, Form 4, 13F, 13D/G, DEF 14A, S-3, Form 144, and NT filings (see `tests/fixtures/README.md`).
+- [x] Add parser test coverage before broadening production ingestion (fixture-backed tests in `tests/test_proxy_parser.py`).
 
 ### Refresh and cache wiring
 

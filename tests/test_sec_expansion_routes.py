@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.proxy_parser import ExecCompRow
+
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -191,6 +193,175 @@ def test_capital_markets_summary_endpoint_returns_aggregates(monkeypatch):
     summary = payload["summary"]
     assert summary["total_filings"] >= 1
     assert summary["late_filer_notices"] >= 1
+
+
+def test_peers_route_returns_default_selected_tickers(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    observed: dict[str, list[str] | None] = {"selected": None}
+
+    def _fake_build_peer_comparison(_session, ticker: str, selected_tickers: list[str] | None = None):
+        observed["selected"] = selected_tickers
+        company_snapshot = _snapshot(ticker=ticker).company
+        company = SimpleNamespace(**company_snapshot.__dict__, last_checked=datetime.now(timezone.utc))
+        return {
+            "company": company,
+            "peer_basis": "Cached peer universe",
+            "available_companies": [
+                {
+                    "ticker": "AAPL",
+                    "name": "Apple Inc.",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Consumer Electronics",
+                    "last_checked": datetime.now(timezone.utc),
+                    "cache_state": "fresh",
+                    "is_focus": True,
+                },
+                {
+                    "ticker": "MSFT",
+                    "name": "Microsoft",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Software",
+                    "last_checked": datetime.now(timezone.utc),
+                    "cache_state": "fresh",
+                    "is_focus": False,
+                },
+            ],
+            "selected_tickers": ["MSFT"],
+            "peers": [
+                {
+                    "ticker": "AAPL",
+                    "name": "Apple Inc.",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Consumer Electronics",
+                    "is_focus": True,
+                    "cache_state": "fresh",
+                    "last_checked": datetime.now(timezone.utc),
+                    "period_end": date(2025, 12, 31),
+                    "price_date": date(2026, 3, 21),
+                    "latest_price": 190.0,
+                    "pe": 28.0,
+                    "ev_to_ebit": 20.0,
+                    "price_to_free_cash_flow": 30.0,
+                    "roe": 0.24,
+                    "revenue_growth": 0.08,
+                    "piotroski_score": 8,
+                    "altman_z_score": 4.0,
+                    "revenue_history": [],
+                }
+            ],
+            "notes": {"ev_to_ebit": "proxy", "price_to_free_cash_flow": "proxy", "piotroski": "score"},
+        }
+
+    monkeypatch.setattr(main_module, "build_peer_comparison", _fake_build_peer_comparison)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/peers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert observed["selected"] == []
+    assert payload["selected_tickers"] == ["MSFT"]
+    assert payload["peers"]
+
+
+def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    observed: dict[str, list[str] | None] = {"selected": None}
+
+    def _fake_build_peer_comparison(_session, ticker: str, selected_tickers: list[str] | None = None):
+        observed["selected"] = selected_tickers
+        company_snapshot = _snapshot(ticker=ticker).company
+        company = SimpleNamespace(**company_snapshot.__dict__, last_checked=datetime.now(timezone.utc))
+        return {
+            "company": company,
+            "peer_basis": "Cached peer universe",
+            "available_companies": [
+                {
+                    "ticker": "AAPL",
+                    "name": "Apple Inc.",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Consumer Electronics",
+                    "last_checked": datetime.now(timezone.utc),
+                    "cache_state": "fresh",
+                    "is_focus": True,
+                },
+                {
+                    "ticker": "MSFT",
+                    "name": "Microsoft",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Software",
+                    "last_checked": datetime.now(timezone.utc),
+                    "cache_state": "fresh",
+                    "is_focus": False,
+                },
+                {
+                    "ticker": "GOOG",
+                    "name": "Alphabet",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Internet",
+                    "last_checked": datetime.now(timezone.utc),
+                    "cache_state": "fresh",
+                    "is_focus": False,
+                },
+            ],
+            "selected_tickers": ["MSFT", "GOOG"],
+            "peers": [
+                {
+                    "ticker": "AAPL",
+                    "name": "Apple Inc.",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Consumer Electronics",
+                    "is_focus": True,
+                    "cache_state": "fresh",
+                    "last_checked": datetime.now(timezone.utc),
+                    "period_end": date(2025, 12, 31),
+                    "price_date": date(2026, 3, 21),
+                    "latest_price": 190.0,
+                    "pe": 28.0,
+                    "ev_to_ebit": 20.0,
+                    "price_to_free_cash_flow": 30.0,
+                    "roe": 0.24,
+                    "revenue_growth": 0.08,
+                    "piotroski_score": 8,
+                    "altman_z_score": 4.0,
+                    "revenue_history": [],
+                }
+            ],
+            "notes": {"ev_to_ebit": "proxy", "price_to_free_cash_flow": "proxy", "piotroski": "score"},
+        }
+
+    monkeypatch.setattr(main_module, "build_peer_comparison", _fake_build_peer_comparison)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/peers?peers=msft,goog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert observed["selected"] == ["MSFT", "GOOG"]
+    assert payload["selected_tickers"] == ["MSFT", "GOOG"]
 
 
 def test_governance_route_filters_proxy_forms(monkeypatch):
@@ -1144,3 +1315,132 @@ def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
     titles = {item["title"] for item in payload["alerts"]}
     assert "Large beneficial ownership stake reported" in titles
     assert "Late filer notice" in titles
+
+
+    # ---------------------------------------------------------------------------
+    # Executive-compensation endpoint tests
+    # ---------------------------------------------------------------------------
+
+    def test_executive_compensation_route_returns_none_source_when_no_cache_and_no_proxy(monkeypatch):
+        """With empty cache and no DEF 14A filings the endpoint returns source='none'."""
+        _install_common_overrides(monkeypatch, {})
+        monkeypatch.setattr(main_module, "get_company_executive_compensation", lambda *_args, **_kwargs: [])
+
+        client = TestClient(app)
+        response = client.get("/api/companies/AAPL/executive-compensation")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["rows"] == []
+        assert payload["fiscal_years"] == []
+        assert payload["source"] == "none"
+        assert payload["error"] is None
+
+
+    def test_executive_compensation_route_returns_cached_rows(monkeypatch):
+        """When the DB has executive_compensation rows they are returned with source='cached'."""
+        _install_common_overrides(monkeypatch, {})
+        monkeypatch.setattr(
+            main_module,
+            "get_company_executive_compensation",
+            lambda *_args, **_kwargs: [
+                SimpleNamespace(
+                    executive_name="Jane Smith",
+                    executive_title="Chief Executive Officer",
+                    fiscal_year=2025,
+                    salary=1_500_000.0,
+                    bonus=500_000.0,
+                    stock_awards=8_000_000.0,
+                    option_awards=None,
+                    non_equity_incentive=2_000_000.0,
+                    other_compensation=85_000.0,
+                    total_compensation=12_085_000.0,
+                ),
+                SimpleNamespace(
+                    executive_name="Bob Lee",
+                    executive_title="Chief Financial Officer",
+                    fiscal_year=2025,
+                    salary=900_000.0,
+                    bonus=250_000.0,
+                    stock_awards=3_500_000.0,
+                    option_awards=None,
+                    non_equity_incentive=800_000.0,
+                    other_compensation=42_000.0,
+                    total_compensation=5_492_000.0,
+                ),
+            ],
+        )
+
+        client = TestClient(app)
+        response = client.get("/api/companies/AAPL/executive-compensation")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source"] == "cached"
+        assert payload["error"] is None
+        assert len(payload["rows"]) == 2
+        assert payload["fiscal_years"] == [2025]
+
+        ceo = next(r for r in payload["rows"] if r["executive_name"] == "Jane Smith")
+        assert ceo["executive_title"] == "Chief Executive Officer"
+        assert ceo["salary"] == 1_500_000.0
+        assert ceo["total_compensation"] == 12_085_000.0
+        assert ceo["option_awards"] is None
+
+
+    def test_executive_compensation_route_live_fallback_from_parsed_proxy(monkeypatch):
+        """When cache is empty but a DEF 14A exists the endpoint falls back to live parsing."""
+        filings = {
+            "0099": FilingMetadata(
+                accession_number="0099",
+                form="DEF 14A",
+                filing_date=date(2025, 3, 6),
+                report_date=date(2025, 3, 6),
+                primary_document="def14a.htm",
+                primary_doc_description="Definitive proxy statement",
+                items=None,
+            )
+        }
+        _install_common_overrides(monkeypatch, filings)
+        monkeypatch.setattr(main_module, "get_company_executive_compensation", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(
+            main_module,
+            "parse_proxy_filing_signals",
+            lambda *_args, **_kwargs: main_module.ProxyFilingSignals(
+                meeting_date=date(2025, 5, 22),
+                executive_comp_table_detected=True,
+                vote_item_count=3,
+                board_nominee_count=9,
+                key_amounts=(1_250_000.0,),
+                vote_outcomes=(),
+                named_exec_rows=(
+                    ExecCompRow(
+                        executive_name="Alice Wang",
+                        executive_title="Chief Executive Officer",
+                        fiscal_year=2024,
+                        salary=1_400_000.0,
+                        bonus=400_000.0,
+                        stock_awards=7_000_000.0,
+                        option_awards=None,
+                        non_equity_incentive=1_800_000.0,
+                        other_compensation=75_000.0,
+                        total_compensation=10_675_000.0,
+                    ),
+                ),
+            ),
+        )
+
+        client = TestClient(app)
+        response = client.get("/api/companies/AAPL/executive-compensation")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["source"] == "live"
+        assert payload["error"] is None
+        assert len(payload["rows"]) == 1
+        assert payload["fiscal_years"] == [2024]
+
+        row = payload["rows"][0]
+        assert row["executive_name"] == "Alice Wang"
+        assert row["salary"] == 1_400_000.0
+        assert row["total_compensation"] == 10_675_000.0

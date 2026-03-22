@@ -11,6 +11,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.capital_markets_event import CapitalMarketsEvent
+    from app.models.executive_compensation import ExecutiveCompensation
     from app.models.filing_event import FilingEvent
     from app.models.financial_statement import FinancialStatement
     from app.models.form144_filing import Form144Filing
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from app.models.institutional_holding import InstitutionalHolding
     from app.models.model_run import ModelRun
     from app.models.price_history import PriceHistory
+    from app.models.proxy_statement import ProxyStatement
+    from app.models.proxy_vote_result import ProxyVoteResult
 
 
 class Company(Base):
@@ -41,6 +44,7 @@ class Company(Base):
     filing_events_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     capital_markets_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     form144_filings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    proxy_statements_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
         back_populates="company",
@@ -83,6 +87,21 @@ class Company(Base):
         passive_deletes=True,
     )
     form144_filings: Mapped[list["Form144Filing"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    proxy_statements: Mapped[list["ProxyStatement"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    exec_comp_rows: Mapped[list["ExecutiveCompensation"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    proxy_vote_results: Mapped[list["ProxyVoteResult"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

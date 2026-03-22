@@ -209,6 +209,28 @@ export function updateLocalUserData(updater: (current: LocalUserData) => LocalUs
   return nextValue;
 }
 
+export function exportLocalUserData(): LocalUserData {
+  return normalizeLocalUserData(readLocalUserData());
+}
+
+export function importLocalUserData(rawJson: string): LocalUserData {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    throw new Error("Import file is not valid JSON.");
+  }
+
+  const normalized = normalizeLocalUserData(parsed);
+  writeLocalUserData(normalized);
+  return normalized;
+}
+
+export function clearAllLocalUserData(): LocalUserData {
+  writeLocalUserData(EMPTY_USER_DATA);
+  return EMPTY_USER_DATA;
+}
+
 export function toggleWatchlistCompany(snapshot: LocalCompanySnapshot): { saved: boolean; data: LocalUserData } {
   const normalizedSnapshot = normalizeCompanySnapshot(snapshot);
   let saved = false;

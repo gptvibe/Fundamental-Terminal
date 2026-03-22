@@ -78,8 +78,8 @@ export function CompanyDevicePanel({ ticker, companyName = null, sector = null }
 
       <div className="device-panel-copy">
         <div className="device-panel-title">Keep your own shortlist here</div>
-        <div className="device-panel-subtitle">No sign-in needed. Your watchlist and notes are stored only on this browser on this device.</div>
-        <div className="device-panel-privacy">Private to this browser only</div>
+        <div className="device-panel-subtitle">No sign-in needed. Your watchlist and notes are saved only in this browser on this device.</div>
+        <div className="device-panel-privacy">Browser-only storage: use Export JSON on the home page to back up or move this data.</div>
       </div>
 
       <button

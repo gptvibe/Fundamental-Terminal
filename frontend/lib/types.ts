@@ -378,6 +378,28 @@ export interface CompanyGovernanceSummaryResponse {
   error: string | null;
 }
 
+export interface ExecCompRowPayload {
+  executive_name: string;
+  executive_title: string | null;
+  fiscal_year: number | null;
+  salary: number | null;
+  bonus: number | null;
+  stock_awards: number | null;
+  option_awards: number | null;
+  non_equity_incentive: number | null;
+  other_compensation: number | null;
+  total_compensation: number | null;
+}
+
+export interface CompanyExecutiveCompensationResponse {
+  company: CompanyPayload | null;
+  rows: ExecCompRowPayload[];
+  fiscal_years: number[];
+  source: "cached" | "live" | "none";
+  refresh: RefreshState;
+  error: string | null;
+}
+
 export interface FilingEventPayload {
   accession_number: string | null;
   form: string;

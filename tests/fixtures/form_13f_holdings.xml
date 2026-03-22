@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<informationTable>
+  <infoTable>
+    <nameOfIssuer>Apple Inc.</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>037833100</cusip>
+    <value>18250000</value>
+    <sshPrnamt>98500000</sshPrnamt>
+    <sshPrnamtType>SH</sshPrnamtType>
+    <putCall></putCall>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <otherManager></otherManager>
+    <votingAuthority>
+      <Sole>98500000</Sole>
+      <Shared>0</Shared>
+      <None>0</None>
+    </votingAuthority>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>Microsoft Corporation</nameOfIssuer>
+    <titleOfClass>COM</titleOfClass>
+    <cusip>594918104</cusip>
+    <value>9420000</value>
+    <sshPrnamt>24100000</sshPrnamt>
+    <sshPrnamtType>SH</sshPrnamtType>
+    <putCall>Put</putCall>
+    <investmentDiscretion>SHARED</investmentDiscretion>
+    <otherManager></otherManager>
+    <votingAuthority>
+      <Sole>0</Sole>
+      <Shared>24100000</Shared>
+      <None>0</None>
+    </votingAuthority>
+  </infoTable>
+  <infoTable>
+    <nameOfIssuer>Alphabet Inc.</nameOfIssuer>
+    <titleOfClass>CL A COM</titleOfClass>
+    <cusip>02079K305</cusip>
+    <value>5180000</value>
+    <sshPrnamt>36800000</sshPrnamt>
+    <sshPrnamtType>SH</sshPrnamtType>
+    <putCall>Call</putCall>
+    <investmentDiscretion>SOLE</investmentDiscretion>
+    <otherManager></otherManager>
+    <votingAuthority>
+      <Sole>36800000</Sole>
+      <Shared>0</Shared>
+      <None>0</None>
+    </votingAuthority>
+  </infoTable>
+</informationTable>

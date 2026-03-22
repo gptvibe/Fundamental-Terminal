@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  clearAllLocalUserData,
   clearCompanyNote,
+  exportLocalUserData,
+  importLocalUserData,
   readLocalUserData,
   removeWatchlistCompany,
   saveCompanyNote,
@@ -41,6 +44,9 @@ interface UseLocalUserDataResult {
   removeFromWatchlist: (ticker: string) => void;
   saveNote: (snapshot: LocalCompanySnapshot, note: string) => void;
   clearNote: (ticker: string) => void;
+  exportData: () => LocalUserData;
+  importData: (rawJson: string) => LocalUserData;
+  clearAll: () => void;
   syncMetadata: (snapshot: LocalCompanySnapshot) => void;
 }
 
@@ -108,6 +114,11 @@ export function useLocalUserData(): UseLocalUserDataResult {
   const clearNote = useCallback((ticker: string) => {
     clearCompanyNote(ticker);
   }, []);
+  const exportData = useCallback(() => exportLocalUserData(), []);
+  const importData = useCallback((rawJson: string) => importLocalUserData(rawJson), []);
+  const clearAll = useCallback(() => {
+    clearAllLocalUserData();
+  }, []);
   const syncMetadata = useCallback((snapshot: LocalCompanySnapshot) => {
     syncLocalCompanyMetadata(snapshot);
   }, []);
@@ -125,6 +136,9 @@ export function useLocalUserData(): UseLocalUserDataResult {
     removeFromWatchlist,
     saveNote,
     clearNote,
+    exportData,
+    importData,
+    clearAll,
     syncMetadata
   };
 }

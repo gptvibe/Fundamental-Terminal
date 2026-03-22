@@ -77,18 +77,24 @@ npm run dev
 The frontend proxies backend requests through `/backend/*` and exposes:
 
 - `/` for search, autocomplete, and trending tickers
-- `/company/[ticker]` — company overview with unified activity feed and priority alerts
-- `/company/[ticker]/financials` — financial statements, margin-trend chart, cash-flow waterfall, balance sheet, and segment breakdown
+- `/company/[ticker]` — company overview with unified activity feed, priority alerts, and quick peer comparison
+- `/company/[ticker]/financials` — dedicated financial workspace with statements, margin trends, cash-flow waterfall, liquidity/capital, balance-sheet history, and quality summary
+- `/company/[ticker]/peers` — dedicated peer-comparison workspace (focus company plus up to 4 peers with reset-to-default behavior)
 - `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
 - `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
 - `/company/[ticker]/models` — DCF, health score, and scenario analysis
-- `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel
+- `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel, executive pay table, and pay trend chart
 - `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
 - `/company/[ticker]/ownership` — institutional holdings analytics and manager activity trends
 - `/company/[ticker]/stakes` — legacy path redirected to `/company/[ticker]/ownership-changes`
 - `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
 - `/company/[ticker]/events` — 8-K events classified by item code with category chart
 - `/company/[ticker]/sec-feed` — unified SEC activity feed across all filing types
+
+Personal workspace behavior:
+
+- Watchlist saves and private notes are stored in browser-local `LocalUserData` only (no account and no backend persistence).
+- Users can export/import this local data as JSON from the saved-companies panel and clear all local saves.
 
 Search accepts either a ticker or a company name and shows an autocomplete dropdown with SEC-backed matches. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
 
@@ -146,18 +152,34 @@ GET  /api/companies/search?query=intel
 GET  /api/companies/search?ticker=AAPL
 GET  /api/companies/resolve?query=INTC
 GET  /api/companies/AAPL/financials
+GET  /api/companies/AAPL/financial-history
 GET  /api/companies/AAPL/filings
+GET  /api/companies/AAPL/filings/view
 GET  /api/companies/AAPL/filing-insights
 GET  /api/companies/AAPL/insider-trades
 GET  /api/companies/AAPL/form-144-filings
 GET  /api/companies/AAPL/institutional-holdings
+GET  /api/companies/AAPL/institutional-holdings/summary
 GET  /api/companies/AAPL/beneficial-ownership
+GET  /api/companies/AAPL/beneficial-ownership/summary
 GET  /api/companies/AAPL/governance
+GET  /api/companies/AAPL/governance/summary
 GET  /api/companies/AAPL/capital-markets
+GET  /api/companies/AAPL/capital-markets/summary
+GET  /api/companies/AAPL/events
+GET  /api/companies/AAPL/filing-events
+GET  /api/companies/AAPL/filing-events/summary
+GET  /api/companies/AAPL/executive-compensation
+GET  /api/companies/AAPL/peers
 GET  /api/companies/AAPL/activity-feed
 GET  /api/companies/AAPL/alerts
-POST /api/companies/AAPL/refresh
 GET  /api/companies/AAPL/models?model=dcf,dupont,piotroski
+GET  /api/jobs/{job_id}/events
+GET  /api/insiders/AAPL
+GET  /api/ownership/AAPL
+GET  /api/filings/AAPL
+GET  /api/search_filings?form=8-K&ticker=AAPL
+POST /api/companies/AAPL/refresh
 ```
 
 The API serves cached PostgreSQL data only. If cached data is missing or stale, it returns the cached payload and queues the data fetcher in the background.
