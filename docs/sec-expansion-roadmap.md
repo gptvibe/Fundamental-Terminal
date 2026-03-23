@@ -36,6 +36,7 @@ The following phases are fully complete. Their build details have been removed f
 | 7 | Dilution and capital-raise monitoring — S-1/S-3/424B/NT filings, capital-markets page | ✓ Shipped |
 | 8 | Unified activity feed and alerts — activity-feed and alerts routes, sec-feed page, Form 144 in feed | ✓ Shipped |
 | 9 | Valuation workbench depth — trust-aware DCF, Treasury risk-free input, reverse DCF, ROIC, capital allocation, peers/watchlist decision metrics | ✓ Shipped |
+| 10 | Market Context 2.0 + Residual Income Valuation — official-source macro providers (HQM, BLS, BEA), DB-first enriched macro snapshot, residual income model v1.0.0, DCF v2.2.0 sector risk premiums, MacroStrip component | ✓ Shipped |
 
 ### Core backend entry points
 

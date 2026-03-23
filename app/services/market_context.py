@@ -9,11 +9,15 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from app.config import settings
 from app.services.risk_free_rate import TREASURY_SOURCE_NAME, _request_with_retries, get_latest_risk_free_rate
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -786,3 +790,543 @@ def _parse_datetime_utc(value: str) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# Market Context v2 — persistence-first, grouped sections, new providers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MacroHistoryPoint:
+    date: str
+    value: float
+
+
+@dataclass(frozen=True, slots=True)
+class MacroSeriesItem:
+    """Unified per-series payload used in grouped sections."""
+    series_id: str
+    label: str
+    source_name: str
+    source_url: str
+    units: str
+    value: float | None
+    previous_value: float | None
+    change: float | None
+    change_percent: float | None
+    observation_date: date | None
+    release_date: date | None
+    history: tuple[MacroHistoryPoint, ...]
+    status: str
+
+
+@dataclass(frozen=True, slots=True)
+class MacroV2Snapshot:
+    """Extended market context snapshot with grouped sections."""
+    status: str
+    rates_credit: tuple[MacroSeriesItem, ...]
+    inflation_labor: tuple[MacroSeriesItem, ...]
+    growth_activity: tuple[MacroSeriesItem, ...]
+    # Legacy fields preserved for backward compat
+    curve_points: tuple[MarketCurvePoint, ...]
+    slope_2s10s: MarketSlope
+    slope_3m10y: MarketSlope
+    fred_series: tuple[MarketFredSeries, ...]
+    provenance: dict[str, Any]
+    fetched_at: datetime
+    hqm_snapshot: dict[str, Any] | None = None
+
+
+def _build_change(value: float | None, previous: float | None) -> tuple[float | None, float | None]:
+    if value is None or previous is None:
+        return None, None
+    change = value - previous
+    change_pct = (change / abs(previous)) if previous != 0 else None
+    return change, change_pct
+
+
+def _normalize_percent_decimal(value: float | None, units: str | None) -> float | None:
+    """Normalize percent values to decimal form expected by frontend formatters.
+
+    Some providers/FRED series return percentage points (e.g. 2.8 for 2.8%).
+    Frontend formatters expect decimals (0.028).
+    """
+    if value is None:
+        return None
+    if (units or "").lower() != "percent":
+        return value
+    # Provider outputs are mixed: some series already arrive as decimals
+    # (e.g. FRED fallback CPI 0.0243 for 2.43%), while others arrive as
+    # percentage points (e.g. BLS 3.1 or GDP 0.7). Normalize only values that
+    # are still clearly in point form.
+    return value / 100.0 if abs(value) >= 0.5 else value
+
+
+def _curve_point_to_series_item(point: MarketCurvePoint, previous_rate: float | None) -> MacroSeriesItem:
+    """Convert a Treasury curve point to a MacroSeriesItem."""
+    change, change_pct = _build_change(point.rate, previous_rate)
+    return MacroSeriesItem(
+        series_id=f"DGS_{point.tenor.upper()}",
+        label=f"Treasury {point.tenor.upper()}",
+        source_name=TREASURY_SOURCE_NAME,
+        source_url=TREASURY_CSV_SOURCE_URL,
+        units="percent",
+        value=point.rate,
+        previous_value=previous_rate,
+        change=change,
+        change_percent=change_pct,
+        observation_date=point.observation_date,
+        release_date=None,
+        history=(),
+        status="ok",
+    )
+
+
+def _fred_series_to_series_item(series: MarketFredSeries) -> MacroSeriesItem:
+    """Convert a legacy MarketFredSeries to a MacroSeriesItem."""
+    change, change_pct = None, None
+    normalized_value = _normalize_percent_decimal(series.value, series.units)
+    return MacroSeriesItem(
+        series_id=series.series_id,
+        label=series.label,
+        source_name="Federal Reserve Economic Data (FRED)",
+        source_url="https://fred.stlouisfed.org/",
+        units=series.units,
+        value=normalized_value,
+        previous_value=None,
+        change=change,
+        change_percent=change_pct,
+        observation_date=series.observation_date,
+        release_date=None,
+        history=(),
+        status=series.state,
+    )
+
+
+def _build_rates_credit_section(
+    snapshot: MarketContextSnapshot,
+    hqm_snap: Any | None,
+) -> tuple[MacroSeriesItem, ...]:
+    """Assemble the rates_credit grouped section from Treasury + HQM + credit spread."""
+    by_tenor = {point.tenor: point for point in snapshot.curve_points}
+    items: list[MacroSeriesItem] = []
+
+    # Key Treasury tenors in rates_credit
+    for tenor in ("2y", "10y", "30y"):
+        point = by_tenor.get(tenor)
+        if point is None:
+            continue
+        items.append(_curve_point_to_series_item(point, None))
+
+    # 2s10s slope
+    if snapshot.slope_2s10s.value is not None:
+        change, change_pct = None, None
+        items.append(MacroSeriesItem(
+            series_id="slope_2s10s",
+            label="2s10s Yield Curve Slope",
+            source_name=TREASURY_SOURCE_NAME,
+            source_url=TREASURY_CSV_SOURCE_URL,
+            units="percent",
+            value=snapshot.slope_2s10s.value,
+            previous_value=None,
+            change=change,
+            change_percent=change_pct,
+            observation_date=snapshot.slope_2s10s.observation_date,
+            release_date=None,
+            history=(),
+            status="ok",
+        ))
+
+    # 3m10y slope
+    if snapshot.slope_3m10y.value is not None:
+        items.append(MacroSeriesItem(
+            series_id="slope_3m10y",
+            label="3m10y Yield Curve Slope",
+            source_name=TREASURY_SOURCE_NAME,
+            source_url=TREASURY_CSV_SOURCE_URL,
+            units="percent",
+            value=snapshot.slope_3m10y.value,
+            previous_value=None,
+            change=None,
+            change_percent=None,
+            observation_date=snapshot.slope_3m10y.observation_date,
+            release_date=None,
+            history=(),
+            status="ok",
+        ))
+
+    # HQM corporate yield
+    if hqm_snap is not None and hqm_snap.get("hqm_30y") is not None:
+        hqm_val = float(hqm_snap["hqm_30y"])
+        treasury_30y = by_tenor.get("30y")
+        hqm_spread: float | None = None
+        if treasury_30y is not None:
+            hqm_spread = hqm_val - treasury_30y.rate
+        items.append(MacroSeriesItem(
+            series_id="HQM_30Y",
+            label="HQM Corporate Yield (30Y)",
+            source_name="U.S. Treasury HQM Corporate Bond Yield Curve",
+            source_url="https://home.treasury.gov/resource-center/economic-policy/corporate-bond-yield-curve",
+            units="percent",
+            value=hqm_val,
+            previous_value=None,
+            change=None,
+            change_percent=None,
+            observation_date=date.fromisoformat(str(hqm_snap["observation_date"])) if hqm_snap.get("observation_date") else None,
+            release_date=None,
+            history=(),
+            status=str(hqm_snap.get("status") or "ok"),
+        ))
+        if hqm_spread is not None:
+            items.append(MacroSeriesItem(
+                series_id="HQM_spread_vs_30Y",
+                label="HQM Spread vs 30Y Treasury",
+                source_name="U.S. Treasury HQM Corporate Bond Yield Curve",
+                source_url="https://home.treasury.gov/resource-center/economic-policy/corporate-bond-yield-curve",
+                units="percent",
+                value=hqm_spread,
+                previous_value=None,
+                change=None,
+                change_percent=None,
+                observation_date=date.fromisoformat(str(hqm_snap["observation_date"])) if hqm_snap.get("observation_date") else None,
+                release_date=None,
+                history=(),
+                status="ok",
+            ))
+
+    # BAA credit spread from FRED (if available)
+    for series in snapshot.fred_series:
+        if series.series_id == "BAA10Y":
+            items.append(_fred_series_to_series_item(series))
+            break
+
+    return tuple(items)
+
+
+def _build_inflation_labor_section_from_fred(
+    snapshot: MarketContextSnapshot,
+) -> tuple[MacroSeriesItem, ...]:
+    """Build inflation_labor section from legacy FRED series (fallback when BLS unavailable)."""
+    target_ids = {"CPIAUCSL", "CPILFESL", "PCEPI", "PCEPILFE", "UNRATE"}
+    items: list[MacroSeriesItem] = []
+    for series in snapshot.fred_series:
+        if series.series_id in target_ids:
+            items.append(_fred_series_to_series_item(series))
+    return tuple(items)
+
+
+def _build_inflation_labor_from_bls(bls_results: Any) -> tuple[MacroSeriesItem, ...]:
+    """Build inflation_labor section from BLS provider results."""
+    items: list[MacroSeriesItem] = []
+    for result in bls_results:
+        normalized_value = _normalize_percent_decimal(result.value, result.units)
+        normalized_previous = _normalize_percent_decimal(result.previous_value, result.units)
+        change, change_pct = _build_change(normalized_value, normalized_previous)
+        history = tuple(
+            MacroHistoryPoint(
+                date=p.observation_date.isoformat(),
+                value=_normalize_percent_decimal(p.value, result.units) or 0.0,
+            )
+            for p in result.history
+        )
+        items.append(MacroSeriesItem(
+            series_id=result.series_id,
+            label=result.label,
+            source_name=result.source_name,
+            source_url=result.source_url,
+            units=result.units,
+            value=normalized_value,
+            previous_value=normalized_previous,
+            change=change,
+            change_percent=change_pct,
+            observation_date=result.observation_date,
+            release_date=None,
+            history=history,
+            status=result.status,
+        ))
+    return tuple(items)
+
+
+def _build_growth_activity_section_from_bea(bea_results: Any) -> tuple[MacroSeriesItem, ...]:
+    """Build growth_activity section from BEA provider results."""
+    items: list[MacroSeriesItem] = []
+    for result in bea_results:
+        normalized_value = _normalize_percent_decimal(result.value, result.units)
+        normalized_previous = _normalize_percent_decimal(result.previous_value, result.units)
+        change, change_pct = _build_change(normalized_value, normalized_previous)
+        history = tuple(
+            MacroHistoryPoint(
+                date=p.observation_date.isoformat(),
+                value=_normalize_percent_decimal(p.value, result.units) or 0.0,
+            )
+            for p in result.history
+        )
+        items.append(MacroSeriesItem(
+            series_id=result.series_id,
+            label=result.label,
+            source_name=result.source_name,
+            source_url=result.source_url,
+            units=result.units,
+            value=normalized_value,
+            previous_value=normalized_previous,
+            change=change,
+            change_percent=change_pct,
+            observation_date=result.observation_date,
+            release_date=None,
+            history=history,
+            status=result.status,
+        ))
+    return tuple(items)
+
+
+def _macro_series_item_to_dict(item: MacroSeriesItem) -> dict[str, Any]:
+    return {
+        "series_id": item.series_id,
+        "label": item.label,
+        "source_name": item.source_name,
+        "source_url": item.source_url,
+        "units": item.units,
+        "value": item.value,
+        "previous_value": item.previous_value,
+        "change": item.change,
+        "change_percent": item.change_percent,
+        "observation_date": item.observation_date.isoformat() if item.observation_date else None,
+        "release_date": item.release_date.isoformat() if item.release_date else None,
+        "history": [{"date": p.date, "value": p.value} for p in item.history],
+        "status": item.status,
+    }
+
+
+def _macro_v2_snapshot_to_dict(snap: MacroV2Snapshot) -> dict[str, Any]:
+    """Serialize a MacroV2Snapshot to a JSON-serializable dict (for DB storage)."""
+    return {
+        "status": snap.status,
+        "rates_credit": [_macro_series_item_to_dict(item) for item in snap.rates_credit],
+        "inflation_labor": [_macro_series_item_to_dict(item) for item in snap.inflation_labor],
+        "growth_activity": [_macro_series_item_to_dict(item) for item in snap.growth_activity],
+        "curve_points": [
+            {
+                "tenor": p.tenor,
+                "rate": p.rate,
+                "observation_date": p.observation_date.isoformat(),
+            }
+            for p in snap.curve_points
+        ],
+        "slope_2s10s": _slope_to_payload(snap.slope_2s10s),
+        "slope_3m10y": _slope_to_payload(snap.slope_3m10y),
+        "fred_series": [
+            {
+                "series_id": s.series_id,
+                "label": s.label,
+                "category": s.category,
+                "units": s.units,
+                "value": s.value,
+                "observation_date": s.observation_date.isoformat() if s.observation_date else None,
+                "state": s.state,
+            }
+            for s in snap.fred_series
+        ],
+        "provenance": snap.provenance,
+        "fetched_at": snap.fetched_at.isoformat(),
+        "hqm_snapshot": snap.hqm_snapshot,
+    }
+
+
+def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
+    """Fetch enriched market context from all providers.
+
+    This is the live-fetch path. Called only when the DB snapshot is stale or missing.
+    """
+    # Base Treasury snapshot (existing logic)
+    base_snapshot = get_market_context_snapshot()
+
+    # HQM provider
+    hqm_snap: dict[str, Any] | None = None
+    try:
+        from app.services.macro_providers.treasury_hqm import fetch_hqm_snapshot
+        hqm_result = fetch_hqm_snapshot()
+        if hqm_result.status != "unavailable":
+            hqm_snap = {
+                "status": hqm_result.status,
+                "hqm_30y": hqm_result.hqm_30y,
+                "observation_date": hqm_result.observation_date.isoformat() if hqm_result.observation_date else None,
+            }
+    except Exception:
+        logger.warning("HQM provider failed during enriched fetch", exc_info=True)
+
+    # BLS provider
+    inflation_labor_items: tuple[MacroSeriesItem, ...] = ()
+    try:
+        from app.services.macro_providers.bls_provider import fetch_bls_series
+        bls_results = fetch_bls_series()
+        if bls_results:
+            inflation_labor_items = _build_inflation_labor_from_bls(bls_results)
+    except Exception:
+        logger.warning("BLS provider failed during enriched fetch", exc_info=True)
+
+    # Fall back to FRED inflation_labor if BLS unavailable
+    if not inflation_labor_items or not any(item.status == "ok" and item.value is not None for item in inflation_labor_items):
+        inflation_labor_items = _build_inflation_labor_section_from_fred(base_snapshot)
+
+    # BEA/FRED growth provider
+    growth_activity_items: tuple[MacroSeriesItem, ...] = ()
+    try:
+        from app.services.macro_providers.bea_provider import fetch_bea_series
+        bea_results = fetch_bea_series()
+        if bea_results:
+            growth_activity_items = _build_growth_activity_section_from_bea(bea_results)
+    except Exception:
+        logger.warning("BEA provider failed during enriched fetch", exc_info=True)
+
+    # Rates & credit section
+    rates_credit_items = _build_rates_credit_section(base_snapshot, hqm_snap)
+
+    # Determine combined status
+    provider_statuses = [base_snapshot.status]
+    if hqm_snap:
+        provider_statuses.append(str(hqm_snap.get("status") or "partial"))
+    all_items = list(rates_credit_items) + list(inflation_labor_items) + list(growth_activity_items)
+    if any(item.status == "unavailable" for item in all_items):
+        combined_status = "partial"
+    elif provider_statuses and all(s == "ok" for s in provider_statuses):
+        combined_status = "ok"
+    else:
+        combined_status = "partial"
+
+    return MacroV2Snapshot(
+        status=combined_status,
+        rates_credit=rates_credit_items,
+        inflation_labor=inflation_labor_items,
+        growth_activity=growth_activity_items,
+        curve_points=base_snapshot.curve_points,
+        slope_2s10s=base_snapshot.slope_2s10s,
+        slope_3m10y=base_snapshot.slope_3m10y,
+        fred_series=base_snapshot.fred_series,
+        provenance={
+            **base_snapshot.provenance,
+            "hqm": hqm_snap,
+            "bls_available": bool(inflation_labor_items and any(i.status == "ok" for i in inflation_labor_items)),
+            "bea_available": bool(growth_activity_items and any(i.status == "ok" for i in growth_activity_items)),
+        },
+        fetched_at=datetime.now(timezone.utc),
+        hqm_snapshot=hqm_snap,
+    )
+
+
+def get_market_context_v2(session: "Session") -> dict[str, Any]:
+    """DB-first market context v2.
+
+    Returns the latest persisted global snapshot payload. If missing or stale,
+    returns whatever is stored (or an empty shell) and queues a background refresh.
+    The caller is responsible for triggering the background refresh.
+    Returns (payload, is_stale).
+    """
+    from app.services.macro_persistence import read_global_macro_snapshot_with_meta
+    payload, is_stale = read_global_macro_snapshot_with_meta(session)
+    if payload is not None and not is_stale:
+        return payload
+    # Try to fetch fresh data (best-effort; never block if unavailable)
+    try:
+        fresh = _fetch_enriched_market_context_v2()
+        fresh_dict = _macro_v2_snapshot_to_dict(fresh)
+        from app.services.macro_persistence import upsert_global_macro_snapshot
+        upsert_global_macro_snapshot(
+            session,
+            snapshot_date=fresh.fetched_at.date(),
+            status=fresh.status,
+            payload=fresh_dict,
+            provenance=fresh.provenance,
+            fetched_at=fresh.fetched_at,
+        )
+        return fresh_dict
+    except Exception:
+        logger.warning("Market context v2 live fetch failed; serving cached or empty payload", exc_info=True)
+
+    return payload or _empty_macro_payload()
+
+
+def get_company_market_context_v2(
+    session: "Session",
+    company_id: int,
+    *,
+    sector: str | None = None,
+    market_sector: str | None = None,
+    market_industry: str | None = None,
+) -> dict[str, Any]:
+    """DB-first company-specific market context v2.
+
+    Returns the persisted company macro snapshot enriched with relevance mapping.
+    Builds/caches the company-specific snapshot from the global snapshot on first access.
+    """
+    from app.services.macro_persistence import (
+        read_company_macro_snapshot_with_meta,
+        upsert_company_macro_snapshot,
+    )
+    from app.services.macro_relevance import get_company_macro_relevance
+
+    company_payload, is_stale = read_company_macro_snapshot_with_meta(session, company_id)
+
+    if company_payload is not None and not is_stale:
+        return company_payload
+
+    # Build company-specific snapshot from global
+    global_payload = get_market_context_v2(session)
+    relevance = get_company_macro_relevance(
+        sector=sector,
+        market_sector=market_sector,
+        market_industry=market_industry,
+    )
+
+    company_specific = {
+        **global_payload,
+        "relevant_series": relevance.relevant_series,
+        "sector_exposure": relevance.sector_exposure,
+    }
+
+    now = datetime.now(timezone.utc)
+    upsert_company_macro_snapshot(
+        session,
+        company_id=company_id,
+        snapshot_date=now.date(),
+        payload=company_specific,
+        fetched_at=now,
+    )
+
+    return company_specific
+
+
+def _empty_macro_payload() -> dict[str, Any]:
+    """Return a typed empty payload when no data is available."""
+    return {
+        "status": "missing",
+        "rates_credit": [],
+        "inflation_labor": [],
+        "growth_activity": [],
+        "curve_points": [],
+        "slope_2s10s": {"label": "2s10s", "value": None, "long_tenor": "10y", "short_tenor": "2y", "observation_date": None},
+        "slope_3m10y": {"label": "3m10y", "value": None, "long_tenor": "10y", "short_tenor": "3m", "observation_date": None},
+        "fred_series": [],
+        "provenance": {},
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "hqm_snapshot": None,
+    }
+
+
+def refresh_market_context_v2_sync(session: "Session") -> None:
+    """Force-refresh the global macro snapshot (called from background workers)."""
+    try:
+        fresh = _fetch_enriched_market_context_v2()
+        fresh_dict = _macro_v2_snapshot_to_dict(fresh)
+        from app.services.macro_persistence import upsert_global_macro_snapshot
+        upsert_global_macro_snapshot(
+            session,
+            snapshot_date=fresh.fetched_at.date(),
+            status=fresh.status,
+            payload=fresh_dict,
+            provenance=fresh.provenance,
+            fetched_at=fresh.fetched_at,
+        )
+        logger.info("Market context v2 refreshed successfully for %s", fresh.fetched_at.date())
+    except Exception:
+        logger.error("Market context v2 background refresh failed", exc_info=True)

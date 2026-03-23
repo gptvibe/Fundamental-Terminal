@@ -161,6 +161,8 @@ def test_market_context_client_uses_fred_curve_when_treasury_csv_fails(monkeypat
 
 
 def test_company_market_context_route_returns_payload(monkeypatch):
+    from app.db import get_db_session
+
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
     monkeypatch.setattr(
         main_module,
@@ -188,23 +190,33 @@ def test_company_market_context_route_returns_payload(monkeypatch):
     )
     monkeypatch.setattr(
         main_module,
-        "get_market_context_snapshot",
-        lambda: SimpleNamespace(
-            status="partial",
-            curve_points=(
-                SimpleNamespace(tenor="2y", rate=0.04, observation_date=date(2026, 3, 21)),
-                SimpleNamespace(tenor="10y", rate=0.0425, observation_date=date(2026, 3, 21)),
-            ),
-            slope_2s10s=SimpleNamespace(label="2s10s", value=0.0025, short_tenor="2y", long_tenor="10y", observation_date=date(2026, 3, 21)),
-            slope_3m10y=SimpleNamespace(label="3m10y", value=-0.0025, short_tenor="3m", long_tenor="10y", observation_date=date(2026, 3, 21)),
-            fred_series=(),
-            provenance={"treasury": {"status": "ok"}, "fred": {"enabled": False, "status": "missing_api_key"}},
-            fetched_at=datetime(2026, 3, 22, tzinfo=timezone.utc),
-        ),
+        "get_company_market_context_v2",
+        lambda *_args, **_kwargs: {
+            "status": "partial",
+            "curve_points": [
+                {"tenor": "2y", "rate": 0.04, "observation_date": "2026-03-21"},
+                {"tenor": "10y", "rate": 0.0425, "observation_date": "2026-03-21"},
+            ],
+            "slope_2s10s": {"label": "2s10s", "value": 0.0025, "short_tenor": "2y", "long_tenor": "10y", "observation_date": "2026-03-21"},
+            "slope_3m10y": {"label": "3m10y", "value": -0.0025, "short_tenor": "3m", "long_tenor": "10y", "observation_date": "2026-03-21"},
+            "fred_series": [],
+            "provenance": {"treasury": {"status": "ok"}, "fred": {"enabled": False, "status": "missing_api_key"}},
+            "fetched_at": "2026-03-22T00:00:00+00:00",
+            "rates_credit": [],
+            "inflation_labor": [],
+            "growth_activity": [],
+            "relevant_series": [],
+            "sector_exposure": [],
+            "hqm_snapshot": None,
+        },
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/market-context")
+    app.dependency_overrides[get_db_session] = lambda: None
+    try:
+        client = TestClient(app)
+        response = client.get("/api/companies/AAPL/market-context")
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
 
     assert response.status_code == 200
     payload = response.json()
@@ -233,3 +245,13 @@ def test_parse_treasury_curve_textview_extracts_2m_and_4m():
         assert obs_date == date(2026, 3, 21)
         assert by_tenor["2m"] == pytest.approx(0.0452)
         assert by_tenor["4m"] == pytest.approx(0.0447)
+
+
+def test_normalize_percent_decimal_handles_mixed_provider_scales():
+    # Already-decimal FRED fallback values should remain unchanged.
+    assert market_context_module._normalize_percent_decimal(0.02434, "percent") == pytest.approx(0.02434)
+    assert market_context_module._normalize_percent_decimal(0.044, "percent") == pytest.approx(0.044)
+
+    # Percentage-point style provider values should convert to decimals.
+    assert market_context_module._normalize_percent_decimal(3.18, "percent") == pytest.approx(0.0318)
+    assert market_context_module._normalize_percent_decimal(0.7, "percent") == pytest.approx(0.007)

@@ -55,7 +55,12 @@ from app.services import (
 )
 from app.services.cache_queries import get_company_beneficial_ownership_reports
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
-from app.services.market_context import get_cached_market_context_status, get_market_context_snapshot
+from app.services.market_context import (
+    get_cached_market_context_status,
+    get_company_market_context_v2,
+    get_market_context_snapshot,
+    get_market_context_v2,
+)
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
@@ -758,6 +763,27 @@ class MarketFredSeriesPayload(BaseModel):
     state: str
 
 
+class MacroHistoryPointPayload(BaseModel):
+    date: str
+    value: float
+
+
+class MacroSeriesItemPayload(BaseModel):
+    series_id: str
+    label: str
+    source_name: str
+    source_url: str
+    units: str
+    value: Number = None
+    previous_value: Number = None
+    change: Number = None
+    change_percent: Number = None
+    observation_date: DateType | None = None
+    release_date: DateType | None = None
+    history: list[MacroHistoryPointPayload] = Field(default_factory=list)
+    status: str
+
+
 class CompanyMarketContextResponse(BaseModel):
     company: CompanyPayload | None
     status: str
@@ -768,6 +794,13 @@ class CompanyMarketContextResponse(BaseModel):
     provenance: dict[str, Any]
     fetched_at: datetime
     refresh: RefreshState
+    # v2 grouped sections
+    rates_credit: list[MacroSeriesItemPayload] = Field(default_factory=list)
+    inflation_labor: list[MacroSeriesItemPayload] = Field(default_factory=list)
+    growth_activity: list[MacroSeriesItemPayload] = Field(default_factory=list)
+    relevant_series: list[str] = Field(default_factory=list)
+    sector_exposure: list[str] = Field(default_factory=list)
+    hqm_snapshot: dict[str, Any] | None = None
 
 
 class WatchlistSummaryRequest(BaseModel):
@@ -1320,84 +1353,118 @@ def company_market_context(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    context = get_market_context_snapshot()
-    return CompanyMarketContextResponse(
-        company=_serialize_company(snapshot),
-        status=context.status,
-        curve_points=[
-            MarketCurvePointPayload(tenor=point.tenor, rate=point.rate, observation_date=point.observation_date)
-            for point in context.curve_points
-        ],
-        slope_2s10s=MarketSlopePayload(
-            label=context.slope_2s10s.label,
-            value=context.slope_2s10s.value,
-            short_tenor=context.slope_2s10s.short_tenor,
-            long_tenor=context.slope_2s10s.long_tenor,
-            observation_date=context.slope_2s10s.observation_date,
-        ),
-        slope_3m10y=MarketSlopePayload(
-            label=context.slope_3m10y.label,
-            value=context.slope_3m10y.value,
-            short_tenor=context.slope_3m10y.short_tenor,
-            long_tenor=context.slope_3m10y.long_tenor,
-            observation_date=context.slope_3m10y.observation_date,
-        ),
-        fred_series=[
-            MarketFredSeriesPayload(
-                series_id=item.series_id,
-                label=item.label,
-                category=item.category,
-                units=item.units,
-                value=item.value,
-                observation_date=item.observation_date,
-                state=item.state,
+    company = snapshot.company
+    payload = get_company_market_context_v2(
+        session,
+        company.id,
+        sector=company.sector,
+        market_sector=company.market_sector,
+        market_industry=company.market_industry,
+    )
+    return _v2_dict_to_response(payload, company=_serialize_company(snapshot), refresh=refresh)
+
+
+def _v2_dict_to_response(
+    payload: dict[str, Any],
+    *,
+    company: "CompanyPayload | None",
+    refresh: "RefreshState",
+) -> "CompanyMarketContextResponse":
+    """Convert a v2 macro payload dict to CompanyMarketContextResponse."""
+    # Legacy curve_points
+    curve_points = [
+        MarketCurvePointPayload(
+            tenor=p["tenor"],
+            rate=p["rate"],
+            observation_date=p["observation_date"],
+        )
+        for p in (payload.get("curve_points") or [])
+    ]
+    s2 = payload.get("slope_2s10s") or {}
+    s3 = payload.get("slope_3m10y") or {}
+    slope_2s10s = MarketSlopePayload(
+        label=str(s2.get("label") or "2s10s"),
+        value=s2.get("value"),
+        short_tenor=str(s2.get("short_tenor") or "2y"),
+        long_tenor=str(s2.get("long_tenor") or "10y"),
+        observation_date=s2.get("observation_date"),
+    )
+    slope_3m10y = MarketSlopePayload(
+        label=str(s3.get("label") or "3m10y"),
+        value=s3.get("value"),
+        short_tenor=str(s3.get("short_tenor") or "3m"),
+        long_tenor=str(s3.get("long_tenor") or "10y"),
+        observation_date=s3.get("observation_date"),
+    )
+    fred_series = [
+        MarketFredSeriesPayload(
+            series_id=str(item.get("series_id", "")),
+            label=str(item.get("label", "")),
+            category=str(item.get("category", "")),
+            units=str(item.get("units", "")),
+            value=item.get("value"),
+            observation_date=item.get("observation_date"),
+            state=str(item.get("state", "ok")),
+        )
+        for item in (payload.get("fred_series") or [])
+    ]
+    # v2 grouped sections
+    def _items(section_key: str) -> list[MacroSeriesItemPayload]:
+        return [
+            MacroSeriesItemPayload(
+                series_id=str(d.get("series_id", "")),
+                label=str(d.get("label", "")),
+                source_name=str(d.get("source_name", "")),
+                source_url=str(d.get("source_url", "")),
+                units=str(d.get("units", "")),
+                value=d.get("value"),
+                previous_value=d.get("previous_value"),
+                change=d.get("change"),
+                change_percent=d.get("change_percent"),
+                observation_date=d.get("observation_date"),
+                release_date=d.get("release_date"),
+                history=[
+                    MacroHistoryPointPayload(date=h["date"], value=h["value"])
+                    for h in (d.get("history") or [])
+                ],
+                status=str(d.get("status", "ok")),
             )
-            for item in context.fred_series
-        ],
-        provenance=context.provenance,
-        fetched_at=context.fetched_at,
+            for d in (payload.get(section_key) or [])
+        ]
+
+    fetched_raw = payload.get("fetched_at") or ""
+    try:
+        fetched_at = datetime.fromisoformat(str(fetched_raw))
+    except Exception:
+        fetched_at = datetime.now(timezone.utc)
+
+    return CompanyMarketContextResponse(
+        company=company,
+        status=str(payload.get("status") or "ok"),
+        curve_points=curve_points,
+        slope_2s10s=slope_2s10s,
+        slope_3m10y=slope_3m10y,
+        fred_series=fred_series,
+        provenance=payload.get("provenance") or {},
+        fetched_at=fetched_at,
         refresh=refresh,
+        rates_credit=_items("rates_credit"),
+        inflation_labor=_items("inflation_labor"),
+        growth_activity=_items("growth_activity"),
+        relevant_series=list(payload.get("relevant_series") or []),
+        sector_exposure=list(payload.get("sector_exposure") or []),
+        hqm_snapshot=payload.get("hqm_snapshot"),
     )
 
 
 @app.get("/api/market-context", response_model=CompanyMarketContextResponse)
-def global_market_context() -> CompanyMarketContextResponse:
-    context = get_market_context_snapshot()
-    return CompanyMarketContextResponse(
+def global_market_context(
+    session: Session = Depends(get_db_session),
+) -> CompanyMarketContextResponse:
+    payload = get_market_context_v2(session)
+    return _v2_dict_to_response(
+        payload,
         company=None,
-        status=context.status,
-        curve_points=[
-            MarketCurvePointPayload(tenor=point.tenor, rate=point.rate, observation_date=point.observation_date)
-            for point in context.curve_points
-        ],
-        slope_2s10s=MarketSlopePayload(
-            label=context.slope_2s10s.label,
-            value=context.slope_2s10s.value,
-            short_tenor=context.slope_2s10s.short_tenor,
-            long_tenor=context.slope_2s10s.long_tenor,
-            observation_date=context.slope_2s10s.observation_date,
-        ),
-        slope_3m10y=MarketSlopePayload(
-            label=context.slope_3m10y.label,
-            value=context.slope_3m10y.value,
-            short_tenor=context.slope_3m10y.short_tenor,
-            long_tenor=context.slope_3m10y.long_tenor,
-            observation_date=context.slope_3m10y.observation_date,
-        ),
-        fred_series=[
-            MarketFredSeriesPayload(
-                series_id=item.series_id,
-                label=item.label,
-                category=item.category,
-                units=item.units,
-                value=item.value,
-                observation_date=item.observation_date,
-                state=item.state,
-            )
-            for item in context.fred_series
-        ],
-        provenance=context.provenance,
-        fetched_at=context.fetched_at,
         refresh=RefreshState(triggered=False, reason="none", ticker=None, job_id=None),
     )
 

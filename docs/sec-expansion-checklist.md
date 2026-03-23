@@ -49,6 +49,34 @@
 - [x] Extend watchlist payload/UI with triage metrics for undervaluation, quality, capital return, and balance-sheet risk.
 - [x] Add frontend sort/filter tests for watchlist decision triage behavior.
 
+## Sprint 10: Market Context 2.0 + Residual Income Valuation (Shipped 2026-03-23)
+
+### Macro data pipeline (official sources)
+
+- [x] Add official-source providers for Treasury HQM, BLS Public API v1, and BEA proxy series via FRED.
+- [x] Persist macro snapshots and observations in PostgreSQL using DB-first/cache-first read paths.
+- [x] Add grouped macro response sections: `rates_credit`, `inflation_labor`, `growth_activity`.
+- [x] Keep API/service naming as `market-context` while using "Macro" as the user-facing label.
+
+### Valuation model updates
+
+- [x] Add `residual_income` model v1.0.0 with status handling (`ok | partial | proxy | insufficient_data`).
+- [x] Mark `residual_income` as primary for financial firms where DCF is unsupported.
+- [x] Upgrade DCF to v2.2.0 with sector risk premium adjustments in discount rate assumptions.
+
+### API and frontend integration
+
+- [x] Extend `CompanyMarketContextResponse` with v2 macro fields and grouped series payloads.
+- [x] Wire `/api/market-context` and `/api/companies/{ticker}/market-context` to v2 DB-first services.
+- [x] Add grouped Macro sections to home dashboard.
+- [x] Add `MacroStrip` to company overview pages.
+
+### Test coverage
+
+- [x] Add provider tests for HQM/BLS/BEA fetch and fallback behavior.
+- [x] Add model tests for `residual_income` and DCF sector risk premium behavior.
+- [x] Keep regression tests green for valuation and market-context paths.
+
 ## Sprint 1: Existing SEC Data Visibility Gaps
 
 ### Backend API contracts

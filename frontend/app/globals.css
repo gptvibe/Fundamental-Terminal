@@ -1558,6 +1558,100 @@ select {
   line-height: 1.6;
 }
 
+.econ-macro-sections {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 126%, transparent);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--cyan) 6%, transparent), transparent 42%),
+    radial-gradient(circle at bottom right, color-mix(in srgb, var(--green) 7%, transparent), transparent 46%),
+    linear-gradient(180deg, color-mix(in srgb, var(--panel-alt) 93%, transparent), color-mix(in srgb, var(--panel) 97%, transparent));
+  box-shadow: var(--shadow);
+}
+
+.econ-macro-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.econ-macro-section {
+  display: grid;
+  gap: 10px;
+}
+
+.econ-macro-section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.econ-macro-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.econ-macro-item-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--cyan) 7%, transparent), transparent 45%),
+    color-mix(in srgb, var(--panel) 95%, transparent);
+}
+
+.econ-macro-item-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.econ-macro-item-value {
+  font-size: 1.02rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--surface-strong-text);
+}
+
+.econ-macro-item-change {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.econ-macro-item-change.positive {
+  color: color-mix(in srgb, var(--green) 80%, var(--text));
+}
+
+.econ-macro-item-change.negative {
+  color: color-mix(in srgb, var(--danger) 80%, var(--text));
+}
+
+.econ-macro-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.econ-macro-source-link {
+  color: color-mix(in srgb, var(--cyan) 72%, var(--text));
+  text-decoration: none;
+}
+
+.econ-macro-source-link:hover {
+  text-decoration: underline;
+}
+
 .econ-empty-state {
   display: grid;
   place-items: center;

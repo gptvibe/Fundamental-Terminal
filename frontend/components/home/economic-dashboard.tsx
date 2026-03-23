@@ -14,8 +14,8 @@ import {
 } from "recharts";
 
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
-import { formatDate, formatPercent } from "@/lib/format";
-import type { CompanyMarketContextResponse, MarketFredSeriesPayload } from "@/lib/types";
+import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import type { CompanyMarketContextResponse, MacroSeriesItemPayload, MarketFredSeriesPayload } from "@/lib/types";
 
 interface EconomicDashboardProps {
   context: CompanyMarketContextResponse | null;
@@ -143,7 +143,7 @@ export function EconomicDashboard({ context }: EconomicDashboardProps) {
     <div className="econ-dashboard">
       <section className="econ-hero">
         <div className="econ-hero-copy">
-          <div className="grid-empty-kicker">US macro dashboard</div>
+          <div className="grid-empty-kicker">Macro</div>
           <div className="econ-hero-title">{riskMood.title}</div>
           <div className="grid-empty-copy">{riskMood.copy}</div>
         </div>
@@ -262,6 +262,56 @@ export function EconomicDashboard({ context }: EconomicDashboardProps) {
           </article>
         ))}
       </section>
+
+      {(context.rates_credit?.length || context.inflation_labor?.length || context.growth_activity?.length) ? (
+        <section className="econ-macro-sections">
+          <div className="econ-macro-header">
+            <div className="grid-empty-kicker">Macro</div>
+            <div className="econ-chart-title">At a glance</div>
+          </div>
+          {context.rates_credit?.length ? (
+            <MacroGroupedSection title="Rates &amp; Credit" items={context.rates_credit} />
+          ) : null}
+          {context.inflation_labor?.length ? (
+            <MacroGroupedSection title="Inflation &amp; Labor" items={context.inflation_labor} />
+          ) : null}
+          {context.growth_activity?.length ? (
+            <MacroGroupedSection title="Growth &amp; Activity" items={context.growth_activity} />
+          ) : null}
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function MacroGroupedSection({ title, items }: { title: string; items: MacroSeriesItemPayload[] }) {
+  const visibleItems = selectMacroAtAGlanceItems(title, items);
+
+  return (
+    <div className="econ-macro-section">
+      <div className="econ-macro-section-title">{title}</div>
+      <div className="econ-macro-items-grid">
+        {visibleItems.map((item) => (
+          <article key={item.series_id} className="econ-macro-item-card">
+            <div className="econ-macro-item-label">{item.label}</div>
+            <div className="econ-macro-item-value">
+              {formatMacroValue(item)}
+            </div>
+            {item.change_percent != null ? (
+              <div className={`econ-macro-item-change ${item.change_percent >= 0 ? "positive" : "negative"}`}>
+                {item.change_percent >= 0 ? "+" : ""}
+                {(item.change_percent * 100).toFixed(2)}%
+              </div>
+            ) : null}
+            <div className="econ-macro-item-meta">
+              {item.observation_date ? `${formatDate(item.observation_date)} · ` : ""}
+              <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="econ-macro-source-link">
+                {item.source_name}
+              </a>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
@@ -639,4 +689,50 @@ function rangeRates(values: Array<number | null>): number | null {
     return null;
   }
   return Math.max(...clean) - Math.min(...clean);
+}
+
+function formatMacroValue(item: MacroSeriesItemPayload): string {
+  if (item.value == null) {
+    return "—";
+  }
+
+  if (item.units === "percent") {
+    return formatPercent(item.value);
+  }
+
+  if (item.units === "spread") {
+    return `${item.value.toFixed(2)} pts`;
+  }
+
+  if (item.units === "billions_usd") {
+    if (Math.abs(item.value) >= 1000) {
+      return `$${(item.value / 1000).toFixed(2)}T`;
+    }
+    return `$${item.value.toFixed(1)}B`;
+  }
+
+  if (item.units === "thousands") {
+    return `${formatCompactNumber(item.value * 1000)}`;
+  }
+
+  return formatCompactNumber(item.value);
+}
+
+function selectMacroAtAGlanceItems(title: string, items: MacroSeriesItemPayload[]): MacroSeriesItemPayload[] {
+  const desiredSeriesBySection: Record<string, string[]> = {
+    "Rates & Credit": ["DGS_10Y", "slope_2s10s", "BAA10Y"],
+    "Inflation & Labor": ["CPIAUCSL", "PCEPILFE", "UNRATE", "CUSR0000SA0", "CUSR0000SA0L1E", "LNS14000000"],
+    "Growth & Activity": ["A191RL1Q225SBEA", "PCE", "CP", "PI"],
+  };
+
+  const desired = desiredSeriesBySection[title] ?? [];
+  const prioritized = desired
+    .map((seriesId) => items.find((item) => item.series_id === seriesId))
+    .filter((item): item is MacroSeriesItemPayload => Boolean(item && item.value != null && item.status === "ok"));
+
+  if (prioritized.length) {
+    return prioritized;
+  }
+
+  return items.filter((item) => item.value != null && item.status === "ok").slice(0, 3);
 }

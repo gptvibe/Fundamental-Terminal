@@ -16,6 +16,11 @@ from app.model_engine.models.reverse_dcf import (
     compute as compute_reverse_dcf,
 )
 from app.model_engine.models.roic import MODEL_NAME as ROIC_NAME, MODEL_VERSION as ROIC_VERSION, compute as compute_roic
+from app.model_engine.models.residual_income import (
+    MODEL_NAME as RESIDUAL_INCOME_NAME,
+    MODEL_VERSION as RESIDUAL_INCOME_VERSION,
+    compute as compute_residual_income,
+)
 from app.model_engine.types import ModelDefinition
 
 MODEL_REGISTRY: dict[str, ModelDefinition] = {
@@ -27,6 +32,7 @@ MODEL_REGISTRY: dict[str, ModelDefinition] = {
     REVERSE_DCF_NAME: ModelDefinition(name=REVERSE_DCF_NAME, version=REVERSE_DCF_VERSION, compute=compute_reverse_dcf),
     ROIC_NAME: ModelDefinition(name=ROIC_NAME, version=ROIC_VERSION, compute=compute_roic),
     CAPITAL_ALLOCATION_NAME: ModelDefinition(name=CAPITAL_ALLOCATION_NAME, version=CAPITAL_ALLOCATION_VERSION, compute=compute_capital_allocation),
+    RESIDUAL_INCOME_NAME: ModelDefinition(name=RESIDUAL_INCOME_NAME, version=RESIDUAL_INCOME_VERSION, compute=compute_residual_income),
 }
 
-CORE_MODEL_NAMES = [RATIOS_NAME]
+CORE_MODEL_NAMES = [RATIOS_NAME, RESIDUAL_INCOME_NAME]

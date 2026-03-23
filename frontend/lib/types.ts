@@ -300,6 +300,27 @@ export interface MarketFredSeriesPayload {
   state: string;
 }
 
+export interface MacroHistoryPoint {
+  date: string;
+  value: number;
+}
+
+export interface MacroSeriesItemPayload {
+  series_id: string;
+  label: string;
+  source_name: string;
+  source_url: string;
+  units: string;
+  value: number | null;
+  previous_value: number | null;
+  change: number | null;
+  change_percent: number | null;
+  observation_date: string | null;
+  release_date: string | null;
+  history: MacroHistoryPoint[];
+  status: string;
+}
+
 export interface CompanyMarketContextResponse {
   company: CompanyPayload | null;
   status: string;
@@ -310,6 +331,13 @@ export interface CompanyMarketContextResponse {
   provenance: Record<string, unknown>;
   fetched_at: string;
   refresh: RefreshState;
+  // v2 grouped sections
+  rates_credit?: MacroSeriesItemPayload[];
+  inflation_labor?: MacroSeriesItemPayload[];
+  growth_activity?: MacroSeriesItemPayload[];
+  relevant_series?: string[];
+  sector_exposure?: string[];
+  hqm_snapshot?: Record<string, unknown> | null;
 }
 
 export interface MarketContextStatusPayload {

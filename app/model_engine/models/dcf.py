@@ -16,13 +16,40 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "2.1.0"
+MODEL_VERSION = "2.2.0"
 
 EQUITY_RISK_PREMIUM = 0.05
 BASE_COMPANY_RISK_PREMIUM = 0.01
 MAX_GROWTH_RATE = 0.15
 MIN_GROWTH_RATE = -0.10
 PROJECTION_YEARS = 5
+
+# Sector-based additional risk premiums layered on top of ERP.
+# Positive values increase the discount rate; negative values reduce it.
+_SECTOR_RISK_PREMIUM: dict[str, float] = {
+    "utilities": -0.010,
+    "consumer staples": -0.005,
+    "healthcare": 0.000,
+    "industrials": 0.005,
+    "real estate": -0.005,
+    "energy": 0.010,
+    "materials": 0.010,
+    "consumer discretionary": 0.010,
+    "communication services": 0.010,
+    "information technology": 0.015,
+    "technology": 0.015,
+}
+
+
+def _sector_risk_premium(dataset: CompanyDataset) -> float:
+    """Return sector-specific risk adjustment (delta on top of base ERP)."""
+    for field in (dataset.market_sector, dataset.sector):
+        if field:
+            key = field.lower().strip()
+            premium = _SECTOR_RISK_PREMIUM.get(key)
+            if premium is not None:
+                return premium
+    return 0.0  # default: no adjustment
 
 REQUIRED_VALUATION_FIELDS = [
     "free_cash_flow",
@@ -120,7 +147,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     assumed_growth = sum(growth_rates) / len(growth_rates) if growth_rates else 0.03
     assumed_growth = max(MIN_GROWTH_RATE, min(MAX_GROWTH_RATE, assumed_growth))
 
-    discount_rate = risk_free.rate_used + EQUITY_RISK_PREMIUM
+    sector_premium = _sector_risk_premium(dataset)
+    discount_rate = risk_free.rate_used + EQUITY_RISK_PREMIUM + sector_premium
     if used_proxy_fcf:
         discount_rate += BASE_COMPANY_RISK_PREMIUM
     terminal_growth_rate = min(0.03, max(0.005, risk_free.rate_used * 0.6))
@@ -214,6 +242,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "starting_growth_rate": json_number(assumed_growth),
             "projection_years": PROJECTION_YEARS,
             "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
+            "sector_risk_premium": json_number(sector_premium),
         },
         "assumption_provenance": {
             "risk_free_rate": {
@@ -226,6 +255,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "discount_rate_inputs": {
                 "risk_free_rate": json_number(risk_free.rate_used),
                 "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
+                "sector_risk_premium": json_number(sector_premium),
                 "company_risk_premium": json_number(BASE_COMPANY_RISK_PREMIUM if used_proxy_fcf else 0.0),
             },
             "terminal_assumptions": {

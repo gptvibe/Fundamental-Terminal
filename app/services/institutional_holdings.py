@@ -393,6 +393,9 @@ def _collect_fund_company_snapshots(
         snapshots.append(
             HoldingSnapshot(
                 accession_number=current.accession_number,
+                filing_form=current.filing_form,
+                base_form=current.base_form,
+                is_amendment=current.is_amendment,
                 reporting_date=current.reporting_date,
                 filing_date=current.filing_date,
                 shares_held=current.shares_held,

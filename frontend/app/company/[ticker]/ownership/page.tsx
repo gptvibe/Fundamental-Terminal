@@ -16,10 +16,12 @@ import { Panel } from "@/components/ui/panel";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyInstitutionalHoldingsSummary } from "@/lib/api";
+import { getCompanyInstitutionalHoldings, getCompanyInstitutionalHoldingsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import { buildSmartMoneySummary } from "@/lib/smart-money";
-import type { CompanyInstitutionalHoldingsSummaryResponse } from "@/lib/types";
+import type { CompanyInstitutionalHoldingsResponse, CompanyInstitutionalHoldingsSummaryResponse } from "@/lib/types";
+
+const OWNERSHIP_POLL_INTERVAL_MS = 3000;
 
 export default function CompanyOwnershipPage() {
   const params = useParams<{ ticker: string }>();
@@ -28,18 +30,22 @@ export default function CompanyOwnershipPage() {
     company,
     financials,
     institutionalData,
-    institutionalHoldings,
+    institutionalHoldings: workspaceInstitutionalHoldings,
     institutionalError,
     loading,
     refreshing,
     refreshState,
+    activeJobId,
     consoleEntries,
     connectionState,
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker, { includeInstitutional: true });
+  const [liveInstitutionalData, setLiveInstitutionalData] = useState<CompanyInstitutionalHoldingsResponse | null>(null);
   const [summaryData, setSummaryData] = useState<CompanyInstitutionalHoldingsSummaryResponse | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const institutionalHoldings = liveInstitutionalData?.institutional_holdings ?? workspaceInstitutionalHoldings;
+  const ownershipRefreshState = liveInstitutionalData?.refresh ?? summaryData?.refresh ?? refreshState;
   const latestReportingDate = useMemo(
     () =>
       institutionalHoldings.reduce<string | null>(
@@ -61,6 +67,14 @@ export default function CompanyOwnershipPage() {
       }),
     [institutionalHoldings.length, latestReportingDate, smartMoney, summary?.amended_rows, summary?.latest_reporting_date, summary?.total_rows, summary?.unique_managers]
   );
+
+  useEffect(() => {
+    if (!institutionalData) {
+      return;
+    }
+
+    setLiveInstitutionalData(institutionalData);
+  }, [institutionalData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,6 +100,56 @@ export default function CompanyOwnershipPage() {
     };
   }, [ticker, reloadKey]);
 
+  useEffect(() => {
+    const trackedJobId = activeJobId ?? ownershipRefreshState?.job_id;
+    if (!trackedJobId) {
+      return;
+    }
+
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const pollOwnership = async () => {
+      try {
+        const [holdingsResponse, summaryResponse] = await Promise.all([
+          getCompanyInstitutionalHoldings(ticker),
+          getCompanyInstitutionalHoldingsSummary(ticker)
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setLiveInstitutionalData(holdingsResponse);
+        setSummaryData(summaryResponse);
+        setSummaryError(null);
+
+        const hasHoldings = holdingsResponse.institutional_holdings.length > 0;
+        const refreshComplete = !holdingsResponse.refresh.job_id && !summaryResponse.refresh.job_id;
+        if ((hasHoldings || refreshComplete) && intervalId !== null) {
+          window.clearInterval(intervalId);
+          intervalId = null;
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSummaryError(error instanceof Error ? error.message : "Unable to refresh institutional summary");
+        }
+      }
+    };
+
+    void pollOwnership();
+    intervalId = window.setInterval(() => {
+      void pollOwnership();
+    }, OWNERSHIP_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [activeJobId, ownershipRefreshState?.job_id, ticker]);
+
   return (
     <CompanyWorkspaceShell
       rail={
@@ -93,9 +157,9 @@ export default function CompanyOwnershipPage() {
           ticker={ticker}
           companyName={company?.name ?? null}
           sector={company?.sector ?? null}
-          refreshState={refreshState}
+          refreshState={ownershipRefreshState}
           refreshing={refreshing}
-          onRefresh={() => queueRefresh()}
+          onRefresh={() => queueRefresh(true)}
           actionTitle="Next Steps"
           actionSubtitle="Refresh the latest ownership data or jump into valuation models."
           primaryActionLabel="Refresh Ownership Data"
@@ -115,7 +179,7 @@ export default function CompanyOwnershipPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Ownership" subtitle={company?.name ?? ticker} aside={refreshState ? <StatusPill state={refreshState} /> : undefined}>
+      <Panel title="Ownership" subtitle={company?.name ?? ticker} aside={ownershipRefreshState ? <StatusPill state={ownershipRefreshState} /> : undefined}>
         <div className="metric-grid">
           <Metric label="Ticker" value={ticker} />
           <Metric label="Tracked Holdings" value={(summary?.total_rows ?? institutionalHoldings.length).toLocaleString()} />
@@ -125,6 +189,11 @@ export default function CompanyOwnershipPage() {
           <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
         </div>
         {summaryError ? <div className="text-muted">{summaryError}</div> : null}
+        {!loading && !summaryError && institutionalHoldings.length === 0 ? (
+          <div className="text-muted" style={{ marginTop: 12 }}>
+            No institutional holdings are cached yet for this ticker. Trigger a refresh to pull the latest 13F coverage.
+          </div>
+        ) : null}
       </Panel>
 
       <Panel title="Plain-English Scorecard" subtitle="Simple read on whether institutional holders are adding, trimming, or staying mixed">
@@ -143,7 +212,7 @@ export default function CompanyOwnershipPage() {
           holdings={institutionalHoldings}
           loading={loading && institutionalData === null}
           error={institutionalError}
-          refresh={institutionalData?.refresh ?? refreshState}
+          refresh={ownershipRefreshState}
         />
       </Panel>
 
@@ -164,11 +233,11 @@ export default function CompanyOwnershipPage() {
       </Panel>
 
       <Panel title="Smart Money Flow" subtitle="Quarterly buying, selling, and net institutional flow from 13F filings">
-        <SmartMoneyFlowChart holdings={institutionalHoldings} loading={loading && institutionalData === null} error={institutionalError} refresh={institutionalData?.refresh ?? refreshState} />
+        <SmartMoneyFlowChart holdings={institutionalHoldings} loading={loading && institutionalData === null} error={institutionalError} refresh={ownershipRefreshState} />
       </Panel>
 
       <Panel title="Hedge Fund Activity" subtitle="Sortable holdings table with share changes, portfolio weights, and quarter labels">
-        <HedgeFundActivityTable ticker={ticker} holdings={institutionalHoldings} loading={loading && institutionalData === null} error={institutionalError} refresh={institutionalData?.refresh ?? refreshState} />
+        <HedgeFundActivityTable ticker={ticker} holdings={institutionalHoldings} loading={loading && institutionalData === null} error={institutionalError} refresh={ownershipRefreshState} />
       </Panel>
     </CompanyWorkspaceShell>
   );

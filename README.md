@@ -320,11 +320,39 @@ Useful options:
 
 - Core `ratios` are precomputed automatically whenever canonical financial data is saved.
 - Cached model results are stored in PostgreSQL with `model_version` and reused until financial inputs change.
+- DCF v2.2.0 adds per-sector risk premium adjustments (e.g., Utilities −1%, Technology +1.5%) layered on the base equity risk premium.
+- `residual_income` v1.0.0 is the primary model for financial sector companies (banks, REITs, insurers) where asset-level cash-flow DCF is unsupported. Formula: RI = (ROE − CoE) × Book Equity, with ROE fading toward CoE over a 5-year projection horizon and a Gordon Growth terminal value.
 - DCF/reverse-DCF/ROIC assumptions include Treasury-direct 10-year risk-free input with 24-hour cache and provenance metadata.
 
 Run model computations from cached PostgreSQL data only:
 
 ```bash
 python -m app.model_engine.worker AAPL --models dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios
+```
+
+## Macro (Market Context)
+
+The terminal persists macro indicator data in PostgreSQL with a DB-first fetch path. Live fetches are only triggered on cache miss or staleness. Data is grouped into three sections returned by the API:
+
+- `rates_credit` — Treasury par yield curve tenors, HQM 30-year corporate benchmark, and BAA corporate spread
+- `inflation_labor` — CPI (Urban All Items), Core CPI, PPI (Final Demand), Unemployment Rate, and Nonfarm Payrolls
+- `growth_activity` — Real GDP, Personal Income, PCE, and Corporate Profits (via FRED)
+
+Official data sources:
+
+| Source | Series | Env var required |
+|--------|--------|-----------------|
+| U.S. Treasury (CSV) | Daily par yield curve | `TREASURY_YIELD_CURVE_CSV_URL` |
+| U.S. Treasury HQM | 30-year corporate bond yield | none (public) |
+| BLS Public API v1 | CPI, Core CPI, PPI, Unemployment, Payrolls | none (public, rate-limited) |
+| FRED (BEA proxy) | Real GDP, Personal Income, PCE, Corporate Profits | `FRED_API_KEY` |
+
+Company pages display a `MacroStrip` with the most relevant indicators filtered by sector exposure. The home dashboard groups indicators under the "Macro" heading.
+
+API endpoints:
+
+```bash
+GET /api/market-context               # global macro snapshot (DB-first)
+GET /api/companies/AAPL/market-context  # company-specific enriched context
 ```
 
