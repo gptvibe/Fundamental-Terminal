@@ -1330,3 +1330,22 @@ def refresh_market_context_v2_sync(session: "Session") -> None:
         logger.info("Market context v2 refreshed successfully for %s", fresh.fetched_at.date())
     except Exception:
         logger.error("Market context v2 background refresh failed", exc_info=True)
+
+
+def run_market_context_refresh_job() -> None:
+    """Refresh and persist market context snapshot using a managed DB session."""
+    from app.db.session import SessionLocal, get_engine
+
+    logger.info("Starting market context refresh job")
+    get_engine()
+    session = SessionLocal()
+    try:
+        refresh_market_context_v2_sync(session)
+        session.commit()
+        logger.info("Market context refresh job completed successfully")
+    except Exception:
+        session.rollback()
+        logger.exception("Market context refresh job failed")
+        raise
+    finally:
+        session.close()
