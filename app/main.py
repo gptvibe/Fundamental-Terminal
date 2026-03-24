@@ -21,20 +21,22 @@ from app.config import settings
 from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
-from app.models import ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
+from app.models import EarningsRelease, ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
 from app.services.ownership_analytics import build_ownership_analytics
 from app.services.peer_comparison import build_peer_comparison
 from app.services import (
-        get_company_filing_events,
-        get_company_capital_markets_events,
     CompanyCacheSnapshot,
+    get_company_capital_markets_events,
     get_company_coverage_counts,
+    get_company_earnings_cache_status,
+    get_company_earnings_releases,
     get_company_executive_compensation,
-    get_company_financials,
+    get_company_filing_events,
     get_company_filing_insights,
+    get_company_financials,
     get_company_form144_cache_status,
     get_company_form144_filings,
     get_company_insider_trade_cache_status,
@@ -47,8 +49,8 @@ from app.services import (
     get_company_proxy_cache_status,
     get_company_proxy_statements,
     get_company_snapshot,
-    get_company_snapshots_by_ticker,
     get_company_snapshot_by_cik,
+    get_company_snapshots_by_ticker,
     queue_company_refresh,
     search_company_snapshots,
     status_broker,
@@ -101,6 +103,7 @@ class CompanyPayload(BaseModel):
     last_checked_insiders: datetime | None = None
     last_checked_institutional: datetime | None = None
     last_checked_filings: datetime | None = None
+    earnings_last_checked: datetime | None = None
     cache_state: Literal["fresh", "stale", "missing"]
 
 
@@ -285,6 +288,61 @@ class CompanyForm144Response(BaseModel):
     company: CompanyPayload | None
     filings: list[Form144FilingPayload]
     refresh: RefreshState
+
+
+class EarningsReleasePayload(BaseModel):
+    accession_number: str
+    form: str
+    filing_date: DateType | None = None
+    report_date: DateType | None = None
+    source_url: str
+    primary_document: str | None = None
+    exhibit_document: str | None = None
+    exhibit_type: str | None = None
+    reported_period_label: str | None = None
+    reported_period_end: DateType | None = None
+    revenue: Number = None
+    operating_income: Number = None
+    net_income: Number = None
+    diluted_eps: Number = None
+    revenue_guidance_low: Number = None
+    revenue_guidance_high: Number = None
+    eps_guidance_low: Number = None
+    eps_guidance_high: Number = None
+    share_repurchase_amount: Number = None
+    dividend_per_share: Number = None
+    highlights: list[str] = Field(default_factory=list)
+    parse_state: Literal["parsed", "metadata_only"]
+
+
+class CompanyEarningsResponse(BaseModel):
+    company: CompanyPayload | None
+    earnings_releases: list[EarningsReleasePayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
+class EarningsSummaryPayload(BaseModel):
+    total_releases: int
+    parsed_releases: int
+    metadata_only_releases: int
+    releases_with_guidance: int
+    releases_with_buybacks: int
+    releases_with_dividends: int
+    latest_filing_date: DateType | None = None
+    latest_report_date: DateType | None = None
+    latest_reported_period_end: DateType | None = None
+    latest_revenue: Number = None
+    latest_operating_income: Number = None
+    latest_net_income: Number = None
+    latest_diluted_eps: Number = None
+
+
+class CompanyEarningsSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: EarningsSummaryPayload
+    refresh: RefreshState
+    error: str | None = None
 
 
 class LargestInsiderTradePayload(BaseModel):
@@ -1206,6 +1264,66 @@ def company_form144_filings(
     )
 
 
+@app.get("/api/companies/{ticker}/earnings", response_model=CompanyEarningsResponse)
+def company_earnings(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyEarningsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEarningsResponse(
+            company=None,
+            earnings_releases=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
+    earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
+    refresh = _refresh_for_earnings(background_tasks, snapshot, earnings_cache_state)
+    payload = [_serialize_earnings_release(release) for release in earnings_releases]
+    return CompanyEarningsResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, earnings_last_checked),
+            last_checked_earnings=earnings_last_checked,
+        ),
+        earnings_releases=payload,
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/earnings/summary", response_model=CompanyEarningsSummaryResponse)
+def company_earnings_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyEarningsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEarningsSummaryResponse(
+            company=None,
+            summary=_build_earnings_summary([]),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
+    earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
+    refresh = _refresh_for_earnings(background_tasks, snapshot, earnings_cache_state)
+    payload = [_serialize_earnings_release(release) for release in earnings_releases]
+    return CompanyEarningsSummaryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, earnings_last_checked),
+            last_checked_earnings=earnings_last_checked,
+        ),
+        summary=_build_earnings_summary(payload),
+        refresh=refresh,
+    )
+
+
 @app.get("/api/insiders/{ticker}", response_model=InsiderAnalyticsResponse)
 def insider_analytics(
     ticker: str,
@@ -2119,6 +2237,20 @@ def _refresh_for_governance(
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_earnings(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    earnings_cache_state: Literal["fresh", "stale", "missing"],
+) -> RefreshState:
+    if snapshot.cache_state == "missing":
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+    if snapshot.cache_state == "stale":
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    if earnings_cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=earnings_cache_state)
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _get_cached_search_response(query: str) -> CompanySearchResponse | None:
     now = time.monotonic()
     with _search_response_cache_lock:
@@ -2213,6 +2345,7 @@ def _serialize_company(
     last_checked_insiders: datetime | None = None,
     last_checked_institutional: datetime | None = None,
     last_checked_filings: datetime | None = None,
+    last_checked_earnings: datetime | None = None,
 ) -> CompanyPayload:
     return CompanyPayload(
         ticker=snapshot.company.ticker,
@@ -2227,6 +2360,7 @@ def _serialize_company(
         last_checked_insiders=last_checked_insiders,
         last_checked_institutional=last_checked_institutional,
         last_checked_filings=last_checked_filings,
+        earnings_last_checked=last_checked_earnings,
         cache_state=snapshot.cache_state,
     )
 
@@ -2385,6 +2519,70 @@ def _serialize_form144_filing(filing: Form144Filing) -> Form144FilingPayload:
         broker_name=filing.broker_name,
         source_url=filing.source_url,
         summary=filing.summary,
+    )
+
+
+def _serialize_earnings_release(release: EarningsRelease) -> EarningsReleasePayload:
+    return EarningsReleasePayload(
+        accession_number=release.accession_number,
+        form=release.form,
+        filing_date=release.filing_date,
+        report_date=release.report_date,
+        source_url=release.source_url,
+        primary_document=release.primary_document,
+        exhibit_document=release.exhibit_document,
+        exhibit_type=release.exhibit_type,
+        reported_period_label=release.reported_period_label,
+        reported_period_end=release.reported_period_end,
+        revenue=release.revenue,
+        operating_income=release.operating_income,
+        net_income=release.net_income,
+        diluted_eps=release.diluted_eps,
+        revenue_guidance_low=release.revenue_guidance_low,
+        revenue_guidance_high=release.revenue_guidance_high,
+        eps_guidance_low=release.eps_guidance_low,
+        eps_guidance_high=release.eps_guidance_high,
+        share_repurchase_amount=release.share_repurchase_amount,
+        dividend_per_share=release.dividend_per_share,
+        highlights=list(release.highlights or []),
+        parse_state=release.parse_state,
+    )
+
+
+def _build_earnings_summary(releases: list[EarningsReleasePayload]) -> EarningsSummaryPayload:
+    parsed_releases = [release for release in releases if release.parse_state == "parsed"]
+    metadata_only_releases = len(releases) - len(parsed_releases)
+    guidance_releases = [
+        release
+        for release in releases
+        if any(
+            value is not None
+            for value in (
+                release.revenue_guidance_low,
+                release.revenue_guidance_high,
+                release.eps_guidance_low,
+                release.eps_guidance_high,
+            )
+        )
+    ]
+    buyback_releases = [release for release in releases if release.share_repurchase_amount is not None]
+    dividend_releases = [release for release in releases if release.dividend_per_share is not None]
+    latest = releases[0] if releases else None
+
+    return EarningsSummaryPayload(
+        total_releases=len(releases),
+        parsed_releases=len(parsed_releases),
+        metadata_only_releases=metadata_only_releases,
+        releases_with_guidance=len(guidance_releases),
+        releases_with_buybacks=len(buyback_releases),
+        releases_with_dividends=len(dividend_releases),
+        latest_filing_date=latest.filing_date if latest is not None else None,
+        latest_report_date=latest.report_date if latest is not None else None,
+        latest_reported_period_end=latest.reported_period_end if latest is not None else None,
+        latest_revenue=latest.revenue if latest is not None else None,
+        latest_operating_income=latest.operating_income if latest is not None else None,
+        latest_net_income=latest.net_income if latest is not None else None,
+        latest_diluted_eps=latest.diluted_eps if latest is not None else None,
     )
 
 

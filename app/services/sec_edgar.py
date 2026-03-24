@@ -13,14 +13,14 @@ from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy import Select, case, func, or_, select, update
+from sqlalchemy import Select, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
-from app.models import BeneficialOwnershipReport, Company, FinancialStatement, Form144Filing, InsiderTrade
+from app.models import BeneficialOwnershipReport, Company, EarningsRelease, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -640,6 +640,7 @@ class IngestionResult:
     form144_filings_written: int = 0
     institutional_holdings_written: int = 0
     beneficial_ownership_written: int = 0
+    earnings_releases_written: int = 0
     price_points_written: int = 0
     fetched_from_sec: bool = False
     last_checked: datetime | None = None
@@ -1412,6 +1413,65 @@ class EdgarIngestionService:
         _touch_company_form144_filings(session, company.id, checked_at)
         return filings_written
 
+    def _refresh_earnings_releases(
+        self,
+        session: Session,
+        company: Company,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        *,
+        force: bool = False,
+    ) -> int:
+        from app.services.earnings_release import collect_earnings_releases, upsert_earnings_releases
+
+        if force:
+            session.execute(delete(EarningsRelease).where(EarningsRelease.company_id == company.id))
+            session.flush()
+            existing_accessions: set[str] = set()
+        else:
+            existing_accessions = _existing_earnings_release_accessions(session, company.id)
+        session.commit()
+        earnings_filings = [
+            metadata
+            for metadata in filing_index.values()
+            if _base_form(metadata.form) == "8-K" and "2.02" in _item_tokens(metadata.items)
+        ]
+        earnings_filings.sort(
+            key=lambda metadata: (
+                metadata.filing_date or date.min,
+                metadata.accession_number,
+            ),
+            reverse=True,
+        )
+        earnings_filings = earnings_filings[: settings.sec_form4_max_filings_per_refresh]
+
+        candidate_filings = earnings_filings if force else [
+            metadata for metadata in earnings_filings if metadata.accession_number not in existing_accessions
+        ]
+        if candidate_filings:
+            reporter.step("earnings", f"Fetching {len(candidate_filings)} earnings release filing(s)...")
+        else:
+            reporter.step("earnings", "Checking cached earnings release coverage...")
+
+        normalized_releases = collect_earnings_releases(
+            company.cik,
+            {metadata.accession_number: metadata for metadata in candidate_filings},
+            client=self.client,
+        )
+
+        reporter.step("database", "Saving earnings releases to database...")
+        releases_written = 0
+        if normalized_releases:
+            releases_written = upsert_earnings_releases(
+                session=session,
+                company=company,
+                releases=normalized_releases,
+                checked_at=checked_at,
+            )
+        _touch_company_earnings_releases(session, company.id, checked_at)
+        return releases_written
+
     def refresh_company(
         self,
         identifier: str,
@@ -1446,6 +1506,7 @@ class EdgarIngestionService:
             latest_price_checked = get_company_price_last_checked(session, local_company.id) if local_company else None
             latest_insider_checked = _latest_insider_trade_last_checked(session, local_company) if local_company else None
             latest_form144_checked = _latest_form144_last_checked(session, local_company) if local_company else None
+            latest_earnings_checked = _latest_earnings_last_checked(session, local_company) if local_company else None
             latest_institutional_checked = (
                 get_company_institutional_holdings_last_checked(session, local_company) if local_company else None
             )
@@ -1460,6 +1521,7 @@ class EdgarIngestionService:
             prices_fresh = latest_price_checked is not None and latest_price_checked >= freshness_cutoff
             insider_fresh = latest_insider_checked is not None and latest_insider_checked >= freshness_cutoff
             form144_fresh = latest_form144_checked is not None and latest_form144_checked >= freshness_cutoff
+            earnings_fresh = latest_earnings_checked is not None and latest_earnings_checked >= freshness_cutoff
             institutional_fresh = (
                 latest_institutional_checked is not None and latest_institutional_checked >= freshness_cutoff
             )
@@ -1474,6 +1536,7 @@ class EdgarIngestionService:
             if refresh_insider_data:
                 relevant_last_checked_values.append(latest_insider_checked)
                 relevant_last_checked_values.append(latest_form144_checked)
+            relevant_last_checked_values.append(latest_earnings_checked)
             if refresh_institutional_data:
                 relevant_last_checked_values.append(latest_institutional_checked)
             if refresh_beneficial_ownership_data:
@@ -1488,6 +1551,7 @@ class EdgarIngestionService:
                 and effective_insider_fresh
                 and effective_institutional_fresh
                 and effective_beneficial_fresh
+                and earnings_fresh
             ):
                 active_reporter.complete("Using fresh cached data.")
                 session.commit()
@@ -1501,6 +1565,7 @@ class EdgarIngestionService:
                     insider_trades_written=0,
                     institutional_holdings_written=0,
                     beneficial_ownership_written=0,
+                    earnings_releases_written=0,
                     price_points_written=0,
                     fetched_from_sec=False,
                     last_checked=min(
@@ -1554,7 +1619,54 @@ class EdgarIngestionService:
                     detail=(
                         f"Cached {beneficial_ownership_written} beneficial ownership filings"
                         if beneficial_ownership_written
-                        else "Checked beneficial ownership filings; no new entries"
+                    else "Checked beneficial ownership filings; no new entries"
+                    ),
+                )
+
+            if (
+                local_company is not None
+                and not force
+                and statements_fresh
+                and prices_fresh
+                and has_segment_breakdown_key
+                and effective_insider_fresh
+                and effective_institutional_fresh
+                and effective_beneficial_fresh
+                and not earnings_fresh
+            ):
+                session.commit()
+                active_reporter.step("sec", "Checking SEC for new earnings releases...")
+                submissions = self.client.get_submissions(local_company.cik)
+                filing_index = self.client.build_filing_index(submissions)
+                earnings_releases_written = self._refresh_earnings_releases(
+                    session=session,
+                    company=local_company,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=active_reporter,
+                    force=force,
+                )
+                session.commit()
+                active_reporter.complete("Refresh and compute complete.")
+                return IngestionResult(
+                    identifier=identifier,
+                    company_id=local_company.id,
+                    cik=local_company.cik,
+                    ticker=local_company.ticker,
+                    status="fetched",
+                    statements_written=0,
+                    insider_trades_written=0,
+                    form144_filings_written=0,
+                    institutional_holdings_written=0,
+                    beneficial_ownership_written=0,
+                    earnings_releases_written=earnings_releases_written,
+                    price_points_written=0,
+                    fetched_from_sec=True,
+                    last_checked=checked_at,
+                    detail=(
+                        f"Cached {earnings_releases_written} earnings release filings"
+                        if earnings_releases_written
+                        else "Checked earnings releases"
                     ),
                 )
 
@@ -1802,6 +1914,18 @@ class EdgarIngestionService:
                 )
                 session.commit()
 
+            earnings_releases_written = 0
+            if force or not earnings_fresh:
+                earnings_releases_written = self._refresh_earnings_releases(
+                    session=session,
+                    company=company,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=active_reporter,
+                    force=force,
+                )
+                session.commit()
+
             filing_events_written = 0
             active_reporter.step("events", "Caching 8-K filing events...")
             from app.services.eight_k_events import collect_filing_events, upsert_filing_events
@@ -1874,6 +1998,12 @@ class EdgarIngestionService:
                     if beneficial_ownership_written
                     else "Checked beneficial ownership filings"
                 )
+            if force or not earnings_fresh:
+                detail_parts.append(
+                    f"Cached {earnings_releases_written} earnings release rows"
+                    if earnings_releases_written
+                    else "Checked earnings releases"
+                )
             detail_parts.append(
                 f"Cached {filing_events_written} filing event rows"
                 if filing_events_written
@@ -1898,6 +2028,7 @@ class EdgarIngestionService:
                 form144_filings_written=form144_filings_written,
                 institutional_holdings_written=institutional_holdings_written,
                 beneficial_ownership_written=beneficial_ownership_written,
+                earnings_releases_written=earnings_releases_written,
                 price_points_written=price_points_written,
                 fetched_from_sec=True,
                 last_checked=checked_at,
@@ -1951,6 +2082,11 @@ def _existing_form144_accessions(session: Session, company_id: int) -> set[str]:
     return {value for value in session.execute(statement).scalars() if value}
 
 
+def _existing_earnings_release_accessions(session: Session, company_id: int) -> set[str]:
+    statement = select(EarningsRelease.accession_number).where(EarningsRelease.company_id == company_id).distinct()
+    return {value for value in session.execute(statement).scalars() if value}
+
+
 def _latest_insider_trade_last_checked(session: Session, company: Company) -> datetime | None:
     if company.insider_trades_last_checked is not None:
         return _normalize_datetime_value(company.insider_trades_last_checked)
@@ -1964,6 +2100,14 @@ def _latest_form144_last_checked(session: Session, company: Company) -> datetime
         return _normalize_datetime_value(company.form144_filings_last_checked)
 
     statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
+    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _latest_earnings_last_checked(session: Session, company: Company) -> datetime | None:
+    if company.earnings_last_checked is not None:
+        return _normalize_datetime_value(company.earnings_last_checked)
+
+    statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
     return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
 
 
@@ -2127,6 +2271,19 @@ def _touch_company_form144_filings(session: Session, company_id: int, checked_at
         update(Company)
         .where(Company.id == company_id)
         .values(form144_filings_last_checked=checked_at)
+    )
+
+
+def _touch_company_earnings_releases(session: Session, company_id: int, checked_at: datetime) -> None:
+    session.execute(
+        update(EarningsRelease)
+        .where(EarningsRelease.company_id == company_id)
+        .values(last_checked=checked_at)
+    )
+    session.execute(
+        update(Company)
+        .where(Company.id == company_id)
+        .values(earnings_last_checked=checked_at)
     )
 
 
@@ -3497,6 +3654,11 @@ def _build_filing_source_url(cik: str, accession_number: str, primary_document: 
     if primary_document:
         return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/{primary_document}"
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json#accn={accession_number}"
+
+
+def _item_tokens(value: str | None) -> set[str]:
+    normalized = (value or "").replace(" ", "")
+    return {token for token in normalized.split(",") if token}
 
 
 def _base_form(value: str | None) -> str:

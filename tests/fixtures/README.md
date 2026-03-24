@@ -12,6 +12,7 @@ Representative SEC filing samples for parser testing.
 | `form4_nonderivative.xml` | Form 4 | Non-derivative open-market sale with 10b5-1 plan footnote |
 | `form4_derivative.xml` | Form 4 | Derivative transaction (stock option exercise) with expiration date |
 | `form_8k_earnings.html` | 8-K | Item 2.02 earnings release with dollar amounts and Exhibit 99.1 |
+| `form_8k_earnings_guidance.html` | 8-K | Item 2.02 earnings release with guidance, buyback, and dividend signals |
 | `form_8k_leadership.html` | 8-K | Item 5.02 officer appointment |
 | `form_13f_holdings.xml` | 13F | Information table with put/call flags, sole/shared discretion, voting authority |
 | `sc_13d.html` | SC 13D | Beneficial ownership initial filing with percent and share count |

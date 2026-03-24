@@ -13,6 +13,7 @@ const tabs: Array<{ key: string; label: string; suffix: string; exact?: boolean 
   { key: "financials", label: "Financials", suffix: "/financials" },
   { key: "peers", label: "Peers", suffix: "/peers" },
   { key: "filings", label: "Filings", suffix: "/filings" },
+  { key: "earnings", label: "Earnings", suffix: "/earnings" },
   { key: "events", label: "Events", suffix: "/events" },
   { key: "capital-markets", label: "Capital Markets", suffix: "/capital-markets" },
   { key: "sec-feed", label: "SEC Feed", suffix: "/sec-feed" },

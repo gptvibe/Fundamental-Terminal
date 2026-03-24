@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { CompanySubnav } from "@/components/layout/company-subnav";
@@ -20,10 +20,20 @@ describe("CompanySubnav", () => {
   it("includes peers tab and marks it active on peers route", () => {
     mockUsePathname.mockReturnValue("/company/AAPL/peers");
 
-    render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
+    const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
 
-    const peersTab = screen.getByRole("link", { name: "Peers" });
+    const peersTab = within(container).getByRole("link", { name: "Peers" });
     expect(peersTab.getAttribute("href")).toBe("/company/AAPL/peers");
     expect(peersTab.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("includes earnings tab and marks it active on earnings route", () => {
+    mockUsePathname.mockReturnValue("/company/AAPL/earnings");
+
+    const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
+
+    const earningsTab = within(container).getByRole("link", { name: "Earnings" });
+    expect(earningsTab.getAttribute("href")).toBe("/company/AAPL/earnings");
+    expect(earningsTab.getAttribute("aria-current")).toBe("page");
   });
 });

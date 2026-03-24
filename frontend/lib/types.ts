@@ -21,6 +21,7 @@ export interface CompanyPayload {
   last_checked_insiders: string | null;
   last_checked_institutional: string | null;
   last_checked_filings: string | null;
+  earnings_last_checked?: string | null;
   cache_state: CacheState;
 }
 
@@ -575,6 +576,63 @@ export interface CapitalMarketsSummaryPayload {
 export interface CompanyCapitalMarketsSummaryResponse {
   company: CompanyPayload | null;
   summary: CapitalMarketsSummaryPayload;
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export type EarningsParseState = "parsed" | "metadata_only";
+
+export interface EarningsReleasePayload {
+  accession_number: string;
+  form: string;
+  filing_date: string | null;
+  report_date: string | null;
+  primary_document: string | null;
+  exhibit_document: string | null;
+  exhibit_type: string | null;
+  source_url: string;
+  parse_state: EarningsParseState;
+  reported_period_label: string | null;
+  reported_period_end: string | null;
+  revenue: number | null;
+  operating_income: number | null;
+  net_income: number | null;
+  diluted_eps: number | null;
+  revenue_guidance_low: number | null;
+  revenue_guidance_high: number | null;
+  eps_guidance_low: number | null;
+  eps_guidance_high: number | null;
+  share_repurchase_amount: number | null;
+  dividend_per_share: number | null;
+  highlights: string[];
+}
+
+export interface EarningsSummaryPayload {
+  total_releases: number;
+  parsed_releases: number;
+  metadata_only_releases: number;
+  releases_with_guidance: number;
+  releases_with_buybacks: number;
+  releases_with_dividends: number;
+  latest_filing_date: string | null;
+  latest_report_date: string | null;
+  latest_reported_period_end: string | null;
+  latest_revenue: number | null;
+  latest_operating_income: number | null;
+  latest_net_income: number | null;
+  latest_diluted_eps: number | null;
+}
+
+export interface CompanyEarningsResponse {
+  company: CompanyPayload | null;
+  earnings_releases: EarningsReleasePayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface CompanyEarningsSummaryResponse {
+  company: CompanyPayload | null;
+  summary: EarningsSummaryPayload;
   refresh: RefreshState;
   error: string | null;
 }

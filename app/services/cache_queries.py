@@ -8,7 +8,21 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, Company, ExecutiveCompensation, FilingEvent, FinancialStatement, Form144Filing, InsiderTrade, InstitutionalHolding, ModelRun, PriceHistory, ProxyStatement
+from app.models import (
+    BeneficialOwnershipReport,
+    CapitalMarketsEvent,
+    Company,
+    EarningsRelease,
+    ExecutiveCompensation,
+    FilingEvent,
+    FinancialStatement,
+    Form144Filing,
+    InsiderTrade,
+    InstitutionalHolding,
+    ModelRun,
+    PriceHistory,
+    ProxyStatement,
+)
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, FILING_PARSER_STATEMENT_TYPE
 
 
@@ -322,6 +336,33 @@ def get_company_form144_cache_status(session: Session, company: Company) -> tupl
     last_checked = _normalize_datetime(company.form144_filings_last_checked)
     if last_checked is None:
         statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
+        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    return last_checked, _cache_state_from_last_checked(last_checked)
+
+
+def get_company_earnings_releases(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 100,
+) -> list[EarningsRelease]:
+    statement = (
+        select(EarningsRelease)
+        .where(EarningsRelease.company_id == company_id)
+        .order_by(
+            EarningsRelease.filing_date.desc().nullslast(),
+            EarningsRelease.reported_period_end.desc().nullslast(),
+            EarningsRelease.id.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_earnings_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    last_checked = _normalize_datetime(company.earnings_last_checked)
+    if last_checked is None:
+        statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     return last_checked, _cache_state_from_last_checked(last_checked)
 

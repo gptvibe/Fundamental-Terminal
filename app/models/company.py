@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.filing_event import FilingEvent
     from app.models.financial_statement import FinancialStatement
     from app.models.form144_filing import Form144Filing
+    from app.models.earnings_release import EarningsRelease
     from app.models.insider_trade import InsiderTrade
     from app.models.institutional_holding import InstitutionalHolding
     from app.models.model_run import ModelRun
@@ -44,6 +45,7 @@ class Company(Base):
     filing_events_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     capital_markets_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     form144_filings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    earnings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     proxy_statements_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
@@ -87,6 +89,11 @@ class Company(Base):
         passive_deletes=True,
     )
     form144_filings: Mapped[list["Form144Filing"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    earnings_releases: Mapped[list["EarningsRelease"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,
