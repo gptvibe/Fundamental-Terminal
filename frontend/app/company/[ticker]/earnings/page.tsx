@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useParams } from "next/navigation";
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { EarningsTrendChart, type EarningsTrendDatum } from "@/components/charts/earnings-trend-chart";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -11,10 +13,11 @@ import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyEarnings, getCompanyEarningsSummary } from "@/lib/api";
-import { formatCompactNumber, formatDate } from "@/lib/format";
+import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyEarningsResponse, CompanyEarningsSummaryResponse, EarningsReleasePayload, FinancialPayload } from "@/lib/types";
 
 const EARNINGS_POLL_INTERVAL_MS = 3000;
+const SEGMENT_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7", "#7CFFCB", "#64D2FF"];
 
 export default function CompanyEarningsPage() {
   const params = useParams<{ ticker: string }>();
@@ -115,6 +118,10 @@ export default function CompanyEarningsPage() {
   const summary = summaryData?.summary;
   const trackedJobId = effectiveRefreshState?.job_id;
   const fallbackTrendPoints = useMemo(() => buildFallbackTrendPoints(financials), [financials]);
+  const secModelPoints = useMemo(() => buildSecModelPoints(financials), [financials]);
+  const secModelWindow = useMemo(() => secModelPoints.slice(-8), [secModelPoints]);
+  const latestSecModelPoint = secModelPoints.at(-1) ?? null;
+  const segmentContributionRows = useMemo(() => buildSegmentContributionRows(financials), [financials]);
 
   useEffect(() => {
     if (!trackedJobId) {
@@ -259,6 +266,185 @@ export default function CompanyEarningsPage() {
           <EarningsTrendChart earnings={sortedReleases} points={useFallbackTrend ? fallbackTrendPoints : undefined} sourceLabel={chartSourceLabel} />
         ) : (
           <PanelEmptyState message="No earnings releases have been cached yet for this company." />
+        )}
+      </Panel>
+
+      <Panel
+        title="SEC-Heavy Earnings Models"
+        subtitle="Models built from SEC filing fundamentals first: earnings quality, EPS drift, and segment contribution delta"
+      >
+        {loading || workspaceLoading ? (
+          <div className="text-muted">Loading SEC-heavy model visuals...</div>
+        ) : secModelPoints.length ? (
+          <div style={{ display: "grid", gap: 16 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span className="pill">Latest quality score {latestSecModelPoint ? `${latestSecModelPoint.qualityScore.toFixed(1)}/100` : "\u2014"}</span>
+              <span className="pill">Latest EPS drift {latestSecModelPoint ? formatEpsDelta(latestSecModelPoint.epsDelta) : "\u2014"}</span>
+              <span className="pill">Segment rows {segmentContributionRows.length.toLocaleString()}</span>
+              <span className="pill">Source: SEC financial statements</span>
+            </div>
+
+            <div className="metric-card" style={{ display: "grid", gap: 8 }}>
+              <div className="metric-label">How To Read This (Plain English)</div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Earnings quality score: higher means free cash flow conversion is stronger and accrual noise is lower versus reported earnings.
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                EPS drift: bars above zero mean EPS improved versus the prior reported period; below zero means EPS weakened.
+              </div>
+              <div className="text-muted" style={{ fontSize: 14 }}>
+                Segment contribution delta: positive bars mean that segment gained share of total revenue versus the prior comparable filing.
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+              <div className="metric-card" style={{ display: "grid", gap: 10 }}>
+                <div className="metric-label">Earnings Quality Score Trend</div>
+                <div className="text-muted" style={{ fontSize: 13 }}>Blend of FCF margin, cash conversion, and accrual discipline.</div>
+                <div style={{ width: "100%", height: 260 }}>
+                  <ResponsiveContainer>
+                    <LineChart data={secModelWindow} margin={{ top: 8, right: 14, left: 2, bottom: 6 }}>
+                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} />
+                      <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(11)} domain={[0, 100]} width={40} />
+                      <Tooltip
+                        {...RECHARTS_TOOLTIP_PROPS}
+                        formatter={(value, _name, item) => {
+                          if (String(item?.dataKey) === "qualityScore") {
+                            return [`${Number(value).toFixed(1)}/100`, "Quality score"];
+                          }
+                          return [String(value), "Value"];
+                        }}
+                      />
+                      <ReferenceLine y={50} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 4" />
+                      <Line dataKey="qualityScore" stroke="#00FF41" strokeWidth={2.6} dot={{ r: 3 }} isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="metric-card" style={{ display: "grid", gap: 10 }}>
+                <div className="metric-label">EPS Drift (Period-over-Period)</div>
+                <div className="text-muted" style={{ fontSize: 13 }}>Shows whether diluted EPS is accelerating or decelerating each period.</div>
+                <div style={{ width: "100%", height: 260 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={secModelWindow} margin={{ top: 8, right: 14, left: 2, bottom: 6 }}>
+                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} />
+                      <YAxis
+                        stroke={CHART_AXIS_COLOR}
+                        tick={chartTick(11)}
+                        width={48}
+                        tickFormatter={(value) => formatEps(Number(value))}
+                      />
+                      <Tooltip
+                        {...RECHARTS_TOOLTIP_PROPS}
+                        formatter={(value, _name, item) => {
+                          if (String(item?.dataKey) === "epsDelta") {
+                            const payload = item?.payload as SecModelPoint | undefined;
+                            const driftText = formatEpsDelta(Number(value));
+                            const pctText = payload?.epsDeltaPercent == null ? "\u2014" : formatPercent(payload.epsDeltaPercent);
+                            return [`${driftText} (${pctText})`, "EPS drift"];
+                          }
+                          return [String(value), "Value"];
+                        }}
+                      />
+                      <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" />
+                      <Bar dataKey="epsDelta" radius={[8, 8, 0, 0]} isAnimationActive={false}>
+                        {secModelWindow.map((entry) => (
+                          <Cell key={entry.key} fill={entry.epsDelta >= 0 ? "#00E5FF" : "#FF6B6B"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            <div className="metric-card" style={{ display: "grid", gap: 10 }}>
+              <div className="metric-label">Segment Contribution Delta</div>
+              <div className="text-muted" style={{ fontSize: 13 }}>
+                Share-of-revenue change by segment versus previous statement with segment disclosures.
+              </div>
+              {segmentContributionRows.length ? (
+                <>
+                  <div style={{ width: "100%", height: 320 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={segmentContributionRows} layout="vertical" margin={{ top: 8, right: 20, left: 24, bottom: 4 }}>
+                        <CartesianGrid stroke={CHART_GRID_COLOR} horizontal={false} />
+                        <XAxis
+                          type="number"
+                          stroke={CHART_AXIS_COLOR}
+                          tick={chartTick(11)}
+                          tickFormatter={(value) => formatPercent(Number(value))}
+                          width={52}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="shortName"
+                          stroke={CHART_AXIS_COLOR}
+                          tick={chartTick(11)}
+                          width={120}
+                        />
+                        <Tooltip
+                          {...RECHARTS_TOOLTIP_PROPS}
+                          formatter={(value, _name, item) => {
+                            const payload = item?.payload as SegmentContributionRow | undefined;
+                            if (!payload) {
+                              return [String(value), "Share delta"];
+                            }
+                            return [
+                              `${formatPercent(Number(value))} (${formatCompactNumber(payload.revenue)} latest)` ,
+                              `${payload.segmentName}`
+                            ];
+                          }}
+                        />
+                        <ReferenceLine x={0} stroke="rgba(255,255,255,0.28)" />
+                        <Bar dataKey="shareDelta" radius={[0, 8, 8, 0]} isAnimationActive={false}>
+                          {segmentContributionRows.map((row) => (
+                            <Cell key={row.segmentId} fill={row.shareDelta >= 0 ? row.color : "#FF6B6B"} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+                      <thead>
+                        <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
+                          <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
+                          <th align="right" style={{ padding: "8px 10px" }}>Latest Revenue</th>
+                          <th align="right" style={{ padding: "8px 10px" }}>Share of Revenue</th>
+                          <th align="right" style={{ padding: "8px 10px" }}>Share Delta</th>
+                          <th align="right" style={{ padding: "8px 10px" }}>Revenue Delta</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {segmentContributionRows.map((row) => (
+                          <tr key={row.segmentId}>
+                            <td style={{ padding: "10px 10px" }}>{row.segmentName}</td>
+                            <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatCompactNumber(row.revenue)}</td>
+                            <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.share)}</td>
+                            <td style={{ padding: "10px 10px", textAlign: "right", color: row.shareDelta >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                              {formatSignedPercent(row.shareDelta)}
+                            </td>
+                            <td style={{ padding: "10px 10px", textAlign: "right", color: row.revenueDelta != null && row.revenueDelta >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                              {formatSignedCompactNumber(row.revenueDelta)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <PanelEmptyState message="No segment history delta available yet. The model appears once at least two filings include segment revenue breakdowns." />
+              )}
+            </div>
+          </div>
+        ) : (
+          <PanelEmptyState message="SEC-heavy models need at least two filing statements with revenue, cash-flow, and EPS fields." />
         )}
       </Panel>
 
@@ -563,4 +749,210 @@ function buildFallbackTrendPoints(financials: FinancialPayload[]): EarningsTrend
       dilutedEps: statement.eps,
       parseState: "financials_fallback"
     }));
+}
+
+type SecModelPoint = {
+  key: string;
+  label: string;
+  filingType: string;
+  revenue: number | null;
+  netIncome: number | null;
+  operatingCashFlow: number | null;
+  freeCashFlow: number | null;
+  eps: number | null;
+  totalAssets: number | null;
+  fcfMargin: number | null;
+  cashConversion: number | null;
+  accrualRatio: number | null;
+  qualityScore: number;
+  epsDelta: number;
+  epsDeltaPercent: number | null;
+};
+
+type SegmentContributionRow = {
+  segmentId: string;
+  segmentName: string;
+  shortName: string;
+  revenue: number;
+  share: number;
+  shareDelta: number;
+  revenueDelta: number | null;
+  color: string;
+};
+
+function buildSecModelPoints(financials: FinancialPayload[]): SecModelPoint[] {
+  const quarterly = financials.filter((statement) => ["10-Q", "6-K"].includes(statement.filing_type));
+  const annual = financials.filter((statement) => ["10-K", "20-F", "40-F"].includes(statement.filing_type));
+  const sourceRows = quarterly.length ? quarterly : annual;
+  const uniqueRows = dedupeByPeriod(sourceRows);
+  const sortedRows = [...uniqueRows]
+    .filter((statement) => statement.period_end && (statement.revenue != null || statement.eps != null || statement.net_income != null))
+    .sort((left, right) => (left.period_end || "").localeCompare(right.period_end || ""));
+
+  return sortedRows.map((statement, index) => {
+    const previous = index > 0 ? sortedRows[index - 1] : null;
+    const fcfMargin = safeRatio(statement.free_cash_flow, statement.revenue);
+    const cashConversion = safeRatio(statement.operating_cash_flow, statement.net_income);
+    const accrualRatio =
+      statement.total_assets != null && statement.total_assets !== 0 && statement.net_income != null && statement.operating_cash_flow != null
+        ? Math.abs(statement.net_income - statement.operating_cash_flow) / Math.abs(statement.total_assets)
+        : null;
+    const epsDelta =
+      statement.eps != null && previous?.eps != null
+        ? statement.eps - previous.eps
+        : 0;
+    const epsDeltaPercent = safeRatio(epsDelta, previous?.eps ?? null);
+
+    return {
+      key: `${statement.filing_type}:${statement.period_end}`,
+      label: formatDate(statement.period_end),
+      filingType: statement.filing_type,
+      revenue: statement.revenue,
+      netIncome: statement.net_income,
+      operatingCashFlow: statement.operating_cash_flow,
+      freeCashFlow: statement.free_cash_flow,
+      eps: statement.eps,
+      totalAssets: statement.total_assets,
+      fcfMargin,
+      cashConversion,
+      accrualRatio,
+      qualityScore: computeEarningsQualityScore(fcfMargin, cashConversion, accrualRatio),
+      epsDelta,
+      epsDeltaPercent
+    } satisfies SecModelPoint;
+  });
+}
+
+function buildSegmentContributionRows(financials: FinancialPayload[]): SegmentContributionRow[] {
+  const statementsWithSegments = financials.filter((statement) => statement.segment_breakdown.length > 0 && statement.revenue != null);
+  if (statementsWithSegments.length < 2) {
+    return [];
+  }
+
+  const sorted = [...statementsWithSegments].sort((left, right) => (right.period_end || "").localeCompare(left.period_end || ""));
+  const latest = sorted[0];
+  const previous = sorted.find((statement) => statement.period_end !== latest.period_end) ?? sorted[1];
+  if (!latest || !previous) {
+    return [];
+  }
+
+  const prevMap = new Map(previous.segment_breakdown.map((segment) => [segment.segment_id, segment]));
+  const latestRevenueBase = latest.revenue && latest.revenue !== 0 ? Math.abs(latest.revenue) : null;
+  const previousRevenueBase = previous.revenue && previous.revenue !== 0 ? Math.abs(previous.revenue) : null;
+
+  return latest.segment_breakdown
+    .filter((segment) => segment.revenue != null)
+    .map((segment, index) => {
+      const latestRevenue = Math.abs(segment.revenue ?? 0);
+      const previousSegment = prevMap.get(segment.segment_id);
+      const previousRevenue = previousSegment?.revenue != null ? Math.abs(previousSegment.revenue) : null;
+      const share =
+        segment.share_of_revenue ??
+        (latestRevenueBase ? latestRevenue / latestRevenueBase : 0);
+      const previousShare =
+        previousSegment?.share_of_revenue ??
+        (previousRevenueBase && previousRevenue != null ? previousRevenue / previousRevenueBase : 0);
+
+      return {
+        segmentId: segment.segment_id,
+        segmentName: segment.segment_name,
+        shortName: shortenLabel(segment.segment_name, 18),
+        revenue: segment.revenue ?? 0,
+        share,
+        shareDelta: share - previousShare,
+        revenueDelta: previousRevenue != null ? latestRevenue - previousRevenue : null,
+        color: SEGMENT_COLORS[index % SEGMENT_COLORS.length]
+      } satisfies SegmentContributionRow;
+    })
+    .sort((left, right) => Math.abs(right.shareDelta) - Math.abs(left.shareDelta));
+}
+
+function computeEarningsQualityScore(
+  fcfMargin: number | null,
+  cashConversion: number | null,
+  accrualRatio: number | null
+): number {
+  const components: number[] = [];
+
+  if (fcfMargin != null) {
+    components.push(scaleRange(fcfMargin, -0.08, 0.2));
+  }
+  if (cashConversion != null) {
+    components.push(scaleRange(cashConversion, 0.5, 1.5));
+  }
+  if (accrualRatio != null) {
+    components.push(scaleRangeInverse(accrualRatio, 0, 0.18));
+  }
+
+  if (!components.length) {
+    return 0;
+  }
+
+  return (components.reduce((sum, value) => sum + value, 0) / components.length) * 100;
+}
+
+function dedupeByPeriod(statements: FinancialPayload[]): FinancialPayload[] {
+  const seen = new Set<string>();
+  return statements.filter((statement) => {
+    const key = `${statement.filing_type}:${statement.period_end}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function safeRatio(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
+  if (numerator == null || denominator == null || denominator === 0) {
+    return null;
+  }
+  return numerator / denominator;
+}
+
+function scaleRange(value: number, min: number, max: number): number {
+  if (max <= min) {
+    return 0;
+  }
+  const scaled = (value - min) / (max - min);
+  return Math.max(0, Math.min(1, scaled));
+}
+
+function scaleRangeInverse(value: number, best: number, worst: number): number {
+  if (worst <= best) {
+    return 0;
+  }
+  const scaled = 1 - (value - best) / (worst - best);
+  return Math.max(0, Math.min(1, scaled));
+}
+
+function shortenLabel(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, maxLength - 1)}\u2026`;
+}
+
+function formatEpsDelta(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  const formatted = formatEps(Math.abs(value));
+  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  const formatted = formatPercent(Math.abs(value));
+  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
+}
+
+function formatSignedCompactNumber(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  const formatted = formatCompactNumber(Math.abs(value));
+  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
 }

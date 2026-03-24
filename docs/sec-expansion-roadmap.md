@@ -108,6 +108,19 @@ Core SEC dataset expansion and valuation-workbench depth are now shipped through
 
 Future roadmap work should prioritize model calibration quality, interaction telemetry-guided UX iteration, and performance hardening over adding new ingestion families.
 
+### SEC-Heavy Earnings Models (Next Sequence)
+
+This sequence starts with SEC-first earnings modeling and keeps external dependencies optional.
+
+1. Ship SEC-heavy earnings model panel on `/company/[ticker]/earnings` (quality score trend, EPS drift, segment contribution delta) using cached 10-Q/10-K statement data.
+2. Improve parser precision for Item 2.02 exhibits so release-level revenue/EPS coverage rises and fallback usage declines.
+3. Add model diagnostics chips (coverage ratio, fallback ratio, stale period warning) so users know confidence level at a glance.
+4. Add backtests for model signal stability per ticker (directional consistency of quality score and EPS drift around earnings windows).
+5. Add peer-relative SEC model context on the earnings page (issuer percentile vs sector for quality and EPS drift).
+6. Add explainability panel that logs exact formula inputs from SEC fields for each model point.
+7. Add alerts for threshold moves (quality score regime shift, EPS drift sign flip, segment share change beyond threshold).
+8. Only after SEC-heavy quality is stable, layer optional non-SEC augmentations (consensus surprise and transcript sentiment) behind explicit source labels.
+
 ---
 
 ## Delivery Rules (Ongoing)
