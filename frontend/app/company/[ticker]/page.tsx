@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
+import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
@@ -139,12 +140,14 @@ export default function CompanyOverviewPage() {
               <div className="text-muted">Loading activity feed...</div>
             ) : (
               <div style={{ display: "grid", gap: 16 }}>
-                <div className="metric-grid">
-                  <Metric label="Feed Entries" value={(activityData?.entries.length ?? 0).toLocaleString()} />
-                  <Metric label="High Alerts" value={(activityData?.summary.high ?? 0).toLocaleString()} />
-                  <Metric label="Medium Alerts" value={(activityData?.summary.medium ?? 0).toLocaleString()} />
-                  <Metric label="Total Alerts" value={(activityData?.summary.total ?? 0).toLocaleString()} />
-                </div>
+                <CompanyMetricGrid
+                  items={[
+                    { label: "Feed Entries", value: (activityData?.entries.length ?? 0).toLocaleString() },
+                    { label: "High Alerts", value: (activityData?.summary.high ?? 0).toLocaleString() },
+                    { label: "Medium Alerts", value: (activityData?.summary.medium ?? 0).toLocaleString() },
+                    { label: "Total Alerts", value: (activityData?.summary.total ?? 0).toLocaleString() }
+                  ]}
+                />
 
                 <div style={{ display: "grid", gap: 12 }}>
                   <div style={{ fontWeight: 600, color: "var(--text)" }}>Top Alerts</div>
@@ -191,22 +194,34 @@ export default function CompanyOverviewPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Company" subtitle={company?.name ?? ticker} aside={refreshState ? <StatusPill state={refreshState} /> : undefined} className="financial-hero">
-        <div style={{ display: "grid", gap: 14 }}>
-          <div className="metric-grid">
-            <Metric label="Ticker" value={ticker} />
-            <Metric label="CIK" value={company?.cik ?? null} />
-            <Metric label="Sector" value={company?.sector ?? null} />
-            <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
-          </div>
-          <div className="financial-summary-strip">
-            <SummaryCard label="Revenue" value={formatCompactNumber(latestFinancial?.revenue)} accent="cyan" />
-            <SummaryCard label="EPS" value={latestFinancial?.eps == null ? "?" : latestFinancial.eps.toFixed(2)} accent="gold" />
-            <SummaryCard label="Net Income" value={formatCompactNumber(latestFinancial?.net_income)} accent="green" />
-            <SummaryCard label="Free Cash Flow" value={formatCompactNumber(latestFinancial?.free_cash_flow)} accent="green" />
-          </div>
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Overview"
+        companyName={company?.name ?? ticker}
+        sector={company?.sector}
+        cacheState={company?.cache_state ?? null}
+        description="SEC-first company workspace with persisted fundamentals, market context, and research panels kept current through background refreshes."
+        aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "CIK", value: company?.cik ?? null },
+          { label: "Sector", value: company?.sector ?? null },
+          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null }
+        ]}
+        ribbonItems={[
+          { label: "Financials", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" },
+          { label: "Prices", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" },
+          { label: "Sources", value: "SEC EDGAR/XBRL + Yahoo Finance", tone: "gold" },
+          { label: "Refresh", value: refreshState?.job_id ? "Queued" : "Background-first", tone: refreshState?.job_id ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "Revenue", value: formatCompactNumber(latestFinancial?.revenue), accent: "cyan" },
+          { label: "EPS", value: latestFinancial?.eps == null ? "?" : latestFinancial.eps.toFixed(2), accent: "gold" },
+          { label: "Net Income", value: formatCompactNumber(latestFinancial?.net_income), accent: "green" },
+          { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" }
+        ]}
+        className="financial-hero"
+      />
 
       <PriceFundamentalsModule priceData={priceHistory} fundamentalsData={fundamentalsTrendData} />
 
@@ -259,24 +274,6 @@ function formatFeedEntryType(type: string): string {
     return "planned-sale";
   }
   return type;
-}
-
-function Metric({ label, value }: { label: string; value: number | string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{typeof value === "number" ? formatCompactNumber(value) : value ?? "?"}</div>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value, accent }: { label: string; value: string; accent: "green" | "cyan" | "gold" }) {
-  return (
-    <div className={`summary-card accent-${accent}`}>
-      <div className="summary-card-label">{label}</div>
-      <div className="summary-card-value">{value}</div>
-    </div>
-  );
 }
 
 function AlertOrEntryCard({

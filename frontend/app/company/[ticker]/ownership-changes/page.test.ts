@@ -81,6 +81,7 @@ describe("CompanyOwnershipChangesPage", () => {
     const html = renderToStaticMarkup(React.createElement(CompanyOwnershipChangesPage));
 
     expect(html).toContain("Stake Changes");
+    expect(html).toContain("SEC-first stake-change workspace centered on Schedules 13D and 13G");
     expect(html).toContain("Signal Visuals");
     expect(html).toContain("Beneficial Owner Table");
     expect(html).toContain("Activist Signals");

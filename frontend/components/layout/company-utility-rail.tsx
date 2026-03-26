@@ -83,39 +83,49 @@ export function CompanyUtilityRail({
       ? dynamicStatusMsg || "Refresh in progress"
       : primaryActionLabel;
 
+  function handleExport() {
+    window.print();
+  }
+
   return (
     <div className="company-utility-stack">
       <Panel title={actionTitle} subtitle={actionSubtitle}>
+        <div className="utility-action-bar" aria-label="Workspace actions">
+          <button
+            onClick={() => void onRefresh()}
+            className="ticker-button utility-action-button"
+            style={actionStyle}
+            disabled={refreshInProgress}
+            aria-disabled={refreshInProgress}
+          >
+            {refreshInProgress ? <span className="utility-action-spinner" aria-hidden="true" /> : null}
+            <span>{refreshButtonLabel}</span>
+          </button>
+          <button type="button" className="ticker-button utility-action-button" onClick={handleExport}>
+            Export View
+          </button>
+          {secondaryActionHref && secondaryActionLabel ? (
+            <Link href={secondaryActionHref} className="ticker-button utility-action-button utility-action-link-button">
+              {secondaryActionLabel}
+            </Link>
+          ) : null}
+        </div>
+
         <div className="utility-action-list">
           <div className="utility-action-item">
-              <button
-                onClick={() => void onRefresh()}
-                className="ticker-button utility-action-button"
-                style={actionStyle}
-                disabled={refreshInProgress}
-                aria-disabled={refreshInProgress}
-              >
-                {refreshInProgress && (
-                  <span className="spinner" style={{ marginRight: 8, verticalAlign: "middle" }}>
-                    <svg width="18" height="18" viewBox="0 0 50 50">
-                      <circle cx="25" cy="25" r="20" fill="none" stroke="#00FF41" strokeWidth="5" strokeDasharray="31.4 31.4" strokeLinecap="round">
-                        <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="1s" repeatCount="indefinite" />
-                      </circle>
-                    </svg>
-                  </span>
-                )}
-                {refreshButtonLabel}
-              </button>
+            <div className="utility-action-label">Refresh</div>
             {primaryActionDescription ? <div className="utility-action-description">{primaryActionDescription}</div> : null}
           </div>
           {secondaryActionHref && secondaryActionLabel ? (
             <div className="utility-action-item">
-              <Link href={secondaryActionHref} className="ticker-button utility-action-button" style={{ display: "block" }}>
-                {secondaryActionLabel}
-              </Link>
+              <div className="utility-action-label">Navigate</div>
               {secondaryActionDescription ? <div className="utility-action-description">{secondaryActionDescription}</div> : null}
             </div>
           ) : null}
+          <div className="utility-action-item">
+            <div className="utility-action-label">Export</div>
+            <div className="utility-action-description">Print or save this research view as a PDF without leaving the workspace.</div>
+          </div>
         </div>
       </Panel>
 
@@ -126,7 +136,7 @@ export function CompanyUtilityRail({
       {children}
 
       <Panel title="Data Status" subtitle="See what is available and whether this workspace is up to date.">
-        <div style={{ display: "grid", gap: 12 }}>
+        <div className="utility-status-stack">
           <StatusPill state={effectiveState} />
           {statusLines.map((line) => (
             <div key={line} className="sparkline-note">

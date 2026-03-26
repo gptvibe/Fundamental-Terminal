@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 
 import { InsiderActivityTrendChart } from "@/components/charts/insider-activity-trend-chart";
 import { InsiderRoleActivityChart } from "@/components/charts/insider-role-activity-chart";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { InsiderActivitySummary } from "@/components/insiders/insider-activity-summary";
@@ -16,7 +17,7 @@ import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyForm144Filings } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatCompactNumber, formatDate } from "@/lib/format";
 import type { CompanyForm144Response, InsiderActivitySummaryPayload } from "@/lib/types";
 
 export default function CompanyInsidersPage() {
@@ -58,6 +59,10 @@ export default function CompanyInsidersPage() {
     () => buildInsiderScorecard(insiderData?.summary ?? null, insiderTrades.length, latestTradeDate),
     [insiderData?.summary, insiderTrades.length, latestTradeDate]
   );
+  const insiderSummaryMetrics = insiderData?.summary?.metrics ?? null;
+  const form144Count = form144Data?.filings.length ?? 0;
+  const latestForm144Date = form144Data?.filings[0]?.filing_date ?? form144Data?.filings[0]?.planned_sale_date ?? null;
+  const effectiveRefreshState = form144Data?.refresh ?? insiderData?.refresh ?? refreshState;
 
   return (
     <CompanyWorkspaceShell
@@ -66,7 +71,7 @@ export default function CompanyInsidersPage() {
           ticker={ticker}
           companyName={company?.name ?? null}
           sector={company?.sector ?? null}
-          refreshState={refreshState}
+          refreshState={effectiveRefreshState}
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}
           actionTitle="Next Steps"
@@ -87,14 +92,33 @@ export default function CompanyInsidersPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Insiders" subtitle={company?.name ?? ticker} aside={refreshState ? <StatusPill state={refreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Cached Trades" value={insiderTrades.length.toLocaleString()} />
-          <Metric label="Latest Filing" value={latestTradeDate ? formatDate(latestTradeDate) : "Pending"} />
-          <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Insiders"
+        companyName={company?.name ?? ticker}
+        sector={company?.sector ?? null}
+        cacheState={company?.cache_state ?? null}
+        description="SEC-first insider workspace with open-market Form 4 activity and Form 144 planned sales kept current through background refreshes."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Cached Trades", value: insiderTrades.length.toLocaleString() },
+          { label: "Latest Filing", value: latestTradeDate ? formatDate(latestTradeDate) : "Pending" },
+          { label: "Form 144 Filings", value: form144Count.toLocaleString() },
+        ]}
+        ribbonItems={[
+          { label: "Insiders", value: company?.last_checked_insiders ? formatDate(company.last_checked_insiders) : company?.last_checked ? formatDate(company.last_checked) : "Pending", tone: "green" },
+          { label: "Form 144", value: latestForm144Date ? formatDate(latestForm144Date) : "Pending", tone: "gold" },
+          { label: "Sources", value: "SEC Form 4 + Form 144 filings", tone: "cyan" },
+          { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" },
+        ]}
+        summaries={[
+          { label: "Buys", value: formatCompactNumber(insiderSummaryMetrics?.total_buy_value), accent: "green" },
+          { label: "Sells", value: formatCompactNumber(insiderSummaryMetrics?.total_sell_value), accent: "red" },
+          { label: "Net Value", value: formatCompactNumber(insiderSummaryMetrics?.net_value), accent: "cyan" },
+          { label: "Planned Sales", value: form144Count.toLocaleString(), accent: "gold" },
+        ]}
+      />
 
       <Panel title="Plain-English Scorecard" subtitle="Simple read on whether insiders are buying, selling, or sending a mixed signal">
         <PlainEnglishScorecard
@@ -131,15 +155,6 @@ export default function CompanyInsidersPage() {
         <Form144FilingsTable ticker={ticker} filings={form144Data?.filings ?? []} loading={form144Loading && form144Data === null} error={form144Error} refresh={form144Data?.refresh ?? null} />
       </Panel>
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }
 

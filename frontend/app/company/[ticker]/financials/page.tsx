@@ -4,12 +4,13 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { formatDate } from "@/lib/format";
+import { formatCompactNumber, formatDate } from "@/lib/format";
 
 const BusinessSegmentBreakdown = dynamic(
   () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
@@ -60,6 +61,7 @@ export default function CompanyFinancialsTabPage() {
     financials,
     annualStatements,
     priceHistory,
+    latestFinancial,
     loading,
     error,
     refreshing,
@@ -98,14 +100,33 @@ export default function CompanyFinancialsTabPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Financials" subtitle={company?.name ?? ticker} aside={refreshState ? <StatusPill state={refreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Statements" value={financials.length.toLocaleString()} />
-          <Metric label="Annual Filings" value={annualStatements.length.toLocaleString()} />
-          <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Financials"
+        companyName={company?.name ?? ticker}
+        sector={company?.sector}
+        cacheState={company?.cache_state ?? null}
+        description="Statement history, derived SEC metrics, and balance-sheet quality in one review surface fed by cached filings first."
+        aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Statements", value: financials.length.toLocaleString() },
+          { label: "Annual Filings", value: annualStatements.length.toLocaleString() },
+          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null }
+        ]}
+        ribbonItems={[
+          { label: "Financial Source", value: "SEC EDGAR/XBRL", tone: "green" },
+          { label: "Market Profile", value: "Yahoo Finance", tone: "cyan" },
+          { label: "Financials Checked", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" },
+          { label: "Prices Checked", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" }
+        ]}
+        summaries={[
+          { label: "Latest Revenue", value: formatCompactNumber(latestFinancial?.revenue), accent: "cyan" },
+          { label: "Operating Income", value: formatCompactNumber(latestFinancial?.operating_income), accent: "gold" },
+          { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" },
+          { label: "Price History", value: priceHistory.length.toLocaleString(), accent: "cyan" }
+        ]}
+      />
 
       <Panel title="Business Segment Breakdown" subtitle="Treemap, share, and growth from reported segment revenue">
         {financials.length ? (
@@ -157,15 +178,6 @@ export default function CompanyFinancialsTabPage() {
         )}
       </Panel>
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }
 

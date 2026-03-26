@@ -14,12 +14,12 @@ export default function CompanyRouteError({
   }, [error]);
 
   return (
-    <div className="panel" style={{ display: "grid", gap: 12 }}>
-      <h2 style={{ margin: 0 }}>Company workspace failed to load</h2>
-      <p className="text-muted" style={{ margin: 0 }}>
+    <div className="panel workspace-error-state">
+      <h2 className="workspace-state-title">Company workspace failed to load</h2>
+      <p className="text-muted workspace-state-copy">
         Cached SEC-first data is still available after a retry. If this persists, queue a refresh from the company console.
       </p>
-      <button type="button" className="ticker-button" onClick={reset} style={{ width: "fit-content" }}>
+      <button type="button" className="ticker-button workspace-state-button" onClick={reset}>
         Retry route
       </button>
     </div>

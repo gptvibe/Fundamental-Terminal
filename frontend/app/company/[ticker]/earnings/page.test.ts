@@ -7,14 +7,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import CompanyEarningsPage from "@/app/company/[ticker]/earnings/page";
 import { getCompanyEarningsWorkspace } from "@/lib/api";
 
-class ResizeObserverMock {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-vi.stubGlobal("ResizeObserver", ResizeObserverMock);
-
 afterEach(() => {
   cleanup();
 });

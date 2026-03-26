@@ -4,6 +4,14 @@ export const CHART_GRID_COLOR = "var(--chart-grid)";
 export const CHART_AXIS_COLOR = "var(--chart-axis)";
 export const CHART_LEGEND_COLOR = "var(--chart-legend)";
 export const CHART_TEXT_COLOR = "var(--text)";
+export const CHART_SERIES_COLORS = [
+  "var(--chart-series-1)",
+  "var(--chart-series-2)",
+  "var(--chart-series-3)",
+  "var(--chart-series-4)",
+  "var(--chart-series-5)",
+  "var(--chart-series-6)"
+] as const;
 
 export const RECHARTS_TOOLTIP_PROPS = {
   contentStyle: {
@@ -37,4 +45,8 @@ export function chartLegendStyle(fontSize = 12): CSSProperties {
     color: CHART_LEGEND_COLOR,
     fontSize
   };
+}
+
+export function chartSeriesColor(index: number): string {
+  return CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length];
 }

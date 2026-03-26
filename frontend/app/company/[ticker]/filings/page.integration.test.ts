@@ -103,6 +103,12 @@ vi.mock("@/lib/api", () => ({
     insights: [],
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
   })),
+  getCompanyFilingEvents: vi.fn(async () => ({
+    company: null,
+    events: [],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    error: null,
+  })),
 }));
 
 describe("CompanyFilingsPage integration", () => {

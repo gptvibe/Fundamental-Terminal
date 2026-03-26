@@ -8,6 +8,7 @@ import { FilingEventCategoryChart } from "@/components/charts/filing-event-categ
 import { FilingDocumentViewer } from "@/components/filings/filing-document-viewer";
 import { FilingParserInsights } from "@/components/filings/filing-parser-insights";
 import { CompanyFilingsTimeline } from "@/components/filings/company-filings-timeline";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
@@ -205,14 +206,33 @@ export default function CompanyFilingsPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Filings" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Recent Filings" value={filings.length.toLocaleString()} />
-          <Metric label="Latest Filing" value={latestFilingDate ? formatDate(latestFilingDate) : "Pending"} />
-          <Metric label="Last Checked" value={pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : null} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Filings"
+        companyName={pageCompany?.name ?? ticker}
+        sector={pageCompany?.sector}
+        cacheState={pageCompany?.cache_state ?? null}
+        description="SEC-first filing workflow keeps the recent timeline, parser snapshot, and document viewer available from cache while background refresh jobs backfill newer submissions."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Recent Filings", value: filings.length.toLocaleString() },
+          { label: "Latest Filing", value: latestFilingDate ? formatDate(latestFilingDate) : "Pending" },
+          { label: "Last Checked", value: pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : null }
+        ]}
+        ribbonItems={[
+          { label: "Timeline Source", value: sourceLabel, tone: data?.timeline_source === "cached_financials" ? "gold" : "green" },
+          { label: "Primary Inputs", value: "SEC submissions", tone: "green" },
+          { label: "8-K Event Feed", value: allEvents.length ? `${allEvents.length.toLocaleString()} classified` : "Pending", tone: "cyan" },
+          { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "Tracked Forms", value: formCounts.length.toLocaleString(), accent: "cyan" },
+          { label: "Event Categories", value: eventCategories.length.toLocaleString(), accent: "gold" },
+          { label: "Selected Filing", value: selectedFiling?.form ?? "Pending", accent: "green" },
+          { label: "Viewer Mode", value: "In-workspace SEC HTML", accent: "cyan" }
+        ]}
+      />
 
       <Panel title="Recent Filing Timeline" subtitle="SEC-first view of annual, quarterly, and current reports with direct source links">
         <CompanyFilingsTimeline
@@ -332,15 +352,6 @@ export default function CompanyFilingsPage() {
         )}
       </Panel>
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }
 

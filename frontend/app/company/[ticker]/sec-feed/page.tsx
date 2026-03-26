@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
@@ -98,15 +99,32 @@ export default function CompanySecFeedPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="SEC Feed" subtitle={company?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Feed Entries" value={feed.length.toLocaleString()} />
-          <Metric label="Latest Activity" value={latestDate ? formatDate(latestDate) : "Pending"} />
-          <Metric label="High Alerts" value={(activityData?.summary.high ?? 0).toLocaleString()} />
-          <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="SEC Feed"
+        companyName={company?.name ?? activityData?.company?.name ?? ticker}
+        sector={company?.sector ?? activityData?.company?.sector ?? null}
+        cacheState={company?.cache_state ?? activityData?.company?.cache_state ?? null}
+        description="Unified SEC signal stream across filings, events, governance, insider activity, Form 144 planned sales, and ownership updates."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Feed Entries", value: feed.length.toLocaleString() },
+          { label: "Latest Activity", value: latestDate ? formatDate(latestDate) : "Pending" },
+          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null },
+        ]}
+        ribbonItems={[
+          { label: "Sources", value: "SEC filings + ownership + insider + Form 144 + 13F", tone: "green" },
+          { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" },
+          { label: "Latest Feed", value: latestDate ? formatDate(latestDate) : "Pending", tone: "cyan" },
+        ]}
+        summaries={[
+          { label: "Total Alerts", value: (activityData?.summary.total ?? 0).toLocaleString(), accent: "cyan" },
+          { label: "High Alerts", value: (activityData?.summary.high ?? 0).toLocaleString(), accent: "red" },
+          { label: "Medium Alerts", value: (activityData?.summary.medium ?? 0).toLocaleString(), accent: "gold" },
+          { label: "Low Alerts", value: (activityData?.summary.low ?? 0).toLocaleString(), accent: "green" },
+        ]}
+      />
 
       <Panel title="Priority Alerts" subtitle="Most important filing-driven signals from recent SEC activity">
         {error ? (
@@ -114,8 +132,8 @@ export default function CompanySecFeedPage() {
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Loading alerts...</div>
         ) : (
-          <div style={{ display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="workspace-card-stack">
+            <div className="workspace-filter-row">
               {([
                 ["all", `All (${activityData?.summary.total ?? 0})`],
                 ["high", `High (${activityData?.summary.high ?? 0})`],
@@ -125,14 +143,9 @@ export default function CompanySecFeedPage() {
                 <button
                   key={level}
                   type="button"
-                  className="pill"
+                  className="pill workspace-filter-pill"
                   onClick={() => setAlertLevelFilter(level)}
                   aria-pressed={alertLevelFilter === level}
-                  style={{
-                    cursor: "pointer",
-                    borderColor: alertLevelFilter === level ? "var(--accent)" : undefined,
-                    color: alertLevelFilter === level ? "var(--text)" : undefined,
-                  }}
                 >
                   {label}
                 </button>
@@ -142,15 +155,15 @@ export default function CompanySecFeedPage() {
             {topAlerts.length ? topAlerts.map((alert) => {
                 const content = (
                   <>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <div className="workspace-card-row">
+                      <div className="workspace-pill-row">
                         <span className="pill">{alert.level}</span>
                         <span className="pill">{alert.source}</span>
                       </div>
                       <div className="text-muted">{formatDate(alert.date)}</div>
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{alert.title}</div>
-                    <div className="text-muted" style={{ fontSize: 13 }}>{alert.detail}</div>
+                    <div className="workspace-card-title">{alert.title}</div>
+                    <div className="text-muted workspace-card-copy">{alert.detail}</div>
                   </>
                 );
 
@@ -161,13 +174,7 @@ export default function CompanySecFeedPage() {
                       href={alert.href}
                       target="_blank"
                       rel="noreferrer"
-                      className="filing-link-card"
-                      style={{
-                        display: "grid",
-                        gap: 8,
-                        textDecoration: "none",
-                        borderColor: alert.level === "high" ? "rgba(255, 83, 83, 0.5)" : undefined,
-                      }}
+                      className={`filing-link-card workspace-card-link${alert.level === "high" ? " is-danger" : ""}`}
                     >
                       {content}
                     </a>
@@ -177,8 +184,7 @@ export default function CompanySecFeedPage() {
                 return (
                   <div
                     key={alert.id}
-                    className="filing-link-card"
-                    style={{ display: "grid", gap: 8, borderColor: alert.level === "high" ? "rgba(255, 83, 83, 0.5)" : undefined }}
+                    className={`filing-link-card workspace-card-link${alert.level === "high" ? " is-danger" : ""}`}
                   >
                     {content}
                   </div>
@@ -194,32 +200,32 @@ export default function CompanySecFeedPage() {
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Loading SEC feed...</div>
         ) : feed.length ? (
-          <div style={{ display: "grid", gap: 12 }}>
+          <div className="workspace-card-stack">
             {feed.map((entry) => {
               const content = (
                 <>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div className="workspace-card-row">
+                    <div className="workspace-pill-row">
                       <span className="pill">{formatFeedEntryType(entry.type)}</span>
                       <span className="pill">{entry.badge}</span>
                     </div>
                     <div className="text-muted">{formatDate(entry.date)}</div>
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{entry.title}</div>
-                  <div className="text-muted" style={{ fontSize: 13 }}>{entry.detail}</div>
+                  <div className="workspace-card-title">{entry.title}</div>
+                  <div className="text-muted workspace-card-copy">{entry.detail}</div>
                 </>
               );
 
               if (entry.href) {
                 return (
-                  <a key={entry.id} href={entry.href} target="_blank" rel="noreferrer" className="filing-link-card" style={{ display: "grid", gap: 8, textDecoration: "none" }}>
+                  <a key={entry.id} href={entry.href} target="_blank" rel="noreferrer" className="filing-link-card workspace-card-link">
                     {content}
                   </a>
                 );
               }
 
               return (
-                <div key={entry.id} className="filing-link-card" style={{ display: "grid", gap: 8 }}>
+                <div key={entry.id} className="filing-link-card workspace-card-link">
                   {content}
                 </div>
               );
@@ -234,15 +240,6 @@ export default function CompanySecFeedPage() {
         )}
       </Panel>
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }
 

@@ -54,6 +54,7 @@ describe("CompanySecFeedPage", () => {
     const html = renderToStaticMarkup(React.createElement(CompanySecFeedPage));
 
     expect(html).toContain("SEC Feed");
+    expect(html).toContain("Unified SEC signal stream across filings");
     expect(html).toContain("Priority Alerts");
     expect(html).toContain("Chronological SEC Stream");
     expect(html).toContain("Loading alerts...");

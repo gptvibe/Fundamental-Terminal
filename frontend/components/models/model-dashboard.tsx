@@ -20,6 +20,7 @@ import {
 import {
   CHART_AXIS_COLOR,
   CHART_GRID_COLOR,
+  CHART_SERIES_COLORS,
   RECHARTS_TOOLTIP_PROPS,
   chartLegendStyle,
   chartTick
@@ -29,8 +30,6 @@ import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotro
 import type { ModelPayload } from "@/lib/types";
 
 const MODEL_ORDER = ["dcf", "reverse_dcf", "roic", "capital_allocation", "dupont", "piotroski", "altman_z", "ratios"];
-const CHART_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#7CFFB2", "#64D2FF", "#F6C945"];
-
 export function ModelDashboard({ models }: { models: ModelPayload[] }) {
   const sortedModels = [...models].sort((left, right) => {
     const leftIndex = MODEL_ORDER.indexOf(left.model_name);
@@ -252,7 +251,7 @@ function ReverseDcfModelView({ model }: { model: ModelPayload }) {
             <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? value.toFixed(3) : value} />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {heatmap.map((entry, index) => (
-                <Cell key={`${entry.label}-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                <Cell key={`${entry.label}-${index}`} fill={CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length]} />
               ))}
             </Bar>
           </BarChart>
@@ -377,7 +376,7 @@ function DupontModelView({ model }: { model: ModelPayload }) {
             />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {chartData.map((entry, index) => (
-                <Cell key={entry.label} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                <Cell key={entry.label} fill={CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length]} />
               ))}
             </Bar>
           </BarChart>
@@ -492,7 +491,7 @@ function AltmanModelView({ model }: { model: ModelPayload }) {
             <ReferenceLine y={0} stroke="var(--panel-border)" />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {factors.map((entry, index) => (
-                <Cell key={entry.label} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                <Cell key={entry.label} fill={CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length]} />
               ))}
             </Bar>
           </BarChart>
@@ -564,7 +563,7 @@ function RatiosModelView({ model }: { model: ModelPayload }) {
             />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {chartData.map((entry, index) => (
-                <Cell key={entry.label} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                <Cell key={entry.label} fill={CHART_SERIES_COLORS[index % CHART_SERIES_COLORS.length]} />
               ))}
             </Bar>
           </BarChart>

@@ -9,6 +9,7 @@ import { NewVsExitedPositions } from "@/components/institutional/new-vs-exited-p
 import { ConvictionHeatmap } from "@/components/institutional/conviction-heatmap";
 import { SmartMoneySummary } from "@/components/institutional/smart-money-summary";
 import { TopHolderTrend } from "@/components/institutional/top-holder-trend";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { HedgeFundActivityTable } from "@/components/tables/hedge-fund-activity-table";
@@ -179,22 +180,40 @@ export default function CompanyOwnershipPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Ownership" subtitle={company?.name ?? ticker} aside={ownershipRefreshState ? <StatusPill state={ownershipRefreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Tracked Holdings" value={(summary?.total_rows ?? institutionalHoldings.length).toLocaleString()} />
-          <Metric label="Unique Managers" value={(summary?.unique_managers ?? 0).toLocaleString()} />
-          <Metric label="Amended Filings" value={(summary?.amended_rows ?? 0).toLocaleString()} />
-          <Metric label="Latest Quarter" value={summary?.latest_reporting_date ? formatDate(summary.latest_reporting_date) : latestReportingDate ? formatDate(latestReportingDate) : "Pending"} />
-          <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
-        </div>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Ownership"
+        companyName={company?.name ?? ticker}
+        sector={company?.sector}
+        cacheState={company?.cache_state ?? null}
+        description="Institutional ownership stays 13F-first, showing persisted fund positioning, amendments, and smart-money context immediately while refresh jobs refill the cache in the background."
+        aside={ownershipRefreshState ? <StatusPill state={ownershipRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Tracked Holdings", value: (summary?.total_rows ?? institutionalHoldings.length).toLocaleString() },
+          { label: "Unique Managers", value: (summary?.unique_managers ?? 0).toLocaleString() },
+          { label: "Latest Quarter", value: summary?.latest_reporting_date ? formatDate(summary.latest_reporting_date) : latestReportingDate ? formatDate(latestReportingDate) : "Pending" }
+        ]}
+        ribbonItems={[
+          { label: "Primary Source", value: "SEC 13F filings", tone: "green" },
+          { label: "Amended Filings", value: (summary?.amended_rows ?? 0).toLocaleString(), tone: "gold" },
+          { label: "Smart Money", value: smartMoney?.sentiment ?? "pending", tone: smartMoney?.sentiment === "bullish" ? "green" : smartMoney?.sentiment === "bearish" ? "red" : "cyan" },
+          { label: "Refresh", value: ownershipRefreshState?.job_id ? "Polling cached workspace" : "Background-first", tone: ownershipRefreshState?.job_id ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "Managers", value: (summary?.unique_managers ?? 0).toLocaleString(), accent: "cyan" },
+          { label: "Amendments", value: (summary?.amended_rows ?? 0).toLocaleString(), accent: "gold" },
+          { label: "Financial Periods", value: financials.length.toLocaleString(), accent: "green" },
+          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : "Pending", accent: "cyan" }
+        ]}
+      >
         {summaryError ? <div className="text-muted">{summaryError}</div> : null}
         {!loading && !summaryError && institutionalHoldings.length === 0 ? (
           <div className="text-muted" style={{ marginTop: 12 }}>
             No institutional holdings are cached yet for this ticker. Trigger a refresh to pull the latest 13F coverage.
           </div>
         ) : null}
-      </Panel>
+      </CompanyResearchHeader>
 
       <Panel title="Plain-English Scorecard" subtitle="Simple read on whether institutional holders are adding, trimming, or staying mixed">
         <PlainEnglishScorecard
@@ -240,15 +259,6 @@ export default function CompanyOwnershipPage() {
         <HedgeFundActivityTable ticker={ticker} holdings={institutionalHoldings} loading={loading && institutionalData === null} error={institutionalError} refresh={ownershipRefreshState} />
       </Panel>
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }
 

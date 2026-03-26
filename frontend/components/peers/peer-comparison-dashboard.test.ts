@@ -148,6 +148,9 @@ describe("PeerComparisonDashboard", () => {
       expect(getCompanyPeersMock).toHaveBeenCalledWith("AAPL", undefined);
     });
 
+    expect(screen.getByRole("button", { name: "Collapse compare tray" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Selected 1/4")).toBeTruthy();
+
     fireEvent.click(screen.getByTitle("GOOG — Alphabet"));
 
     await waitFor(() => {
@@ -159,5 +162,8 @@ describe("PeerComparisonDashboard", () => {
     await waitFor(() => {
       expect(getCompanyPeersMock).toHaveBeenCalledWith("AAPL", []);
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse compare tray" }));
+    expect(screen.getByRole("button", { name: "Open compare tray" }).getAttribute("aria-expanded")).toBe("false");
   });
 });

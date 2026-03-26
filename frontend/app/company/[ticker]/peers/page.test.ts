@@ -56,7 +56,8 @@ describe("CompanyPeersPage", () => {
 
     render(React.createElement(CompanyPeersPage));
 
-    expect(screen.getByText("Loading company context...")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Peers" })).toBeTruthy();
+    expect(screen.getByText("4 selected peers")).toBeTruthy();
     expect(screen.getByText("Loading peer comparison...")).toBeTruthy();
   });
 
@@ -75,7 +76,7 @@ describe("CompanyPeersPage", () => {
 
     render(React.createElement(CompanyPeersPage));
 
-    expect(screen.getAllByText("Peer Workspace")[0]).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Peers" })).toBeTruthy();
     expect(screen.getByText("4 selected peers")).toBeTruthy();
     expect(screen.getByText("peer-dashboard-ACME")).toBeTruthy();
   });

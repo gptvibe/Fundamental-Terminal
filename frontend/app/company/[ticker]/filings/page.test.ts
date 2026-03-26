@@ -70,6 +70,7 @@ describe("CompanyFilingsPage", () => {
     const html = renderToStaticMarkup(React.createElement(CompanyFilingsPage));
 
     expect(html).toContain("Filings");
+    expect(html).toContain("SEC-first filing workflow");
     expect(html).toContain("Recent Filing Timeline");
     expect(html).toContain("Filing Parser Snapshot");
     expect(html).toContain("Filing Viewer");

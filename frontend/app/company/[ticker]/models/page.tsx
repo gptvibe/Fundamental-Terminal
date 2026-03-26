@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
 
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { Panel } from "@/components/ui/panel";
@@ -285,19 +286,35 @@ export default function CompanyModelsPage() {
         <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
       </Panel>
 
-      <Panel title="Valuation Models" subtitle={data?.company?.name ?? ticker} aside={data ? <StatusPill state={data.refresh} /> : undefined} className="model-hero models-page-hero">
-        <div style={{ display: "grid", gap: 14 }}>
-          <div className="metric-grid">
-            <div className="metric-card">
-              <div className="metric-label">Ticker</div>
-              <div className="metric-value neon-green">{ticker}</div>
-            </div>
-            <div className="metric-card">
-              <div className="metric-label">Available Models</div>
-              <div className="metric-value neon-cyan">{modelSummary.cachedCount}/{MODEL_NAMES.length}</div>
-            </div>
-          </div>
-
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Valuation Models"
+        companyName={data?.company?.name ?? financialData?.company?.name ?? ticker}
+        sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
+        cacheState={data?.company?.cache_state ?? financialData?.company?.cache_state ?? null}
+        description="Cached model outputs stay aligned with SEC fundamentals and cached price inputs, with refreshes queued in the background when inputs are stale."
+        aside={data ? <StatusPill state={data.refresh} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Available Models", value: `${modelSummary.cachedCount}/${MODEL_NAMES.length}` },
+          { label: "Last Computed", value: modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data" },
+          { label: "DuPont Basis", value: modelSummary.dupontBasis ?? dupontMode.toUpperCase() }
+        ]}
+        ribbonItems={[
+          { label: "Financial Inputs", value: "SEC EDGAR/XBRL", tone: "green" },
+          { label: "Price Inputs", value: "Yahoo Finance", tone: "cyan" },
+          { label: "Financials Checked", value: financialData?.company?.last_checked_financials ? formatDate(financialData.company.last_checked_financials) : "Pending", tone: "green" },
+          { label: "Refresh", value: activeJobId ? "Model update running" : "Background-first", tone: activeJobId ? "gold" : "cyan" }
+        ]}
+        summaries={[
+          { label: "Last Updated", value: modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data", accent: "cyan" },
+          { label: "DCF EV", value: formatCompactNumber(modelSummary.dcfEnterpriseValue), accent: "green" },
+          { label: "DuPont ROE", value: formatPercent(modelSummary.dupontRoe), accent: "gold" },
+          { label: "Piotroski", value: modelSummary.piotroskiLabel, accent: "green" },
+          { label: "Altman Proxy", value: formatSigned(modelSummary.altmanZ), accent: "cyan" }
+        ]}
+        className="model-hero models-page-hero models-page-span-full"
+      >
           <div className="dupont-mode-bar">
             <div className="dupont-mode-select-col">
               <div className="metric-label">DuPont Basis</div>
@@ -336,17 +353,8 @@ export default function CompanyModelsPage() {
             </div>
           ) : null}
 
-          <div className="model-summary-strip">
-            <SummaryCard label="Last Updated" value={modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"} accent="cyan" />
-            <SummaryCard label="DCF EV" value={formatCompactNumber(modelSummary.dcfEnterpriseValue)} accent="green" />
-            <SummaryCard label="DuPont ROE" value={formatPercent(modelSummary.dupontRoe)} accent="gold" />
-            <SummaryCard label="Piotroski" value={modelSummary.piotroskiLabel} accent="green" />
-            <SummaryCard label="Altman Proxy" value={formatSigned(modelSummary.altmanZ)} accent="cyan" />
-          </div>
-
           <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, DCF Scenario Analysis, and Model Analytics for the full model output.</div>
-        </div>
-      </Panel>
+      </CompanyResearchHeader>
 
       <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
         <DeferredClientSection placeholder={<div className="text-muted">Loading DCF scenario analysis...</div>}>
@@ -408,15 +416,6 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     financialData,
     activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id
   };
-}
-
-function SummaryCard({ label, value, accent }: { label: string; value: string; accent: "green" | "cyan" | "gold" }) {
-  return (
-    <div className={`summary-card accent-${accent}`}>
-      <div className="summary-card-label">{label}</div>
-      <div className="summary-card-value">{value}</div>
-    </div>
-  );
 }
 
 function asNumber(value: unknown): number | null {

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { BeneficialOwnershipFormChart } from "@/components/charts/beneficial-ownership-form-chart";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
@@ -189,22 +190,33 @@ export default function CompanyOwnershipChangesPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Stake Changes" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="13D / 13G Filings" value={(summary?.total_filings ?? filings.length).toLocaleString()} />
-          <Metric label="Initial Filings" value={(summary?.initial_filings ?? initialFilings).toLocaleString()} />
-          <Metric label="Amendments" value={(summary?.amendments ?? amendments).toLocaleString()} />
-          <Metric label="Reporting Persons" value={(summary?.unique_reporting_persons ?? 0).toLocaleString()} />
-          <Metric label="Largest Reported Stake" value={summary?.max_reported_percent != null ? `${summary.max_reported_percent.toFixed(2)}%` : "Pending"} />
-          <Metric label="Latest Event Date" value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : "Pending"} />
-          <Metric label="Amendment Chains" value={(summary?.chains_with_amendments ?? 0).toLocaleString()} />
-          <Metric label="Increase Events" value={(summary?.ownership_increase_events ?? increaseEvents).toLocaleString()} />
-          <Metric label="Decrease Events" value={(summary?.ownership_decrease_events ?? decreaseEvents).toLocaleString()} />
-          <Metric label="Largest Increase" value={summary?.largest_increase_pp != null ? `${formatSignedNumber(summary.largest_increase_pp)} pp` : "Pending"} />
-          <Metric label="Largest Decrease" value={summary?.largest_decrease_pp != null ? `${formatSignedNumber(summary.largest_decrease_pp)} pp` : "Pending"} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Stake Changes"
+        companyName={pageCompany?.name ?? ticker}
+        sector={pageCompany?.sector ?? null}
+        cacheState={pageCompany?.cache_state ?? null}
+        description="SEC-first stake-change workspace centered on Schedules 13D and 13G, amendment chains, and quantified ownership deltas."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "13D / 13G Filings", value: (summary?.total_filings ?? filings.length).toLocaleString() },
+          { label: "Reporting Persons", value: (summary?.unique_reporting_persons ?? 0).toLocaleString() },
+          { label: "Latest Event", value: summary?.latest_event_date ? formatDate(summary.latest_event_date) : "Pending" },
+        ]}
+        ribbonItems={[
+          { label: "Latest Filing", value: summary?.latest_filing_date ? formatDate(summary.latest_filing_date) : latestFilingDate ? formatDate(latestFilingDate) : "Pending", tone: "cyan" },
+          { label: "Signal Quality", value: `${(signalQuality.coverage * 100).toFixed(1)}% quantified deltas`, tone: "gold" },
+          { label: "Sources", value: "SEC Schedules 13D + 13G", tone: "green" },
+          { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" },
+        ]}
+        summaries={[
+          { label: "Increase Events", value: (summary?.ownership_increase_events ?? increaseEvents).toLocaleString(), accent: "green" },
+          { label: "Decrease Events", value: (summary?.ownership_decrease_events ?? decreaseEvents).toLocaleString(), accent: "red" },
+          { label: "Largest Stake", value: summary?.max_reported_percent != null ? `${summary.max_reported_percent.toFixed(2)}%` : "?", accent: "cyan" },
+          { label: "Amendment Chains", value: (summary?.chains_with_amendments ?? 0).toLocaleString(), accent: "gold" },
+        ]}
+      />
 
       <Panel title="Form Mix" subtitle="How many initial stake disclosures versus amendments are visible in SEC submissions">
         <BeneficialOwnershipFormChart filings={filings} />
@@ -216,7 +228,7 @@ export default function CompanyOwnershipChangesPage() {
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Preparing stake-change visuals...</div>
         ) : filings.length ? (
-          <div style={{ display: "grid", gap: 16 }}>
+          <div className="workspace-card-stack workspace-card-stack-lg">
             <PlainEnglishScorecard
               title="Simple Activity Scorecard"
               label={investorScorecard.label}
@@ -232,13 +244,13 @@ export default function CompanyOwnershipChangesPage() {
               ]}
             />
 
-            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-              <div className="metric-card" style={{ minHeight: 280 }}>
+            <div className="workspace-two-column-panels">
+              <div className="metric-card workspace-chart-card">
                 <div className="metric-label">Monthly Filing Pace</div>
-                <div className="text-muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                <div className="text-muted workspace-card-copy">
                   More filings usually mean active stake updates or governance pressure.
                 </div>
-                <div style={{ width: "100%", height: 210 }}>
+                <div className="workspace-chart-frame">
                   <ResponsiveContainer>
                     <BarChart data={monthlyTimeline} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -255,12 +267,12 @@ export default function CompanyOwnershipChangesPage() {
                 </div>
               </div>
 
-              <div className="metric-card" style={{ minHeight: 280 }}>
+              <div className="metric-card workspace-chart-card">
                 <div className="metric-label">Direction Breakdown</div>
-                <div className="text-muted" style={{ fontSize: 13, marginBottom: 8 }}>
+                <div className="text-muted workspace-card-copy">
                   Shows if disclosed ownership is mostly increasing, decreasing, or unclear.
                 </div>
-                <div style={{ width: "100%", height: 210 }}>
+                <div className="workspace-chart-frame">
                   <ResponsiveContainer>
                     <BarChart data={directionBreakdown} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -274,16 +286,16 @@ export default function CompanyOwnershipChangesPage() {
               </div>
             </div>
 
-            <div className="metric-card" style={{ display: "grid", gap: 10 }}>
+            <div className="metric-card workspace-note-card">
               <div className="metric-label">How To Read This (Plain English)</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>Initial filing: A person or fund reports a meaningful stake for the first time.</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>Amendment: They update an earlier filing, often after changing position size or intent.</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>Increase or decrease event: We measured a clear percentage-point change versus the prior filing.</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>Unknown direction: SEC text did not provide enough structured numbers to quantify the change.</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
+              <div className="text-muted workspace-note-line">Initial filing: A person or fund reports a meaningful stake for the first time.</div>
+              <div className="text-muted workspace-note-line">Amendment: They update an earlier filing, often after changing position size or intent.</div>
+              <div className="text-muted workspace-note-line">Increase or decrease event: We measured a clear percentage-point change versus the prior filing.</div>
+              <div className="text-muted workspace-note-line">Unknown direction: SEC text did not provide enough structured numbers to quantify the change.</div>
+              <div className="text-muted workspace-note-line">
                 Signal quality here: {signalQuality.quantified.toLocaleString()} of {signalQuality.totalAmendments.toLocaleString()} amendments have quantified deltas ({(signalQuality.coverage * 100).toFixed(1)}%).
               </div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
+              <div className="text-muted workspace-note-line">
                 Practical tip: Treat this page as an early signal feed, then open the SEC filing link before making any investment decision.
               </div>
             </div>
@@ -350,26 +362,25 @@ export default function CompanyOwnershipChangesPage() {
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Loading activist signal panel...</div>
         ) : activistSignals.length ? (
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="workspace-card-stack">
             {activistSignals.map((signal) => (
               <a
                 key={signal.key}
                 href={signal.sourceUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="filing-link-card"
-                style={{ display: "grid", gap: 8, textDecoration: "none" }}
+                className="filing-link-card workspace-card-link"
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <div className="workspace-card-row">
+                  <div className="workspace-pill-row">
                     <span className="pill">{signal.form}</span>
                     <span className="pill">{signal.label}</span>
                     {signal.changeDirection ? <span className="pill">{signal.changeDirection}</span> : null}
                   </div>
                   <div className="text-muted">{signal.filingDate ? formatDate(signal.filingDate) : "Pending"}</div>
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{signal.headline}</div>
-                <div className="text-muted" style={{ fontSize: 13 }}>{signal.detail}</div>
+                <div className="workspace-card-title">{signal.headline}</div>
+                <div className="text-muted workspace-card-copy">{signal.detail}</div>
               </a>
             ))}
           </div>
@@ -388,18 +399,17 @@ export default function CompanyOwnershipChangesPage() {
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Loading beneficial ownership activity...</div>
         ) : filings.length ? (
-          <div style={{ display: "grid", gap: 12 }}>
+          <div className="workspace-card-stack">
             {filings.map((filing) => (
               <a
                 key={filing.accession_number ?? `${filing.form}-${filing.filing_date ?? filing.report_date ?? filing.source_url}`}
                 href={filing.source_url}
                 target="_blank"
                 rel="noreferrer"
-                className="filing-link-card"
-                style={{ display: "grid", gap: 8, textDecoration: "none" }}
+                className="filing-link-card workspace-card-link"
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <div className="workspace-card-row">
+                  <div className="workspace-pill-row">
                     <span className="pill">{filing.form}</span>
                     {filing.is_amendment ? <span className="pill">Amendment</span> : <span className="pill">Initial</span>}
                     {filing.amendment_sequence != null && filing.amendment_chain_size != null ? (
@@ -411,9 +421,9 @@ export default function CompanyOwnershipChangesPage() {
                   </div>
                   <div className="text-muted">{formatDate(filing.filing_date ?? filing.report_date)}</div>
                 </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{filing.summary}</div>
+                <div className="workspace-card-title">{filing.summary}</div>
                 {filing.is_amendment ? (
-                  <div className="text-muted" style={{ fontSize: 13 }}>
+                  <div className="text-muted workspace-card-copy">
                     {filing.percent_change_pp != null
                       ? `Ownership change: ${formatSignedNumber(filing.percent_change_pp)} pp${filing.previous_percent_owned != null ? ` from ${filing.previous_percent_owned.toFixed(2)}%` : ""}`
                       : "Ownership change: not quantifiable from this filing"}
@@ -422,7 +432,7 @@ export default function CompanyOwnershipChangesPage() {
                   </div>
                 ) : null}
                 {filing.parties.length ? (
-                  <div className="text-muted" style={{ fontSize: 13 }}>
+                  <div className="text-muted workspace-card-copy">
                     {filing.parties
                       .slice(0, 2)
                       .map((party) => {
@@ -438,7 +448,7 @@ export default function CompanyOwnershipChangesPage() {
                     {filing.parties.length > 2 ? ` · +${filing.parties.length - 2} more` : ""}
                   </div>
                 ) : null}
-                <div className="text-muted" style={{ fontSize: 13 }}>
+                <div className="text-muted workspace-card-copy">
                   {filing.accession_number ?? "Accession pending"}
                   {filing.primary_document ? ` · ${filing.primary_document}` : ""}
                 </div>

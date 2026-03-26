@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 
 import { EarningsTrendChart, type EarningsTrendDatum } from "@/components/charts/earnings-trend-chart";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
@@ -219,25 +220,39 @@ export default function CompanyEarningsPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Earnings" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Earnings"
+        companyName={pageCompany?.name ?? ticker}
+        sector={pageCompany?.sector}
+        cacheState={pageCompany?.cache_state ?? null}
+        description="Release-level earnings analysis stays SEC-first, serving cached 8-K Item 2.02 data immediately and polling in the background when refresh jobs are active."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Releases", value: totalReleases.toLocaleString() },
+          { label: "Parsed Releases", value: parsedReleases.toLocaleString() },
+          { label: "Latest Period", value: latestPeriodLabel },
+          { label: "Last Checked", value: lastCheckedValue ? formatDate(lastCheckedValue) : null }
+        ]}
+        ribbonItems={[
+          { label: "Release Source", value: "SEC 8-K Item 2.02", tone: "green" },
+          { label: "Fallback Trend", value: chartSourceLabel, tone: useFallbackTrend ? "gold" : "cyan" },
+          { label: "Latest Filing", value: latestFilingValue, tone: "cyan" },
+          { label: "Refresh", value: trackedJobId ? "Polling cached workspace" : "Background-first", tone: trackedJobId ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "With Guidance", value: releasesWithGuidance.toLocaleString(), accent: "gold" },
+          { label: "Capital Return", value: releasesWithCapitalReturn.toLocaleString(), accent: "green" },
+          { label: "Latest Revenue", value: summary?.latest_revenue != null ? formatCompactNumber(summary.latest_revenue) : formatCompactNumber(latestRelease?.revenue), accent: "cyan" },
+          { label: "Latest Diluted EPS", value: formatEps(summary?.latest_diluted_eps ?? latestRelease?.diluted_eps), accent: "gold" }
+        ]}
+      >
         {combinedError ? (
           <div className="text-muted" style={{ marginBottom: 12 }}>
             {combinedError}
           </div>
         ) : null}
-
-        <div className="metric-grid">
-          <Metric label="Releases" value={totalReleases.toLocaleString()} />
-          <Metric label="Parsed Releases" value={parsedReleases.toLocaleString()} />
-          <Metric label="With Guidance" value={releasesWithGuidance.toLocaleString()} />
-          <Metric label="Capital Return Signals" value={releasesWithCapitalReturn.toLocaleString()} />
-          <Metric label="Latest Period" value={latestPeriodLabel} />
-          <Metric label="Latest Filing" value={latestFilingValue} />
-          <Metric label="Latest Revenue" value={summary?.latest_revenue != null ? formatCompactNumber(summary.latest_revenue) : formatCompactNumber(latestRelease?.revenue)} />
-          <Metric label="Latest Diluted EPS" value={formatEps(summary?.latest_diluted_eps ?? latestRelease?.diluted_eps)} />
-          <Metric label="Last Checked" value={lastCheckedValue ? formatDate(lastCheckedValue) : null} />
-        </div>
-      </Panel>
+      </CompanyResearchHeader>
 
       <Panel title="Reported Revenue vs Diluted EPS" subtitle="SEC earnings releases plotted by reported period so the top-line and per-share trend stay visible at a glance">
         {!loading && !workspaceLoading && useFallbackTrend ? (
@@ -273,15 +288,17 @@ export default function CompanyEarningsPage() {
 
       <Panel title="Peer-Relative Context" subtitle="Percentile view of quality and EPS drift versus sector and peer group">
         {peerContext ? (
-          <div className="metric-grid">
-            <Metric label="Peer basis" value={peerContext.peer_group_basis.replace("_", " ")} />
-            <Metric label="Peer group size" value={peerContext.peer_group_size.toLocaleString()} />
-            <Metric label="Quality percentile" value={peerContext.quality_percentile != null ? formatPercent(peerContext.quality_percentile) : "\u2014"} />
-            <Metric label="EPS drift percentile" value={peerContext.eps_drift_percentile != null ? formatPercent(peerContext.eps_drift_percentile) : "\u2014"} />
-            <Metric label="Sector group size" value={peerContext.sector_group_size.toLocaleString()} />
-            <Metric label="Sector quality percentile" value={peerContext.sector_quality_percentile != null ? formatPercent(peerContext.sector_quality_percentile) : "\u2014"} />
-            <Metric label="Sector EPS percentile" value={peerContext.sector_eps_drift_percentile != null ? formatPercent(peerContext.sector_eps_drift_percentile) : "\u2014"} />
-          </div>
+          <CompanyMetricGrid
+            items={[
+              { label: "Peer basis", value: peerContext.peer_group_basis.replace("_", " ") },
+              { label: "Peer group size", value: peerContext.peer_group_size.toLocaleString() },
+              { label: "Quality percentile", value: peerContext.quality_percentile != null ? formatPercent(peerContext.quality_percentile) : "\u2014" },
+              { label: "EPS drift percentile", value: peerContext.eps_drift_percentile != null ? formatPercent(peerContext.eps_drift_percentile) : "\u2014" },
+              { label: "Sector group size", value: peerContext.sector_group_size.toLocaleString() },
+              { label: "Sector quality percentile", value: peerContext.sector_quality_percentile != null ? formatPercent(peerContext.sector_quality_percentile) : "\u2014" },
+              { label: "Sector EPS percentile", value: peerContext.sector_eps_drift_percentile != null ? formatPercent(peerContext.sector_eps_drift_percentile) : "\u2014" }
+            ]}
+          />
         ) : (
           <PanelEmptyState message="Peer-relative context is unavailable until model points are cached." />
         )}
@@ -289,21 +306,17 @@ export default function CompanyEarningsPage() {
 
       <Panel title="Directional Backtests" subtitle="Directional consistency around earnings filing windows using cached price history only">
         {backtests ? (
-          <div style={{ display: "grid", gap: 12 }}>
-            <div className="metric-grid">
-              <Metric label="Window" value={`${backtests.window_sessions} trading sessions`} />
-              <Metric
-                label="Quality consistency"
-                value={backtests.quality_directional_consistency != null ? formatPercent(backtests.quality_directional_consistency) : "\u2014"}
-              />
-              <Metric label="Quality windows" value={`${backtests.quality_consistent_windows}/${backtests.quality_total_windows}`} />
-              <Metric
-                label="EPS drift consistency"
-                value={backtests.eps_directional_consistency != null ? formatPercent(backtests.eps_directional_consistency) : "\u2014"}
-              />
-              <Metric label="EPS windows" value={`${backtests.eps_consistent_windows}/${backtests.eps_total_windows}`} />
-            </div>
-            <div className="text-muted" style={{ fontSize: 13 }}>
+          <div className="workspace-card-stack">
+            <CompanyMetricGrid
+              items={[
+                { label: "Window", value: `${backtests.window_sessions} trading sessions` },
+                { label: "Quality consistency", value: backtests.quality_directional_consistency != null ? formatPercent(backtests.quality_directional_consistency) : "\u2014" },
+                { label: "Quality windows", value: `${backtests.quality_consistent_windows}/${backtests.quality_total_windows}` },
+                { label: "EPS drift consistency", value: backtests.eps_directional_consistency != null ? formatPercent(backtests.eps_directional_consistency) : "\u2014" },
+                { label: "EPS windows", value: `${backtests.eps_consistent_windows}/${backtests.eps_total_windows}` }
+              ]}
+            />
+            <div className="text-muted workspace-card-copy">
               Price reaction uses cached daily bars only: close on filing date window start versus close after the configured post-event sessions.
             </div>
           </div>
@@ -314,7 +327,7 @@ export default function CompanyEarningsPage() {
 
       <Panel title="Model Alerts" subtitle="Regime and threshold changes from SEC-heavy model series">
         {alerts.length ? (
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="workspace-alert-list">
             {alerts.map((alert) => (
               <AlertRow key={alert.id} alert={alert} />
             ))}
@@ -326,27 +339,27 @@ export default function CompanyEarningsPage() {
 
       <Panel title="Explainability" subtitle="Exact SEC fields, periods, and fallback usage for latest model point">
         {latestModelPoint?.explainability ? (
-          <div style={{ display: "grid", gap: 12 }}>
-            <div className="text-muted" style={{ fontSize: 13 }}>
+          <div className="workspace-card-stack">
+            <div className="text-muted workspace-card-copy">
               Formulas: {latestModelPoint.explainability.quality_formula} | {latestModelPoint.explainability.eps_drift_formula}
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+            <div className="company-data-table-shell">
+              <table className="company-data-table company-data-table-wide">
                 <thead>
-                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
-                    <th align="left" style={{ padding: "8px 10px" }}>Field</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Value</th>
-                    <th align="left" style={{ padding: "8px 10px" }}>Period</th>
-                    <th align="left" style={{ padding: "8px 10px" }}>SEC tags</th>
+                  <tr>
+                    <th>Field</th>
+                    <th className="is-numeric">Value</th>
+                    <th>Period</th>
+                    <th className="is-wrap">SEC tags</th>
                   </tr>
                 </thead>
                 <tbody>
                   {latestModelPoint.explainability.inputs.map((input) => (
                     <tr key={`${input.field}:${input.period_end}`}>
-                      <td style={{ padding: "10px" }}>{input.field.replace(/_/g, " ")}</td>
-                      <td style={{ padding: "10px", textAlign: "right" }}>{formatExplainValue(input.field, input.value)}</td>
-                      <td style={{ padding: "10px" }}>{formatDate(input.period_end)}</td>
-                      <td style={{ padding: "10px" }}>{input.sec_tags.length ? input.sec_tags.join(", ") : "\u2014"}</td>
+                      <td>{input.field.replace(/_/g, " ")}</td>
+                      <td className="is-numeric">{formatExplainValue(input.field, input.value)}</td>
+                      <td>{formatDate(input.period_end)}</td>
+                      <td className="is-wrap">{input.sec_tags.length ? input.sec_tags.join(", ") : "\u2014"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -360,13 +373,12 @@ export default function CompanyEarningsPage() {
 
       <Panel title="Earnings Releases" subtitle="Review each release with guidance, capital return, highlights, exhibit links, and parse status">
         {!loading && !workspaceLoading && sortedReleases.length ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <div className="workspace-filter-row workspace-filter-row-spaced">
             <span className="pill">Signal-bearing releases {usefulReleases.length.toLocaleString()} / {sortedReleases.length.toLocaleString()}</span>
             <button
               type="button"
-              className="ticker-button"
+              className="ticker-button workspace-inline-action"
               onClick={() => setShowMetadataRows((current) => !current)}
-              style={{ padding: "6px 10px", fontSize: 12 }}
             >
               {showMetadataRows ? "Hide metadata-only releases" : "Show metadata-only releases"}
             </button>
@@ -375,18 +387,18 @@ export default function CompanyEarningsPage() {
         {loading || workspaceLoading ? (
           <div className="text-muted">Loading earnings releases...</div>
         ) : displayReleases.length ? (
-          <div style={{ display: "grid", gap: 16, gridTemplateColumns: "minmax(0, 1.35fr) minmax(280px, 0.85fr)" }}>
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 720 }}>
+          <div className="workspace-release-grid">
+            <div className="company-data-table-shell">
+              <table className="company-data-table company-data-table-wide">
                 <thead>
-                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
-                    <th align="left" style={{ padding: "10px 12px" }}>Filed</th>
-                    <th align="left" style={{ padding: "10px 12px" }}>Period</th>
-                    <th align="right" style={{ padding: "10px 12px" }}>Revenue</th>
-                    <th align="right" style={{ padding: "10px 12px" }}>EPS</th>
-                    <th align="left" style={{ padding: "10px 12px" }}>Guidance</th>
-                    <th align="left" style={{ padding: "10px 12px" }}>Capital Return</th>
-                    <th align="left" style={{ padding: "10px 12px" }}>Parse</th>
+                  <tr>
+                    <th>Filed</th>
+                    <th>Period</th>
+                    <th className="is-numeric">Revenue</th>
+                    <th className="is-numeric">EPS</th>
+                    <th className="is-wrap">Guidance</th>
+                    <th className="is-wrap">Capital Return</th>
+                    <th>Parse</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -399,19 +411,15 @@ export default function CompanyEarningsPage() {
                         onClick={() => setSelectedReleaseKey(releaseKey)}
                         onKeyDown={(event) => handleRowKeyDown(event, releaseKey, setSelectedReleaseKey)}
                         tabIndex={0}
-                        style={{
-                          cursor: "pointer",
-                          background: isSelected ? "rgba(0, 255, 65, 0.08)" : "transparent",
-                          outline: isSelected ? "1px solid rgba(0, 255, 65, 0.28)" : "1px solid transparent"
-                        }}
+                        className={`is-interactive${isSelected ? " is-selected" : ""}`}
                       >
-                        <td style={{ padding: "12px 12px", verticalAlign: "top" }}>{formatDate(release.filing_date)}</td>
-                        <td style={{ padding: "12px 12px", verticalAlign: "top" }}>{displayPeriod(release)}</td>
-                        <td style={{ padding: "12px 12px", verticalAlign: "top", textAlign: "right" }}>{formatCompactNumber(release.revenue)}</td>
-                        <td style={{ padding: "12px 12px", verticalAlign: "top", textAlign: "right" }}>{formatEps(release.diluted_eps)}</td>
-                        <td style={{ padding: "12px 12px", verticalAlign: "top" }}>{formatGuidanceSnippet(release)}</td>
-                        <td style={{ padding: "12px 12px", verticalAlign: "top" }}>{formatCapitalReturnSnippet(release)}</td>
-                        <td style={{ padding: "12px 12px", verticalAlign: "top" }}>{release.parse_state.replace(/_/g, " ")}</td>
+                        <td>{formatDate(release.filing_date)}</td>
+                        <td>{displayPeriod(release)}</td>
+                        <td className="is-numeric">{formatCompactNumber(release.revenue)}</td>
+                        <td className="is-numeric">{formatEps(release.diluted_eps)}</td>
+                        <td className="is-wrap">{formatGuidanceSnippet(release)}</td>
+                        <td className="is-wrap">{formatCapitalReturnSnippet(release)}</td>
+                        <td>{release.parse_state.replace(/_/g, " ")}</td>
                       </tr>
                     );
                   })}
@@ -419,21 +427,21 @@ export default function CompanyEarningsPage() {
               </table>
             </div>
 
-            <div className="filing-link-card" style={{ display: "grid", gap: 14 }}>
+            <div className="filing-link-card workspace-card-stack workspace-release-detail">
               {selectedRelease ? (
                 <>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: "var(--text)" }}>{displayReleaseTitle(selectedRelease)}</div>
-                      <div className="text-muted" style={{ fontSize: 13 }}>{describeRelease(selectedRelease)}</div>
+                  <div className="workspace-card-row is-start">
+                    <div className="workspace-card-stack workspace-card-stack-tight">
+                      <div className="workspace-detail-title">{displayReleaseTitle(selectedRelease)}</div>
+                      <div className="text-muted workspace-card-copy">{describeRelease(selectedRelease)}</div>
                     </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div className="workspace-pill-row">
                       <span className="pill">{selectedRelease.form}</span>
                       <span className="pill">{selectedRelease.parse_state.replace(/_/g, " ")}</span>
                     </div>
                   </div>
 
-                  <div style={{ display: "grid", gap: 8 }}>
+                  <div className="workspace-card-stack workspace-card-stack-tight">
                     <DetailRow label="Filing date" value={formatDate(selectedRelease.filing_date)} />
                     <DetailRow label="Reported period" value={selectedRelease.reported_period_label ?? formatDate(selectedRelease.reported_period_end)} />
                     <DetailRow label="Revenue" value={formatCompactNumber(selectedRelease.revenue)} />
@@ -450,20 +458,20 @@ export default function CompanyEarningsPage() {
                     />
                   </div>
 
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <a href={selectedRelease.source_url} target="_blank" rel="noreferrer" className="ticker-button" style={{ display: "inline-flex" }}>
+                  <div className="workspace-pill-row">
+                    <a href={selectedRelease.source_url} target="_blank" rel="noreferrer" className="ticker-button workspace-inline-action is-inline-link">
                       Open SEC Filing
                     </a>
                     {selectedRelease.exhibit_document ? <span className="pill">Exhibit {selectedRelease.exhibit_type ?? selectedRelease.exhibit_document}</span> : null}
                     {selectedRelease.primary_document ? <span className="pill">{selectedRelease.primary_document}</span> : null}
                   </div>
 
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <div className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>Highlights</div>
+                  <div className="workspace-card-stack workspace-card-stack-tight">
+                    <div className="text-muted workspace-eyebrow">Highlights</div>
                     {selectedRelease.highlights.length ? (
-                      <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 8 }}>
+                      <ul className="workspace-highlight-list">
                         {selectedRelease.highlights.map((highlight) => (
-                          <li key={highlight} style={{ color: "var(--text)" }}>{highlight}</li>
+                          <li key={highlight}>{highlight}</li>
                         ))}
                       </ul>
                     ) : (
@@ -484,34 +492,25 @@ export default function CompanyEarningsPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
-  );
-}
-
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
-      <span className="text-muted" style={{ fontSize: 13 }}>{label}</span>
-      <span style={{ color: "var(--text)", fontSize: 13, textAlign: "right" }}>{value}</span>
+    <div className="company-detail-row">
+      <span className="company-detail-label">{label}</span>
+      <span className="company-detail-value">{value}</span>
     </div>
   );
 }
 
 function AlertRow({ alert }: { alert: EarningsAlertPayload }) {
-  const color = alert.level === "high" ? "#FF9E9E" : alert.level === "medium" ? "#FFD98D" : "#B7FFD5";
+  const toneClass = alert.level === "high" ? "is-high" : alert.level === "medium" ? "is-medium" : "is-low";
   return (
-    <div className="metric-card" style={{ borderColor: color, display: "grid", gap: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+    <div className={`metric-card workspace-alert-card ${toneClass}`}>
+      <div className="workspace-card-row">
         <div className="metric-label">{alert.title}</div>
-        <span className="pill" style={{ borderColor: color }}>{alert.level}</span>
+        <span className={`pill workspace-alert-pill ${toneClass}`}>{alert.level}</span>
       </div>
-      <div style={{ color: "var(--text)", fontSize: 14 }}>{alert.detail}</div>
-      <div className="text-muted" style={{ fontSize: 12 }}>{formatDate(alert.period_end)}</div>
+      <div className="workspace-note-line workspace-note-strong">{alert.detail}</div>
+      <div className="text-muted workspace-card-copy-small">{formatDate(alert.period_end)}</div>
     </div>
   );
 }

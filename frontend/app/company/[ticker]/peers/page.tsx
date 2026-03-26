@@ -3,9 +3,9 @@
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
-import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { formatDate } from "@/lib/format";
@@ -58,29 +58,35 @@ export default function CompanyPeersPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Peer Workspace" subtitle={company?.name ?? ticker} aside={refreshState ? <StatusPill state={refreshState} /> : undefined}>
-        {loading ? (
-          <div className="text-muted">Loading company context...</div>
-        ) : (
-          <div className="metric-grid">
-            <Metric label="Ticker" value={ticker} />
-            <Metric label="Sector" value={company?.sector ?? null} />
-            <Metric label="Peer Limit" value="4 selected peers" />
-            <Metric label="Last Checked" value={company?.last_checked ? formatDate(company.last_checked) : null} />
-          </div>
-        )}
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Peers"
+        companyName={company?.name ?? ticker}
+        sector={company?.sector}
+        cacheState={company?.cache_state ?? null}
+        description="Compare valuation, quality, and growth against a cached peer set without blocking the page on live vendor fetches."
+        aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Sector", value: company?.sector ?? null },
+          { label: "Peer Limit", value: "4 selected peers" },
+          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : loading ? "Loading..." : null }
+        ]}
+        ribbonItems={[
+          { label: "Financial Inputs", value: "SEC EDGAR/XBRL", tone: "green" },
+          { label: "Market Profile", value: "Yahoo Finance", tone: "cyan" },
+          { label: "Selection Model", value: "Focus company + cached peers", tone: "gold" },
+          { label: "Refresh", value: refreshState?.job_id ? "Queued" : "Background-first", tone: refreshState?.job_id ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "Statements", value: financials.length.toLocaleString(), accent: "cyan" },
+          { label: "Peer Limit", value: "4 names", accent: "gold" },
+          { label: "Source Policy", value: "Official/public only", accent: "green" },
+          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : "Pending", accent: "cyan" }
+        ]}
+      />
 
       <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }

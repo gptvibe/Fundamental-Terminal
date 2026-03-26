@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { FilingEventCategoryChart } from "@/components/charts/filing-event-category-chart";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
@@ -108,16 +109,33 @@ export default function CompanyEventsPage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Event Feed" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Current Reports" value={(summary?.total_events ?? events.length).toLocaleString()} />
-          <Metric label="Unique Filings" value={(summary?.unique_accessions ?? 0).toLocaleString()} />
-          <Metric label="Latest Event" value={summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending"} />
-          <Metric label="Largest Amount" value={summary?.max_key_amount != null ? `$${Math.round(summary.max_key_amount).toLocaleString()}` : "Pending"} />
-          <Metric label="Last Checked" value={pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : null} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Events"
+        companyName={pageCompany?.name ?? ticker}
+        sector={pageCompany?.sector}
+        cacheState={pageCompany?.cache_state ?? null}
+        description="Current-report intelligence stays anchored to SEC 8-K filings, with categorized event cards and aggregate summaries served from cache before any background refresh completes."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Current Reports", value: (summary?.total_events ?? events.length).toLocaleString() },
+          { label: "Unique Filings", value: (summary?.unique_accessions ?? 0).toLocaleString() },
+          { label: "Latest Event", value: summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending" }
+        ]}
+        ribbonItems={[
+          { label: "Event Source", value: "SEC 8-K current reports", tone: "green" },
+          { label: "Largest Amount", value: summary?.max_key_amount != null ? `$${Math.round(summary.max_key_amount).toLocaleString()}` : "Pending", tone: "gold" },
+          { label: "Category Mix", value: categorySummary || "Pending", tone: "cyan" },
+          { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "Categories", value: Object.keys(summary?.categories ?? {}).length.toLocaleString(), accent: "cyan" },
+          { label: "Top Category", value: categorySummary.split(" · ")[0] ?? "Pending", accent: "gold" },
+          { label: "Source Policy", value: "Official/public only", accent: "green" },
+          { label: "Last Checked", value: pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : "Pending", accent: "cyan" }
+        ]}
+      />
 
       <Panel title="Event Categories" subtitle="Item-based classification of current reports so the filing stream is easier to scan">
         <FilingEventCategoryChart events={events} />
@@ -170,14 +188,5 @@ export default function CompanyEventsPage() {
         )}
       </Panel>
     </CompanyWorkspaceShell>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
   );
 }

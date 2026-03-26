@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { GovernanceFilingChart } from "@/components/charts/governance-filing-chart";
+import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
@@ -138,17 +139,33 @@ export default function CompanyGovernancePage() {
       }
       mainClassName="company-page-grid"
     >
-      <Panel title="Governance" subtitle={pageCompany?.name ?? ticker} aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}>
-        <div className="metric-grid">
-          <Metric label="Ticker" value={ticker} />
-          <Metric label="Proxy Filings" value={(summary?.total_filings ?? filings.length).toLocaleString()} />
-          <Metric label="DEF 14A" value={(summary?.definitive_proxies ?? definitiveCount).toLocaleString()} />
-          <Metric label="DEFA14A" value={(summary?.supplemental_proxies ?? additionalCount).toLocaleString()} />
-          <Metric label="Meeting Dates Parsed" value={(summary?.filings_with_meeting_date ?? 0).toLocaleString()} />
-          <Metric label="Comp Tables Parsed" value={(summary?.filings_with_exec_comp ?? 0).toLocaleString()} />
-          <Metric label="Vote Items Parsed" value={(summary?.filings_with_vote_items ?? 0).toLocaleString()} />
-        </div>
-      </Panel>
+      <CompanyResearchHeader
+        ticker={ticker}
+        title="Governance"
+        companyName={pageCompany?.name ?? ticker}
+        sector={pageCompany?.sector}
+        cacheState={pageCompany?.cache_state ?? null}
+        description="Proxy intelligence stays centered on SEC DEF 14A and DEFA14A filings, surfacing meeting metadata, vote outcomes, and executive compensation tables from cache before refresh jobs complete."
+        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Proxy Filings", value: (summary?.total_filings ?? filings.length).toLocaleString() },
+          { label: "Latest Proxy", value: latestFilingDate ? formatDate(latestFilingDate) : "Pending" },
+          { label: "Latest Meeting", value: summary?.latest_meeting_date ? formatDate(summary.latest_meeting_date) : latestWithVotes?.meeting_date ? formatDate(latestWithVotes.meeting_date) : null }
+        ]}
+        ribbonItems={[
+          { label: "Primary Source", value: "SEC DEF 14A / DEFA14A", tone: "green" },
+          { label: "Meeting Dates Parsed", value: (summary?.filings_with_meeting_date ?? 0).toLocaleString(), tone: "cyan" },
+          { label: "Comp Tables Parsed", value: (summary?.filings_with_exec_comp ?? 0).toLocaleString(), tone: "gold" },
+          { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "DEF 14A", value: (summary?.definitive_proxies ?? definitiveCount).toLocaleString(), accent: "cyan" },
+          { label: "DEFA14A", value: (summary?.supplemental_proxies ?? additionalCount).toLocaleString(), accent: "gold" },
+          { label: "Vote Items Parsed", value: (summary?.filings_with_vote_items ?? 0).toLocaleString(), accent: "green" },
+          { label: "Peak Vote Count", value: (summary?.max_vote_item_count ?? 0).toLocaleString(), accent: "cyan" }
+        ]}
+      />
 
       <Panel title="Proxy Filing Mix" subtitle="How much of the visible governance record is definitive proxy versus supplemental material">
         <GovernanceFilingChart filings={filings} />
@@ -158,24 +175,24 @@ export default function CompanyGovernancePage() {
         {loading || workspaceLoading ? (
           <div className="text-muted">Loading board history...</div>
         ) : definitiveFilings.length ? (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <div className="company-data-table-shell">
+            <table className="company-data-table company-data-table-compact">
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <tr>
                   {(["Filed", "Meeting", "Nominees", "Vote Items", "Exec Comp"] as const).map((h) => (
-                    <th key={h} style={{ padding: "6px 10px", textAlign: "left", color: "var(--text-muted)", fontWeight: 500 }}>{h}</th>
+                    <th key={h} className={h === "Nominees" || h === "Vote Items" ? "is-numeric" : undefined}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {definitiveFilings.map((f) => (
-                  <tr key={f.accession_number ?? `${f.filing_date}-${f.source_url}`} style={{ borderBottom: "1px solid var(--border-subtle, var(--border))" }}>
-                    <td style={{ padding: "7px 10px", color: "var(--text)" }}>{formatDate(f.filing_date ?? f.report_date)}</td>
-                    <td style={{ padding: "7px 10px", color: f.meeting_date ? "var(--text)" : "var(--text-muted)" }}>{f.meeting_date ? formatDate(f.meeting_date) : "—"}</td>
-                    <td style={{ padding: "7px 10px", color: "var(--text)", textAlign: "right" }}>{f.board_nominee_count ?? "—"}</td>
-                    <td style={{ padding: "7px 10px", color: "var(--text)", textAlign: "right" }}>{f.vote_item_count || "—"}</td>
-                    <td style={{ padding: "7px 10px" }}>
-                      <span style={{ color: f.executive_comp_table_detected ? "#00FF41" : "var(--text-muted)" }}>
+                  <tr key={f.accession_number ?? `${f.filing_date}-${f.source_url}`}>
+                    <td>{formatDate(f.filing_date ?? f.report_date)}</td>
+                    <td className={!f.meeting_date ? "is-muted" : undefined}>{f.meeting_date ? formatDate(f.meeting_date) : "—"}</td>
+                    <td className="is-numeric">{f.board_nominee_count ?? "—"}</td>
+                    <td className="is-numeric">{f.vote_item_count || "—"}</td>
+                    <td>
+                      <span className={f.executive_comp_table_detected ? "company-signal-positive" : "text-muted"}>
                         {f.executive_comp_table_detected ? "Yes" : "No"}
                       </span>
                     </td>
@@ -236,21 +253,21 @@ export default function CompanyGovernancePage() {
         {loading || workspaceLoading ? (
           <div className="text-muted">Loading executive compensation data...</div>
         ) : execRows.length ? (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <div className="company-data-table-shell">
+            <table className="company-data-table company-data-table-compact company-data-table-wide">
               <thead>
-                <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                <tr>
                   {(["Executive", "Title", "Year", "Salary", "Bonus", "Stock Awards", "Option Awards", "Non-Equity", "Other", "Total"] as const).map((h) => (
-                    <th key={h} style={{ padding: "6px 10px", textAlign: h === "Executive" || h === "Title" ? "left" : "right", color: "var(--text-muted)", fontWeight: 500, whiteSpace: "nowrap" }}>{h}</th>
+                    <th key={h} className={h === "Executive" || h === "Title" ? "is-wrap" : "is-numeric"}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {execRows.map((row, i) => (
-                  <tr key={`${row.executive_name}-${row.fiscal_year ?? i}`} style={{ borderBottom: "1px solid var(--border-subtle, var(--border))" }}>
-                    <td style={{ padding: "7px 10px", color: "var(--text)", fontWeight: 500, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.executive_name}</td>
-                    <td style={{ padding: "7px 10px", color: "var(--text-muted)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.executive_title ?? "—"}</td>
-                    <td style={{ padding: "7px 10px", color: "var(--text)", textAlign: "right" }}>{row.fiscal_year ?? "—"}</td>
+                  <tr key={`${row.executive_name}-${row.fiscal_year ?? i}`}>
+                    <td className="is-wrap company-data-cell-strong">{row.executive_name}</td>
+                    <td className="is-wrap is-muted">{row.executive_title ?? "—"}</td>
+                    <td className="is-numeric">{row.fiscal_year ?? "—"}</td>
                     <CompCell value={row.salary} />
                     <CompCell value={row.bonus} />
                     <CompCell value={row.stock_awards} />
@@ -263,7 +280,7 @@ export default function CompanyGovernancePage() {
               </tbody>
             </table>
             {execCompData?.source === "live" && (
-              <div className="text-muted" style={{ fontSize: 12, paddingTop: 8 }}>
+              <div className="company-data-table-note">
                 Live-parsed from latest DEF 14A · not yet persisted
               </div>
             )}
@@ -370,18 +387,9 @@ export default function CompanyGovernancePage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{value ?? "?"}</div>
-    </div>
-  );
-}
-
 function CompCell({ value, highlight }: { value: number | null; highlight?: boolean }) {
   return (
-    <td style={{ padding: "7px 10px", textAlign: "right", color: highlight ? "var(--text)" : "var(--text-muted)", fontWeight: highlight ? 600 : 400 }}>
+    <td className={`is-numeric${highlight ? " company-data-cell-strong" : " is-muted"}`}>
       {value != null ? `$${Math.round(value).toLocaleString()}` : "—"}
     </td>
   );

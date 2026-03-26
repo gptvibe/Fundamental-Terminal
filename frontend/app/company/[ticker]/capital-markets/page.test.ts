@@ -2,7 +2,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import CompanyEventsPage from "@/app/company/[ticker]/events/page";
+import CompanyCapitalMarketsPage from "@/app/company/[ticker]/capital-markets/page";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
@@ -11,6 +11,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/hooks/use-company-workspace", () => ({
   useCompanyWorkspace: () => ({
     company: { ticker: "ACME", name: "Acme Corp", sector: "Tech", last_checked: null },
+    financials: [],
     loading: false,
     refreshing: false,
     refreshState: null,
@@ -38,40 +39,49 @@ vi.mock("@/components/ui/status-pill", () => ({
   StatusPill: () => React.createElement("span", null, "status"),
 }));
 
-vi.mock("@/components/charts/filing-event-category-chart", () => ({
-  FilingEventCategoryChart: () => React.createElement("div", null, "event-chart"),
+vi.mock("@/components/charts/capital-markets-signal-chart", () => ({
+  CapitalMarketsSignalChart: () => React.createElement("div", null, "capital-signal-chart"),
+}));
+
+vi.mock("@/components/charts/share-dilution-tracker-chart", () => ({
+  ShareDilutionTrackerChart: () => React.createElement("div", null, "dilution-chart"),
 }));
 
 vi.mock("@/lib/api", () => ({
+  getCompanyCapitalMarkets: vi.fn(async () => ({
+    company: null,
+    filings: [],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    error: null,
+  })),
+  getCompanyCapitalMarketsSummary: vi.fn(async () => ({
+    company: null,
+    summary: {
+      total_filings: 0,
+      late_filer_notices: 0,
+      max_offering_amount: null,
+    },
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    error: null,
+  })),
   getCompanyFilingEvents: vi.fn(async () => ({
     company: null,
     events: [],
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
     error: null,
   })),
-  getCompanyFilingEventsSummary: vi.fn(async () => ({
-    company: null,
-    summary: {
-      total_events: 0,
-      unique_accessions: 0,
-      categories: {},
-      latest_event_date: null,
-      max_key_amount: null,
-    },
-    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
-    error: null,
-  })),
 }));
 
-describe("CompanyEventsPage", () => {
-  it("renders event page sections and initial loading state", () => {
-    const html = renderToStaticMarkup(React.createElement(CompanyEventsPage));
+describe("CompanyCapitalMarketsPage", () => {
+  it("renders the shared capital-markets workspace header and panels", () => {
+    const html = renderToStaticMarkup(React.createElement(CompanyCapitalMarketsPage));
 
-    expect(html).toContain("Events");
-    expect(html).toContain("Current-report intelligence stays anchored to SEC 8-K filings");
-    expect(html).toContain("Event Categories");
-    expect(html).toContain("Recent 8-K Timeline");
-    expect(html).toContain("Loading filing events...");
-    expect(html).toContain("event-chart");
+    expect(html).toContain("Capital Markets");
+    expect(html).toContain("SEC-first financing workspace covering registration activity");
+    expect(html).toContain("Financing Signal Tracker");
+    expect(html).toContain("Capital Raise Filings");
+    expect(html).toContain("Recent Financing Events");
+    expect(html).toContain("capital-signal-chart");
+    expect(html).toContain("dilution-chart");
   });
 });

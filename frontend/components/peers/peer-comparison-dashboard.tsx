@@ -21,14 +21,13 @@ import {
 } from "recharts";
 
 import { getCompanyPeers } from "@/lib/api";
-import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, chartLegendStyle, chartTick } from "@/lib/chart-theme";
+import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, chartLegendStyle, chartSeriesColor, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyPeersResponse, PeerMetricsPayload, PeerRevenuePoint } from "@/lib/types";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 
 const MAX_SELECTED_PEERS = 4;
-const PEER_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7"];
 
 type TooltipEntry = {
   color?: string;
@@ -107,6 +106,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
   const tickerColorMap = useMemo(() => buildTickerColorMap(displayedPeers), [displayedPeers]);
   const radarData = useMemo(() => buildRadarData(displayedPeers), [displayedPeers]);
   const barData = useMemo(() => buildBarData(displayedPeers), [displayedPeers]);
+  const [compareDrawerOpen, setCompareDrawerOpen] = useState(true);
   const [tableScrollTop, setTableScrollTop] = useState(0);
   const rowHeight = 44;
   const tableViewportHeight = 360;
@@ -152,26 +152,53 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
       ) : (
         <div className="peer-dashboard-shell">
           <div className="peer-dashboard-header">
-            <div className="peer-chip-row">
-              {data?.available_companies.map((company) => {
-                const active = company.is_focus || activeTickers.includes(company.ticker);
-                return (
-                  <button
-                    key={company.ticker}
-                    type="button"
-                    className={`peer-chip${active ? " active" : ""}${company.is_focus ? " focus" : ""}`}
-                    onClick={() => {
-                      if (!company.is_focus) {
-                        togglePeer(company.ticker);
-                      }
-                    }}
-                    title={`${company.ticker} — ${company.name}`}
-                  >
-                    <span className="peer-chip-ticker">{company.ticker}</span>
-                    <span className="peer-chip-name">{company.name}</span>
-                  </button>
-                );
-              })}
+            <div className="peer-compare-tray">
+              <div className="peer-compare-tray-header">
+                <div>
+                  <div className="peer-section-title">Compare Tray</div>
+                  <div className="peer-section-subtitle">Focus company plus up to {MAX_SELECTED_PEERS} cached peers.</div>
+                </div>
+                <button
+                  type="button"
+                  className="ticker-button peer-compare-toggle"
+                  aria-expanded={compareDrawerOpen}
+                  onClick={() => setCompareDrawerOpen((current) => !current)}
+                >
+                  {compareDrawerOpen ? "Collapse compare tray" : "Open compare tray"}
+                </button>
+              </div>
+              <div className="peer-compare-selection" aria-live="polite">
+                <span className="pill">Selected {activeTickers.length}/{MAX_SELECTED_PEERS}</span>
+                {displayedPeers.map((peer) => (
+                  <span key={`${peer.ticker}:selected`} className={`peer-selection-pill${peer.is_focus ? " focus" : ""}`}>
+                    {peer.ticker}
+                  </span>
+                ))}
+              </div>
+              {compareDrawerOpen ? (
+                <div className="peer-chip-row" role="group" aria-label="Select peers to compare">
+                  {data?.available_companies.map((company) => {
+                    const active = company.is_focus || activeTickers.includes(company.ticker);
+                    return (
+                      <button
+                        key={company.ticker}
+                        type="button"
+                        className={`peer-chip${active ? " active" : ""}${company.is_focus ? " focus" : ""}`}
+                        onClick={() => {
+                          if (!company.is_focus) {
+                            togglePeer(company.ticker);
+                          }
+                        }}
+                        aria-pressed={active}
+                        title={`${company.ticker} — ${company.name}`}
+                      >
+                        <span className="peer-chip-ticker">{company.ticker}</span>
+                        <span className="peer-chip-name">{company.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
             <div className="peer-dashboard-meta">
               <span className="pill">Up to {MAX_SELECTED_PEERS} peers</span>
@@ -197,8 +224,8 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                       key={peer.ticker}
                       name={peer.ticker}
                       dataKey={peer.ticker}
-                      stroke={tickerColorMap[peer.ticker] ?? PEER_COLORS[index % PEER_COLORS.length]}
-                      fill={tickerColorMap[peer.ticker] ?? PEER_COLORS[index % PEER_COLORS.length]}
+                      stroke={tickerColorMap[peer.ticker] ?? chartSeriesColor(index)}
+                      fill={tickerColorMap[peer.ticker] ?? chartSeriesColor(index)}
                       fillOpacity={peer.is_focus ? 0.24 : 0.12}
                       strokeWidth={peer.is_focus ? 2.6 : 1.8}
                     />
@@ -358,7 +385,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
 
 function buildTickerColorMap(peers: PeerMetricsPayload[]): Record<string, string> {
   return Object.fromEntries(
-    peers.map((peer, index) => [peer.ticker, peer.is_focus ? "#00FF41" : PEER_COLORS[(index + 1) % PEER_COLORS.length]])
+    peers.map((peer, index) => [peer.ticker, peer.is_focus ? "var(--chart-series-1)" : chartSeriesColor(index + 1)])
   );
 }
 
