@@ -8,6 +8,14 @@ export interface RefreshState {
   job_id: string | null;
 }
 
+export interface DataQualityDiagnosticsPayload {
+  coverage_ratio: number | null;
+  fallback_ratio: number | null;
+  stale_flags: string[];
+  parser_confidence: number | null;
+  missing_field_flags: string[];
+}
+
 export interface CompanyPayload {
   ticker: string;
   cik: string;
@@ -124,6 +132,7 @@ export interface CompanyFinancialsResponse {
   financials: FinancialPayload[];
   price_history: PriceHistoryPoint[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
 }
 
 export interface MetricsValuesPayload {
@@ -175,6 +184,7 @@ export interface CompanyMetricsTimeseriesResponse {
   last_price_check: string | null;
   staleness_reason: string | null;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
 }
 
 export interface DerivedMetricValuePayload {
@@ -203,6 +213,7 @@ export interface CompanyDerivedMetricsResponse {
   last_price_check: string | null;
   staleness_reason: string | null;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
 }
 
 export interface CompanyDerivedMetricsSummaryResponse {
@@ -215,6 +226,7 @@ export interface CompanyDerivedMetricsSummaryResponse {
   last_price_check: string | null;
   staleness_reason: string | null;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
 }
 
 export interface FilingParserSegmentPayload {
@@ -240,6 +252,7 @@ export interface CompanyFilingInsightsResponse {
   company: CompanyPayload | null;
   insights: FilingParserInsightPayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
 }
 export interface InsiderTradePayload {
   name: string;
@@ -366,6 +379,7 @@ export interface CompanyModelsResponse {
   requested_models: string[];
   models: ModelPayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
 }
 
 export interface MarketCurvePointPayload {
@@ -456,6 +470,7 @@ export interface CompanyFilingsResponse {
   filings: FilingPayload[];
   timeline_source: "sec_submissions" | "cached_financials";
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -551,6 +566,7 @@ export interface CompanyGovernanceResponse {
   company: CompanyPayload | null;
   filings: GovernanceFilingPayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -569,6 +585,7 @@ export interface CompanyGovernanceSummaryResponse {
   company: CompanyPayload | null;
   summary: GovernanceSummaryPayload;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -614,6 +631,7 @@ export interface CompanyEventsResponse {
   company: CompanyPayload | null;
   events: FilingEventPayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -629,6 +647,7 @@ export interface CompanyFilingEventsSummaryResponse {
   company: CompanyPayload | null;
   summary: FilingEventsSummaryPayload;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -652,6 +671,7 @@ export interface CompanyCapitalRaisesResponse {
   company: CompanyPayload | null;
   filings: CapitalRaisePayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -668,6 +688,7 @@ export interface CompanyCapitalMarketsSummaryResponse {
   company: CompanyPayload | null;
   summary: CapitalMarketsSummaryPayload;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -718,6 +739,7 @@ export interface CompanyEarningsResponse {
   company: CompanyPayload | null;
   earnings_releases: EarningsReleasePayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -725,6 +747,7 @@ export interface CompanyEarningsSummaryResponse {
   company: CompanyPayload | null;
   summary: EarningsSummaryPayload;
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -820,6 +843,7 @@ export interface CompanyEarningsWorkspaceResponse {
   peer_context: EarningsPeerContextPayload;
   alerts: EarningsAlertPayload[];
   refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
   error: string | null;
 }
 
@@ -994,8 +1018,11 @@ export interface RefreshQueuedResponse {
 
 export interface JobStatusEvent {
   job_id: string;
+  trace_id: string;
   sequence: number;
   timestamp: string;
+  ticker: string;
+  kind: string;
   stage: string;
   message: string;
   status: "queued" | "running" | "completed" | "failed";
@@ -1004,6 +1031,10 @@ export interface JobStatusEvent {
 
 export interface ConsoleEntry {
   id: string;
+  job_id?: string;
+  trace_id?: string;
+  ticker?: string;
+  kind?: string;
   timestamp: string;
   stage: string;
   message: string;

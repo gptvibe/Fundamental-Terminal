@@ -1,0 +1,182 @@
+{
+  "cik": "0000123456",
+  "accession_number": "0000123456-26-000010",
+  "filing": {
+    "form": "10-K",
+    "filing_date": "2026-02-20",
+    "report_date": "2025-12-31",
+    "primary_document": "annual.htm"
+  },
+  "companyfacts": {
+    "facts": {
+      "us-gaap": {
+        "Revenues": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 1000
+              }
+            ]
+          }
+        },
+        "OperatingIncomeLoss": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 240
+              }
+            ]
+          }
+        },
+        "NetIncomeLoss": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 180
+              }
+            ]
+          }
+        },
+        "Assets": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 3000
+              }
+            ]
+          }
+        },
+        "CurrentAssets": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 900
+              }
+            ]
+          }
+        },
+        "CashAndCashEquivalentsAtCarryingValue": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 150
+              }
+            ]
+          }
+        },
+        "LongTermDebt": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 320
+              }
+            ]
+          }
+        },
+        "StockholdersEquity": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 1800
+              }
+            ]
+          }
+        },
+        "OperatingCashFlow": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 310
+              }
+            ]
+          }
+        },
+        "PaymentsToAcquirePropertyPlantAndEquipment": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": -90
+              }
+            ]
+          }
+        },
+        "EarningsPerShareDiluted": {
+          "units": {
+            "USD/shares": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 4.2
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expected": {
+    "filing_type": "10-K",
+    "statement_type": "canonical_xbrl",
+    "period_end": "2025-12-31",
+    "source_suffix": "/annual.htm",
+    "data": {
+      "revenue": 1000,
+      "operating_income": 240,
+      "net_income": 180,
+      "total_assets": 3000,
+      "cash_and_cash_equivalents": 150,
+      "long_term_debt": 320,
+      "stockholders_equity": 1800,
+      "capex": 90,
+      "eps": 4.2
+    }
+  }
+}

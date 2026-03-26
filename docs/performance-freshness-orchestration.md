@@ -45,6 +45,15 @@ The script runs warm-cache benchmark cases for:
 - financials payload
 - models payload
 - peers payload
+- metrics-timeseries payload
+
+Model-computation benchmark:
+
+```bash
+python scripts/benchmark_model_computation.py --models dcf,reverse_dcf,roic,ratios --rounds 10
+```
+
+This benchmark executes model definitions in-process against a deterministic SEC-style dataset so model latency regressions can be detected without depending on live upstream traffic.
 
 ## Before/after notes
 Before values are from the pre-follow-up implementation benchmark run.
@@ -62,6 +71,8 @@ Both were captured from local Docker runs against `AAPL` after a warm-up pass.
 - Refresh orchestration remains cache-first and non-blocking:
   stale/missing data returns cached payload immediately and queues a background refresh.
 - Dataset lock timeout is controlled with `REFRESH_LOCK_TIMEOUT_SECONDS`.
+- Structured logs now emit refresh, model-compute, and SSE job events with a shared traceable `job_id`/`trace_id` path.
+- Frontend console rows and SSE payloads expose `ticker` and `kind` metadata so operators can correlate UI events with backend logs.
 - Response cache TTLs are controlled with:
   - `HOT_RESPONSE_CACHE_TTL_SECONDS`
   - `HOT_RESPONSE_CACHE_STALE_TTL_SECONDS`

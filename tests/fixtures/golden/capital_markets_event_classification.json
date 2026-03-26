@@ -1,0 +1,64 @@
+{
+  "cik": "0001000000",
+  "capital_filings": [
+    {
+      "accession_number": "0000001",
+      "form": "S-3",
+      "filing_date": "2026-03-20",
+      "report_date": "2026-03-20",
+      "primary_document": "s3.htm",
+      "primary_doc_description": "Shelf registration statement for up to $500,000,000 of common stock."
+    },
+    {
+      "accession_number": "0000002",
+      "form": "NT 10-Q",
+      "filing_date": "2026-03-21",
+      "report_date": "2026-03-21",
+      "primary_document": "nt10q.htm",
+      "primary_doc_description": "Notification of inability to timely file quarterly report."
+    }
+  ],
+  "event_filings": [
+    {
+      "accession_number": "0000003",
+      "form": "8-K",
+      "filing_date": "2026-03-18",
+      "report_date": "2026-03-17",
+      "primary_document": "a8k.htm",
+      "primary_doc_description": "Company entered a financing agreement for $250,000,000 and disclosed Item 2.03 and Item 9.01. Exhibit 99.1 was furnished.",
+      "items": "2.03,9.01"
+    }
+  ],
+  "expected": {
+    "capital_markets": [
+      {
+        "form": "S-3",
+        "event_type": "Registration",
+        "security_type": "Common Equity",
+        "offering_amount": 500000000.0,
+        "shelf_size": 500000000.0,
+        "is_late_filer": false
+      },
+      {
+        "form": "NT 10-Q",
+        "event_type": "Late Filing Notice",
+        "security_type": null,
+        "offering_amount": null,
+        "shelf_size": null,
+        "is_late_filer": true
+      }
+    ],
+    "filing_events": {
+      "2.03": {
+        "category": "Financing",
+        "key_amounts": [250000000.0],
+        "exhibit_references": ["99.1"]
+      },
+      "9.01": {
+        "category": "Earnings",
+        "key_amounts": [250000000.0],
+        "exhibit_references": ["99.1"]
+      }
+    }
+  }
+}

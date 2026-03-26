@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
+from app.observability import emit_structured_log
 from app.models import BeneficialOwnershipReport, Company, EarningsRelease, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight
 from app.services.institutional_holdings import (
@@ -2050,6 +2051,14 @@ class EdgarIngestionService:
 def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = None) -> dict[str, Any]:
     service = EdgarIngestionService()
     reporter = JobReporter(job_id)
+    emit_structured_log(
+        logger,
+        "refresh.job.start",
+        identifier=identifier,
+        force=force,
+        job_id=job_id,
+        trace_id=job_id,
+    )
     try:
         result = service.refresh_company(identifier=identifier, force=force, reporter=reporter)
         get_engine()
@@ -2066,7 +2075,25 @@ def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = N
         payload = asdict(result)
         payload["last_checked"] = result.last_checked.isoformat() if result.last_checked else None
         payload["job_id"] = job_id
-        logger.info("SEC refresh completed: %s", payload)
+        emit_structured_log(
+            logger,
+            "refresh.job.complete",
+            identifier=identifier,
+            job_id=job_id,
+            trace_id=job_id,
+            ticker=result.ticker,
+            company_id=result.company_id,
+            status=result.status,
+            statements_written=result.statements_written,
+            insider_trades_written=result.insider_trades_written,
+            form144_filings_written=result.form144_filings_written,
+            institutional_holdings_written=result.institutional_holdings_written,
+            beneficial_ownership_written=result.beneficial_ownership_written,
+            earnings_releases_written=result.earnings_releases_written,
+            price_points_written=result.price_points_written,
+            fetched_from_sec=result.fetched_from_sec,
+            last_checked=result.last_checked,
+        )
         return payload
     except Exception as exc:
         get_engine()
@@ -2081,6 +2108,15 @@ def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = N
                     error=str(exc),
                 )
                 session.commit()
+        emit_structured_log(
+            logger,
+            "refresh.job.failed",
+            level=logging.ERROR,
+            identifier=identifier,
+            job_id=job_id,
+            trace_id=job_id,
+            error=str(exc),
+        )
         reporter.fail(str(exc))
         raise
     finally:

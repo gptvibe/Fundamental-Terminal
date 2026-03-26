@@ -28,6 +28,7 @@ def test_metrics_timeseries_openapi_contract_matches_frontend_shape():
         "last_price_check",
         "staleness_reason",
         "refresh",
+        "diagnostics",
     }
     assert expected_response_fields.issubset(response_fields)
 

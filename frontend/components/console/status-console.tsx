@@ -17,6 +17,11 @@ export function StatusConsole({ entries, connectionState }: StatusConsoleProps) 
           <div key={entry.id} className="status-console-entry">
             <span className="status-console-time">{formatTime(entry.timestamp)}</span>
             <span className={`status-console-stage ${classNameForLevel(entry.level)}`}>{entry.stage}</span>
+            {(entry.ticker || entry.kind || entry.trace_id) ? (
+              <span className="text-muted" style={{ fontSize: 11 }}>
+                {[entry.ticker, entry.kind, entry.trace_id ? `#${entry.trace_id.slice(0, 8)}` : null].filter(Boolean).join(" · ")}
+              </span>
+            ) : null}
             <span className={`status-console-message ${entry.level === "error" ? "status-console-message-error" : ""}`}>
               {entry.message}
             </span>

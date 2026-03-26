@@ -18,6 +18,21 @@ class Case:
     params: dict[str, str]
 
 
+def build_cases(ticker: str) -> list[Case]:
+    normalized_ticker = ticker.upper().strip()
+    return [
+        Case(name="company_search", path="/api/companies/search", params={"query": normalized_ticker, "refresh": "false"}),
+        Case(name="financials_payload", path=f"/api/companies/{normalized_ticker}/financials", params={}),
+        Case(
+            name="models_payload",
+            path=f"/api/companies/{normalized_ticker}/models",
+            params={"model": "ratios,dupont,dcf,reverse_dcf,roic,capital_allocation"},
+        ),
+        Case(name="peers_payload", path=f"/api/companies/{normalized_ticker}/peers", params={}),
+        Case(name="metrics_timeseries_payload", path=f"/api/companies/{normalized_ticker}/metrics-timeseries", params={"cadence": "ttm", "max_points": "12"}),
+    ]
+
+
 def _run_case(base_url: str, case: Case, *, rounds: int, timeout: float) -> dict[str, Any]:
     durations_ms: list[float] = []
     status_codes: list[int] = []
@@ -69,12 +84,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ticker = args.ticker.upper().strip()
-    cases = [
-        Case(name="company_search", path="/api/companies/search", params={"query": ticker, "refresh": "false"}),
-        Case(name="financials_payload", path=f"/api/companies/{ticker}/financials", params={}),
-        Case(name="models_payload", path=f"/api/companies/{ticker}/models", params={"model": "ratios,dupont,dcf,reverse_dcf,roic,capital_allocation"}),
-        Case(name="peers_payload", path=f"/api/companies/{ticker}/peers", params={}),
-    ]
+    cases = build_cases(ticker)
 
     # Warm-up pass so benchmark emphasizes warm-cache behavior.
     for case in cases:

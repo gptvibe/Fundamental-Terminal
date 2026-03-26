@@ -9,6 +9,7 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
+import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
@@ -243,30 +244,36 @@ export default function CompanyModelsPage() {
   return (
     <CompanyWorkspaceShell
       rail={
-        <CompanyUtilityRail
-          ticker={ticker}
-          companyName={data?.company?.name ?? financialData?.company?.name ?? null}
-          sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
-          refreshState={data?.refresh ?? financialData?.refresh ?? null}
-          refreshing={refreshing}
-          onRefresh={queueRefresh}
-          actionTitle="Next Steps"
-          actionSubtitle="Refresh the latest data for this ticker or return to financial statements."
-          primaryActionLabel="Refresh Model Inputs"
-          primaryActionDescription="Updates filings, market prices, and model calculations in the background."
-          secondaryActionHref={`/company/${encodeURIComponent(ticker)}/financials`}
-          secondaryActionLabel="Open Financials"
-          secondaryActionDescription="Review statements, charts, and historical company results."
-          statusLines={[
-            `Available models: ${modelSummary.cachedCount}/${MODEL_NAMES.length}`,
-            `Last updated: ${modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"}`,
-            `Price history points available: ${(financialData?.price_history ?? []).length.toLocaleString()}`,
-            `DuPont basis: ${modelSummary.dupontBasis ?? dupontMode.toUpperCase()}`
-          ]}
-          consoleEntries={consoleEntries}
-          connectionState={connectionState}
-          actionTone="gold"
-        />
+        <>
+          <CompanyUtilityRail
+            ticker={ticker}
+            companyName={data?.company?.name ?? financialData?.company?.name ?? null}
+            sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
+            refreshState={data?.refresh ?? financialData?.refresh ?? null}
+            refreshing={refreshing}
+            onRefresh={queueRefresh}
+            actionTitle="Next Steps"
+            actionSubtitle="Refresh the latest data for this ticker or return to financial statements."
+            primaryActionLabel="Refresh Model Inputs"
+            primaryActionDescription="Updates filings, market prices, and model calculations in the background."
+            secondaryActionHref={`/company/${encodeURIComponent(ticker)}/financials`}
+            secondaryActionLabel="Open Financials"
+            secondaryActionDescription="Review statements, charts, and historical company results."
+            statusLines={[
+              `Available models: ${modelSummary.cachedCount}/${MODEL_NAMES.length}`,
+              `Last updated: ${modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"}`,
+              `Price history points available: ${(financialData?.price_history ?? []).length.toLocaleString()}`,
+              `DuPont basis: ${modelSummary.dupontBasis ?? dupontMode.toUpperCase()}`
+            ]}
+            consoleEntries={consoleEntries}
+            connectionState={connectionState}
+            actionTone="gold"
+          />
+
+          <Panel title="Model Diagnostics" subtitle="Coverage, proxy fallback, and missing-field flags rolled up from cached model runs">
+            <DataQualityDiagnostics diagnostics={data?.diagnostics} />
+          </Panel>
+        </>
       }
       mainClassName="models-page-grid"
     >

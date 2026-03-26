@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+import json
+from datetime import date
+from pathlib import Path
+
+from app.services.capital_markets import collect_capital_markets_events
+from app.services.eight_k_events import collect_filing_events
+from app.services.earnings_release import collect_earnings_releases
+from app.services.proxy_parser import parse_proxy_filing_signals
+from app.services.sec_edgar import EdgarNormalizer, FilingMetadata
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+GOLDEN_DIR = FIXTURES_DIR / "golden"
+
+
+class _FixtureBackedEarningsClient:
+    def __init__(self, payload_by_name: dict[str, str], directory_items: list[dict[str, str]]) -> None:
+        self._payload_by_name = payload_by_name
+        self._directory_items = directory_items
+
+    def get_filing_directory_index(self, cik: str, accession_number: str):
+        return {"directory": {"item": self._directory_items}}
+
+    def get_filing_document_text(self, cik: str, accession_number: str, document_name: str):
+        source_url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession_number.replace('-', '')}/{document_name}"
+        return source_url, self._payload_by_name[document_name]
+
+
+def test_canonical_financial_extraction_golden_fixture() -> None:
+    fixture = _load_golden("canonical_financial_extraction.json")
+    filing_index = {
+        fixture["accession_number"]: FilingMetadata(
+            accession_number=fixture["accession_number"],
+            form=fixture["filing"]["form"],
+            filing_date=_parse_date(fixture["filing"]["filing_date"]),
+            report_date=_parse_date(fixture["filing"]["report_date"]),
+            primary_document=fixture["filing"]["primary_document"],
+        )
+    }
+
+    statements = EdgarNormalizer().normalize(fixture["cik"], fixture["companyfacts"], filing_index)
+
+    assert len(statements) == 1
+    statement = statements[0]
+    expected = fixture["expected"]
+    assert statement.filing_type == expected["filing_type"]
+    assert statement.period_end == _parse_date(expected["period_end"])
+    assert statement.source.endswith(expected["source_suffix"])
+    for key, value in expected["data"].items():
+        assert statement.data[key] == value
+
+
+def test_earnings_release_parser_golden_fixture() -> None:
+    fixture = _load_golden("earnings_release_parsing.json")
+    filing = fixture["filings"][0]
+    filing_index = {
+        filing["accession_number"]: FilingMetadata(
+            accession_number=filing["accession_number"],
+            form=filing["form"],
+            filing_date=_parse_date(filing["filing_date"]),
+            report_date=_parse_date(filing["report_date"]),
+            primary_document=filing["primary_document"],
+            primary_doc_description=filing["primary_doc_description"],
+            items=filing["items"],
+        )
+    }
+    client = _FixtureBackedEarningsClient(
+        payload_by_name={name: _load_text_fixture(path) for name, path in fixture["payload_by_name"].items()},
+        directory_items=fixture["directory_items"],
+    )
+
+    releases = collect_earnings_releases(fixture["cik"], filing_index, client=client)
+
+    assert len(releases) == 1
+    release = releases[0]
+    expected = fixture["expected"]
+    assert release.parse_state == expected["parse_state"]
+    assert release.exhibit_document == expected["exhibit_document"]
+    assert release.exhibit_type == expected["exhibit_type"]
+    assert release.reported_period_label == expected["reported_period_label"]
+    assert release.reported_period_end == _parse_date(expected["reported_period_end"])
+    assert release.revenue == expected["revenue"]
+    assert release.operating_income == expected["operating_income"]
+    assert release.net_income == expected["net_income"]
+    assert release.diluted_eps == expected["diluted_eps"]
+    assert release.revenue_guidance_low == expected["revenue_guidance_low"]
+    assert release.revenue_guidance_high == expected["revenue_guidance_high"]
+    assert release.eps_guidance_low == expected["eps_guidance_low"]
+    assert release.eps_guidance_high == expected["eps_guidance_high"]
+    assert release.share_repurchase_amount == expected["share_repurchase_amount"]
+    assert release.dividend_per_share == expected["dividend_per_share"]
+    assert release.source_url.endswith(expected["source_url_suffix"])
+
+
+def test_proxy_governance_parser_golden_fixture() -> None:
+    fixture = _load_golden("proxy_governance_parsing.json")
+    payload = _load_text_fixture(fixture["source_fixture"])
+
+    signals = parse_proxy_filing_signals(payload)
+    expected = fixture["expected"]
+
+    assert signals.meeting_date == _parse_date(expected["meeting_date"])
+    assert signals.executive_comp_table_detected is expected["executive_comp_table_detected"]
+    assert signals.vote_item_count == expected["vote_item_count"]
+    assert signals.board_nominee_count == expected["board_nominee_count"]
+
+    vote_outcome = signals.vote_outcomes[0]
+    expected_outcome = expected["vote_outcomes"][0]
+    assert vote_outcome.proposal_number == expected_outcome["proposal_number"]
+    assert vote_outcome.for_votes == expected_outcome["for_votes"]
+    assert vote_outcome.against_votes == expected_outcome["against_votes"]
+    assert vote_outcome.abstain_votes == expected_outcome["abstain_votes"]
+    assert vote_outcome.broker_non_votes == expected_outcome["broker_non_votes"]
+
+    expected_exec = expected["named_exec_rows"][0]
+    matching_rows = [row for row in signals.named_exec_rows if expected_exec["executive_name_contains"] in row.executive_name]
+    assert matching_rows
+    assert matching_rows[0].salary == expected_exec["salary"]
+    assert matching_rows[0].total_compensation == expected_exec["total_compensation"]
+
+
+def test_capital_markets_and_event_classification_golden_fixture() -> None:
+    fixture = _load_golden("capital_markets_event_classification.json")
+
+    capital_index = {
+        item["accession_number"]: FilingMetadata(
+            accession_number=item["accession_number"],
+            form=item["form"],
+            filing_date=_parse_date(item["filing_date"]),
+            report_date=_parse_date(item["report_date"]),
+            primary_document=item["primary_document"],
+            primary_doc_description=item["primary_doc_description"],
+        )
+        for item in fixture["capital_filings"]
+    }
+    capital_rows = collect_capital_markets_events(fixture["cik"], capital_index)
+    actual_capital_rows = sorted(
+        [
+        {
+            "form": row.form,
+            "event_type": row.event_type,
+            "security_type": row.security_type,
+            "offering_amount": row.offering_amount,
+            "shelf_size": row.shelf_size,
+            "is_late_filer": row.is_late_filer,
+        }
+        for row in capital_rows
+        ],
+        key=lambda item: item["form"],
+    )
+    expected_capital_rows = sorted(fixture["expected"]["capital_markets"], key=lambda item: item["form"])
+    assert actual_capital_rows == expected_capital_rows
+
+    event_index = {
+        item["accession_number"]: FilingMetadata(
+            accession_number=item["accession_number"],
+            form=item["form"],
+            filing_date=_parse_date(item["filing_date"]),
+            report_date=_parse_date(item["report_date"]),
+            primary_document=item["primary_document"],
+            primary_doc_description=item["primary_doc_description"],
+            items=item["items"],
+        )
+        for item in fixture["event_filings"]
+    }
+    event_rows = collect_filing_events(fixture["cik"], event_index)
+    actual_by_item = {
+        row.item_code: {
+            "category": row.category,
+            "key_amounts": list(row.key_amounts),
+            "exhibit_references": list(row.exhibit_references),
+        }
+        for row in event_rows
+    }
+    assert actual_by_item == fixture["expected"]["filing_events"]
+
+
+def _load_golden(name: str) -> dict:
+    return json.loads((GOLDEN_DIR / name).read_text(encoding="utf-8"))
+
+
+def _load_text_fixture(name: str) -> str:
+    return (FIXTURES_DIR / name).read_text(encoding="utf-8")
+
+
+def _parse_date(value: str) -> date:
+    return date.fromisoformat(value)

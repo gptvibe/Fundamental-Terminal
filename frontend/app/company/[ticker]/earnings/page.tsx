@@ -10,6 +10,7 @@ import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/co
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
+import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
@@ -253,6 +254,10 @@ export default function CompanyEarningsPage() {
           </div>
         ) : null}
       </CompanyResearchHeader>
+
+      <Panel title="Earnings Diagnostics" subtitle="Coverage, fallback, and freshness flags across the cached earnings workspace">
+        <DataQualityDiagnostics diagnostics={workspaceData?.diagnostics} />
+      </Panel>
 
       <Panel title="Reported Revenue vs Diluted EPS" subtitle="SEC earnings releases plotted by reported period so the top-line and per-share trend stay visible at a glance">
         {!loading && !workspaceLoading && useFallbackTrend ? (

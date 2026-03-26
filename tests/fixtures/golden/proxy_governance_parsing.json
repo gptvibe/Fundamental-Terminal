@@ -1,0 +1,25 @@
+{
+  "source_fixture": "def14a_standard.html",
+  "expected": {
+    "meeting_date": "2025-05-22",
+    "executive_comp_table_detected": true,
+    "vote_item_count": 3,
+    "board_nominee_count": 9,
+    "vote_outcomes": [
+      {
+        "proposal_number": 1,
+        "for_votes": 210450000,
+        "against_votes": 8320000,
+        "abstain_votes": 2100000,
+        "broker_non_votes": 18500000
+      }
+    ],
+    "named_exec_rows": [
+      {
+        "executive_name_contains": "Smith",
+        "salary": 1500000.0,
+        "total_compensation": 14985000.0
+      }
+    ]
+  }
+}

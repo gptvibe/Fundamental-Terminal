@@ -58,6 +58,10 @@ export function useJobStream(jobId: string | null | undefined) {
     () =>
       events.map((event) => ({
         id: `${event.job_id}-${event.sequence}`,
+        job_id: event.job_id,
+        trace_id: event.trace_id,
+        ticker: event.ticker,
+        kind: event.kind,
         timestamp: event.timestamp,
         stage: event.stage,
         message: event.message,

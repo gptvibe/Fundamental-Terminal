@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import uuid
 from collections import OrderedDict
@@ -10,15 +11,21 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from app.observability import emit_structured_log
+
 
 JobState = Literal["queued", "running", "completed", "failed"]
 JobLevel = Literal["info", "success", "error"]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class JobEvent:
     sequence: int
     timestamp: datetime
+    ticker: str
+    kind: str
     stage: str
     message: str
     status: JobState
@@ -27,8 +34,11 @@ class JobEvent:
     def to_payload(self, job_id: str) -> dict[str, str | int]:
         return {
             "job_id": job_id,
+            "trace_id": job_id,
             "sequence": self.sequence,
             "timestamp": self.timestamp.isoformat(),
+            "ticker": self.ticker,
+            "kind": self.kind,
             "stage": self.stage,
             "message": self.message,
             "status": self.status,
@@ -112,6 +122,8 @@ class StatusBroker:
             event = JobEvent(
                 sequence=record.sequence,
                 timestamp=datetime.now(timezone.utc),
+                ticker=record.ticker,
+                kind=record.kind,
                 stage=stage,
                 message=message,
                 status=record.status,
@@ -121,6 +133,20 @@ class StatusBroker:
             if len(record.events) > self._max_events_per_job:
                 record.events = record.events[-self._max_events_per_job :]
             subscribers = list(record.subscribers.values())
+
+        emit_structured_log(
+            logger,
+            "job.event",
+            job_id=job_id,
+            trace_id=job_id,
+            ticker=event.ticker,
+            job_kind=event.kind,
+            stage=event.stage,
+            message=event.message,
+            status=event.status,
+            level_name=event.level,
+            sequence=event.sequence,
+        )
 
         for loop, queue in subscribers:
             try:

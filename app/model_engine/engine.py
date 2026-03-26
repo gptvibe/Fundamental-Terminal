@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import logging
+import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.session import SessionLocal, get_engine
+from app.observability import emit_structured_log
 from app.model_engine.registry import CORE_MODEL_NAMES, MODEL_REGISTRY
 from app.model_engine.types import CompanyDataset, FinancialPoint, MarketSnapshot, ModelDefinition
 from app.model_engine.utils import serialize_period
@@ -57,7 +59,26 @@ class ModelEngine:
         )
         market_snapshot = _load_latest_market_snapshot(self.session, company_id)
         dataset = _build_company_dataset(company, statements, market_snapshot)
+        emit_structured_log(
+            logger,
+            "model.compute.start",
+            company_id=company.id,
+            ticker=company.ticker,
+            job_id=reporter.job_id if reporter is not None else None,
+            requested_models=model_names or CORE_MODEL_NAMES,
+            force=force,
+            financial_periods=len(dataset.financials),
+            has_market_snapshot=dataset.market_snapshot is not None,
+        )
         if not dataset.financials:
+            emit_structured_log(
+                logger,
+                "model.compute.skipped",
+                company_id=company.id,
+                ticker=company.ticker,
+                job_id=reporter.job_id if reporter is not None else None,
+                reason="missing_financials",
+            )
             return []
 
         definitions = _select_definitions(model_names)
@@ -73,6 +94,16 @@ class ModelEngine:
             input_payload = _build_input_payload(dataset, definition)
             cached_run = cached_by_key.get((definition.name, definition.version))
             if not force and cached_run is not None and _matching_signature(cached_run.input_periods, input_payload):
+                emit_structured_log(
+                    logger,
+                    "model.compute.cached",
+                    company_id=company.id,
+                    ticker=company.ticker,
+                    job_id=reporter.job_id if reporter is not None else None,
+                    model_name=definition.name,
+                    model_version=definition.version,
+                    model_run_id=cached_run.id,
+                )
                 results.append(
                     ModelJobResult(
                         company_id=company.id,
@@ -85,15 +116,30 @@ class ModelEngine:
                 )
                 continue
 
+            started = time.perf_counter()
+            computed_result = definition.compute(dataset)
+            elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
             model_run = ModelRun(
                 company_id=company.id,
                 model_name=definition.name,
                 model_version=definition.version,
                 input_periods=input_payload,
-                result=definition.compute(dataset),
+                result=computed_result,
             )
             self.session.add(model_run)
             self.session.flush()
+            emit_structured_log(
+                logger,
+                "model.compute.persisted",
+                company_id=company.id,
+                ticker=company.ticker,
+                job_id=reporter.job_id if reporter is not None else None,
+                model_name=definition.name,
+                model_version=definition.version,
+                model_run_id=model_run.id,
+                elapsed_ms=elapsed_ms,
+                model_status=(computed_result.get("model_status") if isinstance(computed_result, dict) else None),
+            )
             results.append(
                 ModelJobResult(
                     company_id=company.id,
@@ -105,6 +151,16 @@ class ModelEngine:
                 )
             )
 
+        emit_structured_log(
+            logger,
+            "model.compute.complete",
+            company_id=company.id,
+            ticker=company.ticker,
+            job_id=reporter.job_id if reporter is not None else None,
+            requested_models=[definition.name for definition in definitions],
+            result_count=len(results),
+            cached_count=sum(1 for item in results if item.cached),
+        )
         return results
 
 

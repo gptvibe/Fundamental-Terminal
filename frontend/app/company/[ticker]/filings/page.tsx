@@ -11,6 +11,7 @@ import { CompanyFilingsTimeline } from "@/components/filings/company-filings-tim
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
@@ -233,6 +234,10 @@ export default function CompanyFilingsPage() {
           { label: "Viewer Mode", value: "In-workspace SEC HTML", accent: "cyan" }
         ]}
       />
+
+      <Panel title="Filing Diagnostics" subtitle="Timeline freshness and parser coverage for the SEC filing workspace">
+        <DataQualityDiagnostics diagnostics={insightsData?.diagnostics ?? data?.diagnostics} />
+      </Panel>
 
       <Panel title="Recent Filing Timeline" subtitle="SEC-first view of annual, quarterly, and current reports with direct source links">
         <CompanyFilingsTimeline

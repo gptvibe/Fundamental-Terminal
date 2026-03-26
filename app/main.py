@@ -103,6 +103,14 @@ class RefreshState(BaseModel):
     job_id: str | None = Field(default=None)
 
 
+class DataQualityDiagnosticsPayload(BaseModel):
+    coverage_ratio: Number = None
+    fallback_ratio: Number = None
+    stale_flags: list[str] = Field(default_factory=list)
+    parser_confidence: Number = None
+    missing_field_flags: list[str] = Field(default_factory=list)
+
+
 class CompanyPayload(BaseModel):
     ticker: str
     cik: str
@@ -223,6 +231,7 @@ class CompanyFinancialsResponse(BaseModel):
     financials: list[FinancialPayload]
     price_history: list[PriceHistoryPayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
 class MetricsValuesPayload(BaseModel):
@@ -274,6 +283,7 @@ class CompanyMetricsTimeseriesResponse(BaseModel):
     last_price_check: datetime | None = None
     staleness_reason: str | None = None
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
 class DerivedMetricValuePayload(BaseModel):
@@ -302,6 +312,7 @@ class CompanyDerivedMetricsResponse(BaseModel):
     last_price_check: datetime | None = None
     staleness_reason: str | None = None
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
 class CompanyDerivedMetricsSummaryResponse(BaseModel):
@@ -314,12 +325,14 @@ class CompanyDerivedMetricsSummaryResponse(BaseModel):
     last_price_check: datetime | None = None
     staleness_reason: str | None = None
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
 class CompanyFilingInsightsResponse(BaseModel):
     company: CompanyPayload | None
     insights: list[FilingParserInsightPayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
 class CompanyFactsResponse(BaseModel):
@@ -423,6 +436,7 @@ class CompanyEarningsResponse(BaseModel):
     company: CompanyPayload | None
     earnings_releases: list[EarningsReleasePayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -446,6 +460,7 @@ class CompanyEarningsSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: EarningsSummaryPayload
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -541,6 +556,7 @@ class CompanyEarningsWorkspaceResponse(BaseModel):
     peer_context: EarningsPeerContextPayload
     alerts: list[EarningsAlertPayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -634,6 +650,7 @@ class CompanyModelsResponse(BaseModel):
     requested_models: list[str]
     models: list[ModelPayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
 class RefreshQueuedResponse(BaseModel):
@@ -729,6 +746,7 @@ class CompanyFilingsResponse(BaseModel):
     filings: list[FilingPayload]
     timeline_source: Literal["sec_submissions", "cached_financials"]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -814,6 +832,7 @@ class CompanyCapitalRaisesResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[CapitalRaisePayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -830,6 +849,7 @@ class CompanyCapitalMarketsSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: CapitalMarketsSummaryPayload
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -863,6 +883,7 @@ class CompanyGovernanceResponse(BaseModel):
     company: CompanyPayload | None
     filings: list[GovernanceFilingPayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -881,6 +902,7 @@ class CompanyGovernanceSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: GovernanceSummaryPayload
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -926,6 +948,7 @@ class CompanyEventsResponse(BaseModel):
     company: CompanyPayload | None
     events: list[FilingEventPayload]
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -941,6 +964,7 @@ class CompanyFilingEventsSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: FilingEventsSummaryPayload
     refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
 
@@ -1339,7 +1363,12 @@ def company_financials(
         cached_response = CompanyFinancialsResponse.model_validate(payload_data)
         if not is_fresh:
             stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
-            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+            cached_response = cached_response.model_copy(
+                update={
+                    "refresh": stale_refresh,
+                    "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                }
+            )
 
         not_modified = _apply_conditional_headers(
             request,
@@ -1358,6 +1387,7 @@ def company_financials(
             financials=[],
             price_history=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
         _store_hot_cached_payload(hot_key, payload)
         return payload
@@ -1366,15 +1396,17 @@ def company_financials(
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = get_company_price_history(session, snapshot.company.id)
+    serialized_financials = [_serialize_financial(statement) for statement in financials]
     payload = CompanyFinancialsResponse(
         company=_serialize_company(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
             last_checked_prices=price_last_checked,
         ),
-        financials=[_serialize_financial(statement) for statement in financials],
+        financials=serialized_financials,
         price_history=[_serialize_price_history(point) for point in price_history],
         refresh=refresh,
+        diagnostics=_diagnostics_for_financial_response(serialized_financials, refresh),
     )
     _store_hot_cached_payload(hot_key, payload)
     not_modified = _apply_conditional_headers(
@@ -1401,15 +1433,18 @@ def company_filing_insights(
             company=None,
             insights=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     insights = get_company_filing_insights(session, snapshot.company.id)
     insights_last_checked = max((item.last_checked for item in insights if item.last_checked is not None), default=None)
     refresh = _refresh_for_filing_insights(background_tasks, snapshot)
+    serialized_insights = [_serialize_filing_parser_insight(item) for item in insights]
     return CompanyFilingInsightsResponse(
         company=_serialize_company(snapshot, last_checked=insights_last_checked),
-        insights=[_serialize_filing_parser_insight(item) for item in insights],
+        insights=serialized_insights,
         refresh=refresh,
+        diagnostics=_diagnostics_for_filing_insights(serialized_insights, refresh),
     )
 
 
@@ -1431,6 +1466,7 @@ def company_metrics_timeseries(
             last_price_check=None,
             staleness_reason="company_missing",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     financials = get_company_financials(session, snapshot.company.id)
@@ -1439,17 +1475,19 @@ def company_metrics_timeseries(
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = get_company_price_history(session, snapshot.company.id)
     series = build_metrics_timeseries(financials, price_history, cadence=cadence, max_points=max_points)
+    point_payload = [MetricsTimeseriesPointPayload.model_validate(point) for point in series]
     return CompanyMetricsTimeseriesResponse(
         company=_serialize_company(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
             last_checked_prices=price_last_checked,
         ),
-        series=[MetricsTimeseriesPointPayload.model_validate(point) for point in series],
+        series=point_payload,
         last_financials_check=snapshot.last_checked,
         last_price_check=price_last_checked,
         staleness_reason=staleness_reason,
         refresh=refresh,
+        diagnostics=_diagnostics_for_metrics_timeseries(point_payload, refresh, staleness_reason),
     )
 
 
@@ -1474,6 +1512,7 @@ def company_derived_metrics(
             last_price_check=None,
             staleness_reason="company_missing",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
@@ -1509,6 +1548,7 @@ def company_derived_metrics(
         last_price_check=price_last_checked,
         staleness_reason=staleness_reason,
         refresh=refresh,
+        diagnostics=_diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason),
     )
 
 
@@ -1532,6 +1572,7 @@ def company_derived_metrics_summary(
             last_price_check=None,
             staleness_reason="company_missing",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
@@ -1562,6 +1603,7 @@ def company_derived_metrics_summary(
         last_price_check=price_last_checked,
         staleness_reason=staleness_reason,
         refresh=refresh,
+        diagnostics=_diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason),
     )
 
 
@@ -1712,6 +1754,7 @@ def company_earnings(
             company=None,
             earnings_releases=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
@@ -1726,6 +1769,7 @@ def company_earnings(
         ),
         earnings_releases=payload,
         refresh=refresh,
+        diagnostics=_diagnostics_for_earnings_releases(payload, refresh),
     )
 
 
@@ -1742,6 +1786,7 @@ def company_earnings_summary(
             company=None,
             summary=_build_earnings_summary([]),
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
@@ -1756,6 +1801,7 @@ def company_earnings_summary(
         ),
         summary=_build_earnings_summary(payload),
         refresh=refresh,
+        diagnostics=_diagnostics_for_earnings_releases(payload, refresh),
     )
 
 
@@ -1794,6 +1840,7 @@ def company_earnings_workspace(
             ),
             alerts=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
@@ -1831,6 +1878,7 @@ def company_earnings_workspace(
         peer_context=peer_payload,
         alerts=alerts_payload,
         refresh=refresh,
+        diagnostics=_diagnostics_for_earnings_releases(release_payload, refresh, model_payload),
     )
 
 
@@ -1914,7 +1962,12 @@ def company_models(
         cached_response = CompanyModelsResponse.model_validate(payload_data)
         if not is_fresh:
             stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
-            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+            cached_response = cached_response.model_copy(
+                update={
+                    "refresh": stale_refresh,
+                    "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                }
+            )
 
         not_modified = _apply_conditional_headers(
             request,
@@ -1933,6 +1986,7 @@ def company_models(
             requested_models=requested_models,
             models=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
         _store_hot_cached_payload(hot_key, payload)
         return payload
@@ -1965,11 +2019,13 @@ def company_models(
             ",".join(requested_models) if requested_models else "all",
             status_counts,
         )
+        serialized_models = [_serialize_model(model_run) for model_run in models]
         payload = CompanyModelsResponse(
             company=_serialize_company(snapshot),
             requested_models=requested_models,
-            models=[_serialize_model(model_run) for model_run in models],
+            models=serialized_models,
             refresh=refresh,
+            diagnostics=_diagnostics_for_models(serialized_models, refresh),
         )
         _store_hot_cached_payload(hot_key, payload)
         not_modified = _apply_conditional_headers(
@@ -2236,6 +2292,7 @@ def company_filings(
             filings=[],
             timeline_source="sec_submissions",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2248,6 +2305,7 @@ def company_filings(
             filings=cached_filings,
             timeline_source="sec_submissions",
             refresh=refresh,
+            diagnostics=_diagnostics_for_filings_timeline(cached_filings, refresh, "sec_submissions"),
             error=None,
         )
 
@@ -2262,6 +2320,7 @@ def company_filings(
             filings=filings,
             timeline_source="sec_submissions",
             refresh=refresh,
+            diagnostics=_diagnostics_for_filings_timeline(filings, refresh, "sec_submissions"),
             error=None,
         )
     except Exception:
@@ -2273,6 +2332,7 @@ def company_filings(
             filings=fallback_filings,
             timeline_source="cached_financials",
             refresh=refresh,
+            diagnostics=_diagnostics_for_filings_timeline(fallback_filings, refresh, "cached_financials"),
             error=(
                 "SEC submissions are temporarily unavailable. Showing cached annual and quarterly filings only."
                 if fallback_filings
@@ -2354,6 +2414,7 @@ def company_governance(
             company=None,
             filings=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2366,6 +2427,7 @@ def company_governance(
         company=_serialize_company(snapshot),
         filings=filings,
         refresh=refresh,
+        diagnostics=_diagnostics_for_governance(filings, refresh),
         error=None,
     )
 
@@ -2383,6 +2445,7 @@ def company_governance_summary(
             company=None,
             summary=_empty_governance_summary(),
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2395,6 +2458,7 @@ def company_governance_summary(
         company=_serialize_company(snapshot),
         summary=_build_governance_summary(filings),
         refresh=refresh,
+        diagnostics=_diagnostics_for_governance(filings, refresh),
         error=None,
     )
 
@@ -2479,6 +2543,7 @@ def company_capital_raises(
             company=None,
             filings=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2489,6 +2554,7 @@ def company_capital_raises(
         company=_serialize_company(snapshot),
         filings=filings,
         refresh=refresh,
+        diagnostics=_diagnostics_for_capital_markets(filings, refresh),
         error=None,
     )
 
@@ -2515,6 +2581,7 @@ def company_capital_markets_summary(
             company=None,
             summary=_empty_capital_markets_summary(),
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2524,6 +2591,7 @@ def company_capital_markets_summary(
         company=_serialize_company(snapshot),
         summary=_build_capital_markets_summary(rows),
         refresh=refresh,
+        diagnostics=_diagnostics_for_capital_markets(rows, refresh),
         error=None,
     )
 
@@ -2541,6 +2609,7 @@ def company_events(
             company=None,
             events=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2550,6 +2619,7 @@ def company_events(
         company=_serialize_company(snapshot),
         events=events,
         refresh=refresh,
+        diagnostics=_diagnostics_for_filing_events(events, refresh),
         error=None,
     )
 
@@ -2576,6 +2646,7 @@ def company_filing_events_summary(
             company=None,
             summary=_empty_filing_events_summary(),
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
@@ -2585,6 +2656,7 @@ def company_filing_events_summary(
         company=_serialize_company(snapshot),
         summary=_build_filing_events_summary(rows),
         refresh=refresh,
+        diagnostics=_diagnostics_for_filing_events(rows, refresh),
         error=None,
     )
 
@@ -3037,6 +3109,401 @@ def _serialize_company(
         last_checked_filings=last_checked_filings,
         earnings_last_checked=last_checked_earnings,
         cache_state=snapshot.cache_state,
+    )
+
+
+_FINANCIAL_DIAGNOSTIC_FIELDS = (
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "net_income",
+    "total_assets",
+    "current_assets",
+    "total_liabilities",
+    "current_liabilities",
+    "sga",
+    "research_and_development",
+    "cash_and_cash_equivalents",
+    "stockholders_equity",
+    "operating_cash_flow",
+    "free_cash_flow",
+    "eps",
+)
+
+
+def _round_ratio(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(value, 4)
+
+
+def _mean_ratio(values: list[float | None]) -> float | None:
+    observed = [float(value) for value in values if value is not None]
+    if not observed:
+        return None
+    return _round_ratio(sum(observed) / len(observed))
+
+
+def _build_data_quality_diagnostics(
+    *,
+    coverage_ratio: float | None = None,
+    fallback_ratio: float | None = None,
+    stale_flags: list[str] | None = None,
+    parser_confidence: float | None = None,
+    missing_field_flags: list[str] | None = None,
+) -> DataQualityDiagnosticsPayload:
+    return DataQualityDiagnosticsPayload(
+        coverage_ratio=_round_ratio(coverage_ratio),
+        fallback_ratio=_round_ratio(fallback_ratio),
+        stale_flags=sorted(set(stale_flags or [])),
+        parser_confidence=_round_ratio(parser_confidence),
+        missing_field_flags=sorted(set(missing_field_flags or [])),
+    )
+
+
+def _with_stale_flags(
+    diagnostics: DataQualityDiagnosticsPayload | None,
+    stale_flags: list[str],
+) -> DataQualityDiagnosticsPayload:
+    current = diagnostics or DataQualityDiagnosticsPayload()
+    return current.model_copy(update={"stale_flags": sorted(set([*current.stale_flags, *stale_flags]))})
+
+
+def _stale_flags_from_refresh(refresh: RefreshState | None, *reasons: str | None) -> list[str]:
+    flags: list[str] = []
+    if refresh is not None and refresh.reason in {"stale", "missing"}:
+        flags.append(f"refresh_{refresh.reason}_queued")
+    for reason in reasons:
+        if reason and reason not in {"fresh", "none"}:
+            flags.append(reason)
+    return sorted(set(flags))
+
+
+def _coverage_ratio_for_fields(payload: Any, field_names: tuple[str, ...]) -> float | None:
+    if not field_names:
+        return None
+    present = sum(1 for field_name in field_names if getattr(payload, field_name, None) is not None)
+    return present / len(field_names)
+
+
+def _missing_fields_for_fields(payload: Any, field_names: tuple[str, ...]) -> list[str]:
+    return [field_name for field_name in field_names if getattr(payload, field_name, None) is None]
+
+
+def _diagnostics_for_financial_response(
+    financials: list[FinancialPayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    coverage_ratio = _mean_ratio([_coverage_ratio_for_fields(item, _FINANCIAL_DIAGNOSTIC_FIELDS) for item in financials])
+    latest_missing = _missing_fields_for_fields(financials[0], _FINANCIAL_DIAGNOSTIC_FIELDS) if financials else []
+    return _build_data_quality_diagnostics(
+        coverage_ratio=coverage_ratio,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=coverage_ratio,
+        missing_field_flags=latest_missing,
+    )
+
+
+def _diagnostics_for_filing_insights(
+    insights: list[FilingParserInsightPayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    coverage_fields = ("revenue", "net_income", "operating_income")
+    coverage_values: list[float] = []
+    missing_flags: list[str] = []
+    for insight in insights:
+        base_ratio = _coverage_ratio_for_fields(insight, coverage_fields) or 0.0
+        coverage_values.append((base_ratio * 3 + (1.0 if insight.segments else 0.0)) / 4)
+    if insights:
+        missing_flags.extend(_missing_fields_for_fields(insights[0], coverage_fields))
+        if not insights[0].segments:
+            missing_flags.append("segments")
+    confidence = _mean_ratio(coverage_values)
+    return _build_data_quality_diagnostics(
+        coverage_ratio=confidence,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=confidence,
+        missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_metrics_timeseries(
+    series: list[MetricsTimeseriesPointPayload],
+    refresh: RefreshState,
+    staleness_reason: str | None,
+) -> DataQualityDiagnosticsPayload:
+    coverage_ratio = _mean_ratio([point.quality.coverage_ratio for point in series])
+    missing_flags = list(series[-1].quality.missing_metrics) if series else []
+    return _build_data_quality_diagnostics(
+        coverage_ratio=coverage_ratio,
+        stale_flags=_stale_flags_from_refresh(refresh, staleness_reason),
+        missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_derived_metrics_periods(
+    periods: list[DerivedMetricPeriodPayload],
+    refresh: RefreshState,
+    staleness_reason: str | None,
+) -> DataQualityDiagnosticsPayload:
+    metrics = [metric for period in periods for metric in period.metrics]
+    if not metrics:
+        return _build_data_quality_diagnostics(stale_flags=_stale_flags_from_refresh(refresh, staleness_reason))
+    available = sum(1 for metric in metrics if metric.metric_value is not None)
+    proxy_count = sum(1 for metric in metrics if metric.is_proxy)
+    latest_missing = [metric.metric_key for metric in periods[-1].metrics if metric.metric_value is None] if periods else []
+    return _build_data_quality_diagnostics(
+        coverage_ratio=available / len(metrics),
+        fallback_ratio=proxy_count / len(metrics),
+        stale_flags=_stale_flags_from_refresh(refresh, staleness_reason),
+        missing_field_flags=latest_missing,
+    )
+
+
+def _diagnostics_for_derived_metrics_values(
+    metrics: list[DerivedMetricValuePayload],
+    refresh: RefreshState,
+    staleness_reason: str | None,
+) -> DataQualityDiagnosticsPayload:
+    if not metrics:
+        return _build_data_quality_diagnostics(stale_flags=_stale_flags_from_refresh(refresh, staleness_reason))
+    available = sum(1 for metric in metrics if metric.metric_value is not None)
+    proxy_count = sum(1 for metric in metrics if metric.is_proxy)
+    latest_missing = [metric.metric_key for metric in metrics if metric.metric_value is None]
+    return _build_data_quality_diagnostics(
+        coverage_ratio=available / len(metrics),
+        fallback_ratio=proxy_count / len(metrics),
+        stale_flags=_stale_flags_from_refresh(refresh, staleness_reason),
+        missing_field_flags=latest_missing,
+    )
+
+
+def _diagnostics_for_earnings_releases(
+    releases: list[EarningsReleasePayload],
+    refresh: RefreshState,
+    model_points: list[EarningsModelPointPayload] | None = None,
+) -> DataQualityDiagnosticsPayload:
+    coverage_values: list[float] = []
+    missing_flags: list[str] = []
+    for release in releases:
+        coverage_bits = [
+            release.revenue,
+            release.operating_income,
+            release.net_income,
+            release.diluted_eps,
+            release.reported_period_end,
+            release.exhibit_document or release.primary_document,
+        ]
+        coverage_values.append(sum(1 for value in coverage_bits if value is not None) / len(coverage_bits))
+    if releases:
+        latest = releases[0]
+        if latest.revenue is None:
+            missing_flags.append("revenue")
+        if latest.operating_income is None:
+            missing_flags.append("operating_income")
+        if latest.net_income is None:
+            missing_flags.append("net_income")
+        if latest.diluted_eps is None:
+            missing_flags.append("diluted_eps")
+        if latest.exhibit_document is None and latest.primary_document is None:
+            missing_flags.append("document_reference")
+    fallback_ratio = None
+    if releases:
+        metadata_only = sum(1 for release in releases if release.parse_state != "parsed")
+        fallback_ratio = metadata_only / len(releases)
+    if model_points:
+        observed_fallbacks = [point.fallback_ratio for point in model_points if point.fallback_ratio is not None]
+        if observed_fallbacks:
+            fallback_ratio = _mean_ratio(observed_fallbacks)
+    confidence = _mean_ratio(coverage_values)
+    return _build_data_quality_diagnostics(
+        coverage_ratio=confidence,
+        fallback_ratio=fallback_ratio,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=confidence,
+        missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_governance(
+    filings: list[GovernanceFilingPayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    coverage_values: list[float] = []
+    missing_flags: list[str] = []
+    for filing in filings:
+        score = sum(
+            1
+            for present in (
+                filing.meeting_date is not None,
+                filing.executive_comp_table_detected,
+                filing.vote_item_count > 0,
+                filing.board_nominee_count is not None,
+                bool(filing.vote_outcomes),
+            )
+            if present
+        )
+        coverage_values.append(score / 5)
+    if filings:
+        latest = filings[0]
+        if latest.meeting_date is None:
+            missing_flags.append("meeting_date")
+        if not latest.executive_comp_table_detected:
+            missing_flags.append("summary_compensation_table")
+        if latest.vote_item_count <= 0:
+            missing_flags.append("vote_items")
+        if latest.board_nominee_count is None:
+            missing_flags.append("board_nominee_count")
+    confidence = _mean_ratio(coverage_values)
+    return _build_data_quality_diagnostics(
+        coverage_ratio=confidence,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=confidence,
+        missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_capital_markets(
+    filings: list[CapitalRaisePayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    coverage_values = [
+        sum(1 for present in (filing.event_type, filing.security_type, filing.offering_amount) if present is not None) / 3
+        for filing in filings
+    ]
+    missing_flags: list[str] = []
+    if filings:
+        latest = filings[0]
+        if latest.event_type is None:
+            missing_flags.append("event_type")
+        if latest.security_type is None:
+            missing_flags.append("security_type")
+        if latest.offering_amount is None and not latest.is_late_filer:
+            missing_flags.append("offering_amount")
+    confidence = _mean_ratio(coverage_values)
+    return _build_data_quality_diagnostics(
+        coverage_ratio=confidence,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=confidence,
+        missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_filing_events(
+    events: list[FilingEventPayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    coverage_values = [
+        sum(
+            1
+            for present in (
+                event.item_code not in {None, "UNSPECIFIED"},
+                bool(event.category),
+                bool(event.summary),
+                bool(event.key_amounts) or bool(event.exhibit_references),
+            )
+            if present
+        )
+        / 4
+        for event in events
+    ]
+    missing_flags: list[str] = []
+    if events:
+        latest = events[0]
+        if latest.item_code in {None, "UNSPECIFIED"}:
+            missing_flags.append("item_code")
+        if not latest.key_amounts:
+            missing_flags.append("key_amounts")
+        if not latest.exhibit_references:
+            missing_flags.append("exhibit_references")
+    confidence = _mean_ratio(coverage_values)
+    return _build_data_quality_diagnostics(
+        coverage_ratio=confidence,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=confidence,
+        missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_filings_timeline(
+    filings: list[FilingPayload],
+    refresh: RefreshState,
+    timeline_source: str,
+) -> DataQualityDiagnosticsPayload:
+    coverage_values = [
+        sum(1 for present in (filing.accession_number, filing.primary_document, filing.filing_date or filing.report_date, filing.source_url) if present is not None) / 4
+        for filing in filings
+    ]
+    missing_flags: list[str] = []
+    if filings:
+        latest = filings[0]
+        if latest.accession_number is None:
+            missing_flags.append("accession_number")
+        if latest.primary_document is None:
+            missing_flags.append("primary_document")
+    stale_flags = _stale_flags_from_refresh(refresh)
+    if timeline_source == "cached_financials":
+        stale_flags.append("timeline_cached_financials")
+    return _build_data_quality_diagnostics(
+        coverage_ratio=_mean_ratio(coverage_values),
+        fallback_ratio=1.0 if timeline_source == "cached_financials" else 0.0,
+        stale_flags=stale_flags,
+        parser_confidence=0.65 if timeline_source == "cached_financials" else 1.0,
+        missing_field_flags=missing_flags,
+    )
+
+
+def _model_missing_field_flags(model: ModelPayload) -> list[str]:
+    result = model.result if isinstance(model.result, dict) else {}
+    missing_fields = result.get("missing_required_fields_last_3y") or result.get("missing_fields") or []
+    if isinstance(missing_fields, list):
+        return [str(field_name) for field_name in missing_fields]
+    return []
+
+
+def _model_confidence_score(model: ModelPayload) -> float | None:
+    result = model.result if isinstance(model.result, dict) else {}
+    status_value = str(result.get("model_status") or result.get("status") or "unknown").lower()
+    if status_value == "ok":
+        return 1.0
+    if status_value == "partial":
+        return 0.75
+    if status_value == "proxy":
+        return 0.5
+    if status_value == "insufficient_data":
+        return 0.2
+    if status_value == "unsupported":
+        return 0.0
+    summary_value = str(result.get("confidence_summary") or result.get("trust_summary") or "").lower()
+    if "high" in summary_value or "strong" in summary_value:
+        return 1.0
+    if "partial" in summary_value or "moderate" in summary_value:
+        return 0.6
+    if summary_value:
+        return 0.4
+    return None
+
+
+def _diagnostics_for_models(
+    models: list[ModelPayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    if not models:
+        return _build_data_quality_diagnostics(stale_flags=_stale_flags_from_refresh(refresh))
+    statuses = [
+        str((model.result or {}).get("model_status") if isinstance(model.result, dict) else "unknown").lower()
+        for model in models
+    ]
+    coverage_ratio = sum(1 for status_value in statuses if status_value in {"ok", "partial", "proxy"}) / len(models)
+    fallback_ratio = sum(1 for status_value in statuses if status_value == "proxy") / len(models)
+    missing_flags = sorted({flag for model in models for flag in _model_missing_field_flags(model)})
+    confidence = _mean_ratio([_model_confidence_score(model) for model in models])
+    return _build_data_quality_diagnostics(
+        coverage_ratio=coverage_ratio,
+        fallback_ratio=fallback_ratio,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=confidence,
+        missing_field_flags=missing_flags,
     )
 
 

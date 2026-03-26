@@ -1,0 +1,41 @@
+{
+  "cik": "0000000001",
+  "filings": [
+    {
+      "accession_number": "0001",
+      "form": "8-K",
+      "filing_date": "2026-04-28",
+      "report_date": "2026-03-31",
+      "primary_document": "omega-8k.htm",
+      "primary_doc_description": "Item 2.02 Results of Operations and Financial Condition",
+      "items": "2.02,9.01"
+    }
+  ],
+  "directory_items": [
+    {"name": "omega-8k.htm", "type": "8-K"},
+    {"name": "omega-99-1.htm", "type": "EX-99.1"},
+    {"name": "omega-99-2.htm", "type": "EX-99.2"}
+  ],
+  "payload_by_name": {
+    "omega-99-1.htm": "form_8k_earnings_guidance.html",
+    "omega-8k.htm": "form_8k_earnings.html"
+  },
+  "expected": {
+    "parse_state": "parsed",
+    "exhibit_document": "omega-99-1.htm",
+    "exhibit_type": "99.1",
+    "reported_period_label": "first quarter 2026",
+    "reported_period_end": "2026-03-31",
+    "revenue": 3250000000.0,
+    "operating_income": 610000000.0,
+    "net_income": 455000000.0,
+    "diluted_eps": 1.32,
+    "revenue_guidance_low": 3400000000.0,
+    "revenue_guidance_high": 3550000000.0,
+    "eps_guidance_low": 1.4,
+    "eps_guidance_high": 1.52,
+    "share_repurchase_amount": 500000000.0,
+    "dividend_per_share": 0.25,
+    "source_url_suffix": "/omega-99-1.htm"
+  }
+}

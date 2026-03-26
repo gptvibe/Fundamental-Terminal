@@ -7,6 +7,7 @@ import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
@@ -57,6 +58,7 @@ export default function CompanyFinancialsTabPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const {
+    data,
     company,
     financials,
     annualStatements,
@@ -127,6 +129,10 @@ export default function CompanyFinancialsTabPage() {
           { label: "Price History", value: priceHistory.length.toLocaleString(), accent: "cyan" }
         ]}
       />
+
+      <Panel title="Data Quality Diagnostics" subtitle="Coverage, freshness, and missing-field flags for the cached financial workspace">
+        <DataQualityDiagnostics diagnostics={data?.diagnostics} />
+      </Panel>
 
       <Panel title="Business Segment Breakdown" subtitle="Treemap, share, and growth from reported segment revenue">
         {financials.length ? (

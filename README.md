@@ -26,6 +26,9 @@ Captured from the local app with `INTC` as the demo company.
 
 - See [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md) for the phased SEC dataset expansion plan, including backend models, API contracts, frontend visualizations, and sprint ordering.
 - See [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md) for the task-by-task execution checklist.
+- See [docs/cache-layers-architecture.md](docs/cache-layers-architecture.md) for the cache-first request-path and refresh orchestration rules.
+- See [docs/data-provenance.md](docs/data-provenance.md) for upstream source policy and diagnostics semantics.
+- See [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md) for performance, freshness, and benchmark notes.
 
 ## Canonical metrics
 
@@ -65,6 +68,17 @@ Captured from the local app with `INTC` as the demo company.
    ```bash
    alembic upgrade head
    ```
+
+Developer migration workflow:
+
+```bash
+alembic revision --autogenerate -m "describe_change"
+alembic upgrade head
+```
+
+- Keep schema changes reviewable and paired with route/model tests.
+- Prefer one migration per feature slice rather than mixing unrelated schema edits.
+- If a migration changes persisted research payloads, update backend/frontend contracts and any hot-endpoint tests in the same change.
 
 ## Run as FastAPI
 
@@ -117,6 +131,12 @@ Frontend data-loading/performance strategy:
 - Refresh queue and mutation endpoints remain uncached.
 - Company route loading/error boundaries provide lightweight transitions while preserving deep-linkable routes.
 - Heavy tables use row virtualization and chart-heavy sections are loaded as deferred client islands.
+
+Reliability and diagnostics additions:
+
+- Hot company payloads expose a `diagnostics` block with coverage, fallback, stale, parser-confidence, and missing-field metadata.
+- Refresh jobs, model runs, and SSE events now share traceable job metadata (`job_id`, `trace_id`, `ticker`, `kind`).
+- Golden parser fixtures and hot-endpoint contract tests help catch regressions before they reach persisted routes.
 
 ## Docker Compose
 
@@ -211,6 +231,14 @@ Queue a background refresh manually:
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/companies/AAPL/refresh"
+```
+
+Run targeted reliability checks:
+
+```bash
+python -m pytest tests/test_hot_endpoint_contracts.py tests/test_parser_goldens.py tests/test_observability.py tests/test_benchmark_infrastructure.py
+python scripts/benchmark_hot_endpoints.py --base-url http://127.0.0.1:8000 --ticker AAPL --rounds 20
+python scripts/benchmark_model_computation.py --models dcf,reverse_dcf,roic,ratios --rounds 10
 ```
 
 Run the one-shot Docker prewarm job after the stack is up:
