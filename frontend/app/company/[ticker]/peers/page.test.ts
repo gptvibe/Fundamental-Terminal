@@ -57,7 +57,7 @@ describe("CompanyPeersPage", () => {
     render(React.createElement(CompanyPeersPage));
 
     expect(screen.getByText("Loading company context...")).toBeTruthy();
-    expect(screen.getByText("peer-dashboard-ACME")).toBeTruthy();
+    expect(screen.getByText("Loading peer comparison...")).toBeTruthy();
   });
 
   it("renders peer workspace metrics once company context is available", () => {

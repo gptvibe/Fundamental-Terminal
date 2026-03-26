@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useJobStream } from "@/hooks/use-job-stream";
-import { getCompanyDerivedMetricsSummary } from "@/lib/api";
+import { getCompanyDerivedMetricsSummary, invalidateApiReadCacheForTicker } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { CompanyDerivedMetricsSummaryResponse, DerivedMetricValuePayload } from "@/lib/types";
 
@@ -68,8 +68,9 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
     if (lastEvent.status !== "completed" && lastEvent.status !== "failed") {
       return;
     }
+    invalidateApiReadCacheForTicker(ticker);
     void loadSummary(false);
-  }, [activeJobId, lastEvent, loadSummary]);
+  }, [activeJobId, lastEvent, loadSummary, ticker]);
 
   useEffect(() => {
     if (!activeJobId) {

@@ -1,14 +1,19 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
-import { PeerComparisonDashboard } from "@/components/peers/peer-comparison-dashboard";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { formatDate } from "@/lib/format";
+
+const PeerComparisonDashboard = dynamic(
+  () => import("@/components/peers/peer-comparison-dashboard").then((module) => module.PeerComparisonDashboard),
+  { ssr: false, loading: () => <div className="text-muted">Loading peer comparison...</div> }
+);
 
 export default function CompanyPeersPage() {
   const params = useParams<{ ticker: string }>();

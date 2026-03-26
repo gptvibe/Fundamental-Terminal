@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
@@ -12,6 +12,16 @@ export function FinancialStatementsTable({ financials, ticker }: { financials: F
   const metricTrends = useMemo(() => buildMetricTrendRows(financials), [financials]);
   const jsonPayload = useMemo(() => JSON.stringify(financials, null, 2), [financials]);
   const csvPayload = useMemo(() => buildFinancialsCsv(financials), [financials]);
+  const [tableScrollTop, setTableScrollTop] = useState(0);
+  const rowHeight = 42;
+  const tableViewportHeight = 420;
+  const overscan = 8;
+  const visibleRowCount = Math.ceil(tableViewportHeight / rowHeight) + overscan * 2;
+  const startIndex = Math.max(0, Math.floor(tableScrollTop / rowHeight) - overscan);
+  const endIndex = Math.min(financials.length, startIndex + visibleRowCount);
+  const visibleRows = financials.slice(startIndex, endIndex);
+  const topSpacerHeight = startIndex * rowHeight;
+  const bottomSpacerHeight = Math.max(0, (financials.length - endIndex) * rowHeight);
 
   return (
     <div className="financial-statements-stack">
@@ -70,7 +80,11 @@ export function FinancialStatementsTable({ financials, ticker }: { financials: F
         </div>
       </div>
 
-      <div className="financial-table-shell">
+      <div
+        className="financial-table-shell"
+        style={{ maxHeight: tableViewportHeight, overflowY: "auto" }}
+        onScroll={(event) => setTableScrollTop(event.currentTarget.scrollTop)}
+      >
         <table className="financial-table">
           <thead>
             <tr>
@@ -88,7 +102,12 @@ export function FinancialStatementsTable({ financials, ticker }: { financials: F
             </tr>
           </thead>
           <tbody>
-            {financials.map((row) => (
+            {topSpacerHeight > 0 ? (
+              <tr aria-hidden>
+                <td colSpan={11} style={{ height: topSpacerHeight, padding: 0, border: "none" }} />
+              </tr>
+            ) : null}
+            {visibleRows.map((row) => (
               <tr key={`${row.period_end}-${row.filing_type}-${row.source}`}>
                 <td>{formatDate(row.period_end)}</td>
                 <td className="form-cell">{row.filing_type}</td>
@@ -103,6 +122,11 @@ export function FinancialStatementsTable({ financials, ticker }: { financials: F
                 <td>{formatCompactNumber(row.total_liabilities)}</td>
               </tr>
             ))}
+            {bottomSpacerHeight > 0 ? (
+              <tr aria-hidden>
+                <td colSpan={11} style={{ height: bottomSpacerHeight, padding: 0, border: "none" }} />
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </div>

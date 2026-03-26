@@ -3,6 +3,15 @@
 ## Scope
 This update hardens backend latency and refresh coordination without changing product semantics.
 
+## Frontend performance follow-up
+- Replaced blanket frontend `fetch(..., { cache: "no-store" })` behavior with endpoint-aware read caching in `frontend/lib/api.ts`.
+- Added stale-while-revalidate read policy with in-flight dedupe for read endpoints and explicit uncached behavior for mutations and refresh queue requests.
+- Added ticker-scoped cache invalidation that is triggered by refresh actions and SSE terminal events to keep freshness status aligned with the existing background refresh flow.
+- Added cross-tab cache sync (localStorage + BroadcastChannel invalidation) for shared read payload reuse across tabs/components.
+- Deferred heavy client charts/tables on company financials and peers pages through dynamic islands with lightweight placeholders.
+- Added virtualization for large financial and peer metrics tables to reduce client render and commit cost on long lists.
+- Added route-level loading and error boundaries for the company workspace to improve transitions and failure recovery.
+
 ## What changed
 - Added DB pool tuning knobs with safe defaults in environment-backed settings.
 - Added `dataset_refresh_state` table keyed by `(company_id, dataset)` to persist freshness and active refresh lock metadata.

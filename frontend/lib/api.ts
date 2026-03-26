@@ -36,14 +36,209 @@ import {
 
 const API_PREFIX = "/backend/api";
 
-async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
-  const response = await fetch(`${API_PREFIX}${path}`, {
+type ReadCachePolicy = {
+  ttlMs: number;
+  staleMs: number;
+};
+
+type CacheEntry = {
+  data: unknown;
+  updatedAt: number;
+};
+
+const DEFAULT_READ_POLICY: ReadCachePolicy = {
+  ttlMs: 45_000,
+  staleMs: 180_000,
+};
+
+const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> = [
+  { pattern: /^\/companies\/search\?/, policy: { ttlMs: 20_000, staleMs: 90_000 } },
+  { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
+  { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/peers(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/metrics(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/metrics-timeseries(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
+  { pattern: /^\/market-context(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
+  { pattern: /^\/watchlist\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
+];
+
+const CACHE_STORAGE_PREFIX = "ft:api-cache:v1:";
+const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
+
+const readCache = new Map<string, CacheEntry>();
+const inflightReads = new Map<string, Promise<unknown>>();
+let cacheSyncInitialized = false;
+
+function resolveReadPolicy(path: string): ReadCachePolicy {
+  return READ_POLICY_BY_PATH.find((entry) => entry.pattern.test(path))?.policy ?? DEFAULT_READ_POLICY;
+}
+
+function isReadRequest(init?: RequestInit): boolean {
+  return !init?.method || init.method.toUpperCase() === "GET";
+}
+
+function shouldBypassReadCache(path: string): boolean {
+  if (path.includes("/refresh")) {
+    return true;
+  }
+
+  const queryIndex = path.indexOf("?");
+  if (queryIndex < 0) {
+    return false;
+  }
+
+  const params = new URLSearchParams(path.slice(queryIndex + 1));
+  return params.get("refresh") === "true";
+}
+
+function cacheStorageKey(cacheKey: string): string {
+  return `${CACHE_STORAGE_PREFIX}${cacheKey}`;
+}
+
+function tryReadPersistentCache(cacheKey: string): CacheEntry | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(cacheStorageKey(cacheKey));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as CacheEntry;
+    if (!parsed || typeof parsed.updatedAt !== "number") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistentCache(cacheKey: string, entry: CacheEntry): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(cacheStorageKey(cacheKey), JSON.stringify(entry));
+  } catch {
+    // Ignore storage quota and serialization errors. Memory cache still works.
+  }
+}
+
+function removePersistentCache(cacheKey: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(cacheStorageKey(cacheKey));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function setupCrossTabCacheSync(): void {
+  if (cacheSyncInitialized || typeof window === "undefined") {
+    return;
+  }
+
+  cacheSyncInitialized = true;
+  window.addEventListener("storage", (event) => {
+    if (!event.key?.startsWith(CACHE_STORAGE_PREFIX)) {
+      return;
+    }
+
+    const cacheKey = event.key.slice(CACHE_STORAGE_PREFIX.length);
+    if (event.newValue == null) {
+      readCache.delete(cacheKey);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(event.newValue) as CacheEntry;
+      if (parsed && typeof parsed.updatedAt === "number") {
+        readCache.set(cacheKey, parsed);
+      }
+    } catch {
+      // Ignore malformed external cache writes.
+    }
+  });
+
+  if (typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(CACHE_BROADCAST_CHANNEL);
+    channel.onmessage = (event: MessageEvent<{ type: "invalidate"; prefix: string }>) => {
+      const payload = event.data;
+      if (payload?.type !== "invalidate") {
+        return;
+      }
+      invalidateApiReadCache(payload.prefix, { emitCrossTab: false });
+    };
+  }
+}
+
+function emitInvalidation(prefix: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (typeof BroadcastChannel === "undefined") {
+    return;
+  }
+
+  const channel = new BroadcastChannel(CACHE_BROADCAST_CHANNEL);
+  channel.postMessage({ type: "invalidate", prefix });
+  channel.close();
+}
+
+function readCachedValue<T>(cacheKey: string, path: string): { data: T; stale: boolean } | null {
+  setupCrossTabCacheSync();
+  const now = Date.now();
+  const policy = resolveReadPolicy(path);
+  const inMemory = readCache.get(cacheKey);
+  const entry = inMemory ?? tryReadPersistentCache(cacheKey);
+  if (!entry) {
+    return null;
+  }
+
+  if (!inMemory) {
+    readCache.set(cacheKey, entry);
+  }
+
+  if (now - entry.updatedAt > policy.staleMs) {
+    readCache.delete(cacheKey);
+    removePersistentCache(cacheKey);
+    return null;
+  }
+
+  return {
+    data: entry.data as T,
+    stale: now - entry.updatedAt > policy.ttlMs,
+  };
+}
+
+function cacheValue(cacheKey: string, data: unknown): void {
+  const entry: CacheEntry = {
+    data,
+    updatedAt: Date.now(),
+  };
+  readCache.set(cacheKey, entry);
+  writePersistentCache(cacheKey, entry);
+}
+
+function withApiPrefix(path: string): string {
+  return `${API_PREFIX}${path}`;
+}
+
+async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
+  const response = await fetch(withApiPrefix(path), {
     ...init,
     headers: {
       "Content-Type": "application/json",
       ...(init?.headers ?? {})
     },
-    cache: "no-store",
+    cache: init?.cache,
     signal: init?.signal
   });
 
@@ -52,6 +247,72 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
   }
 
   return (await response.json()) as T;
+}
+
+async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
+  const readRequest = isReadRequest(init);
+  if (!readRequest) {
+    return fetchAndParse<T>(path, { ...init, cache: "no-store" });
+  }
+
+  if (shouldBypassReadCache(path)) {
+    return fetchAndParse<T>(path, { ...init, cache: "no-store" });
+  }
+
+  const cacheKey = path;
+  const cached = readCachedValue<T>(cacheKey, path);
+  if (cached && !cached.stale) {
+    return cached.data;
+  }
+
+  const currentInflight = inflightReads.get(cacheKey) as Promise<T> | undefined;
+  if (currentInflight) {
+    return currentInflight;
+  }
+
+  if (cached?.stale) {
+    void revalidateRead(path, cacheKey);
+    return cached.data;
+  }
+
+  return revalidateRead(path, cacheKey, init);
+}
+
+async function revalidateRead<T>(path: string, cacheKey: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
+  const request = fetchAndParse<T>(path, { ...init, cache: "force-cache" })
+    .then((payload) => {
+      cacheValue(cacheKey, payload);
+      return payload;
+    })
+    .finally(() => {
+      inflightReads.delete(cacheKey);
+    });
+
+  inflightReads.set(cacheKey, request);
+  return request;
+}
+
+export function invalidateApiReadCache(prefix = "", options?: { emitCrossTab?: boolean }): void {
+  for (const key of [...readCache.keys()]) {
+    if (!prefix || key.startsWith(prefix)) {
+      readCache.delete(key);
+      removePersistentCache(key);
+    }
+  }
+
+  if (options?.emitCrossTab !== false) {
+    emitInvalidation(prefix);
+  }
+}
+
+export function invalidateApiReadCacheForTicker(ticker: string): void {
+  const normalized = encodeURIComponent(ticker.trim().toUpperCase());
+  invalidateApiReadCache(`/companies/${normalized}/`);
+}
+
+export function __resetApiClientCacheForTests(): void {
+  invalidateApiReadCache("", { emitCrossTab: false });
+  inflightReads.clear();
 }
 
 export function searchCompanies(
@@ -234,7 +495,10 @@ export function getCompanyPeers(ticker: string, peers?: string[]): Promise<Compa
 
 export function refreshCompany(ticker: string, force = false): Promise<RefreshQueuedResponse> {
   const suffix = force ? "?force=true" : "";
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/refresh${suffix}`, { method: "POST" });
+  return fetchJson<RefreshQueuedResponse>(`/companies/${encodeURIComponent(ticker)}/refresh${suffix}`, { method: "POST" }).then((response) => {
+    invalidateApiReadCacheForTicker(ticker);
+    return response;
+  });
 }
 
 export function getWatchlistSummary(tickers: string[]): Promise<WatchlistSummaryResponse> {

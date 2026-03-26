@@ -111,6 +111,13 @@ On phones, the `/company/[ticker]` view hides the large top chrome to preserve s
 
 Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id}/events` and is rendered in the company console panels.
 
+Frontend data-loading/performance strategy:
+
+- Read endpoints use stale-while-revalidate with request dedupe in `frontend/lib/api.ts` instead of blanket `no-store` fetch behavior.
+- Refresh queue and mutation endpoints remain uncached.
+- Company route loading/error boundaries provide lightweight transitions while preserving deep-linkable routes.
+- Heavy tables use row virtualization and chart-heavy sections are loaded as deferred client islands.
+
 ## Docker Compose
 
 1. Copy `.env.example` to `.env` and adjust secrets or ports as needed.

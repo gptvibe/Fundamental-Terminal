@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
-import { getCompanyFinancials, getCompanyInsiderTrades, getCompanyInstitutionalHoldings, refreshCompany } from "@/lib/api";
+import {
+  getCompanyFinancials,
+  getCompanyInsiderTrades,
+  getCompanyInstitutionalHoldings,
+  invalidateApiReadCacheForTicker,
+  refreshCompany,
+} from "@/lib/api";
 import type {
   CompanyFinancialsResponse,
   CompanyInsiderTradesResponse,
@@ -134,6 +140,7 @@ export function useCompanyWorkspace(
     let cancelled = false;
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
     setRefreshTick((current) => current + 1);
+    invalidateApiReadCacheForTicker(ticker);
 
     void loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
       .then((result) => {
@@ -251,6 +258,7 @@ export function useCompanyWorkspace(
   async function queueRefresh(force = false) {
     try {
       setRefreshing(true);
+      invalidateApiReadCacheForTicker(ticker);
       const response = await refreshCompany(ticker, force);
       setError(null);
       setActiveJobId(response.refresh.job_id);

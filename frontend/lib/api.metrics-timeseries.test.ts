@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getCompanyMetricsTimeseries } from "@/lib/api";
+import { __resetApiClientCacheForTests, getCompanyMetricsTimeseries } from "@/lib/api";
 
 describe("getCompanyMetricsTimeseries", () => {
   afterEach(() => {
+    __resetApiClientCacheForTests();
     vi.restoreAllMocks();
   });
 
@@ -26,7 +27,7 @@ describe("getCompanyMetricsTimeseries", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=12",
-      expect.objectContaining({ cache: "no-store" })
+      expect.objectContaining({ cache: "force-cache" })
     );
   });
 });

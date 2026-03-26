@@ -107,6 +107,16 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
   const tickerColorMap = useMemo(() => buildTickerColorMap(displayedPeers), [displayedPeers]);
   const radarData = useMemo(() => buildRadarData(displayedPeers), [displayedPeers]);
   const barData = useMemo(() => buildBarData(displayedPeers), [displayedPeers]);
+  const [tableScrollTop, setTableScrollTop] = useState(0);
+  const rowHeight = 44;
+  const tableViewportHeight = 360;
+  const overscan = 6;
+  const visibleRowCount = Math.ceil(tableViewportHeight / rowHeight) + overscan * 2;
+  const startIndex = Math.max(0, Math.floor(tableScrollTop / rowHeight) - overscan);
+  const endIndex = Math.min(displayedPeers.length, startIndex + visibleRowCount);
+  const visibleRows = displayedPeers.slice(startIndex, endIndex);
+  const topSpacerHeight = startIndex * rowHeight;
+  const bottomSpacerHeight = Math.max(0, (displayedPeers.length - endIndex) * rowHeight);
 
   function togglePeer(peerTicker: string) {
     setSelectedPeerState((current) => {
@@ -270,7 +280,11 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
             <div className="peer-chart-card">
               <div className="peer-section-title">Metrics Table</div>
               <div className="peer-section-subtitle">Sortable-at-a-glance values from cached prices, filings, and model results.</div>
-              <div className="peer-table-shell">
+              <div
+                className="peer-table-shell"
+                style={{ maxHeight: tableViewportHeight, overflowY: "auto" }}
+                onScroll={(event) => setTableScrollTop(event.currentTarget.scrollTop)}
+              >
                 <table className="peer-metrics-table">
                   <thead>
                     <tr>
@@ -292,7 +306,12 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                     </tr>
                   </thead>
                   <tbody>
-                    {displayedPeers.map((peer) => (
+                    {topSpacerHeight > 0 ? (
+                      <tr aria-hidden>
+                        <td colSpan={15} style={{ height: topSpacerHeight, padding: 0, border: "none" }} />
+                      </tr>
+                    ) : null}
+                    {visibleRows.map((peer) => (
                       <tr key={peer.ticker} className={peer.is_focus ? "is-focus" : undefined}>
                         <td>
                           <div className="peer-table-company">
@@ -318,6 +337,11 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                         <td>{peer.last_checked ? formatDate(peer.last_checked) : "—"}</td>
                       </tr>
                     ))}
+                    {bottomSpacerHeight > 0 ? (
+                      <tr aria-hidden>
+                        <td colSpan={15} style={{ height: bottomSpacerHeight, padding: 0, border: "none" }} />
+                      </tr>
+                    ) : null}
                   </tbody>
                 </table>
               </div>

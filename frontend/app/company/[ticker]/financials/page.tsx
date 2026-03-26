@@ -1,17 +1,8 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 
-import { BalanceSheetChart } from "@/components/charts/balance-sheet-chart";
-import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
-import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
-import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
-import { DerivedMetricsPanel } from "@/components/charts/derived-metrics-panel";
-import { MarginTrendChart } from "@/components/charts/margin-trend-chart";
-import { OperatingCostStructureChart } from "@/components/charts/operating-cost-structure-chart";
-import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
-import { FinancialStatementsTable } from "@/components/company/financial-statements-table";
-import { FinancialQualitySummary } from "@/components/company/financial-quality-summary";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -19,6 +10,47 @@ import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { formatDate } from "@/lib/format";
+
+const BusinessSegmentBreakdown = dynamic(
+  () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
+  { ssr: false, loading: () => <div className="text-muted">Loading segment chart...</div> }
+);
+const CashFlowWaterfallChart = dynamic(
+  () => import("@/components/charts/cash-flow-waterfall-chart").then((module) => module.CashFlowWaterfallChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading cash flow chart...</div> }
+);
+const MarginTrendChart = dynamic(
+  () => import("@/components/charts/margin-trend-chart").then((module) => module.MarginTrendChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading margin trend...</div> }
+);
+const DerivedMetricsPanel = dynamic(
+  () => import("@/components/charts/derived-metrics-panel").then((module) => module.DerivedMetricsPanel),
+  { ssr: false, loading: () => <div className="text-muted">Loading derived metrics...</div> }
+);
+const BalanceSheetChart = dynamic(
+  () => import("@/components/charts/balance-sheet-chart").then((module) => module.BalanceSheetChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading balance-sheet chart...</div> }
+);
+const LiquidityCapitalChart = dynamic(
+  () => import("@/components/charts/liquidity-capital-chart").then((module) => module.LiquidityCapitalChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading liquidity chart...</div> }
+);
+const OperatingCostStructureChart = dynamic(
+  () => import("@/components/charts/operating-cost-structure-chart").then((module) => module.OperatingCostStructureChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading cost structure chart...</div> }
+);
+const FinancialQualitySummary = dynamic(
+  () => import("@/components/company/financial-quality-summary").then((module) => module.FinancialQualitySummary),
+  { ssr: false, loading: () => <div className="text-muted">Loading quality summary...</div> }
+);
+const ShareDilutionTrackerChart = dynamic(
+  () => import("@/components/charts/share-dilution-tracker-chart").then((module) => module.ShareDilutionTrackerChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading dilution chart...</div> }
+);
+const FinancialStatementsTable = dynamic(
+  () => import("@/components/company/financial-statements-table").then((module) => module.FinancialStatementsTable),
+  { ssr: false, loading: () => <div className="text-muted">Loading financial statements...</div> }
+);
 
 export default function CompanyFinancialsTabPage() {
   const params = useParams<{ ticker: string }>();
