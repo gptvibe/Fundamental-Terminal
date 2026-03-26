@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import CapitalMarketsEvent, Company
+from app.services.refresh_state import mark_dataset_checked
 from app.services.sec_edgar import FilingMetadata
 
 SUPPORTED_CAPITAL_FORMS = {
@@ -123,6 +124,7 @@ def upsert_capital_markets_events(
         count += 1
 
     company.capital_markets_last_checked = checked_at
+    mark_dataset_checked(session, company.id, "capital_markets", checked_at=checked_at, success=True)
     return count
 
 

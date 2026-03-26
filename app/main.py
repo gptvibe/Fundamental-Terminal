@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import hashlib
 import html
 import json
 import os
 import re
 import threading
 import time
+from email.utils import format_datetime
 from datetime import date as DateType, datetime, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from starlette.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -88,6 +90,8 @@ FILINGS_TIMELINE_TTL_SECONDS = settings.sec_filings_timeline_ttl_seconds
 SEARCH_RESPONSE_TTL_SECONDS = 60
 _search_response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _search_response_cache_lock = threading.Lock()
+_hot_response_cache: dict[str, tuple[float, float, dict[str, Any]]] = {}
+_hot_response_cache_lock = threading.Lock()
 
 
 class RefreshState(BaseModel):
@@ -1176,6 +1180,8 @@ async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
 
 @app.get("/api/companies/search", response_model=CompanySearchResponse)
 def search_companies(
+    request: Request,
+    http_response: Response,
     background_tasks: BackgroundTasks,
     query: str | None = Query(default=None, min_length=1),
     ticker: str | None = Query(default=None, min_length=1),
@@ -1187,9 +1193,43 @@ def search_companies(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="query is required")
 
     normalized_query = _normalize_search_query(raw_query)
+    hot_key = f"search:{normalized_query}:refresh={int(refresh)}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload, is_fresh = cached_hot
+        cached_response = CompanySearchResponse.model_validate(payload)
+        if not is_fresh and _looks_like_ticker(normalized_query):
+            stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
+            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=max(
+                (item.last_checked for item in cached_response.results if item.last_checked is not None),
+                default=None,
+            ),
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
     if not refresh:
         cached_response = _get_cached_search_response(normalized_query)
         if cached_response is not None:
+            _store_hot_cached_payload(hot_key, cached_response)
+            not_modified = _apply_conditional_headers(
+                request,
+                http_response,
+                cached_response,
+                last_modified=max(
+                    (item.last_checked for item in cached_response.results if item.last_checked is not None),
+                    default=None,
+                ),
+            )
+            if not_modified is not None:
+                return not_modified  # type: ignore[return-value]
             return cached_response
 
     normalized_ticker = _normalize_ticker(normalized_query)
@@ -1232,14 +1272,23 @@ def search_companies(
     else:
         refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
 
-    response = CompanySearchResponse(
+    payload = CompanySearchResponse(
         query=normalized_query,
         results=[_serialize_company(snapshot) for snapshot in snapshots],
         refresh=refresh_state,
     )
     if not refresh:
-        _store_cached_search_response(normalized_query, response)
-    return response
+        _store_cached_search_response(normalized_query, payload)
+    _store_hot_cached_payload(hot_key, payload)
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        payload,
+        last_modified=max((item.last_checked for item in payload.results if item.last_checked is not None), default=None),
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return payload
 
 
 @app.get("/api/companies/resolve", response_model=CompanyResolutionResponse)
@@ -1268,25 +1317,48 @@ def resolve_company_identifier(query: str = Query(..., min_length=1), session: S
 
 @app.get("/api/companies/{ticker}/financials", response_model=CompanyFinancialsResponse)
 def company_financials(
+    request: Request,
+    http_response: Response,
     ticker: str,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyFinancialsResponse:
     normalized_ticker = _normalize_ticker(ticker)
+    hot_key = f"financials:{normalized_ticker}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload_data, is_fresh = cached_hot
+        cached_response = CompanyFinancialsResponse.model_validate(payload_data)
+        if not is_fresh:
+            stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=cached_response.company.last_checked if cached_response.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        return CompanyFinancialsResponse(
+        payload = CompanyFinancialsResponse(
             company=None,
             financials=[],
             price_history=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
         )
+        _store_hot_cached_payload(hot_key, payload)
+        return payload
 
     financials = get_company_financials(session, snapshot.company.id)
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = get_company_price_history(session, snapshot.company.id)
-    return CompanyFinancialsResponse(
+    payload = CompanyFinancialsResponse(
         company=_serialize_company(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
@@ -1296,6 +1368,16 @@ def company_financials(
         price_history=[_serialize_price_history(point) for point in price_history],
         refresh=refresh,
     )
+    _store_hot_cached_payload(hot_key, payload)
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        payload,
+        last_modified=payload.company.last_checked if payload.company else None,
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return payload
 
 
 @app.get("/api/companies/{ticker}/filing-insights", response_model=CompanyFilingInsightsResponse)
@@ -1798,6 +1880,8 @@ def refresh_company(
 
 @app.get("/api/companies/{ticker}/models", response_model=CompanyModelsResponse)
 def company_models(
+    request: Request,
+    http_response: Response,
     ticker: str,
     background_tasks: BackgroundTasks,
     model: str | None = Query(default=None),
@@ -1815,14 +1899,35 @@ def company_models(
     normalized_mode = (dupont_mode or "").lower() or None
     if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
+    hot_key = f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload_data, is_fresh = cached_hot
+        cached_response = CompanyModelsResponse.model_validate(payload_data)
+        if not is_fresh:
+            stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=cached_response.company.last_checked if cached_response.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        return CompanyModelsResponse(
+        payload = CompanyModelsResponse(
             company=None,
             requested_models=requested_models,
             models=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
         )
+        _store_hot_cached_payload(hot_key, payload)
+        return payload
 
     token = None
     try:
@@ -1852,12 +1957,22 @@ def company_models(
             ",".join(requested_models) if requested_models else "all",
             status_counts,
         )
-        return CompanyModelsResponse(
+        payload = CompanyModelsResponse(
             company=_serialize_company(snapshot),
             requested_models=requested_models,
             models=[_serialize_model(model_run) for model_run in models],
             refresh=refresh,
         )
+        _store_hot_cached_payload(hot_key, payload)
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            payload,
+            last_modified=payload.company.last_checked if payload.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return payload
     finally:
         if token is not None:
             dupont_model.reset_mode_override(token)
@@ -2009,6 +2124,8 @@ def global_market_context(
 
 @app.get("/api/companies/{ticker}/peers", response_model=CompanyPeersResponse)
 def company_peers(
+    request: Request,
+    http_response: Response,
     ticker: str,
     background_tasks: BackgroundTasks,
     peers: str | None = Query(default=None),
@@ -2017,8 +2134,27 @@ def company_peers(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     selected_tickers = _parse_csv_values(peers)
+    hot_key = f"peers:{normalized_ticker}:selected={','.join(selected_tickers)}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload_data, is_fresh = cached_hot
+        cached_response = CompanyPeersResponse.model_validate(payload_data)
+        if not is_fresh:
+            stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=cached_response.company.last_checked if cached_response.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
     if snapshot is None:
-        return CompanyPeersResponse(
+        payload = CompanyPeersResponse(
             company=None,
             peer_basis="Cached peer universe",
             available_companies=[],
@@ -2027,6 +2163,8 @@ def company_peers(
             notes={},
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
         )
+        _store_hot_cached_payload(hot_key, payload)
+        return payload
 
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
@@ -2039,7 +2177,7 @@ def company_peers(
         len(payload.get("peers") or []) if payload else 0,
     )
     if payload is None:
-        return CompanyPeersResponse(
+        empty_payload = CompanyPeersResponse(
             company=None,
             peer_basis="Cached peer universe",
             available_companies=[],
@@ -2048,8 +2186,10 @@ def company_peers(
             notes={},
             refresh=refresh,
         )
+        _store_hot_cached_payload(hot_key, empty_payload)
+        return empty_payload
 
-    return CompanyPeersResponse(
+    response_payload = CompanyPeersResponse(
         company=_serialize_company(
             payload["company"],
             last_checked=_merge_last_checked(payload["company"].last_checked, price_last_checked),
@@ -2062,6 +2202,16 @@ def company_peers(
         notes=payload["notes"],
         refresh=refresh,
     )
+    _store_hot_cached_payload(hot_key, response_payload)
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        response_payload,
+        last_modified=response_payload.company.last_checked if response_payload.company else None,
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return response_payload
 
 
 @app.get("/api/companies/{ticker}/filings", response_model=CompanyFilingsResponse)
@@ -2703,6 +2853,57 @@ def _store_cached_search_response(query: str, response: CompanySearchResponse) -
     expires_at = time.monotonic() + SEARCH_RESPONSE_TTL_SECONDS
     with _search_response_cache_lock:
         _search_response_cache[query] = (expires_at, response.model_dump())
+
+
+def _get_hot_cached_payload(key: str) -> tuple[dict[str, Any], bool] | None:
+    now = time.monotonic()
+    with _hot_response_cache_lock:
+        cached = _hot_response_cache.get(key)
+        if cached is None:
+            return None
+
+        fresh_until, stale_until, payload = cached
+        if now <= stale_until:
+            return payload, now <= fresh_until
+
+        _hot_response_cache.pop(key, None)
+        return None
+
+
+def _store_hot_cached_payload(key: str, payload: BaseModel) -> None:
+    now = time.monotonic()
+    fresh_until = now + settings.hot_response_cache_ttl_seconds
+    stale_until = fresh_until + settings.hot_response_cache_stale_ttl_seconds
+    with _hot_response_cache_lock:
+        _hot_response_cache[key] = (fresh_until, stale_until, payload.model_dump(mode="json"))
+
+
+def _apply_conditional_headers(
+    request: Request,
+    response: Response,
+    payload: BaseModel,
+    *,
+    last_modified: datetime | None,
+) -> Response | None:
+    canonical = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    etag = f'W/"{hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]}"'
+    response.headers["ETag"] = etag
+
+    if last_modified is not None:
+        normalized = last_modified if last_modified.tzinfo else last_modified.replace(tzinfo=timezone.utc)
+        response.headers["Last-Modified"] = format_datetime(normalized, usegmt=True)
+
+    response.headers["Cache-Control"] = "private, max-age=0, stale-while-revalidate=120"
+
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=dict(response.headers))
+
+    if last_modified is not None:
+        if_modified_since = request.headers.get("if-modified-since")
+        if if_modified_since and response.headers.get("Last-Modified") == if_modified_since:
+            return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=dict(response.headers))
+
+    return None
 
 
 def _resolve_cached_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:

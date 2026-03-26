@@ -36,6 +36,7 @@ from app.services.market_data import (
 from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
 from app.services.earnings_intelligence import recompute_and_persist_company_earnings_model_points
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
+from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
 from app.services.status_stream import JobReporter
 
 logger = logging.getLogger(__name__)
@@ -2051,12 +2052,35 @@ def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = N
     reporter = JobReporter(job_id)
     try:
         result = service.refresh_company(identifier=identifier, force=force, reporter=reporter)
+        get_engine()
+        with SessionLocal() as session:
+            company = _find_local_company(session, identifier)
+            if company is not None and result.last_checked is not None:
+                release_refresh_lock(
+                    session,
+                    company_id=company.id,
+                    dataset="company_refresh",
+                    checked_at=result.last_checked,
+                )
+                session.commit()
         payload = asdict(result)
         payload["last_checked"] = result.last_checked.isoformat() if result.last_checked else None
         payload["job_id"] = job_id
         logger.info("SEC refresh completed: %s", payload)
         return payload
     except Exception as exc:
+        get_engine()
+        with SessionLocal() as session:
+            company = _find_local_company(session, identifier)
+            if company is not None:
+                release_refresh_lock_failed(
+                    session,
+                    company_id=company.id,
+                    dataset="company_refresh",
+                    checked_at=datetime.now(timezone.utc),
+                    error=str(exc),
+                )
+                session.commit()
         reporter.fail(str(exc))
         raise
     finally:
@@ -2122,6 +2146,10 @@ def _existing_earnings_release_accessions(session: Session, company_id: int) -> 
 
 
 def _latest_insider_trade_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "insiders")
+    if state_cache != "missing":
+        return state_last_checked
+
     if company.insider_trades_last_checked is not None:
         return _normalize_datetime_value(company.insider_trades_last_checked)
 
@@ -2130,6 +2158,10 @@ def _latest_insider_trade_last_checked(session: Session, company: Company) -> da
 
 
 def _latest_form144_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "form144")
+    if state_cache != "missing":
+        return state_last_checked
+
     if company.form144_filings_last_checked is not None:
         return _normalize_datetime_value(company.form144_filings_last_checked)
 
@@ -2138,6 +2170,10 @@ def _latest_form144_last_checked(session: Session, company: Company) -> datetime
 
 
 def _latest_earnings_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "earnings")
+    if state_cache != "missing":
+        return state_last_checked
+
     if company.earnings_last_checked is not None:
         return _normalize_datetime_value(company.earnings_last_checked)
 
@@ -2146,6 +2182,10 @@ def _latest_earnings_last_checked(session: Session, company: Company) -> datetim
 
 
 def _latest_beneficial_ownership_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "beneficial_ownership")
+    if state_cache != "missing":
+        return state_last_checked
+
     if company.beneficial_ownership_last_checked is not None:
         return _normalize_datetime_value(company.beneficial_ownership_last_checked)
 
@@ -2293,6 +2333,7 @@ def _touch_company_insider_trades(session: Session, company_id: int, checked_at:
         .where(Company.id == company_id)
         .values(insider_trades_last_checked=checked_at)
     )
+    mark_dataset_checked(session, company_id, "insiders", checked_at=checked_at, success=True)
 
 
 def _touch_company_form144_filings(session: Session, company_id: int, checked_at: datetime) -> None:
@@ -2306,6 +2347,7 @@ def _touch_company_form144_filings(session: Session, company_id: int, checked_at
         .where(Company.id == company_id)
         .values(form144_filings_last_checked=checked_at)
     )
+    mark_dataset_checked(session, company_id, "form144", checked_at=checked_at, success=True)
 
 
 def _touch_company_earnings_releases(session: Session, company_id: int, checked_at: datetime) -> None:
@@ -2319,6 +2361,7 @@ def _touch_company_earnings_releases(session: Session, company_id: int, checked_
         .where(Company.id == company_id)
         .values(earnings_last_checked=checked_at)
     )
+    mark_dataset_checked(session, company_id, "earnings", checked_at=checked_at, success=True)
 
 
 def _load_form144_document(client: EdgarClient, cik: str, filing_metadata: FilingMetadata) -> tuple[str, str]:
@@ -2800,11 +2843,19 @@ def _find_local_company(session: Session, identifier: str) -> Company | None:
 
 
 def _latest_company_last_checked(session: Session, company_id: int) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company_id, "financials")
+    if state_cache != "missing":
+        return state_last_checked
+
     statement = select(func.max(FinancialStatement.last_checked)).where(
         FinancialStatement.company_id == company_id,
         FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
     )
-    return session.execute(statement).scalar_one_or_none()
+    scanned = session.execute(statement).scalar_one_or_none()
+    normalized = _normalize_datetime_value(scanned)
+    if normalized is not None:
+        mark_dataset_checked(session, company_id, "financials", checked_at=normalized, success=True)
+    return scanned
 
 
 def _latest_statement_has_segment_breakdown_key(session: Session, company_id: int) -> bool:
@@ -2925,6 +2976,7 @@ def _touch_company_statements(session: Session, company_id: int, checked_at: dat
         .values(last_checked=checked_at)
     )
     session.execute(statement)
+    mark_dataset_checked(session, company_id, "financials", checked_at=checked_at, success=True)
 
 
 def _new_accumulator(

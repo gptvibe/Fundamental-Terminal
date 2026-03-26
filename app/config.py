@@ -76,6 +76,14 @@ class Settings:
     market_context_cache_ttl_hours: int = _int_env("MARKET_CONTEXT_CACHE_TTL_HOURS", 6, minimum=1)
     fred_api_key: str | None = os.getenv("FRED_API_KEY", "").strip() or None
     freshness_window_hours: int = _int_env("FRESHNESS_WINDOW_HOURS", 24, minimum=1)
+    db_pool_size: int = _int_env("DB_POOL_SIZE", 10, minimum=1)
+    db_max_overflow: int = _int_env("DB_MAX_OVERFLOW", 20, minimum=0)
+    db_pool_timeout_seconds: int = _int_env("DB_POOL_TIMEOUT_SECONDS", 30, minimum=1)
+    db_pool_recycle_seconds: int = _int_env("DB_POOL_RECYCLE_SECONDS", 1800, minimum=30)
+    model_engine_max_financial_periods: int = _int_env("MODEL_ENGINE_MAX_FINANCIAL_PERIODS", 16, minimum=4)
+    refresh_lock_timeout_seconds: int = _int_env("REFRESH_LOCK_TIMEOUT_SECONDS", 900, minimum=30)
+    hot_response_cache_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1)
+    hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()
     valuation_workbench_enabled: bool = os.getenv("VALUATION_WORKBENCH_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
 

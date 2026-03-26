@@ -13,6 +13,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import BeneficialOwnershipParty, BeneficialOwnershipReport, Company
+from app.services.refresh_state import mark_dataset_checked
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 _BENEFICIAL_OWNERSHIP_FORM_PATTERN = re.compile(
@@ -225,6 +226,7 @@ def upsert_beneficial_ownership_reports(
         count += 1
 
     company.beneficial_ownership_last_checked = checked_at
+    mark_dataset_checked(session, company.id, "beneficial_ownership", checked_at=checked_at, success=True)
     return count
 
 

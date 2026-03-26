@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import Company, FilingEvent
+from app.services.refresh_state import mark_dataset_checked
 from app.services.sec_edgar import FilingMetadata
 
 EVENT_ITEM_LABELS: dict[str, str] = {
@@ -137,6 +138,7 @@ def upsert_filing_events(
         count += 1
 
     company.filing_events_last_checked = checked_at
+    mark_dataset_checked(session, company.id, "filings", checked_at=checked_at, success=True)
     return count
 
 

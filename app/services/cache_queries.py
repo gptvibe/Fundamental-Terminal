@@ -13,6 +13,7 @@ from app.models import (
     CapitalMarketsEvent,
     Company,
     DerivedMetricPoint,
+    DatasetRefreshState,
     EarningsModelPoint,
     EarningsRelease,
     ExecutiveCompensation,
@@ -25,6 +26,7 @@ from app.models import (
     PriceHistory,
     ProxyStatement,
 )
+from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, FILING_PARSER_STATEMENT_TYPE
 
 
@@ -239,13 +241,27 @@ def get_company_models(
     model_names: list[str] | None = None,
     config_by_model: dict[str, dict[str, Any]] | None = None,
 ) -> list[ModelRun]:
-    statement = select(ModelRun).where(ModelRun.company_id == company_id)
+    base_statement = select(
+        ModelRun.id.label("id"),
+        func.row_number().over(
+            partition_by=func.lower(ModelRun.model_name),
+            order_by=(ModelRun.created_at.desc(), ModelRun.id.desc()),
+        ).label("rn"),
+    ).where(ModelRun.company_id == company_id)
+
+    normalized_names: list[str] = []
     if model_names:
         normalized_names = [model_name.lower() for model_name in model_names]
-        statement = statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
+        base_statement = base_statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
 
-    statement = statement.order_by(func.lower(ModelRun.model_name).asc(), ModelRun.created_at.desc(), ModelRun.id.desc())
-    rows = list(session.execute(statement).scalars())
+    ranked = base_statement.subquery()
+    latest_ids_statement = select(ranked.c.id).where(ranked.c.rn == 1)
+    rows_statement = (
+        select(ModelRun)
+        .where(ModelRun.id.in_(latest_ids_statement))
+        .order_by(func.lower(ModelRun.model_name).asc())
+    )
+    rows = list(session.execute(rows_statement).scalars())
 
     latest_by_model: dict[str, ModelRun] = {}
     for row in rows:
@@ -308,14 +324,27 @@ def get_company_derived_metric_points(
 
 
 def get_company_derived_metrics_last_checked(session: Session, company_id: int) -> datetime | None:
+    last_checked, _cache_state = cache_state_for_dataset(session, company_id, "derived_metrics")
+    if last_checked is not None:
+        return last_checked
+
     statement = select(func.max(DerivedMetricPoint.last_checked)).where(DerivedMetricPoint.company_id == company_id)
-    return _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    scanned = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if scanned is not None:
+        mark_dataset_checked(session, company_id, "derived_metrics", checked_at=scanned, success=True)
+    return scanned
 
 
 def get_company_price_cache_status(session: Session, company_id: int) -> tuple[datetime | None, str]:
+    last_checked, cache_state = cache_state_for_dataset(session, company_id, "prices")
+    if cache_state != "missing":
+        return last_checked, cache_state
+
     statement = select(func.max(PriceHistory.last_checked)).where(PriceHistory.company_id == company_id)
-    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
-    return last_checked, _cache_state_from_last_checked(last_checked)
+    scanned = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if scanned is not None:
+        mark_dataset_checked(session, company_id, "prices", checked_at=scanned, success=True)
+    return scanned, _cache_state_from_last_checked(scanned)
 
 
 def get_company_insider_trades(
@@ -338,10 +367,16 @@ def get_company_insider_trades(
 
 
 def get_company_insider_trade_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "insiders")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.insider_trades_last_checked)
     if last_checked is None:
         statement = select(func.max(InsiderTrade.last_checked)).where(InsiderTrade.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "insiders", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -365,10 +400,16 @@ def get_company_form144_filings(
 
 
 def get_company_form144_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "form144")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.form144_filings_last_checked)
     if last_checked is None:
         statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "form144", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -392,10 +433,16 @@ def get_company_earnings_releases(
 
 
 def get_company_earnings_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "earnings")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.earnings_last_checked)
     if last_checked is None:
         statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "earnings", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -417,9 +464,15 @@ def get_company_earnings_model_points(
 
 
 def get_company_earnings_model_cache_status(session: Session, company_id: int) -> tuple[datetime | None, str]:
+    last_checked, cache_state = cache_state_for_dataset(session, company_id, "earnings_models")
+    if cache_state != "missing":
+        return last_checked, cache_state
+
     statement = select(func.max(EarningsModelPoint.last_checked)).where(EarningsModelPoint.company_id == company_id)
-    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
-    return last_checked, _cache_state_from_last_checked(last_checked)
+    scanned = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if scanned is not None:
+        mark_dataset_checked(session, company_id, "earnings_models", checked_at=scanned, success=True)
+    return scanned, _cache_state_from_last_checked(scanned)
 
 
 def get_company_institutional_holdings(
@@ -439,10 +492,16 @@ def get_company_institutional_holdings(
 
 
 def get_company_institutional_holdings_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "institutional")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.institutional_holdings_last_checked)
     if last_checked is None:
         statement = select(func.max(InstitutionalHolding.last_checked)).where(InstitutionalHolding.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "institutional", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -463,10 +522,16 @@ def get_company_beneficial_ownership_reports(
 
 
 def get_company_beneficial_ownership_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "beneficial_ownership")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.beneficial_ownership_last_checked)
     if last_checked is None:
         statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(BeneficialOwnershipReport.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "beneficial_ownership", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -491,10 +556,16 @@ def get_company_filing_events(
 
 
 def get_company_filing_events_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "filings")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.filing_events_last_checked)
     if last_checked is None:
         statement = select(func.max(FilingEvent.last_checked)).where(FilingEvent.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "filings", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -514,10 +585,16 @@ def get_company_capital_markets_events(
 
 
 def get_company_capital_markets_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "capital_markets")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.capital_markets_last_checked)
     if last_checked is None:
         statement = select(func.max(CapitalMarketsEvent.last_checked)).where(CapitalMarketsEvent.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "capital_markets", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
@@ -565,21 +642,46 @@ def get_company_executive_compensation(
 
 
 def get_company_proxy_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "proxy")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
     last_checked = _normalize_datetime(company.proxy_statements_last_checked)
     if last_checked is None:
         statement = select(func.max(ProxyStatement.last_checked)).where(ProxyStatement.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "proxy", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
 def _latest_checks_subquery():
-    return (
+    statement_checks = (
         select(
             FinancialStatement.company_id.label("company_id"),
             func.max(FinancialStatement.last_checked).label("last_checked"),
         )
         .where(FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE)
         .group_by(FinancialStatement.company_id)
+        .subquery()
+    )
+
+    refresh_checks = (
+        select(
+            DatasetRefreshState.company_id.label("company_id"),
+            func.max(DatasetRefreshState.last_checked).label("last_checked"),
+        )
+        .where(DatasetRefreshState.dataset == "financials")
+        .group_by(DatasetRefreshState.company_id)
+        .subquery()
+    )
+
+    return (
+        select(
+            statement_checks.c.company_id.label("company_id"),
+            func.coalesce(refresh_checks.c.last_checked, statement_checks.c.last_checked).label("last_checked"),
+        )
+        .outerjoin(refresh_checks, refresh_checks.c.company_id == statement_checks.c.company_id)
         .subquery()
     )
 

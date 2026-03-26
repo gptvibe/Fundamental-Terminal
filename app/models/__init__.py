@@ -3,6 +3,7 @@ from app.models.beneficial_ownership_report import BeneficialOwnershipReport
 from app.models.capital_markets_event import CapitalMarketsEvent
 from app.models.company import Company
 from app.models.company_macro_snapshot import CompanyMacroSnapshot
+from app.models.dataset_refresh_state import DatasetRefreshState
 from app.models.derived_metric_point import DerivedMetricPoint
 from app.models.earnings_model_point import EarningsModelPoint
 from app.models.earnings_release import EarningsRelease
@@ -27,6 +28,7 @@ __all__ = [
     "CapitalMarketsEvent",
     "Company",
     "CompanyMacroSnapshot",
+    "DatasetRefreshState",
     "DerivedMetricPoint",
     "EarningsModelPoint",
     "EarningsRelease",

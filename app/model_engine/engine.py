@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine.registry import CORE_MODEL_NAMES, MODEL_REGISTRY
 from app.model_engine.types import CompanyDataset, FinancialPoint, MarketSnapshot, ModelDefinition
@@ -49,13 +50,18 @@ class ModelEngine:
         if company is None:
             raise ValueError(f"Company {company_id} does not exist")
 
-        statements = _load_canonical_financials(self.session, company_id)
+        statements = _load_canonical_financials(
+            self.session,
+            company_id,
+            limit=settings.model_engine_max_financial_periods,
+        )
         market_snapshot = _load_latest_market_snapshot(self.session, company_id)
         dataset = _build_company_dataset(company, statements, market_snapshot)
         if not dataset.financials:
             return []
 
         definitions = _select_definitions(model_names)
+        cached_by_key = _latest_model_runs(self.session, company_id, definitions)
         results: list[ModelJobResult] = []
         if definitions and reporter is not None and reporter.enabled:
             reporter.step("models", "Computing financial models…")
@@ -65,7 +71,7 @@ class ModelEngine:
                 stage = "valuation" if definition.name in {"dcf", "reverse_dcf", "roic", "capital_allocation"} else "models"
                 reporter.step(stage, f"Running {definition.name} v{definition.version}…")
             input_payload = _build_input_payload(dataset, definition)
-            cached_run = _latest_model_run(self.session, company_id, definition)
+            cached_run = cached_by_key.get((definition.name, definition.version))
             if not force and cached_run is not None and _matching_signature(cached_run.input_periods, input_payload):
                 results.append(
                     ModelJobResult(
@@ -173,7 +179,7 @@ def _find_company(session: Session, identifier: str) -> Company | None:
     return session.execute(statement).scalar_one_or_none()
 
 
-def _load_canonical_financials(session: Session, company_id: int) -> list[FinancialStatement]:
+def _load_canonical_financials(session: Session, company_id: int, *, limit: int) -> list[FinancialStatement]:
     statement = (
         select(FinancialStatement)
         .where(
@@ -181,6 +187,7 @@ def _load_canonical_financials(session: Session, company_id: int) -> list[Financ
             FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
         )
         .order_by(FinancialStatement.period_end.desc(), FinancialStatement.last_updated.desc(), FinancialStatement.id.desc())
+        .limit(limit)
     )
     return list(session.execute(statement).scalars())
 
@@ -298,6 +305,35 @@ def _latest_model_run(session: Session, company_id: int, definition: ModelDefini
         .limit(1)
     )
     return session.execute(statement).scalar_one_or_none()
+
+
+def _latest_model_runs(
+    session: Session,
+    company_id: int,
+    definitions: list[ModelDefinition],
+) -> dict[tuple[str, str], ModelRun]:
+    if not definitions:
+        return {}
+
+    names = sorted({definition.name for definition in definitions})
+    versions = sorted({definition.version for definition in definitions})
+    statement = (
+        select(ModelRun)
+        .where(
+            ModelRun.company_id == company_id,
+            ModelRun.model_name.in_(names),
+            ModelRun.model_version.in_(versions),
+        )
+        .order_by(ModelRun.model_name.asc(), ModelRun.model_version.asc(), ModelRun.created_at.desc(), ModelRun.id.desc())
+    )
+    rows = list(session.execute(statement).scalars())
+
+    latest: dict[tuple[str, str], ModelRun] = {}
+    for row in rows:
+        key = (row.model_name, row.model_version)
+        if key not in latest:
+            latest[key] = row
+    return latest
 
 
 def _matching_signature(existing_input: object, new_input: dict[str, Any]) -> bool:

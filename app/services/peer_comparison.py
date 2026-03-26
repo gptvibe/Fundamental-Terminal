@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.model_engine.engine import ModelEngine
 from app.models import Company, FinancialStatement, ModelRun, PriceHistory
-from app.services.cache_queries import CompanyCacheSnapshot, get_company_financials, get_company_models, get_company_snapshot
+from app.services.cache_queries import CompanyCacheSnapshot, get_company_snapshot
 from app.services.sec_edgar import ANNUAL_FORMS, CANONICAL_STATEMENT_TYPE
 
 
@@ -55,10 +55,24 @@ def build_peer_comparison(
             model_results = engine.compute_models(snapshot.company.id, model_names=PEER_MODEL_NAMES, force=False)
             if any(not result.cached for result in model_results):
                 wrote_model_cache = True
-        rows.append(_build_peer_row(session, snapshot, is_focus=snapshot.company.id == focus_snapshot.company.id))
 
     if wrote_model_cache:
         session.commit()
+
+    comparison_company_ids = [snapshot.company.id for snapshot in comparison_snapshots]
+    financials_by_company = _load_financials_for_companies(session, comparison_company_ids)
+    latest_prices_by_company = _load_latest_prices_for_companies(session, comparison_company_ids)
+    models_by_company = _load_latest_models_for_companies(session, comparison_company_ids)
+    for snapshot in comparison_snapshots:
+        rows.append(
+            _build_peer_row(
+                snapshot,
+                is_focus=snapshot.company.id == focus_snapshot.company.id,
+                financials_by_company=financials_by_company,
+                latest_prices_by_company=latest_prices_by_company,
+                models_by_company=models_by_company,
+            )
+        )
 
     available_peers = peer_snapshots[: max(0, MAX_AVAILABLE_COMPANIES - 1)]
     available_tickers = {peer.company.ticker for peer in available_peers}
@@ -171,12 +185,19 @@ def _serialize_option(snapshot: CompanyCacheSnapshot, *, is_focus: bool) -> dict
     }
 
 
-def _build_peer_row(session: Session, snapshot: CompanyCacheSnapshot, *, is_focus: bool) -> dict[str, Any]:
-    statements = get_company_financials(session, snapshot.company.id)
+def _build_peer_row(
+    snapshot: CompanyCacheSnapshot,
+    *,
+    is_focus: bool,
+    financials_by_company: dict[int, list[FinancialStatement]],
+    latest_prices_by_company: dict[int, PriceHistory],
+    models_by_company: dict[int, dict[str, ModelRun]],
+) -> dict[str, Any]:
+    statements = financials_by_company.get(snapshot.company.id, [])
     current_statement = _latest_preferred_statement(statements)
     previous_statement = _previous_comparable_statement(statements, current_statement)
-    latest_price = _latest_price_point(session, snapshot.company.id)
-    models = {model.model_name.lower(): model for model in get_company_models(session, snapshot.company.id, PEER_MODEL_NAMES)}
+    latest_price = latest_prices_by_company.get(snapshot.company.id)
+    models = models_by_company.get(snapshot.company.id, {})
 
     current_data = dict(current_statement.data or {}) if current_statement is not None else {}
     previous_data = dict(previous_statement.data or {}) if previous_statement is not None else {}
@@ -286,6 +307,82 @@ def _latest_price_point(session: Session, company_id: int) -> PriceHistory | Non
         .limit(1)
     )
     return session.execute(statement).scalar_one_or_none()
+
+
+def _load_financials_for_companies(session: Session, company_ids: list[int]) -> dict[int, list[FinancialStatement]]:
+    if not company_ids:
+        return {}
+
+    statement = (
+        select(FinancialStatement)
+        .where(
+            FinancialStatement.company_id.in_(company_ids),
+            FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
+        )
+        .order_by(FinancialStatement.company_id.asc(), FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
+    )
+    rows = list(session.execute(statement).scalars())
+    grouped: dict[int, list[FinancialStatement]] = {company_id: [] for company_id in company_ids}
+    for row in rows:
+        grouped.setdefault(row.company_id, []).append(row)
+    return grouped
+
+
+def _load_latest_prices_for_companies(session: Session, company_ids: list[int]) -> dict[int, PriceHistory]:
+    if not company_ids:
+        return {}
+
+    ranked = (
+        select(
+            PriceHistory.id.label("id"),
+            PriceHistory.company_id.label("company_id"),
+            func.row_number().over(
+                partition_by=PriceHistory.company_id,
+                order_by=(PriceHistory.trade_date.desc(), PriceHistory.id.desc()),
+            ).label("rn"),
+        )
+        .where(PriceHistory.company_id.in_(company_ids))
+        .subquery()
+    )
+    statement = (
+        select(PriceHistory)
+        .join(ranked, ranked.c.id == PriceHistory.id)
+        .where(ranked.c.rn == 1)
+    )
+    rows = list(session.execute(statement).scalars())
+    return {row.company_id: row for row in rows}
+
+
+def _load_latest_models_for_companies(session: Session, company_ids: list[int]) -> dict[int, dict[str, ModelRun]]:
+    if not company_ids:
+        return {}
+
+    ranked = (
+        select(
+            ModelRun.id.label("id"),
+            ModelRun.company_id.label("company_id"),
+            func.lower(ModelRun.model_name).label("model_key"),
+            func.row_number().over(
+                partition_by=(ModelRun.company_id, func.lower(ModelRun.model_name)),
+                order_by=(ModelRun.created_at.desc(), ModelRun.id.desc()),
+            ).label("rn"),
+        )
+        .where(
+            ModelRun.company_id.in_(company_ids),
+            func.lower(ModelRun.model_name).in_(PEER_MODEL_NAMES),
+        )
+        .subquery()
+    )
+    statement = (
+        select(ModelRun, ranked.c.model_key)
+        .join(ranked, ranked.c.id == ModelRun.id)
+        .where(ranked.c.rn == 1)
+    )
+    rows = session.execute(statement).all()
+    grouped: dict[int, dict[str, ModelRun]] = {company_id: {} for company_id in company_ids}
+    for model_run, model_key in rows:
+        grouped.setdefault(model_run.company_id, {})[str(model_key)] = model_run
+    return grouped
 
 
 def _build_revenue_history(statements: list[FinancialStatement], *, limit: int = 6) -> list[dict[str, Any]]:

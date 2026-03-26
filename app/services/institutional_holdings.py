@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, InstitutionalFund, InstitutionalHolding
+from app.services.refresh_state import mark_dataset_checked
 from app.services.sec_cache import sec_http_cache
 from app.services.status_stream import JobReporter
 
@@ -600,6 +601,7 @@ def _touch_company_institutional_holdings(session: Session, company_id: int, che
         .where(Company.id == company_id)
         .values(institutional_holdings_last_checked=checked_at)
     )
+    mark_dataset_checked(session, company_id, "institutional", checked_at=checked_at, success=True)
 
 
 def _issuer_matches_company(issuer_name: str, company_tokens: set[str]) -> bool:

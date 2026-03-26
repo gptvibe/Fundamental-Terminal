@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, PriceHistory
+from app.services.refresh_state import mark_dataset_checked
 
 
 PRICE_SOURCE = "yahoo_finance_chart"
@@ -209,6 +210,7 @@ def touch_company_price_history(session: Session, company_id: int, checked_at: d
         .values(last_checked=checked_at)
     )
     session.execute(statement)
+    mark_dataset_checked(session, company_id, "prices", checked_at=checked_at, success=True)
 
 
 def _normalize_market_symbol(ticker: str) -> str:
