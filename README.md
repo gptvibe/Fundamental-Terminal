@@ -235,6 +235,7 @@ Additional environment variables:
 - `SEC_MAX_RETRIES=3` and `SEC_RETRY_BACKOFF_SECONDS=0.5` for SEC request retries
 - `MARKET_MAX_RETRIES=3` and `MARKET_RETRY_BACKOFF_SECONDS=0.5` for market data retries
 - `TREASURY_YIELD_CURVE_CSV_URL` for no-key U.S. Treasury 10-year risk-free rate input
+- `TREASURY_HQM_CSV_URLS` (optional) comma-separated fallback URLs for Treasury HQM corporate bond yields; defaults to official Treasury paths
 - `TREASURY_MAX_RETRIES=3` and `TREASURY_RETRY_BACKOFF_SECONDS=0.5` for Treasury fetch retries
 - `VALUATION_WORKBENCH_ENABLED=true` to enable reverse DCF/ROIC/capital-allocation model surfaces
 
@@ -352,7 +353,7 @@ Official data sources:
 | Source | Series | Env var required |
 |--------|--------|-----------------|
 | U.S. Treasury (CSV) | Daily par yield curve | `TREASURY_YIELD_CURVE_CSV_URL` |
-| U.S. Treasury HQM | 30-year corporate bond yield | none (public) |
+| U.S. Treasury HQM | 30-year corporate bond yield | `TREASURY_HQM_CSV_URLS` (optional, comma-separated fallback chain) |
 | BLS Public API v1 | CPI, Core CPI, PPI, Unemployment, Payrolls | none (public, rate-limited) |
 | FRED (BEA proxy) | Real GDP, Personal Income, PCE, Corporate Profits | `FRED_API_KEY` |
 

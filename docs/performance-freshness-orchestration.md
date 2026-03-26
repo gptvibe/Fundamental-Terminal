@@ -12,6 +12,12 @@ This update hardens backend latency and refresh coordination without changing pr
 - Added virtualization for large financial and peer metrics tables to reduce client render and commit cost on long lists.
 - Added route-level loading and error boundaries for the company workspace to improve transitions and failure recovery.
 
+## Frontend hotspot follow-up (models + earnings)
+- Added a reusable viewport-gated client deferral helper (`DeferredClientSection`) so heavy islands mount only when close to view.
+- Deferred model-heavy islands (DCF scenario analysis and full model analytics) on `/company/[ticker]/models`.
+- Dynamically loaded the advanced AG Grid section on `/company/[ticker]/models` to avoid pulling grid runtime into the initial route payload.
+- Moved SEC-heavy earnings chart stack into a dedicated dynamically loaded island component (`SecHeavyModelsPanel`) so `/company/[ticker]/earnings` no longer statically imports Recharts-heavy analytics.
+
 ## What changed
 - Added DB pool tuning knobs with safe defaults in environment-backed settings.
 - Added `dataset_refresh_state` table keyed by `(company_id, dataset)` to persist freshness and active refresh lock metadata.

@@ -25,11 +25,8 @@ from app.services.risk_free_rate import _request_with_retries
 
 logger = logging.getLogger(__name__)
 
-# Treasury has moved this CSV path over time; keep a small fallback chain.
-HQM_CSV_URLS: Sequence[str] = (
-    "https://home.treasury.gov/system/files/276/hqmYieldCurveData.csv",
-    "https://home.treasury.gov/sites/default/files/interest-rates/hqmYieldCurveData.csv",
-)
+# Treasury HQM CSV URLs with fallback chain (configurable via TREASURY_HQM_CSV_URLS env var)
+HQM_CSV_URLS: Sequence[str] = settings.treasury_hqm_csv_urls
 HQM_SOURCE_NAME = "U.S. Treasury HQM Corporate Bond Yield Curve"
 HQM_SOURCE_URL = "https://home.treasury.gov/resource-center/economic-policy/corporate-bond-yield-curve"
 

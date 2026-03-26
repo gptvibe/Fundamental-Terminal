@@ -71,6 +71,10 @@ class Settings:
         "TREASURY_YIELD_CURVE_CSV_URL",
         "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve&page&_format=csv",
     )
+    treasury_hqm_csv_urls: tuple[str, ...] = _csv_env("TREASURY_HQM_CSV_URLS") or (
+        "https://home.treasury.gov/system/files/276/hqmYieldCurveData.csv",
+        "https://home.treasury.gov/sites/default/files/interest-rates/hqmYieldCurveData.csv",
+    )
     treasury_max_retries: int = _int_env("TREASURY_MAX_RETRIES", 3, minimum=1)
     treasury_retry_backoff_seconds: float = _float_env("TREASURY_RETRY_BACKOFF_SECONDS", 0.5)
     market_context_cache_ttl_hours: int = _int_env("MARKET_CONTEXT_CACHE_TTL_HOURS", 6, minimum=1)

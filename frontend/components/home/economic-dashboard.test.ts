@@ -69,7 +69,7 @@ describe("EconomicDashboard", () => {
   it("renders professional macro sections and current indicators", () => {
     const html = renderToStaticMarkup(React.createElement(EconomicDashboard, { context: makeContext() }));
 
-    expect(html).toContain("US macro dashboard");
+    expect(html).toContain("Yield-curve inversion is still a live risk signal.");
     expect(html).toContain("Current term structure");
     expect(html).toContain("Cross-market scorecard");
     expect(html).toContain("10Y Treasury");

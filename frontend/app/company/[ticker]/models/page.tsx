@@ -5,9 +5,9 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
 
-import { DenseGrid } from "@/components/grid/dense-grid";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
@@ -41,6 +41,10 @@ const DcfScenarioAnalysis = dynamic(
 const ModelDashboard = dynamic(
   () => import("@/components/models/model-dashboard").then((module) => module.ModelDashboard),
   { ssr: false }
+);
+const DenseGrid = dynamic(
+  () => import("@/components/grid/dense-grid").then((module) => module.DenseGrid),
+  { ssr: false, loading: () => <div className="text-muted">Initializing advanced grid...</div> }
 );
 
 type DupontMode = "auto" | "annual" | "ttm";
@@ -345,11 +349,17 @@ export default function CompanyModelsPage() {
       </Panel>
 
       <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
-        <DcfScenarioAnalysis ticker={ticker} dcfModel={dcfModel} financials={financialData?.financials ?? []} priceHistory={financialData?.price_history ?? []} />
+        <DeferredClientSection placeholder={<div className="text-muted">Loading DCF scenario analysis...</div>}>
+          <DcfScenarioAnalysis ticker={ticker} dcfModel={dcfModel} financials={financialData?.financials ?? []} priceHistory={financialData?.price_history ?? []} />
+        </DeferredClientSection>
       </Panel>
 
       <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, the Altman proxy, and ratios"} className="models-page-span-full">
-        {hasModels ? <ModelDashboard models={models} /> : <div className="text-muted">No model results yet. Once financial data is ready, this page will fill in automatically.</div>}
+        {hasModels ? (
+          <DeferredClientSection placeholder={<div className="text-muted">Loading model analytics...</div>}>
+            <ModelDashboard models={models} />
+          </DeferredClientSection>
+        ) : <div className="text-muted">No model results yet. Once financial data is ready, this page will fill in automatically.</div>}
       </Panel>
 
       <details className="subtle-details models-page-span-full">
@@ -363,7 +373,9 @@ export default function CompanyModelsPage() {
           {error ? (
             <div className="text-muted">{error}</div>
           ) : hasModels ? (
-            <DenseGrid rowData={models} columnDefs={columns} height={280} />
+            <DeferredClientSection placeholder={<div className="text-muted">Loading advanced grid...</div>}>
+              <DenseGrid rowData={models as unknown as object[]} columnDefs={columns as unknown as ColDef<object>[]} height={280} />
+            </DeferredClientSection>
           ) : (
             <div className="grid-empty-state">
               <div className="grid-empty-kicker">Preparing model results</div>

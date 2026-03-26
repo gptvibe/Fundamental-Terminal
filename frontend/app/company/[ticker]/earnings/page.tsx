@@ -2,22 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useParams } from "next/navigation";
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import dynamic from "next/dynamic";
 
-import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { EarningsTrendChart, type EarningsTrendDatum } from "@/components/charts/earnings-trend-chart";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyEarningsWorkspace } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
-import type { CompanyEarningsWorkspaceResponse, EarningsAlertPayload, EarningsModelPointPayload, EarningsReleasePayload, FinancialPayload } from "@/lib/types";
+import type { CompanyEarningsWorkspaceResponse, EarningsAlertPayload, EarningsReleasePayload, FinancialPayload } from "@/lib/types";
 
 const EARNINGS_POLL_INTERVAL_MS = 3000;
-const SEGMENT_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7", "#7CFFCB", "#64D2FF"];
+
+const DeferredSecHeavyModelsPanel = dynamic(
+  () => import("@/components/earnings/sec-heavy-models-panel").then((module) => module.SecHeavyModelsPanel),
+  { ssr: false, loading: () => <div className="text-muted">Loading SEC-heavy model visuals...</div> }
+);
 
 export default function CompanyEarningsPage() {
   const params = useParams<{ ticker: string }>();
@@ -105,10 +109,10 @@ export default function CompanyEarningsPage() {
   const summary = workspaceData?.summary;
   const trackedJobId = effectiveRefreshState?.job_id;
   const fallbackTrendPoints = useMemo(() => buildFallbackTrendPoints(financials), [financials]);
-  const secModelPoints = useMemo(() => buildSecModelPointsFromWorkspace(workspaceData?.model_points ?? []), [workspaceData?.model_points]);
-  const secModelWindow = useMemo(() => secModelPoints.slice(-8), [secModelPoints]);
-  const latestSecModelPoint = secModelPoints.at(-1) ?? null;
-  const segmentContributionRows = useMemo(() => buildSegmentContributionRowsFromWorkspace(workspaceData?.model_points ?? []), [workspaceData?.model_points]);
+  const latestModelPoint = useMemo(
+    () => [...(workspaceData?.model_points ?? [])].sort((left, right) => (right.period_end || "").localeCompare(left.period_end || ""))[0] ?? null,
+    [workspaceData?.model_points]
+  );
   const alerts = workspaceData?.alerts ?? [];
   const peerContext = workspaceData?.peer_context ?? null;
   const backtests = workspaceData?.backtests ?? null;
@@ -259,182 +263,12 @@ export default function CompanyEarningsPage() {
         title="SEC-Heavy Earnings Models"
         subtitle="Models built from SEC filing fundamentals first: earnings quality, EPS drift, and segment contribution delta"
       >
-        {loading || workspaceLoading ? (
-          <div className="text-muted">Loading SEC-heavy model visuals...</div>
-        ) : secModelPoints.length ? (
-          <div style={{ display: "grid", gap: 16 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <span className="pill">Latest quality score {latestSecModelPoint ? `${latestSecModelPoint.qualityScore.toFixed(1)}/100` : "\u2014"}</span>
-              <span className="pill">Latest EPS drift {latestSecModelPoint ? formatEpsDelta(latestSecModelPoint.epsDelta) : "\u2014"}</span>
-              <span className="pill">Coverage ratio {latestSecModelPoint?.coverageRatio != null ? formatPercent(latestSecModelPoint.coverageRatio) : "\u2014"}</span>
-              <span className="pill">Fallback ratio {latestSecModelPoint?.fallbackRatio != null ? formatPercent(latestSecModelPoint.fallbackRatio) : "\u2014"}</span>
-              <span className="pill">Stale warning {latestSecModelPoint?.stalePeriodWarning ? "Yes" : "No"}</span>
-              <span className="pill">Segment rows {segmentContributionRows.length.toLocaleString()}</span>
-              <span className="pill">Source: SEC financial statements</span>
-            </div>
-
-            <div className="metric-card" style={{ display: "grid", gap: 8 }}>
-              <div className="metric-label">How To Read This (Plain English)</div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                Earnings quality score: higher means free cash flow conversion is stronger and accrual noise is lower versus reported earnings.
-              </div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                EPS drift: bars above zero mean EPS improved versus the prior reported period; below zero means EPS weakened.
-              </div>
-              <div className="text-muted" style={{ fontSize: 14 }}>
-                Segment contribution delta: positive bars mean that segment gained share of total revenue versus the prior comparable filing.
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
-              <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-                <div className="metric-label">Earnings Quality Score Trend</div>
-                <div className="text-muted" style={{ fontSize: 13 }}>Blend of FCF margin, cash conversion, and accrual discipline.</div>
-                <div style={{ width: "100%", height: 260 }}>
-                  <ResponsiveContainer>
-                    <LineChart data={secModelWindow} margin={{ top: 8, right: 14, left: 2, bottom: 6 }}>
-                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                      <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} />
-                      <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(11)} domain={[0, 100]} width={40} />
-                      <Tooltip
-                        {...RECHARTS_TOOLTIP_PROPS}
-                        formatter={(value, _name, item) => {
-                          if (String(item?.dataKey) === "qualityScore") {
-                            return [`${Number(value).toFixed(1)}/100`, "Quality score"];
-                          }
-                          return [String(value), "Value"];
-                        }}
-                      />
-                      <ReferenceLine y={50} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 4" />
-                      <Line dataKey="qualityScore" stroke="#00FF41" strokeWidth={2.6} dot={{ r: 3 }} isAnimationActive={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-                <div className="metric-label">EPS Drift (Period-over-Period)</div>
-                <div className="text-muted" style={{ fontSize: 13 }}>Shows whether diluted EPS is accelerating or decelerating each period.</div>
-                <div style={{ width: "100%", height: 260 }}>
-                  <ResponsiveContainer>
-                    <BarChart data={secModelWindow} margin={{ top: 8, right: 14, left: 2, bottom: 6 }}>
-                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                      <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} />
-                      <YAxis
-                        stroke={CHART_AXIS_COLOR}
-                        tick={chartTick(11)}
-                        width={48}
-                        tickFormatter={(value) => formatEps(Number(value))}
-                      />
-                      <Tooltip
-                        {...RECHARTS_TOOLTIP_PROPS}
-                        formatter={(value, _name, item) => {
-                          if (String(item?.dataKey) === "epsDelta") {
-                            const payload = item?.payload as SecModelPoint | undefined;
-                            const driftText = formatEpsDelta(Number(value));
-                            const pctText = payload?.epsDeltaPercent == null ? "\u2014" : formatPercent(payload.epsDeltaPercent);
-                            return [`${driftText} (${pctText})`, "EPS drift"];
-                          }
-                          return [String(value), "Value"];
-                        }}
-                      />
-                      <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" />
-                      <Bar dataKey="epsDelta" radius={[8, 8, 0, 0]} isAnimationActive={false}>
-                        {secModelWindow.map((entry) => (
-                          <Cell key={entry.key} fill={entry.epsDelta >= 0 ? "#00E5FF" : "#FF6B6B"} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-
-            <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-              <div className="metric-label">Segment Contribution Delta</div>
-              <div className="text-muted" style={{ fontSize: 13 }}>
-                Share-of-revenue change by segment versus previous statement with segment disclosures.
-              </div>
-              {segmentContributionRows.length ? (
-                <>
-                  <div style={{ width: "100%", height: 320 }}>
-                    <ResponsiveContainer>
-                      <BarChart data={segmentContributionRows} layout="vertical" margin={{ top: 8, right: 20, left: 24, bottom: 4 }}>
-                        <CartesianGrid stroke={CHART_GRID_COLOR} horizontal={false} />
-                        <XAxis
-                          type="number"
-                          stroke={CHART_AXIS_COLOR}
-                          tick={chartTick(11)}
-                          tickFormatter={(value) => formatPercent(Number(value))}
-                          width={52}
-                        />
-                        <YAxis
-                          type="category"
-                          dataKey="shortName"
-                          stroke={CHART_AXIS_COLOR}
-                          tick={chartTick(11)}
-                          width={120}
-                        />
-                        <Tooltip
-                          {...RECHARTS_TOOLTIP_PROPS}
-                          formatter={(value, _name, item) => {
-                            const payload = item?.payload as SegmentContributionRow | undefined;
-                            if (!payload) {
-                              return [String(value), "Share delta"];
-                            }
-                            return [
-                              `${formatPercent(Number(value))} (${formatCompactNumber(payload.revenue)} latest)` ,
-                              `${payload.segmentName}`
-                            ];
-                          }}
-                        />
-                        <ReferenceLine x={0} stroke="rgba(255,255,255,0.28)" />
-                        <Bar dataKey="shareDelta" radius={[0, 8, 8, 0]} isAnimationActive={false}>
-                          {segmentContributionRows.map((row) => (
-                            <Cell key={row.segmentId} fill={row.shareDelta >= 0 ? row.color : "#FF6B6B"} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  <div style={{ overflowX: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
-                      <thead>
-                        <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
-                          <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
-                          <th align="right" style={{ padding: "8px 10px" }}>Latest Revenue</th>
-                          <th align="right" style={{ padding: "8px 10px" }}>Share of Revenue</th>
-                          <th align="right" style={{ padding: "8px 10px" }}>Share Delta</th>
-                          <th align="right" style={{ padding: "8px 10px" }}>Revenue Delta</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {segmentContributionRows.map((row) => (
-                          <tr key={row.segmentId}>
-                            <td style={{ padding: "10px 10px" }}>{row.segmentName}</td>
-                            <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatCompactNumber(row.revenue)}</td>
-                            <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.share)}</td>
-                            <td style={{ padding: "10px 10px", textAlign: "right", color: row.shareDelta >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
-                              {formatSignedPercent(row.shareDelta)}
-                            </td>
-                            <td style={{ padding: "10px 10px", textAlign: "right", color: row.revenueDelta != null && row.revenueDelta >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
-                              {formatSignedCompactNumber(row.revenueDelta)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : (
-                <PanelEmptyState message="No segment history delta available yet. The model appears once at least two filings include segment revenue breakdowns." />
-              )}
-            </div>
-          </div>
-        ) : (
-          <PanelEmptyState message="SEC-heavy models need at least two filing statements with revenue, cash-flow, and EPS fields." />
-        )}
+        <DeferredClientSection placeholder={<div className="text-muted">Loading SEC-heavy model visuals...</div>}>
+          <DeferredSecHeavyModelsPanel
+            loading={loading || workspaceLoading}
+            modelPoints={workspaceData?.model_points ?? []}
+          />
+        </DeferredClientSection>
       </Panel>
 
       <Panel title="Peer-Relative Context" subtitle="Percentile view of quality and EPS drift versus sector and peer group">
@@ -491,10 +325,10 @@ export default function CompanyEarningsPage() {
       </Panel>
 
       <Panel title="Explainability" subtitle="Exact SEC fields, periods, and fallback usage for latest model point">
-        {latestSecModelPoint?.explainability ? (
+        {latestModelPoint?.explainability ? (
           <div style={{ display: "grid", gap: 12 }}>
             <div className="text-muted" style={{ fontSize: 13 }}>
-              Formulas: {latestSecModelPoint.explainability.qualityFormula} | {latestSecModelPoint.explainability.epsDriftFormula}
+              Formulas: {latestModelPoint.explainability.quality_formula} | {latestModelPoint.explainability.eps_drift_formula}
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -507,12 +341,12 @@ export default function CompanyEarningsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {latestSecModelPoint.explainability.inputs.map((input) => (
-                    <tr key={`${input.field}:${input.periodEnd}`}>
+                  {latestModelPoint.explainability.inputs.map((input) => (
+                    <tr key={`${input.field}:${input.period_end}`}>
                       <td style={{ padding: "10px" }}>{input.field.replace(/_/g, " ")}</td>
                       <td style={{ padding: "10px", textAlign: "right" }}>{formatExplainValue(input.field, input.value)}</td>
-                      <td style={{ padding: "10px" }}>{formatDate(input.periodEnd)}</td>
-                      <td style={{ padding: "10px" }}>{input.secTags.length ? input.secTags.join(", ") : "\u2014"}</td>
+                      <td style={{ padding: "10px" }}>{formatDate(input.period_end)}</td>
+                      <td style={{ padding: "10px" }}>{input.sec_tags.length ? input.sec_tags.join(", ") : "\u2014"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -851,130 +685,3 @@ function buildFallbackTrendPoints(financials: FinancialPayload[]): EarningsTrend
     }));
 }
 
-type SecModelPoint = {
-  key: string;
-  label: string;
-  filingType: string;
-  qualityScore: number;
-  epsDelta: number;
-  epsDeltaPercent: number | null;
-  coverageRatio: number | null;
-  fallbackRatio: number | null;
-  stalePeriodWarning: boolean;
-  explainability: {
-    qualityFormula: string;
-    epsDriftFormula: string;
-    inputs: Array<{ field: string; value: number | null; periodEnd: string; secTags: string[] }>;
-  };
-};
-
-type SegmentContributionRow = {
-  segmentId: string;
-  segmentName: string;
-  shortName: string;
-  revenue: number;
-  share: number;
-  shareDelta: number;
-  revenueDelta: number | null;
-  color: string;
-};
-
-function buildSecModelPointsFromWorkspace(modelPoints: EarningsModelPointPayload[]): SecModelPoint[] {
-  return [...modelPoints]
-    .sort((left, right) => (left.period_end || "").localeCompare(right.period_end || ""))
-    .map((point, index, rows) => {
-      const previous = index > 0 ? rows[index - 1] : null;
-      const epsDeltaPercent = safeRatio(point.eps_drift, previous?.eps_drift ?? null);
-      return {
-        key: `${point.filing_type}:${point.period_end}`,
-        label: formatDate(point.period_end),
-        filingType: point.filing_type,
-        qualityScore: point.quality_score ?? 0,
-        epsDelta: point.eps_drift ?? 0,
-        epsDeltaPercent,
-        coverageRatio: point.release_statement_coverage_ratio,
-        fallbackRatio: point.fallback_ratio,
-        stalePeriodWarning: point.stale_period_warning,
-        explainability: {
-          qualityFormula: point.explainability.quality_formula,
-          epsDriftFormula: point.explainability.eps_drift_formula,
-          inputs: point.explainability.inputs.map((input) => ({
-            field: input.field,
-            value: input.value,
-            periodEnd: input.period_end,
-            secTags: input.sec_tags,
-          })),
-        },
-      } satisfies SecModelPoint;
-    });
-}
-
-function buildSegmentContributionRowsFromWorkspace(modelPoints: EarningsModelPointPayload[]): SegmentContributionRow[] {
-  const latest = [...modelPoints].sort((left, right) => (right.period_end || "").localeCompare(left.period_end || ""))[0];
-  if (!latest) {
-    return [];
-  }
-
-  const segmentDeltas = latest.explainability.segment_deltas;
-  if (!Array.isArray(segmentDeltas) || !segmentDeltas.length) {
-    return [];
-  }
-
-  return segmentDeltas
-    .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
-    .map((row, index) => {
-      const segmentName = String(row.segment_name ?? row.segment_id ?? "Unknown");
-      const share = typeof row.current_share === "number" ? row.current_share : 0;
-      const previousShare = typeof row.previous_share === "number" ? row.previous_share : 0;
-      const shareDelta = typeof row.delta === "number" ? row.delta : share - previousShare;
-      return {
-        segmentId: String(row.segment_id ?? segmentName),
-        segmentName,
-        shortName: shortenLabel(segmentName, 18),
-        revenue: 0,
-        share,
-        shareDelta,
-        revenueDelta: null,
-        color: SEGMENT_COLORS[index % SEGMENT_COLORS.length],
-      } satisfies SegmentContributionRow;
-    })
-    .sort((left, right) => Math.abs(right.shareDelta) - Math.abs(left.shareDelta));
-}
-
-function safeRatio(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
-  if (numerator == null || denominator == null || denominator === 0) {
-    return null;
-  }
-  return numerator / denominator;
-}
-
-function shortenLabel(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return `${value.slice(0, maxLength - 1)}\u2026`;
-}
-
-function formatEpsDelta(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) {
-    return "\u2014";
-  }
-  const formatted = formatEps(Math.abs(value));
-  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
-}
-
-function formatSignedPercent(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) {
-    return "\u2014";
-  }
-  const formatted = formatPercent(Math.abs(value));
-  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
-}
-
-function formatSignedCompactNumber(value: number | null | undefined): string {
-  if (value == null || Number.isNaN(value)) {
-    return "\u2014";
-  }
-  const formatted = formatCompactNumber(Math.abs(value));
-  return value > 0 ? `+${formatted}` : value < 0 ? `-${formatted}` : formatted;
-}
