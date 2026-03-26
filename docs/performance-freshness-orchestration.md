@@ -15,6 +15,8 @@ This update hardens backend latency and refresh coordination without changing pr
   - `/api/companies/{ticker}/peers`
 - Added `ETag` and `Last-Modified` support for conditional GET on those endpoints.
 - Added persistent refresh dedupe/lock path in queueing (`company_refresh` dataset lock).
+- Added in-memory cache effectiveness counters and an inspection route:
+  - `/api/internal/cache-metrics`
 
 ## Benchmark script
 Run:
@@ -30,15 +32,16 @@ The script runs warm-cache benchmark cases for:
 - peers payload
 
 ## Before/after notes
-Baseline "before" values were not captured in this patch run; use the benchmark script on the pre-change revision to fill those columns.
-Sample "after" values from this branch (Docker compose local run, 3 warm rounds):
+Before values are from the pre-follow-up implementation benchmark run.
+After values are from this follow-up implementation run.
+Both were captured from local Docker runs against `AAPL` after a warm-up pass.
 
 | Endpoint | Before p50 (ms) | After p50 (ms) | Before p95 (ms) | After p95 (ms) | Notes |
 |---|---:|---:|---:|---:|---|
-| company search | _TBD_ | 3.25 | _TBD_ | 3.47 | warm-cache |
-| financials payload | _TBD_ | 45.09 | _TBD_ | 51.92 | warm-cache |
-| models payload | _TBD_ | 7.46 | _TBD_ | 17.71 | warm-cache |
-| peers payload | _TBD_ | 26.98 | _TBD_ | 30.84 | warm-cache |
+| company search | 3.25 | 4.13 | 3.47 | 27.28 | warm-cache |
+| financials payload | 45.09 | 47.29 | 51.92 | 49.79 | warm-cache |
+| models payload | 7.46 | 30.75 | 17.71 | 31.70 | warm-cache |
+| peers payload | 26.98 | 6.41 | 30.84 | 30.27 | warm-cache |
 
 ## Operational notes
 - Refresh orchestration remains cache-first and non-blocking:
@@ -47,3 +50,4 @@ Sample "after" values from this branch (Docker compose local run, 3 warm rounds)
 - Response cache TTLs are controlled with:
   - `HOT_RESPONSE_CACHE_TTL_SECONDS`
   - `HOT_RESPONSE_CACHE_STALE_TTL_SECONDS`
+- Cache effectiveness counters include hot cache hit/miss/stale/expired/store and conditional 304 counts.

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, InstitutionalFund, InstitutionalHolding
-from app.services.refresh_state import mark_dataset_checked
+from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked
 from app.services.sec_cache import sec_http_cache
 from app.services.status_stream import JobReporter
 
@@ -250,11 +250,18 @@ def refresh_company_institutional_holdings(
 
 
 def get_company_institutional_holdings_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "institutional")
+    if state_cache != "missing":
+        return state_last_checked
+
     if company.institutional_holdings_last_checked is not None:
         return company.institutional_holdings_last_checked
 
     statement = select(func.max(InstitutionalHolding.last_checked)).where(InstitutionalHolding.company_id == company.id)
-    return session.execute(statement).scalar_one_or_none()
+    scanned = session.execute(statement).scalar_one_or_none()
+    if scanned is not None:
+        mark_dataset_checked(session, company.id, "institutional", checked_at=scanned, success=True)
+    return scanned
 
 
 def _resolve_curated_funds(

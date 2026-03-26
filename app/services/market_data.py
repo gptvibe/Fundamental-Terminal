@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, PriceHistory
-from app.services.refresh_state import mark_dataset_checked
+from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked
 
 
 PRICE_SOURCE = "yahoo_finance_chart"
@@ -144,8 +144,15 @@ def get_company_price_history(session: Session, company_id: int) -> list[PriceHi
 
 
 def get_company_price_last_checked(session: Session, company_id: int) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company_id, "prices")
+    if state_cache != "missing":
+        return state_last_checked
+
     statement = select(func.max(PriceHistory.last_checked)).where(PriceHistory.company_id == company_id)
-    return session.execute(statement).scalar_one_or_none()
+    scanned = session.execute(statement).scalar_one_or_none()
+    if scanned is not None:
+        mark_dataset_checked(session, company_id, "prices", checked_at=scanned, success=True)
+    return scanned
 
 
 def upsert_price_history(

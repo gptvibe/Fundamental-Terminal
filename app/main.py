@@ -92,6 +92,8 @@ _search_response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _search_response_cache_lock = threading.Lock()
 _hot_response_cache: dict[str, tuple[float, float, dict[str, Any]]] = {}
 _hot_response_cache_lock = threading.Lock()
+_cache_metric_counts: dict[str, int] = {}
+_cache_metric_lock = threading.Lock()
 
 
 class RefreshState(BaseModel):
@@ -1135,6 +1137,12 @@ if redis is not None:
 @app.get("/health")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/internal/cache-metrics")
+def cache_metrics() -> dict[str, dict[str, int]]:
+    with _cache_metric_lock:
+        return {"metrics": dict(_cache_metric_counts)}
 
 
 @app.get("/api/jobs/{job_id}/events")
@@ -2860,13 +2868,16 @@ def _get_hot_cached_payload(key: str) -> tuple[dict[str, Any], bool] | None:
     with _hot_response_cache_lock:
         cached = _hot_response_cache.get(key)
         if cached is None:
+            _record_cache_metric("hot_cache.miss")
             return None
 
         fresh_until, stale_until, payload = cached
         if now <= stale_until:
+            _record_cache_metric("hot_cache.hit_fresh" if now <= fresh_until else "hot_cache.hit_stale")
             return payload, now <= fresh_until
 
         _hot_response_cache.pop(key, None)
+        _record_cache_metric("hot_cache.expired")
         return None
 
 
@@ -2876,6 +2887,7 @@ def _store_hot_cached_payload(key: str, payload: BaseModel) -> None:
     stale_until = fresh_until + settings.hot_response_cache_stale_ttl_seconds
     with _hot_response_cache_lock:
         _hot_response_cache[key] = (fresh_until, stale_until, payload.model_dump(mode="json"))
+    _record_cache_metric("hot_cache.store")
 
 
 def _apply_conditional_headers(
@@ -2896,14 +2908,23 @@ def _apply_conditional_headers(
     response.headers["Cache-Control"] = "private, max-age=0, stale-while-revalidate=120"
 
     if request.headers.get("if-none-match") == etag:
+        _record_cache_metric("conditional.etag_304")
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=dict(response.headers))
 
     if last_modified is not None:
         if_modified_since = request.headers.get("if-modified-since")
         if if_modified_since and response.headers.get("Last-Modified") == if_modified_since:
+            _record_cache_metric("conditional.last_modified_304")
             return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=dict(response.headers))
 
+    _record_cache_metric("conditional.cacheable_200")
+
     return None
+
+
+def _record_cache_metric(key: str) -> None:
+    with _cache_metric_lock:
+        _cache_metric_counts[key] = _cache_metric_counts.get(key, 0) + 1
 
 
 def _resolve_cached_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:
