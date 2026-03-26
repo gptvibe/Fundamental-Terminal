@@ -12,6 +12,7 @@ from app.models import (
     BeneficialOwnershipReport,
     CapitalMarketsEvent,
     Company,
+    DerivedMetricPoint,
     EarningsRelease,
     ExecutiveCompensation,
     FilingEvent,
@@ -278,6 +279,36 @@ def get_company_price_history(session: Session, company_id: int) -> list[PriceHi
         .order_by(PriceHistory.trade_date.asc())
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_derived_metric_points(
+    session: Session,
+    company_id: int,
+    *,
+    period_type: str | None = None,
+    max_periods: int = 24,
+) -> list[DerivedMetricPoint]:
+    period_statement = select(DerivedMetricPoint.period_end).where(DerivedMetricPoint.company_id == company_id)
+    if period_type:
+        period_statement = period_statement.where(DerivedMetricPoint.period_type == period_type)
+    period_statement = period_statement.group_by(DerivedMetricPoint.period_end).order_by(DerivedMetricPoint.period_end.desc()).limit(max_periods)
+    period_ends = [value for value in session.execute(period_statement).scalars()]
+    if not period_ends:
+        return []
+
+    statement = select(DerivedMetricPoint).where(
+        DerivedMetricPoint.company_id == company_id,
+        DerivedMetricPoint.period_end.in_(period_ends),
+    )
+    if period_type:
+        statement = statement.where(DerivedMetricPoint.period_type == period_type)
+    statement = statement.order_by(DerivedMetricPoint.period_type.asc(), DerivedMetricPoint.period_end.asc(), DerivedMetricPoint.metric_key.asc())
+    return list(session.execute(statement).scalars())
+
+
+def get_company_derived_metrics_last_checked(session: Session, company_id: int) -> datetime | None:
+    statement = select(func.max(DerivedMetricPoint.last_checked)).where(DerivedMetricPoint.company_id == company_id)
+    return _normalize_datetime(session.execute(statement).scalar_one_or_none())
 
 
 def get_company_price_cache_status(session: Session, company_id: int) -> tuple[datetime | None, str]:

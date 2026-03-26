@@ -86,6 +86,7 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 - `/` for search, autocomplete, and trending tickers
 - `/company/[ticker]` — company overview with unified activity feed, priority alerts, and quick peer comparison
 - `/company/[ticker]/financials` — dedicated financial workspace with statements, margin trends, cash-flow waterfall, liquidity/capital, balance-sheet history, and quality summary
+- `/company/[ticker]/financials` — dedicated financial workspace with statements, margin trends, derived SEC metrics (quarterly/annual/TTM with provenance and quality flags), cash-flow waterfall, liquidity/capital, balance-sheet history, and quality summary
 - `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
 - `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
 - `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
@@ -160,6 +161,7 @@ GET  /api/companies/search?query=intel
 GET  /api/companies/search?ticker=AAPL
 GET  /api/companies/resolve?query=INTC
 GET  /api/companies/AAPL/financials
+GET  /api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=24
 GET  /api/companies/AAPL/financial-history
 GET  /api/companies/AAPL/filings
 GET  /api/companies/AAPL/filings/view

@@ -63,6 +63,19 @@ def test_hqm_provider_returns_unavailable_on_http_error():
     assert result.hqm_30y is None
 
 
+def test_hqm_provider_falls_back_when_primary_url_404(monkeypatch):
+    class _HttpByUrl:
+        def get(self, url: str, **_kwargs):
+            if "system/files/276" in url:
+                return _FakeResponse("", status_code=404)
+            return _FakeResponse(HQM_CSV_SAMPLE, status_code=200)
+
+    result = hqm_module.fetch_hqm_snapshot(http_client=_HttpByUrl())
+    assert result.status == "ok"
+    assert result.hqm_30y is not None
+    assert "interest-rates/hqmYieldCurveData.csv" in result.source_url
+
+
 def test_hqm_provider_returns_unavailable_on_empty_body():
     client = _FakeHttp(_FakeResponse(""))
     result = hqm_module.fetch_hqm_snapshot(http_client=client)

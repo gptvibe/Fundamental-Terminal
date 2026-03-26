@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from io import StringIO
+from typing import Sequence
 
 import httpx
 
@@ -24,8 +25,10 @@ from app.services.risk_free_rate import _request_with_retries
 
 logger = logging.getLogger(__name__)
 
-HQM_CSV_URL = (
-    "https://home.treasury.gov/system/files/276/hqmYieldCurveData.csv"
+# Treasury has moved this CSV path over time; keep a small fallback chain.
+HQM_CSV_URLS: Sequence[str] = (
+    "https://home.treasury.gov/system/files/276/hqmYieldCurveData.csv",
+    "https://home.treasury.gov/sites/default/files/interest-rates/hqmYieldCurveData.csv",
 )
 HQM_SOURCE_NAME = "U.S. Treasury HQM Corporate Bond Yield Curve"
 HQM_SOURCE_URL = "https://home.treasury.gov/resource-center/economic-policy/corporate-bond-yield-curve"
@@ -67,26 +70,56 @@ def fetch_hqm_snapshot(http_client: httpx.Client | None = None) -> HqmSnapshot:
         )
 
     try:
-        response = _request_with_retries(
-            http_client,
-            HQM_CSV_URL,
-            max_retries=settings.market_max_retries,
-            backoff_seconds=settings.market_retry_backoff_seconds,
-        )
-        return _parse_hqm_csv(response.text)
-    except Exception:
-        logger.warning("HQM yield curve fetch failed; returning empty snapshot", exc_info=True)
+        response_text, source_url = _fetch_hqm_csv_with_fallback(http_client)
+        snapshot = _parse_hqm_csv(response_text)
         return HqmSnapshot(
-            status="unavailable",
-            curve_points=(),
-            hqm_30y=None,
-            observation_date=None,
-            source_name=HQM_SOURCE_NAME,
-            source_url=HQM_SOURCE_URL,
+            status=snapshot.status,
+            curve_points=snapshot.curve_points,
+            hqm_30y=snapshot.hqm_30y,
+            observation_date=snapshot.observation_date,
+            source_name=snapshot.source_name,
+            source_url=source_url,
         )
+    except Exception:
+        logger.warning("HQM yield curve fetch failed across all URLs; returning empty snapshot", exc_info=True)
+        return _empty_hqm_snapshot()
     finally:
         if own_client:
             http_client.close()
+
+
+def _fetch_hqm_csv_with_fallback(http_client: httpx.Client) -> tuple[str, str]:
+    errors: list[str] = []
+    last_error: Exception | None = None
+
+    for url in HQM_CSV_URLS:
+        try:
+            response = _request_with_retries(
+                http_client,
+                url,
+                max_retries=settings.market_max_retries,
+                backoff_seconds=settings.market_retry_backoff_seconds,
+            )
+            return response.text, url
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            errors.append(f"{url} -> HTTP {status}")
+            # 404 is expected when Treasury rotates paths; keep trying fallback URLs.
+            if status == 404:
+                logger.info("HQM CSV URL returned 404, trying fallback", extra={"url": url})
+                continue
+            logger.warning("HQM CSV URL failed", extra={"url": url, "status_code": status})
+        except Exception as exc:
+            last_error = exc
+            errors.append(f"{url} -> {type(exc).__name__}")
+            logger.warning("HQM CSV URL failed", extra={"url": url, "error": type(exc).__name__})
+
+    if errors:
+        logger.warning("HQM CSV fallback chain exhausted: %s", "; ".join(errors))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("HQM CSV fetch failed with no responses")
 
 
 def _parse_hqm_csv(content: str) -> HqmSnapshot:
@@ -161,6 +194,17 @@ def _parse_hqm_csv(content: str) -> HqmSnapshot:
         curve_points=tuple(points),
         hqm_30y=hqm_30y,
         observation_date=latest_date,
+        source_name=HQM_SOURCE_NAME,
+        source_url=HQM_SOURCE_URL,
+    )
+
+
+def _empty_hqm_snapshot() -> HqmSnapshot:
+    return HqmSnapshot(
+        status="unavailable",
+        curve_points=(),
+        hqm_30y=None,
+        observation_date=None,
         source_name=HQM_SOURCE_NAME,
         source_url=HQM_SOURCE_URL,
     )

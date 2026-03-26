@@ -6,6 +6,7 @@ import { BalanceSheetChart } from "@/components/charts/balance-sheet-chart";
 import { LiquidityCapitalChart } from "@/components/charts/liquidity-capital-chart";
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
+import { DerivedMetricsPanel } from "@/components/charts/derived-metrics-panel";
 import { MarginTrendChart } from "@/components/charts/margin-trend-chart";
 import { OperatingCostStructureChart } from "@/components/charts/operating-cost-structure-chart";
 import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
@@ -33,7 +34,8 @@ export default function CompanyFinancialsTabPage() {
     refreshState,
     consoleEntries,
     connectionState,
-    queueRefresh
+    queueRefresh,
+    reloadKey
   } = useCompanyWorkspace(ticker);
 
   return (
@@ -87,6 +89,10 @@ export default function CompanyFinancialsTabPage() {
 
       <Panel title="Margin Trends" subtitle="Gross, operating, net, and free cash flow margins over time">
         <MarginTrendChart financials={financials} />
+      </Panel>
+
+      <Panel title="Derived SEC Metrics" subtitle="Quarterly, annual, and TTM quality metrics derived from cached canonical SEC financials and cached market profile">
+        <DerivedMetricsPanel ticker={ticker} reloadKey={reloadKey} />
       </Panel>
 
       <Panel title="Balance Sheet" subtitle="Assets versus liabilities over time">

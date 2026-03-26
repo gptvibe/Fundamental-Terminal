@@ -7,7 +7,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from app.db.base import Base
-from app.models import Company, FinancialStatement, ModelRun, PriceHistory
+from app.models import Company, DerivedMetricPoint, FinancialStatement, ModelRun, PriceHistory
 
 config = context.config
 

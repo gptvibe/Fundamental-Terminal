@@ -112,6 +112,10 @@ Future roadmap work should prioritize model calibration quality, interaction tel
 
 This sequence starts with SEC-first earnings modeling and keeps external dependencies optional.
 
+Current sprint note (PR1 in progress):
+
+- Add cache-first derived metrics timeseries route from canonical SEC financial cache + cached price history with typed provenance/quality fields and a financials-page panel visualization.
+
 1. Ship SEC-heavy earnings model panel on `/company/[ticker]/earnings` (quality score trend, EPS drift, segment contribution delta) using cached 10-Q/10-K statement data.
 2. Improve parser precision for Item 2.02 exhibits so release-level revenue/EPS coverage rises and fallback usage declines.
 3. Add model diagnostics chips (coverage ratio, fallback ratio, stale period warning) so users know confidence level at a glance.

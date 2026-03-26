@@ -2795,6 +2795,136 @@ select {
   color: var(--text-muted);
 }
 
+.viz-lab-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.viz-lab-toolbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.viz-control-group {
+  display: grid;
+  gap: 8px;
+}
+
+.viz-control-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.viz-control-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.viz-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.viz-chart-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 132%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 90%, transparent);
+}
+
+.viz-chart-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.viz-chart-title {
+  margin: 0;
+  font-size: 0.96rem;
+  color: var(--text);
+}
+
+.viz-chart-subtitle {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.viz-chart-canvas {
+  width: 100%;
+  height: 360px;
+}
+
+.viz-chart-canvas.compact {
+  height: 300px;
+}
+
+.viz-grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.viz-annotation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.viz-annotation-dot {
+  display: inline-flex;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  margin-right: 6px;
+}
+
+.viz-heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.viz-heatmap-cell {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--panel-border);
+}
+
+.viz-heatmap-quarter {
+  font-family: var(--mono);
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.viz-heatmap-value {
+  font-size: 0.9rem;
+  color: var(--surface-strong-text);
+}
+
+.viz-heatmap-subvalue {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 1080px) {
+  .viz-grid-two {
+    grid-template-columns: 1fr;
+  }
+}
+
 .subtle-details {
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 14px;

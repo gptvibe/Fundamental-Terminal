@@ -33,6 +33,8 @@ from app.services import (
     get_company_coverage_counts,
     get_company_earnings_cache_status,
     get_company_earnings_releases,
+    get_company_derived_metric_points,
+    get_company_derived_metrics_last_checked,
     get_company_executive_compensation,
     get_company_filing_events,
     get_company_filing_insights,
@@ -57,6 +59,7 @@ from app.services import (
 )
 from app.services.cache_queries import get_company_beneficial_ownership_reports
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
+from app.services.derived_metrics_mart import build_summary_payload, to_period_payload
 from app.services.market_context import (
     get_cached_market_context_status,
     get_company_market_context_v2,
@@ -64,6 +67,7 @@ from app.services.market_context import (
     get_market_context_v2,
 )
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
+from app.services.derived_metrics import build_metrics_timeseries
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -209,6 +213,97 @@ class CompanyFinancialsResponse(BaseModel):
     company: CompanyPayload | None
     financials: list[FinancialPayload]
     price_history: list[PriceHistoryPayload]
+    refresh: RefreshState
+
+
+class MetricsValuesPayload(BaseModel):
+    revenue_growth: Number = None
+    gross_margin: Number = None
+    operating_margin: Number = None
+    fcf_margin: Number = None
+    roic_proxy: Number = None
+    leverage_ratio: Number = None
+    current_ratio: Number = None
+    share_dilution: Number = None
+    sbc_burden: Number = None
+    buyback_yield: Number = None
+    dividend_yield: Number = None
+    working_capital_days: Number = None
+    accrual_ratio: Number = None
+    cash_conversion: Number = None
+    segment_concentration: Number = None
+
+
+class MetricsProvenancePayload(BaseModel):
+    statement_type: str
+    statement_source: str
+    price_source: str | None = None
+    formula_version: str
+
+
+class MetricsQualityPayload(BaseModel):
+    available_metrics: int
+    missing_metrics: list[str] = Field(default_factory=list)
+    coverage_ratio: float
+    flags: list[str] = Field(default_factory=list)
+
+
+class MetricsTimeseriesPointPayload(BaseModel):
+    cadence: Literal["quarterly", "annual", "ttm"]
+    period_start: DateType
+    period_end: DateType
+    filing_type: str
+    metrics: MetricsValuesPayload
+    provenance: MetricsProvenancePayload
+    quality: MetricsQualityPayload
+
+
+class CompanyMetricsTimeseriesResponse(BaseModel):
+    company: CompanyPayload | None
+    series: list[MetricsTimeseriesPointPayload]
+    last_financials_check: datetime | None = None
+    last_price_check: datetime | None = None
+    staleness_reason: str | None = None
+    refresh: RefreshState
+
+
+class DerivedMetricValuePayload(BaseModel):
+    metric_key: str
+    metric_value: Number = None
+    is_proxy: bool
+    provenance: dict[str, Any]
+    quality_flags: list[str] = Field(default_factory=list)
+
+
+class DerivedMetricPeriodPayload(BaseModel):
+    period_type: Literal["quarterly", "annual", "ttm"]
+    period_start: DateType
+    period_end: DateType
+    filing_type: str
+    metrics: list[DerivedMetricValuePayload]
+
+
+class CompanyDerivedMetricsResponse(BaseModel):
+    company: CompanyPayload | None
+    period_type: Literal["quarterly", "annual", "ttm"]
+    periods: list[DerivedMetricPeriodPayload]
+    available_metric_keys: list[str]
+    last_metrics_check: datetime | None = None
+    last_financials_check: datetime | None = None
+    last_price_check: datetime | None = None
+    staleness_reason: str | None = None
+    refresh: RefreshState
+
+
+class CompanyDerivedMetricsSummaryResponse(BaseModel):
+    company: CompanyPayload | None
+    period_type: Literal["quarterly", "annual", "ttm"]
+    latest_period_end: DateType | None = None
+    metrics: list[DerivedMetricValuePayload]
+    last_metrics_check: datetime | None = None
+    last_financials_check: datetime | None = None
+    last_price_check: datetime | None = None
+    staleness_reason: str | None = None
     refresh: RefreshState
 
 
@@ -1126,6 +1221,158 @@ def company_filing_insights(
     return CompanyFilingInsightsResponse(
         company=_serialize_company(snapshot, last_checked=insights_last_checked),
         insights=[_serialize_filing_parser_insight(item) for item in insights],
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/metrics-timeseries", response_model=CompanyMetricsTimeseriesResponse)
+def company_metrics_timeseries(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    cadence: Literal["quarterly", "annual", "ttm"] | None = Query(default=None),
+    max_points: int = Query(default=24, ge=1, le=200),
+    session: Session = Depends(get_db_session),
+) -> CompanyMetricsTimeseriesResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyMetricsTimeseriesResponse(
+            company=None,
+            series=[],
+            last_financials_check=None,
+            last_price_check=None,
+            staleness_reason="company_missing",
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    financials = get_company_financials(session, snapshot.company.id)
+    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    price_history = get_company_price_history(session, snapshot.company.id)
+    series = build_metrics_timeseries(financials, price_history, cadence=cadence, max_points=max_points)
+    return CompanyMetricsTimeseriesResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+        ),
+        series=[MetricsTimeseriesPointPayload.model_validate(point) for point in series],
+        last_financials_check=snapshot.last_checked,
+        last_price_check=price_last_checked,
+        staleness_reason=staleness_reason,
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/metrics", response_model=CompanyDerivedMetricsResponse)
+def company_derived_metrics(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
+    max_periods: int = Query(default=24, ge=1, le=200),
+    session: Session = Depends(get_db_session),
+) -> CompanyDerivedMetricsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyDerivedMetricsResponse(
+            company=None,
+            period_type=period_type,
+            periods=[],
+            available_metric_keys=[],
+            last_metrics_check=None,
+            last_financials_check=None,
+            last_price_check=None,
+            staleness_reason="company_missing",
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    financials = get_company_financials(session, snapshot.company.id)
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+
+    rows = get_company_derived_metric_points(
+        session,
+        snapshot.company.id,
+        period_type=period_type,
+        max_periods=max_periods,
+    )
+    last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+    if not rows:
+        refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        if staleness_reason == "fresh":
+            staleness_reason = "metrics_missing"
+
+    period_payload = [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
+    available_metric_keys = sorted({item.metric_key for item in rows})
+    return CompanyDerivedMetricsResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+        ),
+        period_type=period_type,
+        periods=period_payload,
+        available_metric_keys=available_metric_keys,
+        last_metrics_check=last_metrics_check,
+        last_financials_check=snapshot.last_checked,
+        last_price_check=price_last_checked,
+        staleness_reason=staleness_reason,
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/metrics/summary", response_model=CompanyDerivedMetricsSummaryResponse)
+def company_derived_metrics_summary(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
+    session: Session = Depends(get_db_session),
+) -> CompanyDerivedMetricsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyDerivedMetricsSummaryResponse(
+            company=None,
+            period_type=period_type,
+            latest_period_end=None,
+            metrics=[],
+            last_metrics_check=None,
+            last_financials_check=None,
+            last_price_check=None,
+            staleness_reason="company_missing",
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    financials = get_company_financials(session, snapshot.company.id)
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+
+    rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
+    last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+    if not rows:
+        refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        if staleness_reason == "fresh":
+            staleness_reason = "metrics_missing"
+
+    summary = build_summary_payload(rows, period_type)
+    metric_payload = [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+    return CompanyDerivedMetricsSummaryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+        ),
+        period_type=summary["period_type"],
+        latest_period_end=summary["latest_period_end"],
+        metrics=metric_payload,
+        last_metrics_check=last_metrics_check,
+        last_financials_check=snapshot.last_checked,
+        last_price_check=price_last_checked,
+        staleness_reason=staleness_reason,
         refresh=refresh,
     )
 
@@ -2313,6 +2560,24 @@ def _refresh_for_financial_page(
         return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
+def _metrics_staleness_reason(
+    snapshot: CompanyCacheSnapshot,
+    price_cache_state: Literal["fresh", "stale", "missing"],
+    financials: list[FinancialStatement],
+) -> str:
+    if snapshot.cache_state == "missing":
+        return "financials_missing"
+    if snapshot.cache_state == "stale":
+        return "financials_stale"
+    if price_cache_state == "missing":
+        return "price_missing"
+    if price_cache_state == "stale":
+        return "price_stale"
+    if _needs_segment_backfill(financials):
+        return "segment_backfill_missing"
+    return "fresh"
 
 
 def _refresh_for_filing_insights(

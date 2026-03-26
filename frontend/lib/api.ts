@@ -7,6 +7,8 @@ import {
   CompanyEarningsResponse,
   CompanyEarningsSummaryResponse,
   CompanyExecutiveCompensationResponse,
+  CompanyDerivedMetricsResponse,
+  CompanyDerivedMetricsSummaryResponse,
   CompanyFinancialsResponse,
   CompanyBeneficialOwnershipResponse,
   CompanyBeneficialOwnershipSummaryResponse,
@@ -22,6 +24,7 @@ import {
   CompanyInstitutionalHoldingsSummaryResponse,
   CompanyModelsResponse,
   CompanyMarketContextResponse,
+  CompanyMetricsTimeseriesResponse,
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
@@ -65,6 +68,48 @@ export function resolveCompanyIdentifier(query: string): Promise<CompanyResoluti
 
 export function getCompanyFinancials(ticker: string): Promise<CompanyFinancialsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials`);
+}
+
+export function getCompanyMetricsTimeseries(
+  ticker: string,
+  options?: { cadence?: "quarterly" | "annual" | "ttm"; maxPoints?: number; signal?: AbortSignal }
+): Promise<CompanyMetricsTimeseriesResponse> {
+  const params = new URLSearchParams();
+  if (options?.cadence) {
+    params.set("cadence", options.cadence);
+  }
+  if (options?.maxPoints != null) {
+    params.set("max_points", String(options.maxPoints));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/metrics-timeseries${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyDerivedMetrics(
+  ticker: string,
+  options?: { periodType?: "quarterly" | "annual" | "ttm"; maxPeriods?: number; signal?: AbortSignal }
+): Promise<CompanyDerivedMetricsResponse> {
+  const params = new URLSearchParams();
+  if (options?.periodType) {
+    params.set("period_type", options.periodType);
+  }
+  if (options?.maxPeriods != null) {
+    params.set("max_periods", String(options.maxPeriods));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/metrics${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyDerivedMetricsSummary(
+  ticker: string,
+  options?: { periodType?: "quarterly" | "annual" | "ttm"; signal?: AbortSignal }
+): Promise<CompanyDerivedMetricsSummaryResponse> {
+  const params = new URLSearchParams();
+  if (options?.periodType) {
+    params.set("period_type", options.periodType);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/metrics/summary${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyFilings(ticker: string): Promise<CompanyFilingsResponse> {

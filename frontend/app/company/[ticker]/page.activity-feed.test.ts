@@ -68,6 +68,10 @@ vi.mock("@/components/charts/share-dilution-tracker-chart", () => ({
   ShareDilutionTrackerChart: () => React.createElement("div", null, "dilution-tracker"),
 }));
 
+vi.mock("@/components/charts/company-visualization-lab", () => ({
+  CompanyVisualizationLab: () => React.createElement("div", null, "visualization-lab"),
+}));
+
 vi.mock("@/components/company/financial-history-section", () => ({
   FinancialHistorySection: () => React.createElement("div", null, "financial-history"),
 }));

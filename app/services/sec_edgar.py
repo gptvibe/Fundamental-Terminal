@@ -33,6 +33,7 @@ from app.services.market_data import (
     touch_company_price_history,
     upsert_price_history,
 )
+from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.status_stream import JobReporter
 
@@ -1553,6 +1554,7 @@ class EdgarIngestionService:
                 and effective_beneficial_fresh
                 and earnings_fresh
             ):
+                _refresh_derived_metrics_cache(session, local_company.id, checked_at, active_reporter)
                 active_reporter.complete("Using fresh cached data.")
                 session.commit()
                 return IngestionResult(
@@ -1795,6 +1797,7 @@ class EdgarIngestionService:
                     logger.exception("Market data refresh failed for %s", local_company.ticker)
                     active_reporter.step("market", f"Market data refresh failed: {exc}")
                     price_points_written = 0
+                _refresh_derived_metrics_cache(session, local_company.id, checked_at, active_reporter)
                 session.commit()
                 active_reporter.complete("Refresh and compute complete.")
                 return IngestionResult(
@@ -1971,6 +1974,8 @@ class EdgarIngestionService:
                     active_reporter.step("market", f"Market data refresh failed: {exc}")
                     price_points_written = 0
 
+            _refresh_derived_metrics_cache(session, company.id, checked_at, active_reporter)
+
             session.commit()
             active_reporter.complete("Refresh and compute complete.")
 
@@ -2051,6 +2056,18 @@ def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = N
         raise
     finally:
         service.close()
+
+
+def _refresh_derived_metrics_cache(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    reporter: JobReporter,
+) -> int:
+    reporter.step("metrics", "Recomputing derived metrics mart...")
+    rows_written = recompute_and_persist_company_derived_metrics(session, company_id, checked_at=checked_at)
+    reporter.step("metrics", f"Updated {rows_written} derived metric rows")
+    return rows_written
 
 
 def worker_main(argv: list[str] | None = None) -> int:

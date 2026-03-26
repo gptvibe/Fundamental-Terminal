@@ -126,6 +126,97 @@ export interface CompanyFinancialsResponse {
   refresh: RefreshState;
 }
 
+export interface MetricsValuesPayload {
+  revenue_growth: number | null;
+  gross_margin: number | null;
+  operating_margin: number | null;
+  fcf_margin: number | null;
+  roic_proxy: number | null;
+  leverage_ratio: number | null;
+  current_ratio: number | null;
+  share_dilution: number | null;
+  sbc_burden: number | null;
+  buyback_yield: number | null;
+  dividend_yield: number | null;
+  working_capital_days: number | null;
+  accrual_ratio: number | null;
+  cash_conversion: number | null;
+  segment_concentration: number | null;
+}
+
+export interface MetricsProvenancePayload {
+  statement_type: string;
+  statement_source: string;
+  price_source: string | null;
+  formula_version: string;
+}
+
+export interface MetricsQualityPayload {
+  available_metrics: number;
+  missing_metrics: string[];
+  coverage_ratio: number;
+  flags: string[];
+}
+
+export interface MetricsTimeseriesPointPayload {
+  cadence: "quarterly" | "annual" | "ttm";
+  period_start: string;
+  period_end: string;
+  filing_type: string;
+  metrics: MetricsValuesPayload;
+  provenance: MetricsProvenancePayload;
+  quality: MetricsQualityPayload;
+}
+
+export interface CompanyMetricsTimeseriesResponse {
+  company: CompanyPayload | null;
+  series: MetricsTimeseriesPointPayload[];
+  last_financials_check: string | null;
+  last_price_check: string | null;
+  staleness_reason: string | null;
+  refresh: RefreshState;
+}
+
+export interface DerivedMetricValuePayload {
+  metric_key: string;
+  metric_value: number | null;
+  is_proxy: boolean;
+  provenance: Record<string, unknown>;
+  quality_flags: string[];
+}
+
+export interface DerivedMetricPeriodPayload {
+  period_type: "quarterly" | "annual" | "ttm";
+  period_start: string;
+  period_end: string;
+  filing_type: string;
+  metrics: DerivedMetricValuePayload[];
+}
+
+export interface CompanyDerivedMetricsResponse {
+  company: CompanyPayload | null;
+  period_type: "quarterly" | "annual" | "ttm";
+  periods: DerivedMetricPeriodPayload[];
+  available_metric_keys: string[];
+  last_metrics_check: string | null;
+  last_financials_check: string | null;
+  last_price_check: string | null;
+  staleness_reason: string | null;
+  refresh: RefreshState;
+}
+
+export interface CompanyDerivedMetricsSummaryResponse {
+  company: CompanyPayload | null;
+  period_type: "quarterly" | "annual" | "ttm";
+  latest_period_end: string | null;
+  metrics: DerivedMetricValuePayload[];
+  last_metrics_check: string | null;
+  last_financials_check: string | null;
+  last_price_check: string | null;
+  staleness_reason: string | null;
+  refresh: RefreshState;
+}
+
 export interface FilingParserSegmentPayload {
   name: string;
   revenue: number | null;

@@ -38,8 +38,16 @@ const FinancialHistorySection = dynamic(
   () => import("@/components/company/financial-history-section").then((module) => module.FinancialHistorySection),
   { ssr: false }
 );
+const MetricsExplorerPanel = dynamic(
+  () => import("@/components/company/metrics-explorer-panel").then((module) => module.MetricsExplorerPanel),
+  { ssr: false }
+);
 const PeerComparisonDashboard = dynamic(
   () => import("@/components/peers/peer-comparison-dashboard").then((module) => module.PeerComparisonDashboard),
+  { ssr: false }
+);
+const CompanyVisualizationLab = dynamic(
+  () => import("@/components/charts/company-visualization-lab").then((module) => module.CompanyVisualizationLab),
   { ssr: false }
 );
 
@@ -202,6 +210,13 @@ export default function CompanyOverviewPage() {
 
       <PriceFundamentalsModule priceData={priceHistory} fundamentalsData={fundamentalsTrendData} />
 
+      <Panel
+        title="Visualization Lab"
+        subtitle="Unified SEC-first chart system with consistent controls, event annotations, provenance badges, and CSV export"
+      >
+        <CompanyVisualizationLab ticker={ticker} financials={financials} reloadKey={reloadKey} />
+      </Panel>
+
       <Panel title="Cash Flow Bridge" subtitle="How operating cash flow turns into free cash flow and capital allocation uses">
         <CashFlowWaterfallChart financials={financials} />
       </Panel>
@@ -216,6 +231,10 @@ export default function CompanyOverviewPage() {
 
       <Panel title="Business Segments" subtitle="Reported segment revenue mix and growth from cached SEC filing data">
         <BusinessSegmentBreakdown financials={financials} />
+      </Panel>
+
+      <Panel title="Derived Metrics Explorer" subtitle="Persisted SEC-derived metrics with provenance and quality flags">
+        <MetricsExplorerPanel ticker={ticker} reloadKey={reloadKey} />
       </Panel>
 
       <Panel title="10-Year Financial History" subtitle="SEC EDGAR companyfacts (FY)">
