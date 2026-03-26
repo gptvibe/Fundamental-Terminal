@@ -1,4 +1,31 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-fundamentals}
+      POSTGRES_USER: ${POSTGRES_USER:-fundamental}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fundamental}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fundamental} -d ${POSTGRES_DB:-fundamentals}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   backend:
     image: fundamental-terminal/backend:local
     pull_policy: never
@@ -6,11 +33,22 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@host.docker.internal:5432/fundamentals}
-      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://host.docker.internal:6379/0}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       API_HOST: 0.0.0.0
       API_PORT: 8000
       FRED_API_KEY: ${FRED_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     ports:
       - "8000:8000"
 
@@ -21,9 +59,12 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@host.docker.internal:5432/fundamentals}
-      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://host.docker.internal:6379/0}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
+    depends_on:
+      backend:
+        condition: service_healthy
 
   sp500-prewarm:
     image: fundamental-terminal/backend:local
@@ -32,9 +73,12 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@host.docker.internal:5432/fundamentals}
-      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://host.docker.internal:6379/0}
+      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
+    depends_on:
+      backend:
+        condition: service_healthy
 
   frontend:
     image: fundamental-terminal/frontend:local
@@ -47,5 +91,11 @@ services:
     environment:
       BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}
       PORT: 3000
+    depends_on:
+      backend:
+        condition: service_healthy
     ports:
       - "3000:3000"
+
+volumes:
+  postgres_data:

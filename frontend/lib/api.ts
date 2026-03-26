@@ -6,6 +6,7 @@ import {
   CompanyCapitalMarketsSummaryResponse,
   CompanyEarningsResponse,
   CompanyEarningsSummaryResponse,
+  CompanyEarningsWorkspaceResponse,
   CompanyExecutiveCompensationResponse,
   CompanyDerivedMetricsResponse,
   CompanyDerivedMetricsSummaryResponse,
@@ -166,6 +167,10 @@ export function getCompanyEarnings(ticker: string): Promise<CompanyEarningsRespo
 
 export function getCompanyEarningsSummary(ticker: string): Promise<CompanyEarningsSummaryResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/earnings/summary`);
+}
+
+export function getCompanyEarningsWorkspace(ticker: string): Promise<CompanyEarningsWorkspaceResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/earnings/workspace`);
 }
 
 export function getCompanyActivityFeed(ticker: string): Promise<CompanyActivityFeedResponse> {

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.capital_markets_event import CapitalMarketsEvent
     from app.models.derived_metric_point import DerivedMetricPoint
+    from app.models.earnings_model_point import EarningsModelPoint
     from app.models.executive_compensation import ExecutiveCompensation
     from app.models.filing_event import FilingEvent
     from app.models.financial_statement import FinancialStatement
@@ -115,6 +116,11 @@ class Company(Base):
         passive_deletes=True,
     )
     derived_metric_points: Mapped[list["DerivedMetricPoint"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    earnings_model_points: Mapped[list["EarningsModelPoint"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

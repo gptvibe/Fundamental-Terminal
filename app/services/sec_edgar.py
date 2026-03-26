@@ -34,6 +34,7 @@ from app.services.market_data import (
     upsert_price_history,
 )
 from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
+from app.services.earnings_intelligence import recompute_and_persist_company_earnings_model_points
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.status_stream import JobReporter
 
@@ -1555,6 +1556,7 @@ class EdgarIngestionService:
                 and earnings_fresh
             ):
                 _refresh_derived_metrics_cache(session, local_company.id, checked_at, active_reporter)
+                _refresh_earnings_model_cache(session, local_company.id, checked_at, active_reporter)
                 active_reporter.complete("Using fresh cached data.")
                 session.commit()
                 return IngestionResult(
@@ -1648,6 +1650,7 @@ class EdgarIngestionService:
                     reporter=active_reporter,
                     force=force,
                 )
+                _refresh_earnings_model_cache(session, local_company.id, checked_at, active_reporter)
                 session.commit()
                 active_reporter.complete("Refresh and compute complete.")
                 return IngestionResult(
@@ -1798,6 +1801,7 @@ class EdgarIngestionService:
                     active_reporter.step("market", f"Market data refresh failed: {exc}")
                     price_points_written = 0
                 _refresh_derived_metrics_cache(session, local_company.id, checked_at, active_reporter)
+                _refresh_earnings_model_cache(session, local_company.id, checked_at, active_reporter)
                 session.commit()
                 active_reporter.complete("Refresh and compute complete.")
                 return IngestionResult(
@@ -1975,6 +1979,7 @@ class EdgarIngestionService:
                     price_points_written = 0
 
             _refresh_derived_metrics_cache(session, company.id, checked_at, active_reporter)
+            _refresh_earnings_model_cache(session, company.id, checked_at, active_reporter)
 
             session.commit()
             active_reporter.complete("Refresh and compute complete.")
@@ -2067,6 +2072,18 @@ def _refresh_derived_metrics_cache(
     reporter.step("metrics", "Recomputing derived metrics mart...")
     rows_written = recompute_and_persist_company_derived_metrics(session, company_id, checked_at=checked_at)
     reporter.step("metrics", f"Updated {rows_written} derived metric rows")
+    return rows_written
+
+
+def _refresh_earnings_model_cache(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    reporter: JobReporter,
+) -> int:
+    reporter.step("earnings_models", "Recomputing SEC-heavy earnings model cache...")
+    rows_written = recompute_and_persist_company_earnings_model_points(session, company_id, checked_at=checked_at)
+    reporter.step("earnings_models", f"Updated {rows_written} earnings model rows")
     return rows_written
 
 

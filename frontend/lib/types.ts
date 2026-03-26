@@ -728,6 +728,101 @@ export interface CompanyEarningsSummaryResponse {
   error: string | null;
 }
 
+export interface EarningsModelInputPayload {
+  field: string;
+  value: number | null;
+  period_end: string;
+  sec_tags: string[];
+}
+
+export interface EarningsModelExplainabilityPayload {
+  formula_version: string;
+  period_end: string;
+  filing_type: string;
+  inputs: EarningsModelInputPayload[];
+  component_values: Record<string, number | null>;
+  proxy_usage: Record<string, boolean>;
+  segment_deltas: Array<Record<string, unknown>>;
+  release_statement_coverage: Record<string, unknown>;
+  quality_formula: string;
+  eps_drift_formula: string;
+  momentum_formula: string;
+}
+
+export interface EarningsModelPointPayload {
+  period_start: string;
+  period_end: string;
+  filing_type: string;
+  quality_score: number | null;
+  quality_score_delta: number | null;
+  eps_drift: number | null;
+  earnings_momentum_drift: number | null;
+  segment_contribution_delta: number | null;
+  release_statement_coverage_ratio: number | null;
+  fallback_ratio: number | null;
+  stale_period_warning: boolean;
+  quality_flags: string[];
+  source_statement_ids: number[];
+  source_release_ids: number[];
+  explainability: EarningsModelExplainabilityPayload;
+}
+
+export interface EarningsBacktestWindowPayload {
+  accession_number: string;
+  filing_date: string | null;
+  reported_period_end: string | null;
+  pre_price: number | null;
+  post_price: number | null;
+  price_return: number | null;
+  quality_score_delta: number | null;
+  eps_drift: number | null;
+  quality_directional_consistent: boolean | null;
+  eps_directional_consistent: boolean | null;
+  price_source: string | null;
+}
+
+export interface EarningsBacktestPayload {
+  window_sessions: number;
+  quality_directional_consistency: number | null;
+  quality_total_windows: number;
+  quality_consistent_windows: number;
+  eps_directional_consistency: number | null;
+  eps_total_windows: number;
+  eps_consistent_windows: number;
+  windows: EarningsBacktestWindowPayload[];
+}
+
+export interface EarningsPeerContextPayload {
+  peer_group_basis: "market_industry" | "market_sector";
+  peer_group_size: number;
+  quality_percentile: number | null;
+  eps_drift_percentile: number | null;
+  sector_group_size: number;
+  sector_quality_percentile: number | null;
+  sector_eps_drift_percentile: number | null;
+}
+
+export interface EarningsAlertPayload {
+  id: string;
+  type: "quality_regime_shift" | "eps_drift_sign_flip" | "segment_share_change";
+  level: "high" | "medium" | "low";
+  title: string;
+  detail: string;
+  period_end: string;
+}
+
+export interface CompanyEarningsWorkspaceResponse {
+  company: CompanyPayload | null;
+  earnings_releases: EarningsReleasePayload[];
+  summary: EarningsSummaryPayload;
+  model_points: EarningsModelPointPayload[];
+  backtests: EarningsBacktestPayload;
+  peer_context: EarningsPeerContextPayload;
+  alerts: EarningsAlertPayload[];
+  refresh: RefreshState;
+  error: string | null;
+}
+
 export interface ActivityFeedEntryPayload {
   id: string;
   date: string | null;

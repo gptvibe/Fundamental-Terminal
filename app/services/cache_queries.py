@@ -13,6 +13,7 @@ from app.models import (
     CapitalMarketsEvent,
     Company,
     DerivedMetricPoint,
+    EarningsModelPoint,
     EarningsRelease,
     ExecutiveCompensation,
     FilingEvent,
@@ -395,6 +396,29 @@ def get_company_earnings_cache_status(session: Session, company: Company) -> tup
     if last_checked is None:
         statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    return last_checked, _cache_state_from_last_checked(last_checked)
+
+
+def get_company_earnings_model_points(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 24,
+) -> list[EarningsModelPoint]:
+    statement = (
+        select(EarningsModelPoint)
+        .where(EarningsModelPoint.company_id == company_id)
+        .order_by(EarningsModelPoint.period_end.desc(), EarningsModelPoint.id.desc())
+        .limit(limit)
+    )
+    rows = list(session.execute(statement).scalars())
+    rows.sort(key=lambda item: item.period_end)
+    return rows
+
+
+def get_company_earnings_model_cache_status(session: Session, company_id: int) -> tuple[datetime | None, str]:
+    statement = select(func.max(EarningsModelPoint.last_checked)).where(EarningsModelPoint.company_id == company_id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 

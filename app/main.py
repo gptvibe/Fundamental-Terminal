@@ -21,7 +21,7 @@ from app.config import settings
 from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
-from app.models import EarningsRelease, ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
+from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -32,6 +32,8 @@ from app.services import (
     get_company_capital_markets_events,
     get_company_coverage_counts,
     get_company_earnings_cache_status,
+    get_company_earnings_model_cache_status,
+    get_company_earnings_model_points,
     get_company_earnings_releases,
     get_company_derived_metric_points,
     get_company_derived_metrics_last_checked,
@@ -68,6 +70,7 @@ from app.services.market_context import (
 )
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
+from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -436,6 +439,101 @@ class EarningsSummaryPayload(BaseModel):
 class CompanyEarningsSummaryResponse(BaseModel):
     company: CompanyPayload | None
     summary: EarningsSummaryPayload
+    refresh: RefreshState
+    error: str | None = None
+
+
+class EarningsModelInputPayload(BaseModel):
+    field: str
+    value: Number = None
+    period_end: str
+    sec_tags: list[str] = Field(default_factory=list)
+
+
+class EarningsModelExplainabilityPayload(BaseModel):
+    formula_version: str
+    period_end: str
+    filing_type: str
+    inputs: list[EarningsModelInputPayload] = Field(default_factory=list)
+    component_values: dict[str, Number] = Field(default_factory=dict)
+    proxy_usage: dict[str, bool] = Field(default_factory=dict)
+    segment_deltas: list[dict[str, Any]] = Field(default_factory=list)
+    release_statement_coverage: dict[str, Any] = Field(default_factory=dict)
+    quality_formula: str
+    eps_drift_formula: str
+    momentum_formula: str
+
+
+class EarningsModelPointPayload(BaseModel):
+    period_start: DateType
+    period_end: DateType
+    filing_type: str
+    quality_score: Number = None
+    quality_score_delta: Number = None
+    eps_drift: Number = None
+    earnings_momentum_drift: Number = None
+    segment_contribution_delta: Number = None
+    release_statement_coverage_ratio: Number = None
+    fallback_ratio: Number = None
+    stale_period_warning: bool
+    quality_flags: list[str] = Field(default_factory=list)
+    source_statement_ids: list[int] = Field(default_factory=list)
+    source_release_ids: list[int] = Field(default_factory=list)
+    explainability: EarningsModelExplainabilityPayload
+
+
+class EarningsBacktestWindowPayload(BaseModel):
+    accession_number: str
+    filing_date: DateType | None = None
+    reported_period_end: DateType | None = None
+    pre_price: Number = None
+    post_price: Number = None
+    price_return: Number = None
+    quality_score_delta: Number = None
+    eps_drift: Number = None
+    quality_directional_consistent: bool | None = None
+    eps_directional_consistent: bool | None = None
+    price_source: str | None = None
+
+
+class EarningsBacktestPayload(BaseModel):
+    window_sessions: int
+    quality_directional_consistency: Number = None
+    quality_total_windows: int
+    quality_consistent_windows: int
+    eps_directional_consistency: Number = None
+    eps_total_windows: int
+    eps_consistent_windows: int
+    windows: list[EarningsBacktestWindowPayload] = Field(default_factory=list)
+
+
+class EarningsPeerContextPayload(BaseModel):
+    peer_group_basis: Literal["market_industry", "market_sector"]
+    peer_group_size: int
+    quality_percentile: Number = None
+    eps_drift_percentile: Number = None
+    sector_group_size: int
+    sector_quality_percentile: Number = None
+    sector_eps_drift_percentile: Number = None
+
+
+class EarningsAlertPayload(BaseModel):
+    id: str
+    type: Literal["quality_regime_shift", "eps_drift_sign_flip", "segment_share_change"]
+    level: Literal["high", "medium", "low"]
+    title: str
+    detail: str
+    period_end: DateType
+
+
+class CompanyEarningsWorkspaceResponse(BaseModel):
+    company: CompanyPayload | None
+    earnings_releases: list[EarningsReleasePayload]
+    summary: EarningsSummaryPayload
+    model_points: list[EarningsModelPointPayload]
+    backtests: EarningsBacktestPayload
+    peer_context: EarningsPeerContextPayload
+    alerts: list[EarningsAlertPayload]
     refresh: RefreshState
     error: str | None = None
 
@@ -1571,6 +1669,81 @@ def company_earnings_summary(
     )
 
 
+@app.get("/api/companies/{ticker}/earnings/workspace", response_model=CompanyEarningsWorkspaceResponse)
+def company_earnings_workspace(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyEarningsWorkspaceResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEarningsWorkspaceResponse(
+            company=None,
+            earnings_releases=[],
+            summary=_build_earnings_summary([]),
+            model_points=[],
+            backtests=EarningsBacktestPayload(
+                window_sessions=3,
+                quality_directional_consistency=None,
+                quality_total_windows=0,
+                quality_consistent_windows=0,
+                eps_directional_consistency=None,
+                eps_total_windows=0,
+                eps_consistent_windows=0,
+                windows=[],
+            ),
+            peer_context=EarningsPeerContextPayload(
+                peer_group_basis="market_sector",
+                peer_group_size=0,
+                quality_percentile=None,
+                eps_drift_percentile=None,
+                sector_group_size=0,
+                sector_quality_percentile=None,
+                sector_eps_drift_percentile=None,
+            ),
+            alerts=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+        )
+
+    earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
+    model_last_checked, model_cache_state = get_company_earnings_model_cache_status(session, snapshot.company.id)
+    earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
+    model_rows = get_company_earnings_model_points(session, snapshot.company.id)
+    refresh = _refresh_for_earnings_workspace(background_tasks, snapshot, earnings_cache_state, model_cache_state)
+
+    release_payload = [_serialize_earnings_release(release) for release in earnings_releases]
+    model_payload = [_serialize_earnings_model_point(point) for point in model_rows]
+    backtest_payload = EarningsBacktestPayload.model_validate(
+        build_earnings_directional_backtest(
+            model_rows,
+            earnings_releases,
+            get_company_price_history(session, snapshot.company.id),
+        )
+    )
+    latest_point = model_rows[-1] if model_rows else None
+    peer_payload = EarningsPeerContextPayload.model_validate(
+        build_earnings_peer_percentiles(session, snapshot.company, latest_point)
+    )
+    alert_profile = build_sector_alert_profile(session, snapshot.company)
+    alerts_payload = [EarningsAlertPayload.model_validate(item) for item in build_earnings_alerts(model_rows, profile=alert_profile)]
+
+    return CompanyEarningsWorkspaceResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, _merge_last_checked(earnings_last_checked, model_last_checked)),
+            last_checked_earnings=_merge_last_checked(earnings_last_checked, model_last_checked),
+        ),
+        earnings_releases=release_payload,
+        summary=_build_earnings_summary(release_payload),
+        model_points=model_payload,
+        backtests=backtest_payload,
+        peer_context=peer_payload,
+        alerts=alerts_payload,
+        refresh=refresh,
+    )
+
+
 @app.get("/api/insiders/{ticker}", response_model=InsiderAnalyticsResponse)
 def insider_analytics(
     ticker: str,
@@ -2498,6 +2671,21 @@ def _refresh_for_earnings(
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_earnings_workspace(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    earnings_cache_state: Literal["fresh", "stale", "missing"],
+    model_cache_state: Literal["fresh", "stale", "missing"],
+) -> RefreshState:
+    if snapshot.cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+    if earnings_cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=earnings_cache_state)
+    if model_cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=model_cache_state)
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _get_cached_search_response(query: str) -> CompanySearchResponse | None:
     now = time.monotonic()
     with _search_response_cache_lock:
@@ -2811,6 +2999,47 @@ def _serialize_earnings_release(release: EarningsRelease) -> EarningsReleasePayl
         dividend_per_share=release.dividend_per_share,
         highlights=list(release.highlights or []),
         parse_state=release.parse_state,
+    )
+
+
+def _serialize_earnings_model_point(point: EarningsModelPoint) -> EarningsModelPointPayload:
+    explainability = dict(point.explainability or {})
+    raw_inputs = explainability.get("inputs", [])
+    inputs_payload = [
+        EarningsModelInputPayload.model_validate(item)
+        for item in raw_inputs
+        if isinstance(item, dict)
+    ]
+    explainability_payload = EarningsModelExplainabilityPayload(
+        formula_version=str(explainability.get("formula_version") or "sec_earnings_intel_v1"),
+        period_end=str(explainability.get("period_end") or point.period_end.isoformat()),
+        filing_type=str(explainability.get("filing_type") or point.filing_type),
+        inputs=inputs_payload,
+        component_values=dict(explainability.get("component_values") or {}),
+        proxy_usage=dict(explainability.get("proxy_usage") or {}),
+        segment_deltas=list(explainability.get("segment_deltas") or []),
+        release_statement_coverage=dict(explainability.get("release_statement_coverage") or {}),
+        quality_formula=str(explainability.get("quality_formula") or ""),
+        eps_drift_formula=str(explainability.get("eps_drift_formula") or ""),
+        momentum_formula=str(explainability.get("momentum_formula") or ""),
+    )
+
+    return EarningsModelPointPayload(
+        period_start=point.period_start,
+        period_end=point.period_end,
+        filing_type=point.filing_type,
+        quality_score=point.quality_score,
+        quality_score_delta=point.quality_score_delta,
+        eps_drift=point.eps_drift,
+        earnings_momentum_drift=point.earnings_momentum_drift,
+        segment_contribution_delta=point.segment_contribution_delta,
+        release_statement_coverage_ratio=point.release_statement_coverage_ratio,
+        fallback_ratio=point.fallback_ratio,
+        stale_period_warning=point.stale_period_warning,
+        quality_flags=list(point.quality_flags or []),
+        source_statement_ids=[int(value) for value in list(point.source_statement_ids or [])],
+        source_release_ids=[int(value) for value in list(point.source_release_ids or [])],
+        explainability=explainability_payload,
     )
 
 

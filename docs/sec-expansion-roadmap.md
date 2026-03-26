@@ -116,6 +116,11 @@ Current sprint note (PR1 in progress):
 
 - Add cache-first derived metrics timeseries route from canonical SEC financial cache + cached price history with typed provenance/quality fields and a financials-page panel visualization.
 
+Earnings sprint update (2026-03-26):
+
+- Shipped cache-first `/api/companies/{ticker}/earnings/workspace` with persisted SEC-heavy earnings model points, explainability payloads (SEC tags + periods + proxy usage), directional backtests (cached price windows), peer-relative percentiles, and threshold alerts.
+- Wired earnings model recomputation into the existing refresh queue/SSE flow and preserved non-blocking cache-first response behavior.
+
 1. Ship SEC-heavy earnings model panel on `/company/[ticker]/earnings` (quality score trend, EPS drift, segment contribution delta) using cached 10-Q/10-K statement data.
 2. Improve parser precision for Item 2.02 exhibits so release-level revenue/EPS coverage rises and fallback usage declines.
 3. Add model diagnostics chips (coverage ratio, fallback ratio, stale period warning) so users know confidence level at a glance.

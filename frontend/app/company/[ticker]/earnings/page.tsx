@@ -12,9 +12,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyEarnings, getCompanyEarningsSummary } from "@/lib/api";
+import { getCompanyEarningsWorkspace } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
-import type { CompanyEarningsResponse, CompanyEarningsSummaryResponse, EarningsReleasePayload, FinancialPayload } from "@/lib/types";
+import type { CompanyEarningsWorkspaceResponse, EarningsAlertPayload, EarningsModelPointPayload, EarningsReleasePayload, FinancialPayload } from "@/lib/types";
 
 const EARNINGS_POLL_INTERVAL_MS = 3000;
 const SEGMENT_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7", "#7CFFCB", "#64D2FF"];
@@ -34,8 +34,7 @@ export default function CompanyEarningsPage() {
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker);
-  const [releasesData, setReleasesData] = useState<CompanyEarningsResponse | null>(null);
-  const [summaryData, setSummaryData] = useState<CompanyEarningsSummaryResponse | null>(null);
+  const [workspaceData, setWorkspaceData] = useState<CompanyEarningsWorkspaceResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedReleaseKey, setSelectedReleaseKey] = useState<string | null>(null);
@@ -48,29 +47,17 @@ export default function CompanyEarningsPage() {
       }
       setLoadError(null);
 
-      const [releasesResult, summaryResult] = await Promise.allSettled([
-        getCompanyEarnings(ticker),
-        getCompanyEarningsSummary(ticker)
-      ]);
+      const result = await Promise.allSettled([getCompanyEarningsWorkspace(ticker)]);
 
       const errors: string[] = [];
 
-      if (releasesResult.status === "fulfilled") {
-        setReleasesData(releasesResult.value);
-        if (releasesResult.value.error) {
-          errors.push(releasesResult.value.error);
+      if (result[0].status === "fulfilled") {
+        setWorkspaceData(result[0].value);
+        if (result[0].value.error) {
+          errors.push(result[0].value.error);
         }
       } else {
-        errors.push(asErrorMessage(releasesResult.reason, "Unable to load earnings releases"));
-      }
-
-      if (summaryResult.status === "fulfilled") {
-        setSummaryData(summaryResult.value);
-        if (summaryResult.value.error) {
-          errors.push(summaryResult.value.error);
-        }
-      } else {
-        errors.push(asErrorMessage(summaryResult.reason, "Unable to load earnings summary"));
+        errors.push(asErrorMessage(result[0].reason, "Unable to load earnings workspace"));
       }
 
       setLoadError(errors.length ? errors.join(" · ") : null);
@@ -102,7 +89,7 @@ export default function CompanyEarningsPage() {
     };
   }, [loadEarningsData, reloadKey]);
 
-  const releases = useMemo(() => releasesData?.earnings_releases ?? [], [releasesData?.earnings_releases]);
+  const releases = useMemo(() => workspaceData?.earnings_releases ?? [], [workspaceData?.earnings_releases]);
   const sortedReleases = useMemo(
     () => [...releases].sort((left, right) => getReleaseSortKey(right).localeCompare(getReleaseSortKey(left))),
     [releases]
@@ -113,15 +100,18 @@ export default function CompanyEarningsPage() {
     () => displayReleases.find((release) => getReleaseKey(release) === selectedReleaseKey) ?? displayReleases[0] ?? null,
     [displayReleases, selectedReleaseKey]
   );
-  const effectiveRefreshState = releasesData?.refresh ?? summaryData?.refresh ?? refreshState;
-  const pageCompany = company ?? releasesData?.company ?? summaryData?.company ?? null;
-  const summary = summaryData?.summary;
+  const effectiveRefreshState = workspaceData?.refresh ?? refreshState;
+  const pageCompany = company ?? workspaceData?.company ?? null;
+  const summary = workspaceData?.summary;
   const trackedJobId = effectiveRefreshState?.job_id;
   const fallbackTrendPoints = useMemo(() => buildFallbackTrendPoints(financials), [financials]);
-  const secModelPoints = useMemo(() => buildSecModelPoints(financials), [financials]);
+  const secModelPoints = useMemo(() => buildSecModelPointsFromWorkspace(workspaceData?.model_points ?? []), [workspaceData?.model_points]);
   const secModelWindow = useMemo(() => secModelPoints.slice(-8), [secModelPoints]);
   const latestSecModelPoint = secModelPoints.at(-1) ?? null;
-  const segmentContributionRows = useMemo(() => buildSegmentContributionRows(financials), [financials]);
+  const segmentContributionRows = useMemo(() => buildSegmentContributionRowsFromWorkspace(workspaceData?.model_points ?? []), [workspaceData?.model_points]);
+  const alerts = workspaceData?.alerts ?? [];
+  const peerContext = workspaceData?.peer_context ?? null;
+  const backtests = workspaceData?.backtests ?? null;
 
   useEffect(() => {
     if (!trackedJobId) {
@@ -133,20 +123,16 @@ export default function CompanyEarningsPage() {
 
     const pollEarnings = async () => {
       try {
-        const [releasesResponse, summaryResponse] = await Promise.all([
-          getCompanyEarnings(ticker),
-          getCompanyEarningsSummary(ticker)
-        ]);
+        const response = await getCompanyEarningsWorkspace(ticker);
 
         if (cancelled) {
           return;
         }
 
-        setReleasesData(releasesResponse);
-        setSummaryData(summaryResponse);
-        setLoadError([releasesResponse.error, summaryResponse.error].filter(Boolean).join(" · ") || null);
+        setWorkspaceData(response);
+        setLoadError(response.error || null);
 
-        const refreshComplete = !releasesResponse.refresh.job_id && !summaryResponse.refresh.job_id;
+        const refreshComplete = !response.refresh.job_id;
         if (refreshComplete && intervalId !== null) {
           window.clearInterval(intervalId);
           intervalId = null;
@@ -280,6 +266,9 @@ export default function CompanyEarningsPage() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <span className="pill">Latest quality score {latestSecModelPoint ? `${latestSecModelPoint.qualityScore.toFixed(1)}/100` : "\u2014"}</span>
               <span className="pill">Latest EPS drift {latestSecModelPoint ? formatEpsDelta(latestSecModelPoint.epsDelta) : "\u2014"}</span>
+              <span className="pill">Coverage ratio {latestSecModelPoint?.coverageRatio != null ? formatPercent(latestSecModelPoint.coverageRatio) : "\u2014"}</span>
+              <span className="pill">Fallback ratio {latestSecModelPoint?.fallbackRatio != null ? formatPercent(latestSecModelPoint.fallbackRatio) : "\u2014"}</span>
+              <span className="pill">Stale warning {latestSecModelPoint?.stalePeriodWarning ? "Yes" : "No"}</span>
               <span className="pill">Segment rows {segmentContributionRows.length.toLocaleString()}</span>
               <span className="pill">Source: SEC financial statements</span>
             </div>
@@ -448,6 +437,93 @@ export default function CompanyEarningsPage() {
         )}
       </Panel>
 
+      <Panel title="Peer-Relative Context" subtitle="Percentile view of quality and EPS drift versus sector and peer group">
+        {peerContext ? (
+          <div className="metric-grid">
+            <Metric label="Peer basis" value={peerContext.peer_group_basis.replace("_", " ")} />
+            <Metric label="Peer group size" value={peerContext.peer_group_size.toLocaleString()} />
+            <Metric label="Quality percentile" value={peerContext.quality_percentile != null ? formatPercent(peerContext.quality_percentile) : "\u2014"} />
+            <Metric label="EPS drift percentile" value={peerContext.eps_drift_percentile != null ? formatPercent(peerContext.eps_drift_percentile) : "\u2014"} />
+            <Metric label="Sector group size" value={peerContext.sector_group_size.toLocaleString()} />
+            <Metric label="Sector quality percentile" value={peerContext.sector_quality_percentile != null ? formatPercent(peerContext.sector_quality_percentile) : "\u2014"} />
+            <Metric label="Sector EPS percentile" value={peerContext.sector_eps_drift_percentile != null ? formatPercent(peerContext.sector_eps_drift_percentile) : "\u2014"} />
+          </div>
+        ) : (
+          <PanelEmptyState message="Peer-relative context is unavailable until model points are cached." />
+        )}
+      </Panel>
+
+      <Panel title="Directional Backtests" subtitle="Directional consistency around earnings filing windows using cached price history only">
+        {backtests ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="metric-grid">
+              <Metric label="Window" value={`${backtests.window_sessions} trading sessions`} />
+              <Metric
+                label="Quality consistency"
+                value={backtests.quality_directional_consistency != null ? formatPercent(backtests.quality_directional_consistency) : "\u2014"}
+              />
+              <Metric label="Quality windows" value={`${backtests.quality_consistent_windows}/${backtests.quality_total_windows}`} />
+              <Metric
+                label="EPS drift consistency"
+                value={backtests.eps_directional_consistency != null ? formatPercent(backtests.eps_directional_consistency) : "\u2014"}
+              />
+              <Metric label="EPS windows" value={`${backtests.eps_consistent_windows}/${backtests.eps_total_windows}`} />
+            </div>
+            <div className="text-muted" style={{ fontSize: 13 }}>
+              Price reaction uses cached daily bars only: close on filing date window start versus close after the configured post-event sessions.
+            </div>
+          </div>
+        ) : (
+          <PanelEmptyState message="Backtests will appear after model points and price windows are available." />
+        )}
+      </Panel>
+
+      <Panel title="Model Alerts" subtitle="Regime and threshold changes from SEC-heavy model series">
+        {alerts.length ? (
+          <div style={{ display: "grid", gap: 10 }}>
+            {alerts.map((alert) => (
+              <AlertRow key={alert.id} alert={alert} />
+            ))}
+          </div>
+        ) : (
+          <PanelEmptyState message="No quality regime shifts, EPS sign flips, or large segment-share changes were detected." />
+        )}
+      </Panel>
+
+      <Panel title="Explainability" subtitle="Exact SEC fields, periods, and fallback usage for latest model point">
+        {latestSecModelPoint?.explainability ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div className="text-muted" style={{ fontSize: 13 }}>
+              Formulas: {latestSecModelPoint.explainability.qualityFormula} | {latestSecModelPoint.explainability.epsDriftFormula}
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
+                <thead>
+                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
+                    <th align="left" style={{ padding: "8px 10px" }}>Field</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Value</th>
+                    <th align="left" style={{ padding: "8px 10px" }}>Period</th>
+                    <th align="left" style={{ padding: "8px 10px" }}>SEC tags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {latestSecModelPoint.explainability.inputs.map((input) => (
+                    <tr key={`${input.field}:${input.periodEnd}`}>
+                      <td style={{ padding: "10px" }}>{input.field.replace(/_/g, " ")}</td>
+                      <td style={{ padding: "10px", textAlign: "right" }}>{formatExplainValue(input.field, input.value)}</td>
+                      <td style={{ padding: "10px" }}>{formatDate(input.periodEnd)}</td>
+                      <td style={{ padding: "10px" }}>{input.secTags.length ? input.secTags.join(", ") : "\u2014"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <PanelEmptyState message="Explainability rows appear after at least two comparable SEC periods are cached." />
+        )}
+      </Panel>
+
       <Panel title="Earnings Releases" subtitle="Review each release with guidance, capital return, highlights, exhibit links, and parse status">
         {!loading && !workspaceLoading && sortedReleases.length ? (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
@@ -590,6 +666,30 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <span style={{ color: "var(--text)", fontSize: 13, textAlign: "right" }}>{value}</span>
     </div>
   );
+}
+
+function AlertRow({ alert }: { alert: EarningsAlertPayload }) {
+  const color = alert.level === "high" ? "#FF9E9E" : alert.level === "medium" ? "#FFD98D" : "#B7FFD5";
+  return (
+    <div className="metric-card" style={{ borderColor: color, display: "grid", gap: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div className="metric-label">{alert.title}</div>
+        <span className="pill" style={{ borderColor: color }}>{alert.level}</span>
+      </div>
+      <div style={{ color: "var(--text)", fontSize: 14 }}>{alert.detail}</div>
+      <div className="text-muted" style={{ fontSize: 12 }}>{formatDate(alert.period_end)}</div>
+    </div>
+  );
+}
+
+function formatExplainValue(field: string, value: number | null): string {
+  if (value == null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  if (field === "eps") {
+    return formatEps(value);
+  }
+  return formatCompactNumber(value);
 }
 
 function displayPeriod(release: EarningsReleasePayload): string {
@@ -755,18 +855,17 @@ type SecModelPoint = {
   key: string;
   label: string;
   filingType: string;
-  revenue: number | null;
-  netIncome: number | null;
-  operatingCashFlow: number | null;
-  freeCashFlow: number | null;
-  eps: number | null;
-  totalAssets: number | null;
-  fcfMargin: number | null;
-  cashConversion: number | null;
-  accrualRatio: number | null;
   qualityScore: number;
   epsDelta: number;
   epsDeltaPercent: number | null;
+  coverageRatio: number | null;
+  fallbackRatio: number | null;
+  stalePeriodWarning: boolean;
+  explainability: {
+    qualityFormula: string;
+    epsDriftFormula: string;
+    inputs: Array<{ field: string; value: number | null; periodEnd: string; secTags: string[] }>;
+  };
 };
 
 type SegmentContributionRow = {
@@ -780,127 +879,66 @@ type SegmentContributionRow = {
   color: string;
 };
 
-function buildSecModelPoints(financials: FinancialPayload[]): SecModelPoint[] {
-  const quarterly = financials.filter((statement) => ["10-Q", "6-K"].includes(statement.filing_type));
-  const annual = financials.filter((statement) => ["10-K", "20-F", "40-F"].includes(statement.filing_type));
-  const sourceRows = quarterly.length ? quarterly : annual;
-  const uniqueRows = dedupeByPeriod(sourceRows);
-  const sortedRows = [...uniqueRows]
-    .filter((statement) => statement.period_end && (statement.revenue != null || statement.eps != null || statement.net_income != null))
-    .sort((left, right) => (left.period_end || "").localeCompare(right.period_end || ""));
-
-  return sortedRows.map((statement, index) => {
-    const previous = index > 0 ? sortedRows[index - 1] : null;
-    const fcfMargin = safeRatio(statement.free_cash_flow, statement.revenue);
-    const cashConversion = safeRatio(statement.operating_cash_flow, statement.net_income);
-    const accrualRatio =
-      statement.total_assets != null && statement.total_assets !== 0 && statement.net_income != null && statement.operating_cash_flow != null
-        ? Math.abs(statement.net_income - statement.operating_cash_flow) / Math.abs(statement.total_assets)
-        : null;
-    const epsDelta =
-      statement.eps != null && previous?.eps != null
-        ? statement.eps - previous.eps
-        : 0;
-    const epsDeltaPercent = safeRatio(epsDelta, previous?.eps ?? null);
-
-    return {
-      key: `${statement.filing_type}:${statement.period_end}`,
-      label: formatDate(statement.period_end),
-      filingType: statement.filing_type,
-      revenue: statement.revenue,
-      netIncome: statement.net_income,
-      operatingCashFlow: statement.operating_cash_flow,
-      freeCashFlow: statement.free_cash_flow,
-      eps: statement.eps,
-      totalAssets: statement.total_assets,
-      fcfMargin,
-      cashConversion,
-      accrualRatio,
-      qualityScore: computeEarningsQualityScore(fcfMargin, cashConversion, accrualRatio),
-      epsDelta,
-      epsDeltaPercent
-    } satisfies SecModelPoint;
-  });
+function buildSecModelPointsFromWorkspace(modelPoints: EarningsModelPointPayload[]): SecModelPoint[] {
+  return [...modelPoints]
+    .sort((left, right) => (left.period_end || "").localeCompare(right.period_end || ""))
+    .map((point, index, rows) => {
+      const previous = index > 0 ? rows[index - 1] : null;
+      const epsDeltaPercent = safeRatio(point.eps_drift, previous?.eps_drift ?? null);
+      return {
+        key: `${point.filing_type}:${point.period_end}`,
+        label: formatDate(point.period_end),
+        filingType: point.filing_type,
+        qualityScore: point.quality_score ?? 0,
+        epsDelta: point.eps_drift ?? 0,
+        epsDeltaPercent,
+        coverageRatio: point.release_statement_coverage_ratio,
+        fallbackRatio: point.fallback_ratio,
+        stalePeriodWarning: point.stale_period_warning,
+        explainability: {
+          qualityFormula: point.explainability.quality_formula,
+          epsDriftFormula: point.explainability.eps_drift_formula,
+          inputs: point.explainability.inputs.map((input) => ({
+            field: input.field,
+            value: input.value,
+            periodEnd: input.period_end,
+            secTags: input.sec_tags,
+          })),
+        },
+      } satisfies SecModelPoint;
+    });
 }
 
-function buildSegmentContributionRows(financials: FinancialPayload[]): SegmentContributionRow[] {
-  const statementsWithSegments = financials.filter((statement) => statement.segment_breakdown.length > 0 && statement.revenue != null);
-  if (statementsWithSegments.length < 2) {
+function buildSegmentContributionRowsFromWorkspace(modelPoints: EarningsModelPointPayload[]): SegmentContributionRow[] {
+  const latest = [...modelPoints].sort((left, right) => (right.period_end || "").localeCompare(left.period_end || ""))[0];
+  if (!latest) {
     return [];
   }
 
-  const sorted = [...statementsWithSegments].sort((left, right) => (right.period_end || "").localeCompare(left.period_end || ""));
-  const latest = sorted[0];
-  const previous = sorted.find((statement) => statement.period_end !== latest.period_end) ?? sorted[1];
-  if (!latest || !previous) {
+  const segmentDeltas = latest.explainability.segment_deltas;
+  if (!Array.isArray(segmentDeltas) || !segmentDeltas.length) {
     return [];
   }
 
-  const prevMap = new Map(previous.segment_breakdown.map((segment) => [segment.segment_id, segment]));
-  const latestRevenueBase = latest.revenue && latest.revenue !== 0 ? Math.abs(latest.revenue) : null;
-  const previousRevenueBase = previous.revenue && previous.revenue !== 0 ? Math.abs(previous.revenue) : null;
-
-  return latest.segment_breakdown
-    .filter((segment) => segment.revenue != null)
-    .map((segment, index) => {
-      const latestRevenue = Math.abs(segment.revenue ?? 0);
-      const previousSegment = prevMap.get(segment.segment_id);
-      const previousRevenue = previousSegment?.revenue != null ? Math.abs(previousSegment.revenue) : null;
-      const share =
-        segment.share_of_revenue ??
-        (latestRevenueBase ? latestRevenue / latestRevenueBase : 0);
-      const previousShare =
-        previousSegment?.share_of_revenue ??
-        (previousRevenueBase && previousRevenue != null ? previousRevenue / previousRevenueBase : 0);
-
+  return segmentDeltas
+    .filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
+    .map((row, index) => {
+      const segmentName = String(row.segment_name ?? row.segment_id ?? "Unknown");
+      const share = typeof row.current_share === "number" ? row.current_share : 0;
+      const previousShare = typeof row.previous_share === "number" ? row.previous_share : 0;
+      const shareDelta = typeof row.delta === "number" ? row.delta : share - previousShare;
       return {
-        segmentId: segment.segment_id,
-        segmentName: segment.segment_name,
-        shortName: shortenLabel(segment.segment_name, 18),
-        revenue: segment.revenue ?? 0,
+        segmentId: String(row.segment_id ?? segmentName),
+        segmentName,
+        shortName: shortenLabel(segmentName, 18),
+        revenue: 0,
         share,
-        shareDelta: share - previousShare,
-        revenueDelta: previousRevenue != null ? latestRevenue - previousRevenue : null,
-        color: SEGMENT_COLORS[index % SEGMENT_COLORS.length]
+        shareDelta,
+        revenueDelta: null,
+        color: SEGMENT_COLORS[index % SEGMENT_COLORS.length],
       } satisfies SegmentContributionRow;
     })
     .sort((left, right) => Math.abs(right.shareDelta) - Math.abs(left.shareDelta));
-}
-
-function computeEarningsQualityScore(
-  fcfMargin: number | null,
-  cashConversion: number | null,
-  accrualRatio: number | null
-): number {
-  const components: number[] = [];
-
-  if (fcfMargin != null) {
-    components.push(scaleRange(fcfMargin, -0.08, 0.2));
-  }
-  if (cashConversion != null) {
-    components.push(scaleRange(cashConversion, 0.5, 1.5));
-  }
-  if (accrualRatio != null) {
-    components.push(scaleRangeInverse(accrualRatio, 0, 0.18));
-  }
-
-  if (!components.length) {
-    return 0;
-  }
-
-  return (components.reduce((sum, value) => sum + value, 0) / components.length) * 100;
-}
-
-function dedupeByPeriod(statements: FinancialPayload[]): FinancialPayload[] {
-  const seen = new Set<string>();
-  return statements.filter((statement) => {
-    const key = `${statement.filing_type}:${statement.period_end}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
 }
 
 function safeRatio(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
@@ -908,22 +946,6 @@ function safeRatio(numerator: number | null | undefined, denominator: number | n
     return null;
   }
   return numerator / denominator;
-}
-
-function scaleRange(value: number, min: number, max: number): number {
-  if (max <= min) {
-    return 0;
-  }
-  const scaled = (value - min) / (max - min);
-  return Math.max(0, Math.min(1, scaled));
-}
-
-function scaleRangeInverse(value: number, best: number, worst: number): number {
-  if (worst <= best) {
-    return 0;
-  }
-  const scaled = 1 - (value - best) / (worst - best);
-  return Math.max(0, Math.min(1, scaled));
 }
 
 function shortenLabel(value: string, maxLength: number): string {
