@@ -60,6 +60,25 @@ Current canonical source ids include:
 - Governance, filing events, earnings release signals, ownership, and capital-markets datasets are derived from official SEC filings.
 - Price-based overlays are supplemental and should never replace official filing-derived fundamentals.
 
+## Point-in-Time Semantics
+- Research routes may be queried with `as_of` to suppress data that would not have been visible at that timestamp.
+- Canonical SEC statements use filing acceptance time when available; otherwise they fall back to the statement period end as the visibility cutoff.
+- Financial restatement summaries use the amended filing acceptance time when available, then the filing date, so date-only `as_of` reviews include all SEC corrections known by the end of that day.
+- Price-backed inputs use the market observation date.
+- Risk-free-rate and macro assumptions use the latest published observation on or before the requested cutoff.
+- Fetch timestamps are stored separately from source observation timestamps so ingestion timing remains auditable without becoming the public market-visibility clock.
+- Date-only `as_of` values are interpreted as end-of-day UTC.
+
+## Amendment Lineage
+- Restatement records are persisted from official SEC companyfacts normalization and archived filing links; no non-official amendment source is introduced.
+- A restatement row can capture two related but distinct concepts: normalized statement value changes and companyfacts observation changes that did not move the final normalized value.
+- Confidence impact flags on restatement responses summarize whether an amended filing, a core metric revision, or a materially large change was detected.
+
+## Latest-vs-Prior Filing Comparison
+- The changes-since-last-filing service derives its comparison from cached canonical SEC statements for the latest filing and the prior comparable filing of the same filing type.
+- New risk indicators in that payload are computed from official filing metrics rather than supplemental market data.
+- Amended prior values in that payload are sourced from persisted financial restatement records, so amendment context stays auditable and point-in-time compatible.
+
 ## Provenance Contract
 Hot company payloads now expose:
 - `provenance[]`

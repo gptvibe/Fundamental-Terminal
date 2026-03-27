@@ -22,7 +22,7 @@ from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
-from app.models import BeneficialOwnershipReport, Company, EarningsRelease, FinancialStatement, Form144Filing, InsiderTrade
+from app.models import BeneficialOwnershipReport, Company, EarningsRelease, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -49,6 +49,7 @@ ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 INTERIM_FORMS = {"10-Q", "6-K"}
 CANONICAL_STATEMENT_TYPE = "canonical_xbrl"
 FILING_PARSER_STATEMENT_TYPE = "filing_parser"
+RESTATEMENT_TRACKED_FORMS = {"10-K", "10-Q"}
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -543,6 +544,7 @@ class FilingMetadata:
     form: str | None = None
     filing_date: date | None = None
     report_date: date | None = None
+    acceptance_datetime: datetime | None = None
     primary_document: str | None = None
     primary_doc_description: str | None = None
     items: str | None = None
@@ -554,6 +556,7 @@ class FactCandidate:
     accession_number: str
     form: str
     value: int | float
+    unit: str | None
     taxonomy: str
     tag: str
     tag_rank: int
@@ -583,11 +586,15 @@ class SegmentRevenueCandidate:
 @dataclass(slots=True)
 class NormalizedStatement:
     accession_number: str
+    form: str
     filing_type: str
+    filing_date: date | None
     period_start: date
     period_end: date
     source: str
+    filing_acceptance_at: datetime | None
     data: dict[str, Any]
+    selected_facts: dict[str, dict[str, Any]]
 
 
 @dataclass(slots=True)
@@ -778,6 +785,7 @@ class StatementAccumulator:
     filing_type: str
     filed_at: date | None = None
     report_date: date | None = None
+    filing_acceptance_at: datetime | None = None
     source: str = ""
     metric_candidates: dict[str, list[FactCandidate]] = field(default_factory=dict)
     segment_revenue_candidates: list[SegmentRevenueCandidate] = field(default_factory=list)
@@ -968,6 +976,7 @@ class EdgarClient:
                 form=_value_at(arrays.get("form"), position),
                 filing_date=_parse_date(_value_at(arrays.get("filingDate"), position)),
                 report_date=_parse_date(_value_at(arrays.get("reportDate"), position)),
+                acceptance_datetime=_parse_datetime_value(_value_at(arrays.get("acceptanceDateTime"), position)),
                 primary_document=_value_at(arrays.get("primaryDocument"), position),
                 primary_doc_description=_value_at(arrays.get("primaryDocDescription"), position),
                 items=_value_at(arrays.get("items"), position),
@@ -1315,6 +1324,7 @@ class EdgarNormalizer:
         data["debt_changes"] = None
         data["free_cash_flow"] = None
         data["segment_breakdown"] = []
+        selected_facts: dict[str, dict[str, Any]] = {}
 
         for metric, candidates in accumulator.metric_candidates.items():
             selected = _select_best_candidate(
@@ -1325,6 +1335,8 @@ class EdgarNormalizer:
                 target_duration_days=target_duration_days,
             )
             data[metric] = selected.value if selected is not None else None
+            if selected is not None:
+                selected_facts[metric] = _candidate_fact_metadata(selected)
 
         capex_candidate = _select_best_candidate(
             candidates=accumulator.capex_candidates,
@@ -1349,12 +1361,21 @@ class EdgarNormalizer:
         )
         if capex_candidate is not None:
             data["capex"] = _json_number(abs(capex_candidate.value))
+            selected_facts["capex"] = _candidate_fact_metadata(capex_candidate)
         if debt_issuance_candidate is not None or debt_repayment_candidate is not None:
             issuance_value = abs(debt_issuance_candidate.value) if debt_issuance_candidate is not None else 0
             repayment_value = abs(debt_repayment_candidate.value) if debt_repayment_candidate is not None else 0
             data["debt_changes"] = _json_number(issuance_value - repayment_value)
+            selected_facts["debt_changes"] = {
+                "issued": _candidate_fact_metadata(debt_issuance_candidate) if debt_issuance_candidate is not None else None,
+                "repaid": _candidate_fact_metadata(debt_repayment_candidate) if debt_repayment_candidate is not None else None,
+            }
         if data.get("operating_cash_flow") is not None and capex_candidate is not None:
             data["free_cash_flow"] = _json_number(data["operating_cash_flow"] - abs(capex_candidate.value))
+            selected_facts["free_cash_flow"] = {
+                "operating_cash_flow": selected_facts.get("operating_cash_flow"),
+                "capex": selected_facts.get("capex"),
+            }
         else:
             data["free_cash_flow"] = None
 
@@ -1385,11 +1406,15 @@ class EdgarNormalizer:
 
         return NormalizedStatement(
             accession_number=accumulator.accession_number,
+            form=_normalize_form_text(accumulator.filing_type),
             filing_type=filing_type,
+            filing_date=accumulator.filed_at,
             period_start=period_start,
             period_end=period_end,
             source=accumulator.source,
+            filing_acceptance_at=accumulator.filing_acceptance_at,
             data=data,
+            selected_facts=selected_facts,
         )
 
 
@@ -1619,6 +1644,12 @@ class EdgarIngestionService:
 
         reporter.step("database", "Saving to database...")
         statements_written = _upsert_statements(
+            session=session,
+            company=company,
+            normalized_statements=normalized_statements,
+            checked_at=checked_at,
+        )
+        _replace_financial_restatements(
             session=session,
             company=company,
             normalized_statements=normalized_statements,
@@ -3345,6 +3376,8 @@ def _upsert_statements(
             "data": statement.data,
             "source": statement.source,
             "last_updated": checked_at,
+            "filing_acceptance_at": statement.filing_acceptance_at,
+            "fetch_timestamp": checked_at,
             "last_checked": checked_at,
         }
         for statement in normalized_statements
@@ -3363,6 +3396,8 @@ def _upsert_statements(
                 (data_changed, statement.excluded.last_updated),
                 else_=FinancialStatement.last_updated,
             ),
+            "filing_acceptance_at": statement.excluded.filing_acceptance_at,
+            "fetch_timestamp": statement.excluded.fetch_timestamp,
             "last_checked": statement.excluded.last_checked,
             "filing_type": statement.excluded.filing_type,
         },
@@ -3390,6 +3425,7 @@ def _upsert_filing_parser_statements(
             "data": item.data,
             "source": item.source,
             "last_updated": checked_at,
+            "fetch_timestamp": checked_at,
             "last_checked": checked_at,
         }
         for item in parsed_insights
@@ -3408,12 +3444,254 @@ def _upsert_filing_parser_statements(
                 (data_changed, statement.excluded.last_updated),
                 else_=FinancialStatement.last_updated,
             ),
+            "fetch_timestamp": statement.excluded.fetch_timestamp,
             "last_checked": statement.excluded.last_checked,
             "filing_type": statement.excluded.filing_type,
         },
     )
     session.execute(statement)
     return len(payload)
+
+
+def _replace_financial_restatements(
+    session: Session,
+    company: Company,
+    normalized_statements: list[NormalizedStatement],
+    checked_at: datetime,
+) -> int:
+    session.execute(delete(FinancialRestatement).where(FinancialRestatement.company_id == company.id))
+
+    payload = _build_financial_restatement_payloads(company.id, normalized_statements, checked_at)
+    if not payload:
+        return 0
+
+    session.execute(insert(FinancialRestatement).values(payload))
+    return len(payload)
+
+
+def _build_financial_restatement_payloads(
+    company_id: int,
+    normalized_statements: list[NormalizedStatement],
+    checked_at: datetime,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, date, date], list[NormalizedStatement]] = {}
+    for statement in normalized_statements:
+        if statement.filing_type not in RESTATEMENT_TRACKED_FORMS:
+            continue
+        grouped.setdefault((statement.filing_type, statement.period_start, statement.period_end), []).append(statement)
+
+    payloads: list[dict[str, Any]] = []
+    for statements in grouped.values():
+        ordered = sorted(statements, key=_normalized_statement_sort_key)
+        previous: NormalizedStatement | None = None
+        for current in ordered:
+            is_amendment = _is_amended_form(current.form)
+            normalized_changes = _build_normalized_data_changes(previous, current)
+            companyfacts_changes = _build_companyfacts_changes(previous, current)
+            changed_metric_keys = sorted(
+                {
+                    *(str(item.get("metric_key") or "") for item in normalized_changes),
+                    *(
+                        str(item.get("metric_key") or "")
+                        for item in companyfacts_changes
+                        if bool(item.get("value_changed"))
+                    ),
+                }
+                - {""}
+            )
+            if previous is None and not is_amendment:
+                previous = current
+                continue
+            if previous is not None and not is_amendment and not changed_metric_keys:
+                previous = current
+                continue
+
+            payloads.append(
+                {
+                    "company_id": company_id,
+                    "statement_type": CANONICAL_STATEMENT_TYPE,
+                    "filing_type": current.filing_type,
+                    "form": current.form,
+                    "accession_number": current.accession_number,
+                    "previous_accession_number": previous.accession_number if previous is not None else None,
+                    "period_start": current.period_start,
+                    "period_end": current.period_end,
+                    "filing_date": current.filing_date,
+                    "previous_filing_date": previous.filing_date if previous is not None else None,
+                    "filing_acceptance_at": current.filing_acceptance_at,
+                    "previous_filing_acceptance_at": previous.filing_acceptance_at if previous is not None else None,
+                    "source": current.source,
+                    "previous_source": previous.source if previous is not None else None,
+                    "is_amendment": is_amendment,
+                    "detection_kind": "amended_filing" if is_amendment else "companyfacts_revision",
+                    "changed_metric_keys": changed_metric_keys,
+                    "companyfacts_changes": companyfacts_changes,
+                    "normalized_data_changes": normalized_changes,
+                    "confidence_impact": _build_restatement_confidence_impact(
+                        changed_metric_keys=changed_metric_keys,
+                        normalized_changes=normalized_changes,
+                        companyfacts_changes=companyfacts_changes,
+                        is_amendment=is_amendment,
+                    ),
+                    "last_updated": checked_at,
+                    "last_checked": checked_at,
+                }
+            )
+            previous = current
+
+    return payloads
+
+
+def _build_normalized_data_changes(
+    previous: NormalizedStatement | None,
+    current: NormalizedStatement,
+) -> list[dict[str, Any]]:
+    if previous is None:
+        return []
+
+    changes: list[dict[str, Any]] = []
+    previous_data = previous.data or {}
+    current_data = current.data or {}
+    for metric_key in sorted({*previous_data.keys(), *current_data.keys()} - {"segment_breakdown"}):
+        previous_value = previous_data.get(metric_key)
+        current_value = current_data.get(metric_key)
+        if previous_value == current_value:
+            continue
+        if isinstance(previous_value, (dict, list)) or isinstance(current_value, (dict, list)):
+            continue
+        changes.append(
+            {
+                "metric_key": metric_key,
+                "previous_value": previous_value,
+                "current_value": current_value,
+                "delta": _metric_delta(previous_value, current_value),
+                "relative_change": _relative_change(previous_value, current_value),
+                "direction": _change_direction(previous_value, current_value),
+            }
+        )
+    return changes
+
+
+def _build_companyfacts_changes(
+    previous: NormalizedStatement | None,
+    current: NormalizedStatement,
+) -> list[dict[str, Any]]:
+    previous_facts = previous.selected_facts if previous is not None else {}
+    previous_data = previous.data if previous is not None else {}
+    current_facts = current.selected_facts or {}
+    changes: list[dict[str, Any]] = []
+    for metric_key in sorted({*previous_facts.keys(), *current_facts.keys()}):
+        previous_fact = previous_facts.get(metric_key)
+        current_fact = current_facts.get(metric_key)
+        if previous_fact == current_fact:
+            continue
+        changes.append(
+            {
+                "metric_key": metric_key,
+                "previous_fact": previous_fact,
+                "current_fact": current_fact,
+                "value_changed": previous_data.get(metric_key) != (current.data or {}).get(metric_key),
+            }
+        )
+    return changes
+
+
+def _build_restatement_confidence_impact(
+    *,
+    changed_metric_keys: list[str],
+    normalized_changes: list[dict[str, Any]],
+    companyfacts_changes: list[dict[str, Any]],
+    is_amendment: bool,
+) -> dict[str, Any]:
+    core_metrics = {"revenue", "operating_income", "net_income", "operating_cash_flow", "free_cash_flow", "eps"}
+    flags = {"restatement_detected"}
+    if is_amendment:
+        flags.add("amended_sec_filing")
+    if normalized_changes:
+        flags.add("normalized_statement_changed")
+    if companyfacts_changes:
+        flags.add("companyfacts_observation_changed")
+    if any(metric in core_metrics for metric in changed_metric_keys):
+        flags.add("core_metric_changed")
+
+    relative_moves = [
+        abs(float(value))
+        for value in (item.get("relative_change") for item in normalized_changes)
+        if isinstance(value, (int, float))
+    ]
+    largest_relative_change = max(relative_moves, default=None)
+    if largest_relative_change is not None and largest_relative_change >= 0.1:
+        flags.add("material_metric_change")
+
+    severity = "low"
+    if "material_metric_change" in flags or {"revenue", "net_income", "eps"} & set(changed_metric_keys):
+        severity = "high"
+    elif normalized_changes or companyfacts_changes:
+        severity = "medium"
+
+    return {
+        "severity": severity,
+        "flags": sorted(flags),
+        "largest_relative_change": largest_relative_change,
+        "changed_metric_count": len(changed_metric_keys),
+    }
+
+
+def _normalized_statement_sort_key(statement: NormalizedStatement) -> tuple[datetime, date, str]:
+    return (
+        _normalized_statement_effective_at(statement),
+        statement.period_end,
+        statement.accession_number,
+    )
+
+
+def _normalized_statement_effective_at(statement: NormalizedStatement) -> datetime:
+    if statement.filing_acceptance_at is not None:
+        return statement.filing_acceptance_at
+    if statement.filing_date is not None:
+        return datetime.combine(statement.filing_date, datetime.max.time(), tzinfo=timezone.utc)
+    return datetime.combine(statement.period_end, datetime.max.time(), tzinfo=timezone.utc)
+
+
+def _candidate_fact_metadata(candidate: FactCandidate) -> dict[str, Any]:
+    return {
+        "accession_number": candidate.accession_number,
+        "form": candidate.form,
+        "taxonomy": candidate.taxonomy,
+        "tag": candidate.tag,
+        "unit": candidate.unit,
+        "filed_at": candidate.filed_at,
+        "period_start": candidate.period_start,
+        "period_end": candidate.period_end,
+        "value": candidate.value,
+    }
+
+
+def _metric_delta(previous_value: Any, current_value: Any) -> int | float | None:
+    if not isinstance(previous_value, (int, float)) or not isinstance(current_value, (int, float)):
+        return None
+    return _json_number(current_value - previous_value)
+
+
+def _relative_change(previous_value: Any, current_value: Any) -> float | None:
+    if not isinstance(previous_value, (int, float)) or not isinstance(current_value, (int, float)):
+        return None
+    if previous_value == 0:
+        return None
+    return float((current_value - previous_value) / abs(previous_value))
+
+
+def _change_direction(previous_value: Any, current_value: Any) -> str:
+    if previous_value is None and current_value is not None:
+        return "added"
+    if previous_value is not None and current_value is None:
+        return "removed"
+    if isinstance(previous_value, (int, float)) and isinstance(current_value, (int, float)):
+        if current_value > previous_value:
+            return "increase"
+        if current_value < previous_value:
+            return "decrease"
+    return "changed"
 
 
 def _touch_company_statements(session: Session, company_id: int, checked_at: datetime) -> None:
@@ -3443,6 +3721,7 @@ def _new_accumulator(
         filing_type=filing_type,
         filed_at=filing_metadata.filing_date if filing_metadata else None,
         report_date=filing_metadata.report_date if filing_metadata else None,
+        filing_acceptance_at=filing_metadata.acceptance_datetime if filing_metadata else None,
         source=source,
     )
 
@@ -3467,8 +3746,8 @@ def _build_fact_candidate(
         return None
 
     filing_metadata = filing_index.get(accession_number)
-    form = _base_form(observation.get("form") or (filing_metadata.form if filing_metadata else None))
-    if form not in SUPPORTED_FORMS:
+    form = _normalize_form_text(observation.get("form") or (filing_metadata.form if filing_metadata else None))
+    if _base_form(form) not in SUPPORTED_FORMS:
         return None
 
     value = observation.get("val")
@@ -3480,6 +3759,7 @@ def _build_fact_candidate(
         accession_number=accession_number,
         form=form,
         value=_json_number(value),
+        unit=str(observation.get("unit") or "").strip() or None,
         taxonomy=taxonomy,
         tag=tag,
         tag_rank=tag_rank,
@@ -3501,8 +3781,8 @@ def _build_segment_revenue_candidate(
         return None
 
     filing_metadata = filing_index.get(accession_number)
-    form = _base_form(observation.get("form") or (filing_metadata.form if filing_metadata else None))
-    if form not in SUPPORTED_FORMS:
+    form = _normalize_form_text(observation.get("form") or (filing_metadata.form if filing_metadata else None))
+    if _base_form(form) not in SUPPORTED_FORMS:
         return None
 
     value = observation.get("val")
@@ -3866,7 +4146,7 @@ def _iter_monetary_observations(fact_payload: dict[str, Any]) -> list[dict[str, 
         unit_observations = units_root.get(unit)
         if not isinstance(unit_observations, list):
             continue
-        observations.extend(observation for observation in unit_observations if isinstance(observation, dict))
+        observations.extend({**observation, "unit": unit} for observation in unit_observations if isinstance(observation, dict))
 
     return observations
 
@@ -3891,7 +4171,7 @@ def _iter_ratio_observations(fact_payload: dict[str, Any]) -> list[dict[str, Any
         unit_observations = units_root.get(unit)
         if not isinstance(unit_observations, list):
             continue
-        observations.extend(observation for observation in unit_observations if isinstance(observation, dict))
+        observations.extend({**observation, "unit": unit} for observation in unit_observations if isinstance(observation, dict))
 
     return observations
 
@@ -3914,7 +4194,7 @@ def _iter_share_observations(fact_payload: dict[str, Any]) -> list[dict[str, Any
         unit_observations = units_root.get(unit)
         if not isinstance(unit_observations, list):
             continue
-        observations.extend(observation for observation in unit_observations if isinstance(observation, dict))
+        observations.extend({**observation, "unit": unit} for observation in unit_observations if isinstance(observation, dict))
 
     return observations
 
@@ -4192,15 +4472,51 @@ def _build_filing_source_url(cik: str, accession_number: str, primary_document: 
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json#accn={accession_number}"
 
 
+def _parse_datetime_value(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    normalized = cleaned.replace("Z", "+00:00")
+    for pattern in ("%Y-%m-%dT%H:%M:%S%z", "%Y%m%d%H%M%S"):
+        try:
+            parsed = datetime.strptime(normalized, pattern)
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _item_tokens(value: str | None) -> set[str]:
     normalized = (value or "").replace(" ", "")
     return {token for token in normalized.split(",") if token}
 
 
+def _normalize_form_text(value: str | None) -> str:
+    return str(value or "").strip().upper()
+
+
+def _is_amended_form(value: str | None) -> bool:
+    normalized = _normalize_form_text(value)
+    return normalized.endswith("/A") or normalized.endswith("-A")
+
+
 def _base_form(value: str | None) -> str:
-    if not value:
+    normalized = _normalize_form_text(value)
+    if not normalized:
         return ""
-    return value.split("/")[0].upper()
+    if normalized.endswith("/A") or normalized.endswith("-A"):
+        return normalized[:-2]
+    return normalized.split("/")[0]
 
 
 def _parse_date(value: Any) -> date | None:

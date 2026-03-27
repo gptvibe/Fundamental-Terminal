@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import case, func, or_, select
@@ -18,6 +18,7 @@ from app.models import (
     EarningsRelease,
     ExecutiveCompensation,
     FilingEvent,
+    FinancialRestatement,
     FinancialStatement,
     Form144Filing,
     InsiderTrade,
@@ -217,6 +218,42 @@ def get_company_financials(session: Session, company_id: int) -> list[FinancialS
     return list(session.execute(statement).scalars())
 
 
+def get_company_financial_restatements(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 200,
+) -> list[FinancialRestatement]:
+    statement = (
+        select(FinancialRestatement)
+        .where(FinancialRestatement.company_id == company_id)
+        .order_by(
+            FinancialRestatement.filing_acceptance_at.desc().nullslast(),
+            FinancialRestatement.filing_date.desc().nullslast(),
+            FinancialRestatement.period_end.desc(),
+            FinancialRestatement.id.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
+def select_point_in_time_financials(
+    financials: list[FinancialStatement],
+    as_of: datetime,
+) -> list[FinancialStatement]:
+    visible: dict[tuple[date, str], FinancialStatement] = {}
+    for statement in financials:
+        effective_at = _statement_effective_at(statement)
+        if effective_at is None or effective_at > as_of:
+            continue
+        key = (statement.period_end, statement.filing_type)
+        current = visible.get(key)
+        if current is None or _statement_sort_key(statement) > _statement_sort_key(current):
+            visible[key] = statement
+    return sorted(visible.values(), key=lambda item: (item.period_end, item.filing_type), reverse=True)
+
+
 def get_company_filing_insights(
     session: Session,
     company_id: int,
@@ -289,6 +326,28 @@ def _config_matches(input_periods: Any, expected: dict[str, Any]) -> bool:
     return False
 
 
+def _statement_effective_at(statement: FinancialStatement) -> datetime | None:
+    acceptance_at = getattr(statement, "filing_acceptance_at", None)
+    if acceptance_at is not None:
+        return _normalize_datetime(acceptance_at)
+    period_end = getattr(statement, "period_end", None)
+    if period_end is None:
+        return None
+    return datetime.combine(period_end, time.max, tzinfo=timezone.utc)
+
+
+def _statement_sort_key(statement: FinancialStatement) -> tuple[datetime, datetime, int]:
+    return (
+        _statement_effective_at(statement) or datetime.min.replace(tzinfo=timezone.utc),
+        _normalize_datetime(getattr(statement, "last_updated", None)) or datetime.min.replace(tzinfo=timezone.utc),
+        int(getattr(statement, "id", 0) or 0),
+    )
+
+
+def _price_observation_at(trade_date: date) -> datetime:
+    return datetime.combine(trade_date, time.max, tzinfo=timezone.utc)
+
+
 def get_company_price_history(session: Session, company_id: int) -> list[PriceHistory]:
     statement = (
         select(PriceHistory)
@@ -296,6 +355,15 @@ def get_company_price_history(session: Session, company_id: int) -> list[PriceHi
         .order_by(PriceHistory.trade_date.asc())
     )
     return list(session.execute(statement).scalars())
+
+
+def filter_price_history_as_of(price_history: list[PriceHistory], as_of: datetime) -> list[PriceHistory]:
+    return [point for point in price_history if _price_observation_at(point.trade_date) <= as_of]
+
+
+def latest_price_as_of(price_history: list[PriceHistory], as_of: datetime) -> PriceHistory | None:
+    visible = filter_price_history_as_of(price_history, as_of)
+    return visible[-1] if visible else None
 
 
 def get_company_derived_metric_points(

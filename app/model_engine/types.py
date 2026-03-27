@@ -16,6 +16,8 @@ class FinancialPoint:
     source: str
     last_updated: datetime
     data: dict[str, Number]
+    filing_acceptance_at: datetime | None = None
+    fetch_timestamp: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,8 @@ class MarketSnapshot:
     latest_price: float | None
     price_date: date | None
     price_source: str | None
+    observation_timestamp: datetime | None = None
+    fetch_timestamp: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +39,7 @@ class CompanyDataset:
     market_industry: str | None
     market_snapshot: MarketSnapshot | None
     financials: tuple[FinancialPoint, ...]
+    as_of_date: date | None = None
 
 
 ModelCallable = Callable[[CompanyDataset], dict[str, Any]]

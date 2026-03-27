@@ -25,7 +25,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "reason": "Need at least two annual statements for ROIC trend",
         }
 
-    risk_free = get_latest_risk_free_rate()
+    risk_free = get_latest_risk_free_rate(dataset.as_of_date)
     capital_cost_proxy = risk_free.rate_used + 0.045
 
     trend: list[dict[str, object]] = []

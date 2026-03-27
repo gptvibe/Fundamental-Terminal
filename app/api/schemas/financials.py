@@ -201,5 +201,181 @@ class CompanyFilingInsightsResponse(BaseModel):
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
+class FilingComparisonReferencePayload(BaseModel):
+    accession_number: str | None = None
+    filing_type: str
+    statement_type: str
+    period_start: DateType
+    period_end: DateType
+    source: str
+    last_updated: datetime
+    last_checked: datetime
+    filing_acceptance_at: datetime | None = None
+    fetch_timestamp: datetime | None = None
+
+
+class FilingComparisonMetricDeltaPayload(BaseModel):
+    metric_key: str
+    label: str
+    unit: Literal["usd", "usd_per_share", "shares", "ratio"]
+    previous_value: Number = None
+    current_value: Number = None
+    delta: Number = None
+    relative_change: float | None = None
+    direction: Literal["added", "removed", "increase", "decrease", "changed"]
+
+
+class FilingComparisonRiskIndicatorPayload(BaseModel):
+    indicator_key: str
+    label: str
+    severity: Literal["medium", "high"]
+    description: str
+    current_value: Number = None
+    previous_value: Number = None
+
+
+class FilingComparisonSegmentShiftPayload(BaseModel):
+    segment_id: str
+    segment_name: str
+    kind: Literal["business", "geographic", "other"] = "other"
+    current_revenue: Number = None
+    previous_revenue: Number = None
+    revenue_delta: Number = None
+    current_share_of_revenue: float | None = None
+    previous_share_of_revenue: float | None = None
+    share_delta: float | None = None
+    direction: Literal["added", "removed", "increase", "decrease", "changed"]
+
+
+class FilingComparisonAmendedValuePayload(BaseModel):
+    metric_key: str
+    label: str
+    previous_value: Number = None
+    amended_value: Number = None
+    delta: Number = None
+    relative_change: float | None = None
+    direction: Literal["added", "removed", "increase", "decrease", "changed"]
+    accession_number: str | None = None
+    form: str | None = None
+    detection_kind: Literal["amended_filing", "companyfacts_revision"]
+    amended_at: datetime | None = None
+    source: str
+    confidence_severity: Literal["low", "medium", "high"]
+    confidence_flags: list[str] = Field(default_factory=list)
+
+
+class ChangesSinceLastFilingSummaryPayload(BaseModel):
+    filing_type: str | None = None
+    current_period_start: DateType | None = None
+    current_period_end: DateType | None = None
+    previous_period_start: DateType | None = None
+    previous_period_end: DateType | None = None
+    metric_delta_count: int = 0
+    new_risk_indicator_count: int = 0
+    segment_shift_count: int = 0
+    share_count_change_count: int = 0
+    capital_structure_change_count: int = 0
+    amended_prior_value_count: int = 0
+
+
+class CompanyChangesSinceLastFilingResponse(ProvenanceEnvelope):
+    company: CompanyPayload | None
+    current_filing: FilingComparisonReferencePayload | None = None
+    previous_filing: FilingComparisonReferencePayload | None = None
+    summary: ChangesSinceLastFilingSummaryPayload
+    metric_deltas: list[FilingComparisonMetricDeltaPayload] = Field(default_factory=list)
+    new_risk_indicators: list[FilingComparisonRiskIndicatorPayload] = Field(default_factory=list)
+    segment_shifts: list[FilingComparisonSegmentShiftPayload] = Field(default_factory=list)
+    share_count_changes: list[FilingComparisonMetricDeltaPayload] = Field(default_factory=list)
+    capital_structure_changes: list[FilingComparisonMetricDeltaPayload] = Field(default_factory=list)
+    amended_prior_values: list[FilingComparisonAmendedValuePayload] = Field(default_factory=list)
+    refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+
+
+class FinancialRestatementFactPayload(BaseModel):
+    accession_number: str | None = None
+    form: str | None = None
+    taxonomy: str | None = None
+    tag: str | None = None
+    unit: str | None = None
+    filed_at: DateType | None = None
+    period_start: DateType | None = None
+    period_end: DateType | None = None
+    value: Number = None
+
+
+class FinancialRestatementMetricChangePayload(BaseModel):
+    metric_key: str
+    previous_value: Number = None
+    current_value: Number = None
+    delta: Number = None
+    relative_change: float | None = None
+    direction: Literal["added", "removed", "increase", "decrease", "changed"]
+    previous_fact: FinancialRestatementFactPayload | None = None
+    current_fact: FinancialRestatementFactPayload | None = None
+    value_changed: bool | None = None
+
+
+class FinancialRestatementConfidenceImpactPayload(BaseModel):
+    severity: Literal["low", "medium", "high"]
+    flags: list[str] = Field(default_factory=list)
+    largest_relative_change: float | None = None
+    changed_metric_count: int = 0
+
+
+class FinancialRestatementPayload(BaseModel):
+    accession_number: str
+    previous_accession_number: str | None = None
+    filing_type: str
+    form: str
+    is_amendment: bool
+    detection_kind: Literal["amended_filing", "companyfacts_revision"]
+    period_start: DateType
+    period_end: DateType
+    filing_date: DateType | None = None
+    previous_filing_date: DateType | None = None
+    filing_acceptance_at: datetime | None = None
+    previous_filing_acceptance_at: datetime | None = None
+    source: str
+    previous_source: str | None = None
+    changed_metric_keys: list[str] = Field(default_factory=list)
+    normalized_data_changes: list[FinancialRestatementMetricChangePayload] = Field(default_factory=list)
+    companyfacts_changes: list[FinancialRestatementMetricChangePayload] = Field(default_factory=list)
+    confidence_impact: FinancialRestatementConfidenceImpactPayload
+    last_updated: datetime
+    last_checked: datetime
+
+
+class FinancialRestatementPeriodSummaryPayload(BaseModel):
+    filing_type: str
+    period_start: DateType
+    period_end: DateType
+    restatement_count: int
+    changed_metric_keys: list[str] = Field(default_factory=list)
+    latest_accession_number: str | None = None
+    latest_filing_date: DateType | None = None
+
+
+class FinancialRestatementSummaryPayload(BaseModel):
+    total_restatements: int
+    amended_filings: int
+    companyfacts_revisions: int
+    amended_metric_keys: list[str] = Field(default_factory=list)
+    changed_periods: list[FinancialRestatementPeriodSummaryPayload] = Field(default_factory=list)
+    high_confidence_impacts: int = 0
+    medium_confidence_impacts: int = 0
+    low_confidence_impacts: int = 0
+    latest_filing_date: DateType | None = None
+    latest_filing_acceptance_at: datetime | None = None
+
+
+class CompanyFinancialRestatementsResponse(ProvenanceEnvelope):
+    company: CompanyPayload | None
+    summary: FinancialRestatementSummaryPayload
+    restatements: list[FinancialRestatementPayload]
+    refresh: RefreshState
+
+
 class CompanyFactsResponse(BaseModel):
     facts: dict[str, Any]

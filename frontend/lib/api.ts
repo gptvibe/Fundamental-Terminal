@@ -4,6 +4,7 @@ import {
   CompanyAlertsResponse,
   CompanyCapitalRaisesResponse,
   CompanyCapitalMarketsSummaryResponse,
+  CompanyChangesSinceLastFilingResponse,
   CompanyEarningsResponse,
   CompanyEarningsSummaryResponse,
   CompanyEarningsWorkspaceResponse,
@@ -11,6 +12,7 @@ import {
   CompanyDerivedMetricsResponse,
   CompanyDerivedMetricsSummaryResponse,
   CompanyFinancialsResponse,
+  CompanyFinancialRestatementsResponse,
   CompanyBeneficialOwnershipResponse,
   CompanyBeneficialOwnershipSummaryResponse,
   CompanyEventsResponse,
@@ -328,13 +330,54 @@ export function resolveCompanyIdentifier(query: string): Promise<CompanyResoluti
   return fetchJson(`/companies/resolve?query=${encodeURIComponent(query)}`);
 }
 
-export function getCompanyFinancials(ticker: string): Promise<CompanyFinancialsResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials`);
+function currentAsOfParam(): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  const value = new URLSearchParams(window.location.search).get("as_of")?.trim();
+  return value || undefined;
+}
+
+function appendAsOf(params: URLSearchParams, asOf?: string | null): void {
+  const value = asOf?.trim() || currentAsOfParam();
+  if (value) {
+    params.set("as_of", value);
+  }
+}
+
+export function getCompanyFinancials(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyFinancialsResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyChangesSinceLastFiling(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyChangesSinceLastFilingResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/changes-since-last-filing${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyFinancialRestatements(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyFinancialRestatementsResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/financial-restatements${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyMetricsTimeseries(
   ticker: string,
-  options?: { cadence?: "quarterly" | "annual" | "ttm"; maxPoints?: number; signal?: AbortSignal }
+  options?: { cadence?: "quarterly" | "annual" | "ttm"; maxPoints?: number; asOf?: string | null; signal?: AbortSignal }
 ): Promise<CompanyMetricsTimeseriesResponse> {
   const params = new URLSearchParams();
   if (options?.cadence) {
@@ -343,13 +386,14 @@ export function getCompanyMetricsTimeseries(
   if (options?.maxPoints != null) {
     params.set("max_points", String(options.maxPoints));
   }
+  appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/metrics-timeseries${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyDerivedMetrics(
   ticker: string,
-  options?: { periodType?: "quarterly" | "annual" | "ttm"; maxPeriods?: number; signal?: AbortSignal }
+  options?: { periodType?: "quarterly" | "annual" | "ttm"; maxPeriods?: number; asOf?: string | null; signal?: AbortSignal }
 ): Promise<CompanyDerivedMetricsResponse> {
   const params = new URLSearchParams();
   if (options?.periodType) {
@@ -358,18 +402,20 @@ export function getCompanyDerivedMetrics(
   if (options?.maxPeriods != null) {
     params.set("max_periods", String(options.maxPeriods));
   }
+  appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/metrics${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyDerivedMetricsSummary(
   ticker: string,
-  options?: { periodType?: "quarterly" | "annual" | "ttm"; signal?: AbortSignal }
+  options?: { periodType?: "quarterly" | "annual" | "ttm"; asOf?: string | null; signal?: AbortSignal }
 ): Promise<CompanyDerivedMetricsSummaryResponse> {
   const params = new URLSearchParams();
   if (options?.periodType) {
     params.set("period_type", options.periodType);
   }
+  appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/metrics/summary${suffix}`, { signal: options?.signal });
 }
@@ -468,7 +514,11 @@ export function getCompanyInstitutionalHoldingsSummary(ticker: string): Promise<
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/institutional-holdings/summary`);
 }
 
-export function getCompanyModels(ticker: string, modelNames?: string[], options?: { dupontMode?: "auto" | "annual" | "ttm" }): Promise<CompanyModelsResponse> {
+export function getCompanyModels(
+  ticker: string,
+  modelNames?: string[],
+  options?: { dupontMode?: "auto" | "annual" | "ttm"; asOf?: string | null }
+): Promise<CompanyModelsResponse> {
   const params = new URLSearchParams();
   if (modelNames?.length) {
     params.set("model", modelNames.join(","));
@@ -476,6 +526,7 @@ export function getCompanyModels(ticker: string, modelNames?: string[], options?
   if (options?.dupontMode) {
     params.set("dupont_mode", options.dupontMode);
   }
+  appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`);
 }
@@ -488,9 +539,18 @@ export function getGlobalMarketContext(): Promise<CompanyMarketContextResponse> 
   return fetchJson("/market-context");
 }
 
-export function getCompanyPeers(ticker: string, peers?: string[]): Promise<CompanyPeersResponse> {
-  const peerParam = peers?.length ? `?peers=${encodeURIComponent(peers.join(","))}` : "";
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/peers${peerParam}`);
+export function getCompanyPeers(
+  ticker: string,
+  peers?: string[],
+  options?: { asOf?: string | null }
+): Promise<CompanyPeersResponse> {
+  const params = new URLSearchParams();
+  if (peers?.length) {
+    params.set("peers", peers.join(","));
+  }
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/peers${suffix}`);
 }
 
 export function refreshCompany(ticker: string, force = false): Promise<RefreshQueuedResponse> {

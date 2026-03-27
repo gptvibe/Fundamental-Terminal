@@ -25,9 +25,9 @@ from app.api import register_routers
 from app.api.schemas import *
 from app.config import settings
 from app.db import get_db_session
-from app.model_engine.engine import ModelEngine
+from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
 from app.model_engine.models import dupont as dupont_model
-from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
+from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
 from app.source_registry import SourceTier, SourceUsage, build_provenance_entries, build_source_mix, infer_source_id
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
@@ -36,6 +36,7 @@ from app.services.ownership_analytics import build_ownership_analytics
 from app.services.peer_comparison import build_peer_comparison
 from app.services import (
     CompanyCacheSnapshot,
+    build_changes_since_last_filing,
     get_company_capital_markets_events,
     get_company_coverage_counts,
     get_company_earnings_cache_status,
@@ -44,6 +45,7 @@ from app.services import (
     get_company_earnings_releases,
     get_company_derived_metric_points,
     get_company_derived_metrics_last_checked,
+    get_company_financial_restatements,
     get_company_executive_compensation,
     get_company_filing_events,
     get_company_filing_insights,
@@ -66,9 +68,20 @@ from app.services import (
     search_company_snapshots,
     status_broker,
 )
-from app.services.cache_queries import get_company_beneficial_ownership_reports
+from app.services.cache_queries import (
+    filter_price_history_as_of,
+    get_company_beneficial_ownership_reports,
+    latest_price_as_of,
+    select_point_in_time_financials,
+)
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
-from app.services.derived_metrics_mart import build_summary_payload, to_period_payload
+from app.services.derived_metrics_mart import (
+    build_derived_metric_points,
+    build_summary_payload,
+    build_summary_payload_from_points,
+    to_period_payload,
+    to_period_payload_from_points,
+)
 from app.services.market_context import (
     get_cached_market_context_status,
     get_company_market_context_v2,
@@ -320,10 +333,13 @@ def company_financials(
     http_response: Response,
     ticker: str,
     background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyFinancialsResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    hot_key = f"financials:{normalized_ticker}"
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    hot_key = f"financials:{normalized_ticker}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -358,6 +374,7 @@ def company_financials(
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
+        payload = _apply_requested_as_of(payload, requested_as_of)
         _store_hot_cached_payload(hot_key, payload)
         return payload
 
@@ -365,6 +382,9 @@ def company_financials(
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+        price_history = filter_price_history_as_of(price_history, parsed_as_of)
     serialized_financials = [_serialize_financial(statement) for statement in financials]
     diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
     payload = CompanyFinancialsResponse(
@@ -385,6 +405,7 @@ def company_financials(
             refresh=refresh,
         ),
     )
+    payload = _apply_requested_as_of(payload, requested_as_of)
     _store_hot_cached_payload(hot_key, payload)
     not_modified = _apply_conditional_headers(
         request,
@@ -425,18 +446,133 @@ def company_filing_insights(
     )
 
 
+@app.get("/api/companies/{ticker}/changes-since-last-filing", response_model=CompanyChangesSinceLastFilingResponse)
+def company_changes_since_last_filing(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChangesSinceLastFilingResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyChangesSinceLastFilingResponse(
+            company=None,
+            summary=ChangesSinceLastFilingSummaryPayload(),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    financials = get_company_financials(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+    restatements = get_company_financial_restatements(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        restatements = [record for record in restatements if _financial_restatement_effective_at(record) <= parsed_as_of]
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    comparison = build_changes_since_last_filing(financials, restatements)
+    diagnostics = _diagnostics_for_changes_since_last_filing(comparison, refresh)
+    comparison_as_of = requested_as_of or _latest_as_of(
+        (comparison.get("current_filing") or {}).get("filing_acceptance_at"),
+        (comparison.get("current_filing") or {}).get("period_end"),
+    )
+
+    usages: list[SourceUsage] = [
+        SourceUsage(
+            source_id="ft_changes_since_last_filing",
+            role="derived",
+            as_of=comparison_as_of,
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                (comparison.get("current_filing") or {}).get("last_checked"),
+                (comparison.get("previous_filing") or {}).get("last_checked"),
+            ),
+        )
+    ]
+    companyfacts_usage = _source_usage_from_hint(
+        "https://data.sec.gov/api/xbrl/companyfacts/",
+        role="primary",
+        as_of=comparison_as_of,
+        last_refreshed_at=snapshot.last_checked,
+        default_source_id="sec_companyfacts",
+    )
+    if companyfacts_usage is not None:
+        usages.append(companyfacts_usage)
+    if any(
+        str(source or "").startswith("https://www.sec.gov/Archives/")
+        for source in [
+            (comparison.get("current_filing") or {}).get("source"),
+            (comparison.get("previous_filing") or {}).get("source"),
+            *(item.get("source") for item in comparison.get("amended_prior_values", [])),
+        ]
+    ):
+        filing_usage = _source_usage_from_hint(
+            "https://www.sec.gov/Archives/",
+            role="supplemental",
+            as_of=comparison_as_of,
+            last_refreshed_at=_merge_last_checked(snapshot.last_checked, *(item.last_checked for item in restatements)),
+            default_source_id="sec_edgar",
+        )
+        if filing_usage is not None:
+            usages.append(filing_usage)
+
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    confidence_flags.update(str(flag) for flag in comparison.get("confidence_flags", []))
+    confidence_flags.update(
+        str(item.get("indicator_key") or "")
+        for item in comparison.get("new_risk_indicators", [])
+        if str(item.get("severity") or "") == "high"
+    )
+    confidence_flags.discard("")
+
+    payload = CompanyChangesSinceLastFilingResponse(
+        company=_serialize_company(snapshot),
+        current_filing=comparison.get("current_filing"),
+        previous_filing=comparison.get("previous_filing"),
+        summary=comparison.get("summary") or ChangesSinceLastFilingSummaryPayload(),
+        metric_deltas=comparison.get("metric_deltas") or [],
+        new_risk_indicators=comparison.get("new_risk_indicators") or [],
+        segment_shifts=comparison.get("segment_shifts") or [],
+        share_count_changes=comparison.get("share_count_changes") or [],
+        capital_structure_changes=comparison.get("capital_structure_changes") or [],
+        amended_prior_values=comparison.get("amended_prior_values") or [],
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_build_provenance_contract(
+            usages,
+            as_of=comparison_as_of,
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                (comparison.get("current_filing") or {}).get("last_checked"),
+                (comparison.get("previous_filing") or {}).get("last_checked"),
+                *(item.last_checked for item in restatements),
+            ),
+            confidence_flags=sorted(confidence_flags),
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
 @app.get("/api/companies/{ticker}/metrics-timeseries", response_model=CompanyMetricsTimeseriesResponse)
 def company_metrics_timeseries(
     ticker: str,
     background_tasks: BackgroundTasks,
     cadence: Literal["quarterly", "annual", "ttm"] | None = Query(default=None),
     max_points: int = Query(default=24, ge=1, le=200),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyMetricsTimeseriesResponse:
     normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        return CompanyMetricsTimeseriesResponse(
+        payload = CompanyMetricsTimeseriesResponse(
             company=None,
             series=[],
             last_financials_check=None,
@@ -446,18 +582,22 @@ def company_metrics_timeseries(
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
+        return _apply_requested_as_of(payload, requested_as_of)
 
     financials = get_company_financials(session, snapshot.company.id)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+        price_history = filter_price_history_as_of(price_history, parsed_as_of)
     series = build_metrics_timeseries(financials, price_history, cadence=cadence, max_points=max_points)
     point_payload = _sanitize_metrics_timeseries_points_for_strict_official_mode(
         [MetricsTimeseriesPointPayload.model_validate(point) for point in series]
     )
     diagnostics = _diagnostics_for_metrics_timeseries(point_payload, refresh, staleness_reason)
-    return CompanyMetricsTimeseriesResponse(
+    payload = CompanyMetricsTimeseriesResponse(
         company=_serialize_company(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
@@ -477,6 +617,7 @@ def company_metrics_timeseries(
             refresh=refresh,
         ),
     )
+    return _apply_requested_as_of(payload, requested_as_of)
 
 
 @app.get("/api/companies/{ticker}/metrics", response_model=CompanyDerivedMetricsResponse)
@@ -485,12 +626,15 @@ def company_derived_metrics(
     background_tasks: BackgroundTasks,
     period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
     max_periods: int = Query(default=24, ge=1, le=200),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyDerivedMetricsResponse:
     normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        return CompanyDerivedMetricsResponse(
+        payload = CompanyDerivedMetricsResponse(
             company=None,
             period_type=period_type,
             periods=[],
@@ -503,32 +647,80 @@ def company_derived_metrics(
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
+        return _apply_requested_as_of(payload, requested_as_of)
 
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
 
-    rows = get_company_derived_metric_points(
-        session,
-        snapshot.company.id,
-        period_type=period_type,
-        max_periods=max_periods,
-    )
-    last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
-    if not rows:
-        refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
-        if staleness_reason == "fresh":
-            staleness_reason = "metrics_missing"
+    if parsed_as_of is None:
+        rows = get_company_derived_metric_points(
+            session,
+            snapshot.company.id,
+            period_type=period_type,
+            max_periods=max_periods,
+        )
+        last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+        if not rows:
+            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            if staleness_reason == "fresh":
+                staleness_reason = "metrics_missing"
 
+        period_payload = _sanitize_derived_metric_periods_for_strict_official_mode(
+            [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
+        )
+        available_metric_keys = sorted({item.metric_key for item in rows})
+        metric_values = [metric for period in period_payload for metric in period.metrics]
+        latest_period_end = max((period.period_end for period in period_payload), default=None)
+        diagnostics = _diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason)
+        payload = CompanyDerivedMetricsResponse(
+            company=_serialize_company(
+                snapshot,
+                last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+            ),
+            period_type=period_type,
+            periods=period_payload,
+            available_metric_keys=available_metric_keys,
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            staleness_reason=staleness_reason,
+            refresh=refresh,
+            diagnostics=diagnostics,
+            **_derived_metrics_provenance_contract(
+                metric_values,
+                as_of=latest_period_end,
+                derived_source_id="ft_derived_metrics_mart",
+                last_metrics_check=last_metrics_check,
+                last_financials_check=snapshot.last_checked,
+                last_price_check=price_last_checked,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    filtered_financials = select_point_in_time_financials(financials, parsed_as_of)
+    filtered_price_history = filter_price_history_as_of(_visible_price_history(session, snapshot.company.id), parsed_as_of)
+    point_rows = [
+        row
+        for row in build_derived_metric_points(filtered_financials, filtered_price_history)
+        if row.get("period_type") == period_type
+    ]
+    period_rows = to_period_payload_from_points(point_rows)
+    if len(period_rows) > max_periods:
+        period_rows = period_rows[-max_periods:]
     period_payload = _sanitize_derived_metric_periods_for_strict_official_mode(
-        [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
+        [DerivedMetricPeriodPayload.model_validate(item) for item in period_rows]
     )
-    available_metric_keys = sorted({item.metric_key for item in rows})
+    available_metric_keys = sorted({str(item.get("metric_key") or "") for item in point_rows if item.get("metric_key")})
+    last_metrics_check = None
     diagnostics = _diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason)
     metric_values = [metric for period in period_payload for metric in period.metrics]
     latest_period_end = max((period.period_end for period in period_payload), default=None)
-    return CompanyDerivedMetricsResponse(
+    payload = CompanyDerivedMetricsResponse(
         company=_serialize_company(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
@@ -545,8 +737,8 @@ def company_derived_metrics(
         diagnostics=diagnostics,
         **_derived_metrics_provenance_contract(
             metric_values,
-            as_of=latest_period_end,
-            derived_source_id="ft_derived_metrics_mart",
+            as_of=requested_as_of or latest_period_end,
+            derived_source_id="ft_derived_metrics_engine",
             last_metrics_check=last_metrics_check,
             last_financials_check=snapshot.last_checked,
             last_price_check=price_last_checked,
@@ -554,6 +746,7 @@ def company_derived_metrics(
             refresh=refresh,
         ),
     )
+    return _apply_requested_as_of(payload, requested_as_of)
 
 
 @app.get("/api/companies/{ticker}/metrics/summary", response_model=CompanyDerivedMetricsSummaryResponse)
@@ -561,12 +754,15 @@ def company_derived_metrics_summary(
     ticker: str,
     background_tasks: BackgroundTasks,
     period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyDerivedMetricsSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        return CompanyDerivedMetricsSummaryResponse(
+        payload = CompanyDerivedMetricsSummaryResponse(
             company=None,
             period_type=period_type,
             latest_period_end=None,
@@ -579,25 +775,64 @@ def company_derived_metrics_summary(
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
+        return _apply_requested_as_of(payload, requested_as_of)
 
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
 
-    rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
-    last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
-    if not rows:
-        refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
-        if staleness_reason == "fresh":
-            staleness_reason = "metrics_missing"
+    if parsed_as_of is None:
+        rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
+        last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+        if not rows:
+            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            if staleness_reason == "fresh":
+                staleness_reason = "metrics_missing"
 
-    summary = build_summary_payload(rows, period_type)
+        summary = build_summary_payload(rows, period_type)
+        metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
+            [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+        )
+        diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
+        payload = CompanyDerivedMetricsSummaryResponse(
+            company=_serialize_company(
+                snapshot,
+                last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+            ),
+            period_type=summary["period_type"],
+            latest_period_end=summary["latest_period_end"],
+            metrics=metric_payload,
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            staleness_reason=staleness_reason,
+            refresh=refresh,
+            diagnostics=diagnostics,
+            **_derived_metrics_provenance_contract(
+                metric_payload,
+                as_of=summary["latest_period_end"],
+                derived_source_id="ft_derived_metrics_mart",
+                last_metrics_check=last_metrics_check,
+                last_financials_check=snapshot.last_checked,
+                last_price_check=price_last_checked,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    filtered_financials = select_point_in_time_financials(financials, parsed_as_of)
+    filtered_price_history = filter_price_history_as_of(_visible_price_history(session, snapshot.company.id), parsed_as_of)
+    point_rows = build_derived_metric_points(filtered_financials, filtered_price_history)
+    summary = build_summary_payload_from_points(point_rows, period_type)
+    last_metrics_check = None
     metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
         [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
     )
     diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
-    return CompanyDerivedMetricsSummaryResponse(
+    payload = CompanyDerivedMetricsSummaryResponse(
         company=_serialize_company(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
@@ -614,8 +849,8 @@ def company_derived_metrics_summary(
         diagnostics=diagnostics,
         **_derived_metrics_provenance_contract(
             metric_payload,
-            as_of=summary["latest_period_end"],
-            derived_source_id="ft_derived_metrics_mart",
+            as_of=requested_as_of or summary["latest_period_end"],
+            derived_source_id="ft_derived_metrics_engine",
             last_metrics_check=last_metrics_check,
             last_financials_check=snapshot.last_checked,
             last_price_check=price_last_checked,
@@ -623,6 +858,7 @@ def company_derived_metrics_summary(
             refresh=refresh,
         ),
     )
+    return _apply_requested_as_of(payload, requested_as_of)
 
 
 @app.get("/api/companies/{ticker}/insider-trades", response_model=CompanyInsiderTradesResponse)
@@ -960,9 +1196,12 @@ def company_models(
     background_tasks: BackgroundTasks,
     model: str | None = Query(default=None),
     dupont_mode: str | None = Query(default=None, description="optional DuPont basis: auto|annual|ttm"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyModelsResponse:
     normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
     requested_models = _parse_requested_models(model)
     if not settings.valuation_workbench_enabled:
         requested_models = [
@@ -973,7 +1212,10 @@ def company_models(
     normalized_mode = (dupont_mode or "").lower() or None
     if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
-    hot_key = f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
+    hot_key = (
+        f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
+        f":asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -1008,6 +1250,7 @@ def company_models(
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
+        payload = _apply_requested_as_of(payload, requested_as_of)
         _store_hot_cached_payload(hot_key, payload)
         return payload
 
@@ -1019,20 +1262,40 @@ def company_models(
         refresh = _refresh_for_snapshot(background_tasks, snapshot)
         financials = get_company_financials(session, snapshot.company.id)
         price_last_checked, _price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-        if snapshot.cache_state == "fresh" and requested_models:
+        price_history: list[PriceHistory] = []
+        if parsed_as_of is not None:
+            price_history = _visible_price_history(session, snapshot.company.id)
+            financials = select_point_in_time_financials(financials, parsed_as_of)
+            price_history = filter_price_history_as_of(price_history, parsed_as_of)
+
+        if parsed_as_of is None and snapshot.cache_state == "fresh" and requested_models:
             model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
             if any(not result.cached for result in model_job_results):
                 session.commit()
 
-        models = get_company_models(
-            session,
-            snapshot.company.id,
-            requested_models or None,
-            config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
-        )
+        if parsed_as_of is None:
+            models: list[ModelRun | dict[str, Any]] = get_company_models(
+                session,
+                snapshot.company.id,
+                requested_models or None,
+                config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+            )
+        else:
+            latest_price = latest_price_as_of(price_history, parsed_as_of)
+            dataset = build_company_dataset(
+                snapshot.company,
+                financials,
+                build_market_snapshot(latest_price),
+                as_of_date=parsed_as_of,
+            )
+            models = ModelEngine(session).evaluate_models(
+                dataset,
+                model_names=requested_models or None,
+                created_at=datetime.now(timezone.utc),
+            )
         status_counts: dict[str, int] = {}
         for model_run in models:
-            result = model_run.result if isinstance(model_run.result, dict) else {}
+            result = _model_result_payload(model_run)
             model_status = str(result.get("model_status") or result.get("status") or "unknown")
             status_counts[model_status] = status_counts.get(model_status, 0) + 1
         logging.getLogger(__name__).info(
@@ -1041,7 +1304,7 @@ def company_models(
             ",".join(requested_models) if requested_models else "all",
             status_counts,
         )
-        serialized_models = [_serialize_model(model_run) for model_run in models]
+        serialized_models = [_serialize_model_payload(model_run) for model_run in models]
         diagnostics = _diagnostics_for_models(serialized_models, refresh)
         payload = CompanyModelsResponse(
             company=_serialize_company(snapshot),
@@ -1057,6 +1320,7 @@ def company_models(
                 refresh=refresh,
             ),
         )
+        payload = _apply_requested_as_of(payload, requested_as_of)
         _store_hot_cached_payload(hot_key, payload)
         not_modified = _apply_conditional_headers(
             request,
@@ -1241,12 +1505,15 @@ def company_peers(
     ticker: str,
     background_tasks: BackgroundTasks,
     peers: str | None = Query(default=None),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyPeersResponse:
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     selected_tickers = _parse_csv_values(peers)
-    hot_key = f"peers:{normalized_ticker}:selected={','.join(selected_tickers)}"
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    hot_key = f"peers:{normalized_ticker}:selected={','.join(selected_tickers)}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -1281,13 +1548,14 @@ def company_peers(
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             **_empty_provenance_contract("company_missing"),
         )
+        payload = _apply_requested_as_of(payload, requested_as_of)
         _store_hot_cached_payload(hot_key, payload)
         return payload
 
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
-    payload = build_peer_comparison(session, snapshot.company.ticker, selected_tickers=selected_tickers)
+    payload = build_peer_comparison(session, snapshot.company.ticker, selected_tickers=selected_tickers, as_of=parsed_as_of)
     logging.getLogger(__name__).info(
         "TELEMETRY peer_view ticker=%s selected=%s count=%s",
         snapshot.company.ticker,
@@ -1305,6 +1573,7 @@ def company_peers(
             refresh=refresh,
             **_empty_provenance_contract("peer_data_missing"),
         )
+        empty_payload = _apply_requested_as_of(empty_payload, requested_as_of)
         _store_hot_cached_payload(hot_key, empty_payload)
         return empty_payload
 
@@ -1322,6 +1591,7 @@ def company_peers(
         refresh=refresh,
         **_peers_provenance_contract(payload, price_last_checked=price_last_checked, refresh=refresh),
     )
+    response_payload = _apply_requested_as_of(response_payload, requested_as_of)
     _store_hot_cached_payload(hot_key, response_payload)
     not_modified = _apply_conditional_headers(
         request,
@@ -1859,6 +2129,73 @@ def search_filings(
         client.close()
 
 
+@app.get("/api/companies/{ticker}/financial-restatements", response_model=CompanyFinancialRestatementsResponse)
+def company_financial_restatements(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyFinancialRestatementsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyFinancialRestatementsResponse(
+            company=None,
+            summary=_empty_financial_restatements_summary(),
+            restatements=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    records = get_company_financial_restatements(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        records = [record for record in records if _financial_restatement_effective_at(record) <= parsed_as_of]
+
+    serialized = [_serialize_financial_restatement(record) for record in records]
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    for record in serialized:
+        confidence_flags.update(record.confidence_impact.flags)
+
+    usages: list[SourceUsage] = []
+    companyfacts_usage = _source_usage_from_hint(
+        "https://data.sec.gov/api/xbrl/companyfacts/",
+        role="primary",
+        as_of=requested_as_of or _latest_financial_restatement_as_of(records),
+        last_refreshed_at=snapshot.last_checked,
+        default_source_id="sec_companyfacts",
+    )
+    if companyfacts_usage is not None:
+        usages.append(companyfacts_usage)
+    if any(record.source.startswith("https://www.sec.gov/Archives/") for record in records):
+        filing_usage = _source_usage_from_hint(
+            "https://www.sec.gov/Archives/",
+            role="supplemental",
+            as_of=requested_as_of or _latest_financial_restatement_as_of(records),
+            last_refreshed_at=snapshot.last_checked,
+            default_source_id="sec_edgar",
+        )
+        if filing_usage is not None:
+            usages.append(filing_usage)
+
+    payload = CompanyFinancialRestatementsResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_financial_restatements_summary(serialized),
+        restatements=serialized,
+        refresh=refresh,
+        **_build_provenance_contract(
+            usages,
+            as_of=requested_as_of or _latest_financial_restatement_as_of(records),
+            last_refreshed_at=_merge_last_checked(snapshot.last_checked, *(record.last_checked for record in records)),
+            confidence_flags=sorted(confidence_flags),
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
 @app.get("/api/companies/{ticker}/financial-history", response_model=CompanyFactsResponse)
 def company_financial_history(
     ticker: str,
@@ -2394,10 +2731,16 @@ def _parse_as_of(value: DateType | datetime | str | None) -> datetime | None:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
     if isinstance(value, DateType):
-        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+        return datetime(value.year, value.month, value.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
     text = str(value).strip()
     if not text:
         return None
+    if len(text) == 10 and text.count("-") == 2 and "T" not in text and " " not in text:
+        try:
+            parsed_date = DateType.fromisoformat(text)
+        except ValueError:
+            return None
+        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError:
@@ -2405,10 +2748,25 @@ def _parse_as_of(value: DateType | datetime | str | None) -> datetime | None:
             parsed_date = DateType.fromisoformat(text)
         except ValueError:
             return None
-        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=timezone.utc)
+        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _validated_as_of(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    parsed = _parse_as_of(value)
+    if parsed is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="as_of must be an ISO-8601 date or timestamp")
+    return parsed
+
+
+def _apply_requested_as_of(payload: BaseModel, as_of: str | None) -> Any:
+    if as_of is None:
+        return payload
+    return payload.model_copy(update={"as_of": as_of})
 
 
 def _latest_as_of(*values: DateType | datetime | str | None) -> str | None:
@@ -2544,6 +2902,32 @@ def _diagnostics_for_filing_insights(
         stale_flags=_stale_flags_from_refresh(refresh),
         parser_confidence=confidence,
         missing_field_flags=missing_flags,
+    )
+
+
+def _diagnostics_for_changes_since_last_filing(
+    comparison: dict[str, Any],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    sections = [
+        comparison.get("metric_deltas") or [],
+        comparison.get("new_risk_indicators") or [],
+        comparison.get("segment_shifts") or [],
+        comparison.get("share_count_changes") or [],
+        comparison.get("capital_structure_changes") or [],
+    ]
+    populated_sections = sum(1 for section in sections if section)
+    missing_field_flags: list[str] = []
+    if comparison.get("previous_filing") is None:
+        missing_field_flags.append("previous_comparable_filing_missing")
+    if not comparison.get("segment_shifts"):
+        missing_field_flags.append("segment_shift_data_unavailable")
+    if not comparison.get("amended_prior_values"):
+        missing_field_flags.append("amended_prior_value_data_unavailable")
+    return _build_data_quality_diagnostics(
+        coverage_ratio=populated_sections / float(len(sections)) if sections else None,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        missing_field_flags=missing_field_flags,
     )
 
 
@@ -2992,7 +3376,7 @@ def _derived_metrics_provenance_contract(
 
 
 def _models_provenance_contract(
-    model_runs: list[ModelRun],
+    model_runs: list[ModelRun | dict[str, Any]],
     financials: list[FinancialStatement],
     *,
     price_last_checked: datetime | None,
@@ -3001,7 +3385,7 @@ def _models_provenance_contract(
 ) -> dict[str, Any]:
     usages: list[SourceUsage] = []
     latest_statement = financials[0] if financials else None
-    model_created_at = _merge_last_checked(*(model_run.created_at for model_run in model_runs)) if model_runs else None
+    model_created_at = _merge_last_checked(*(_model_created_at(model_run) for model_run in model_runs)) if model_runs else None
     model_as_of = latest_statement.period_end if latest_statement is not None else _model_response_as_of(model_runs)
 
     if model_as_of is not None:
@@ -3028,8 +3412,8 @@ def _models_provenance_contract(
     extra_flags: set[str] = set()
     for model_run in model_runs:
         result = _sanitize_model_result_for_strict_official_mode(
-            model_run.model_name,
-            model_run.result if isinstance(model_run.result, dict) else {},
+            _model_name(model_run),
+            _model_result_payload(model_run),
         )
         status_value = str(result.get("model_status") or result.get("status") or "").lower()
         if status_value == "partial":
@@ -3066,7 +3450,7 @@ def _models_provenance_contract(
                     str(risk_free.get("source_name") or ""),
                     role="supplemental",
                     as_of=risk_free.get("observation_date"),
-                    last_refreshed_at=model_run.created_at,
+                    last_refreshed_at=_model_created_at(model_run),
                 )
                 if risk_free_usage is not None:
                     usages.append(risk_free_usage)
@@ -3307,17 +3691,17 @@ def _activity_overview_provenance_contract(
     )
 
 
-def _model_response_as_of(model_runs: list[ModelRun]) -> str | None:
+def _model_response_as_of(model_runs: list[ModelRun | dict[str, Any]]) -> str | None:
     values: list[DateType | datetime | str | None] = []
     for model_run in model_runs:
-        result = model_run.result if isinstance(model_run.result, dict) else {}
+        result = _model_result_payload(model_run)
         values.append(result.get("base_period_end"))
         values.append(result.get("period_end"))
         price_snapshot = result.get("price_snapshot")
         if isinstance(price_snapshot, dict):
             values.append(price_snapshot.get("price_date"))
 
-        input_periods = model_run.input_periods
+        input_periods = model_run.get("input_periods") if isinstance(model_run, dict) else model_run.input_periods
         if isinstance(input_periods, dict):
             values.append(input_periods.get("period_end"))
         elif isinstance(input_periods, list):
@@ -3417,6 +3801,179 @@ def _serialize_filing_parser_insight(statement: FinancialStatement) -> FilingPar
             if isinstance(item, dict)
         ],
     )
+
+
+def _serialize_financial_restatement(record: FinancialRestatement) -> FinancialRestatementPayload:
+    return FinancialRestatementPayload(
+        accession_number=record.accession_number,
+        previous_accession_number=record.previous_accession_number,
+        filing_type=record.filing_type,
+        form=record.form,
+        is_amendment=record.is_amendment,
+        detection_kind=(
+            record.detection_kind
+            if record.detection_kind in {"amended_filing", "companyfacts_revision"}
+            else "companyfacts_revision"
+        ),
+        period_start=record.period_start,
+        period_end=record.period_end,
+        filing_date=record.filing_date,
+        previous_filing_date=record.previous_filing_date,
+        filing_acceptance_at=record.filing_acceptance_at,
+        previous_filing_acceptance_at=record.previous_filing_acceptance_at,
+        source=record.source,
+        previous_source=record.previous_source,
+        changed_metric_keys=list(record.changed_metric_keys or []),
+        normalized_data_changes=[
+            _serialize_financial_restatement_metric_change(item)
+            for item in (record.normalized_data_changes or [])
+            if isinstance(item, dict)
+        ],
+        companyfacts_changes=[
+            _serialize_financial_restatement_metric_change(item)
+            for item in (record.companyfacts_changes or [])
+            if isinstance(item, dict)
+        ],
+        confidence_impact=_serialize_financial_restatement_confidence_impact(record.confidence_impact or {}),
+        last_updated=record.last_updated,
+        last_checked=record.last_checked,
+    )
+
+
+def _serialize_financial_restatement_metric_change(payload: dict[str, Any]) -> FinancialRestatementMetricChangePayload:
+    return FinancialRestatementMetricChangePayload(
+        metric_key=str(payload.get("metric_key") or "unknown"),
+        previous_value=payload.get("previous_value"),
+        current_value=payload.get("current_value"),
+        delta=payload.get("delta"),
+        relative_change=payload.get("relative_change"),
+        direction=(
+            str(payload.get("direction") or "changed")
+            if str(payload.get("direction") or "changed") in {"added", "removed", "increase", "decrease", "changed"}
+            else "changed"
+        ),
+        previous_fact=_serialize_financial_restatement_fact(payload.get("previous_fact")),
+        current_fact=_serialize_financial_restatement_fact(payload.get("current_fact")),
+        value_changed=payload.get("value_changed"),
+    )
+
+
+def _serialize_financial_restatement_fact(payload: Any) -> FinancialRestatementFactPayload | None:
+    if not isinstance(payload, dict):
+        return None
+    if not any(
+        key in payload
+        for key in ("accession_number", "form", "taxonomy", "tag", "unit", "filed_at", "period_start", "period_end", "value")
+    ):
+        return None
+    return FinancialRestatementFactPayload(
+        accession_number=payload.get("accession_number"),
+        form=payload.get("form"),
+        taxonomy=payload.get("taxonomy"),
+        tag=payload.get("tag"),
+        unit=payload.get("unit"),
+        filed_at=payload.get("filed_at"),
+        period_start=payload.get("period_start"),
+        period_end=payload.get("period_end"),
+        value=payload.get("value"),
+    )
+
+
+def _serialize_financial_restatement_confidence_impact(payload: dict[str, Any]) -> FinancialRestatementConfidenceImpactPayload:
+    severity = str(payload.get("severity") or "low")
+    if severity not in {"low", "medium", "high"}:
+        severity = "low"
+    return FinancialRestatementConfidenceImpactPayload(
+        severity=severity,
+        flags=[str(flag) for flag in payload.get("flags", []) if flag],
+        largest_relative_change=payload.get("largest_relative_change"),
+        changed_metric_count=int(payload.get("changed_metric_count") or 0),
+    )
+
+
+def _build_financial_restatements_summary(
+    records: list[FinancialRestatementPayload],
+) -> FinancialRestatementSummaryPayload:
+    if not records:
+        return _empty_financial_restatements_summary()
+
+    periods: dict[tuple[str, DateType, DateType], list[FinancialRestatementPayload]] = {}
+    for record in records:
+        periods.setdefault((record.filing_type, record.period_start, record.period_end), []).append(record)
+
+    changed_periods: list[FinancialRestatementPeriodSummaryPayload] = []
+    for (_filing_type, _period_start, _period_end), grouped in sorted(
+        periods.items(),
+        key=lambda item: (item[0][2], item[0][0]),
+        reverse=True,
+    ):
+        latest = max(
+            grouped,
+            key=lambda item: (
+                item.filing_acceptance_at or datetime.min.replace(tzinfo=timezone.utc),
+                item.filing_date or DateType.min,
+                item.accession_number,
+            ),
+        )
+        changed_periods.append(
+            FinancialRestatementPeriodSummaryPayload(
+                filing_type=latest.filing_type,
+                period_start=latest.period_start,
+                period_end=latest.period_end,
+                restatement_count=len(grouped),
+                changed_metric_keys=sorted({metric for item in grouped for metric in item.changed_metric_keys}),
+                latest_accession_number=latest.accession_number,
+                latest_filing_date=latest.filing_date,
+            )
+        )
+
+    severity_counts = {
+        "high": sum(1 for record in records if record.confidence_impact.severity == "high"),
+        "medium": sum(1 for record in records if record.confidence_impact.severity == "medium"),
+        "low": sum(1 for record in records if record.confidence_impact.severity == "low"),
+    }
+    return FinancialRestatementSummaryPayload(
+        total_restatements=len(records),
+        amended_filings=sum(1 for record in records if record.is_amendment),
+        companyfacts_revisions=sum(1 for record in records if record.detection_kind == "companyfacts_revision"),
+        amended_metric_keys=sorted({metric for record in records for metric in record.changed_metric_keys}),
+        changed_periods=changed_periods,
+        high_confidence_impacts=severity_counts["high"],
+        medium_confidence_impacts=severity_counts["medium"],
+        low_confidence_impacts=severity_counts["low"],
+        latest_filing_date=max((record.filing_date for record in records if record.filing_date is not None), default=None),
+        latest_filing_acceptance_at=max(
+            (record.filing_acceptance_at for record in records if record.filing_acceptance_at is not None),
+            default=None,
+        ),
+    )
+
+
+def _empty_financial_restatements_summary() -> FinancialRestatementSummaryPayload:
+    return FinancialRestatementSummaryPayload(
+        total_restatements=0,
+        amended_filings=0,
+        companyfacts_revisions=0,
+        amended_metric_keys=[],
+        changed_periods=[],
+        high_confidence_impacts=0,
+        medium_confidence_impacts=0,
+        low_confidence_impacts=0,
+        latest_filing_date=None,
+        latest_filing_acceptance_at=None,
+    )
+
+
+def _financial_restatement_effective_at(record: FinancialRestatement) -> datetime:
+    if record.filing_acceptance_at is not None:
+        return _parse_as_of(record.filing_acceptance_at) or datetime.min.replace(tzinfo=timezone.utc)
+    if record.filing_date is not None:
+        return _parse_as_of(record.filing_date) or datetime.min.replace(tzinfo=timezone.utc)
+    return _parse_as_of(record.period_end) or datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _latest_financial_restatement_as_of(records: list[FinancialRestatement]) -> str | None:
+    return _latest_as_of(*(_financial_restatement_effective_at(record) for record in records))
 
 
 def _needs_segment_backfill(financials: list[FinancialStatement]) -> bool:
@@ -3682,7 +4239,45 @@ def _build_institutional_holdings_summary(rows: list[InstitutionalHoldingPayload
     )
 
 
-def _serialize_model(model_run: ModelRun) -> ModelPayload:
+def _model_result_payload(model_run: ModelRun | dict[str, Any]) -> dict[str, Any]:
+    if isinstance(model_run, dict):
+        result = model_run.get("result")
+        return result if isinstance(result, dict) else {}
+    return model_run.result if isinstance(model_run.result, dict) else {}
+
+
+def _model_name(model_run: ModelRun | dict[str, Any]) -> str:
+    if isinstance(model_run, dict):
+        return str(model_run.get("model_name") or "")
+    return str(model_run.model_name)
+
+
+def _model_created_at(model_run: ModelRun | dict[str, Any]) -> datetime | None:
+    if isinstance(model_run, dict):
+        value = model_run.get("created_at")
+        return value if isinstance(value, datetime) else None
+    return model_run.created_at
+
+
+def _serialize_model_payload(model_run: ModelRun | dict[str, Any]) -> ModelPayload:
+    if isinstance(model_run, dict):
+        model_name = _model_name(model_run)
+        model_version = str(model_run.get("model_version") or "")
+        created_at = _model_created_at(model_run)
+        if not isinstance(created_at, datetime):
+            created_at = datetime.now(timezone.utc)
+        input_periods = model_run.get("input_periods")
+        if not isinstance(input_periods, (dict, list)):
+            input_periods = {}
+        return ModelPayload(
+            schema_version="2.0",
+            model_name=model_name,
+            model_version=model_version,
+            created_at=created_at,
+            input_periods=input_periods,
+            result=_sanitize_model_result_for_strict_official_mode(model_name, _model_result_payload(model_run)),
+        )
+
     return ModelPayload(
         schema_version="2.0",
         model_name=model_run.model_name,

@@ -64,7 +64,7 @@ REQUIRED_VALUATION_FIELDS = [
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     applicability = valuation_applicability(dataset)
     if not applicability["is_supported"]:
-        risk_free = get_latest_risk_free_rate()
+        risk_free = get_latest_risk_free_rate(dataset.as_of_date)
         return {
             "status": "unsupported",
             "model_status": "unsupported",
@@ -98,7 +98,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         }
 
     missing_fields = missing_fields_last_n_years(dataset, REQUIRED_VALUATION_FIELDS, years=3)
-    risk_free = get_latest_risk_free_rate()
+    risk_free = get_latest_risk_free_rate(dataset.as_of_date)
 
     historical_fcfs: list[float] = []
     used_proxy_fcf = False

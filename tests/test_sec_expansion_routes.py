@@ -256,7 +256,12 @@ def test_peers_route_returns_default_selected_tickers(monkeypatch):
 
     observed: dict[str, list[str] | None] = {"selected": None}
 
-    def _fake_build_peer_comparison(_session, ticker: str, selected_tickers: list[str] | None = None):
+    def _fake_build_peer_comparison(
+        _session,
+        ticker: str,
+        selected_tickers: list[str] | None = None,
+        as_of=None,
+    ):
         observed["selected"] = selected_tickers
         company_snapshot = _snapshot(ticker=ticker).company
         company = SimpleNamespace(**company_snapshot.__dict__, last_checked=datetime.now(timezone.utc))
@@ -337,7 +342,12 @@ def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
 
     observed: dict[str, list[str] | None] = {"selected": None}
 
-    def _fake_build_peer_comparison(_session, ticker: str, selected_tickers: list[str] | None = None):
+    def _fake_build_peer_comparison(
+        _session,
+        ticker: str,
+        selected_tickers: list[str] | None = None,
+        as_of=None,
+    ):
         observed["selected"] = selected_tickers
         company_snapshot = _snapshot(ticker=ticker).company
         company = SimpleNamespace(**company_snapshot.__dict__, last_checked=datetime.now(timezone.utc))

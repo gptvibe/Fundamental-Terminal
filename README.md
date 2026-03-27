@@ -149,6 +149,25 @@ Reliability and diagnostics additions:
 - Golden parser fixtures and hot-endpoint contract tests help catch regressions before they reach persisted routes.
 - Default-mode price and market-profile surfaces show a visible `commercial_fallback` disclosure whenever Yahoo-backed context is present, while strict official mode removes those fallbacks entirely.
 
+Point-in-time research mode:
+
+- Company research routes accept an optional `as_of` query parameter so financials, derived metrics, models, and peers can be rendered without lookahead leakage.
+- Supported research routes include `/api/companies/{ticker}/financials`, `/metrics-timeseries`, `/metrics`, `/metrics/summary`, `/models`, and `/peers`.
+- Date-only values are treated as end-of-day UTC. Full ISO-8601 timestamps are also accepted.
+- The frontend automatically forwards `?as_of=...` from the current page URL when it calls these research endpoints.
+
+Financial restatement tracking:
+
+- `/api/companies/{ticker}/financial-restatements` summarizes persisted 10-K/A and 10-Q/A amendment chains, normalized field deltas, and companyfacts revisions already observed in SEC XBRL.
+- Each restatement row includes changed metric keys, fact-level before/after context when available, and a confidence impact severity derived from the scope of the revision.
+- The route also accepts `as_of` so amendment summaries can be reviewed without including later-known SEC corrections.
+
+Changes since last filing:
+
+- `/api/companies/{ticker}/changes-since-last-filing` compares the latest canonical filing against the prior comparable filing of the same form family.
+- The payload highlights metric deltas, newly added filing-derived risk indicators, segment mix shifts, share-count changes, capital-structure changes, and amended prior values sourced from persisted restatements.
+- The company overview page now includes a card for this comparison, and the route accepts `as_of` for point-in-time review.
+
 ## Docker Compose
 
 1. Copy `.env.example` to `.env` and adjust secrets or ports as needed.
@@ -199,8 +218,16 @@ GET  /api/companies/search?query=intel
 GET  /api/companies/search?ticker=AAPL
 GET  /api/companies/resolve?query=INTC
 GET  /api/companies/AAPL/financials
+GET  /api/companies/AAPL/financials?as_of=2025-02-01
 GET  /api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=24
+GET  /api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=24&as_of=2025-02-01T21:00:00Z
+GET  /api/companies/AAPL/metrics?period_type=ttm&as_of=2025-02-01
+GET  /api/companies/AAPL/metrics/summary?period_type=ttm&as_of=2025-02-01
 GET  /api/companies/AAPL/financial-history
+GET  /api/companies/AAPL/changes-since-last-filing
+GET  /api/companies/AAPL/changes-since-last-filing?as_of=2026-03-20
+GET  /api/companies/AAPL/financial-restatements
+GET  /api/companies/AAPL/financial-restatements?as_of=2026-03-20
 GET  /api/companies/AAPL/filings
 GET  /api/companies/AAPL/filings/view
 GET  /api/companies/AAPL/filing-insights
@@ -219,10 +246,12 @@ GET  /api/companies/AAPL/filing-events
 GET  /api/companies/AAPL/filing-events/summary
 GET  /api/companies/AAPL/executive-compensation
 GET  /api/companies/AAPL/peers
+GET  /api/companies/AAPL/peers?peers=MSFT,NVDA&as_of=2025-02-01
 GET  /api/companies/AAPL/activity-feed
 GET  /api/companies/AAPL/alerts
 GET  /api/companies/AAPL/activity-overview
 GET  /api/companies/AAPL/models?model=dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios
+GET  /api/companies/AAPL/models?model=dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios&as_of=2025-02-01
 GET  /api/jobs/{job_id}/events
 GET  /api/insiders/AAPL
 GET  /api/ownership/AAPL

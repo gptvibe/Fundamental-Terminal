@@ -109,6 +109,10 @@ vi.mock("@/components/company/financial-history-section", () => ({
   FinancialHistorySection: () => React.createElement("div", null, "financial-history"),
 }));
 
+vi.mock("@/components/company/changes-since-last-filing-card", () => ({
+  ChangesSinceLastFilingCard: () => React.createElement("div", null, "changes-since-last-filing"),
+}));
+
 vi.mock("@/components/peers/peer-comparison-dashboard", () => ({
   PeerComparisonDashboard: () => React.createElement("div", null, "peer-dashboard"),
 }));

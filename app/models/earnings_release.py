@@ -48,6 +48,8 @@ class EarningsRelease(Base):
     highlights: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     parse_state: Mapped[str] = mapped_column(String(32), nullable=False)
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    filing_acceptance_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetch_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     company: Mapped["Company"] = relationship(back_populates="earnings_releases")

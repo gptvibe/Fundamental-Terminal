@@ -14,6 +14,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/resolve"),
         ("GET", "/api/companies/{ticker}/financials"),
         ("GET", "/api/companies/{ticker}/filing-insights"),
+        ("GET", "/api/companies/{ticker}/changes-since-last-filing"),
         ("GET", "/api/companies/{ticker}/metrics-timeseries"),
         ("GET", "/api/companies/{ticker}/metrics"),
         ("GET", "/api/companies/{ticker}/metrics/summary"),
@@ -50,6 +51,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/filings/{ticker}"),
         ("GET", "/api/search_filings"),
         ("GET", "/api/companies/{ticker}/financial-history"),
+        ("GET", "/api/companies/{ticker}/financial-restatements"),
         ("GET", "/api/companies/{ticker}/filings/view"),
     }
 

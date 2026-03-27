@@ -150,6 +150,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Unified activity feed assembled from official SEC disclosures and official macro status signals.",
     ),
+    "ft_changes_since_last_filing": SourceDefinition(
+        source_id="ft_changes_since_last_filing",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Filing Changes Service",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Latest-versus-prior filing comparison derived from cached SEC statements and amendment history.",
+    ),
     "manual_override": SourceDefinition(
         source_id="manual_override",
         tier="manual_override",

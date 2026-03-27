@@ -47,6 +47,15 @@ class FinancialStatement(Base):
         nullable=False,
         server_default=func.now(),
     )
+    filing_acceptance_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    fetch_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
     last_checked: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -10,6 +10,7 @@ from app.services.cache_queries import (
     get_company_earnings_releases,
     get_company_derived_metric_points,
     get_company_derived_metrics_last_checked,
+    get_company_financial_restatements,
     get_company_executive_compensation,
     get_company_filing_events,
     get_company_financials,
@@ -32,6 +33,7 @@ from app.services.cache_queries import (
     search_company_snapshots,
 )
 from app.services.fetch_trigger import queue_company_refresh
+from app.services.filing_changes import build_changes_since_last_filing
 from app.services.sec_edgar import EdgarIngestionService, run_refresh_job
 from app.services.status_stream import JobReporter, status_broker
 
@@ -39,6 +41,7 @@ __all__ = [
     "CompanyCacheSnapshot",
     "EdgarIngestionService",
     "JobReporter",
+    "build_changes_since_last_filing",
     "get_company_beneficial_ownership_reports",
     "get_company_capital_markets_cache_status",
     "get_company_coverage_counts",
@@ -49,6 +52,7 @@ __all__ = [
     "get_company_earnings_releases",
     "get_company_derived_metric_points",
     "get_company_derived_metrics_last_checked",
+    "get_company_financial_restatements",
     "get_company_executive_compensation",
     "get_company_filing_events",
     "get_company_financials",

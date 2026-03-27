@@ -41,6 +41,10 @@ const FinancialHistorySection = dynamic(
   () => import("@/components/company/financial-history-section").then((module) => module.FinancialHistorySection),
   { ssr: false }
 );
+const ChangesSinceLastFilingCard = dynamic(
+  () => import("@/components/company/changes-since-last-filing-card").then((module) => module.ChangesSinceLastFilingCard),
+  { ssr: false, loading: () => <div className="text-muted">Loading filing comparison...</div> }
+);
 const MetricsExplorerPanel = dynamic(
   () => import("@/components/company/metrics-explorer-panel").then((module) => module.MetricsExplorerPanel),
   { ssr: false }
@@ -263,6 +267,10 @@ export default function CompanyOverviewPage() {
 
       <Panel title="Business Segments" subtitle="Reported segment revenue mix and growth from cached SEC filing data">
         <BusinessSegmentBreakdown financials={financials} />
+      </Panel>
+
+      <Panel title="Changes Since Last Filing" subtitle="Latest filing versus the prior comparable filing, including amended prior values">
+        <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} />
       </Panel>
 
       <Panel title="Derived Metrics Explorer" subtitle="Persisted SEC-derived metrics with provenance and quality flags">

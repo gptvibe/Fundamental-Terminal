@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import Select, select
@@ -163,6 +164,28 @@ class ModelEngine:
         )
         return results
 
+    def evaluate_models(
+        self,
+        dataset: CompanyDataset,
+        *,
+        model_names: list[str] | None = None,
+        created_at: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        definitions = _select_definitions(model_names)
+        evaluated_at = created_at or datetime.now(timezone.utc)
+        payloads: list[dict[str, Any]] = []
+        for definition in definitions:
+            payloads.append(
+                {
+                    "model_name": definition.name,
+                    "model_version": definition.version,
+                    "created_at": evaluated_at,
+                    "input_periods": _build_input_payload(dataset, definition),
+                    "result": definition.compute(dataset),
+                }
+            )
+        return payloads
+
 
 def precompute_core_models(
     session: Session,
@@ -261,17 +284,27 @@ def _load_latest_market_snapshot(session: Session, company_id: int) -> MarketSna
     latest_price = session.execute(statement).scalar_one_or_none()
     if latest_price is None:
         return None
+    return build_market_snapshot(latest_price)
+
+
+def build_market_snapshot(price_row: PriceHistory | Any) -> MarketSnapshot | None:
+    if price_row is None:
+        return None
     return MarketSnapshot(
-        latest_price=float(latest_price.close),
-        price_date=latest_price.trade_date,
-        price_source=latest_price.source,
+        latest_price=float(price_row.close) if getattr(price_row, "close", None) is not None else None,
+        price_date=getattr(price_row, "trade_date", None),
+        price_source=getattr(price_row, "source", None),
+        observation_timestamp=_market_observation_timestamp(getattr(price_row, "trade_date", None)),
+        fetch_timestamp=getattr(price_row, "fetch_timestamp", None),
     )
 
 
-def _build_company_dataset(
+def build_company_dataset(
     company: Company,
     statements: list[FinancialStatement],
     market_snapshot: MarketSnapshot | None,
+    *,
+    as_of_date: datetime | None = None,
 ) -> CompanyDataset:
     deduped: dict[tuple[object, ...], FinancialPoint] = {}
     for statement in statements:
@@ -285,6 +318,8 @@ def _build_company_dataset(
             period_end=statement.period_end,
             source=statement.source,
             last_updated=statement.last_updated,
+            filing_acceptance_at=getattr(statement, "filing_acceptance_at", None),
+            fetch_timestamp=getattr(statement, "fetch_timestamp", None),
             data=dict(statement.data or {}),
         )
 
@@ -298,14 +333,32 @@ def _build_company_dataset(
         market_industry=company.market_industry,
         market_snapshot=market_snapshot,
         financials=financials,
+        as_of_date=as_of_date.date() if as_of_date is not None else None,
+    )
+
+
+def _build_company_dataset(
+    company: Company,
+    statements: list[FinancialStatement],
+    market_snapshot: MarketSnapshot | None,
+    *,
+    as_of_date: datetime | None = None,
+) -> CompanyDataset:
+    return build_company_dataset(
+        company,
+        statements,
+        market_snapshot,
+        as_of_date=as_of_date,
     )
 
 
 def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -> dict[str, Any]:
     periods = [serialize_period(point) for point in dataset.financials]
     market_snapshot_payload = _serialize_market_snapshot(dataset.market_snapshot)
-    config = _model_config(definition)
+    config = _model_config(dataset, definition)
     signature_input = {"periods": periods}
+    if dataset.as_of_date is not None:
+        signature_input["as_of_date"] = dataset.as_of_date.isoformat()
     if market_snapshot_payload:
         signature_input["market_snapshot"] = market_snapshot_payload
     if config:
@@ -316,6 +369,7 @@ def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -
     return {
         "model_name": definition.name,
         "model_version": definition.version,
+        "as_of_date": dataset.as_of_date.isoformat() if dataset.as_of_date is not None else None,
         "statement_type": CANONICAL_STATEMENT_TYPE,
         "signature": signature,
         "config": config,
@@ -331,16 +385,18 @@ def _serialize_market_snapshot(snapshot: MarketSnapshot | None) -> dict[str, Any
         "latest_price": snapshot.latest_price,
         "price_date": snapshot.price_date.isoformat() if snapshot.price_date is not None else None,
         "price_source": snapshot.price_source,
+        "observation_timestamp": snapshot.observation_timestamp.isoformat() if snapshot.observation_timestamp is not None else None,
+        "fetch_timestamp": snapshot.fetch_timestamp.isoformat() if snapshot.fetch_timestamp is not None else None,
     }
 
 
-def _model_config(definition: ModelDefinition) -> dict[str, Any]:
+def _model_config(dataset: CompanyDataset, definition: ModelDefinition) -> dict[str, Any]:
     if definition.name == "dupont":
         from app.model_engine.models import dupont as dupont_model
 
         return {"mode": dupont_model.get_mode()}
     if definition.name in {"dcf", "reverse_dcf", "roic"}:
-        snapshot = get_latest_risk_free_rate()
+        snapshot = get_latest_risk_free_rate(dataset.as_of_date)
         return {
             "risk_free_rate": {
                 "source_name": snapshot.source_name,
@@ -350,6 +406,12 @@ def _model_config(definition: ModelDefinition) -> dict[str, Any]:
             }
         }
     return {}
+
+
+def _market_observation_timestamp(trade_date) -> datetime | None:
+    if trade_date is None:
+        return None
+    return datetime.combine(trade_date, datetime.max.time(), tzinfo=timezone.utc)
 
 
 def _latest_model_run(session: Session, company_id: int, definition: ModelDefinition) -> ModelRun | None:

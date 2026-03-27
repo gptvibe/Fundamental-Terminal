@@ -8,6 +8,7 @@ from app.models.derived_metric_point import DerivedMetricPoint
 from app.models.earnings_model_point import EarningsModelPoint
 from app.models.earnings_release import EarningsRelease
 from app.models.executive_compensation import ExecutiveCompensation
+from app.models.financial_restatement import FinancialRestatement
 from app.models.financial_statement import FinancialStatement
 from app.models.filing_event import FilingEvent
 from app.models.form144_filing import Form144Filing
@@ -33,6 +34,7 @@ __all__ = [
     "EarningsModelPoint",
     "EarningsRelease",
     "ExecutiveCompensation",
+    "FinancialRestatement",
     "FinancialStatement",
     "FilingEvent",
     "Form144Filing",

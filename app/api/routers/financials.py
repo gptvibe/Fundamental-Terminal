@@ -5,11 +5,13 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api.schemas.financials import (
+    CompanyChangesSinceLastFilingResponse,
     CompanyDerivedMetricsResponse,
     CompanyDerivedMetricsSummaryResponse,
     CompanyFactsResponse,
     CompanyFilingInsightsResponse,
     CompanyFinancialsResponse,
+    CompanyFinancialRestatementsResponse,
     CompanyMetricsTimeseriesResponse,
 )
 
@@ -27,6 +29,12 @@ def build_router(main_module: Any) -> APIRouter:
         main_module.company_filing_insights,
         methods=["GET"],
         response_model=CompanyFilingInsightsResponse,
+    )
+    router.add_api_route(
+        "/api/companies/{ticker}/changes-since-last-filing",
+        main_module.company_changes_since_last_filing,
+        methods=["GET"],
+        response_model=CompanyChangesSinceLastFilingResponse,
     )
     router.add_api_route(
         "/api/companies/{ticker}/metrics-timeseries",
@@ -51,5 +59,11 @@ def build_router(main_module: Any) -> APIRouter:
         main_module.company_financial_history,
         methods=["GET"],
         response_model=CompanyFactsResponse,
+    )
+    router.add_api_route(
+        "/api/companies/{ticker}/financial-restatements",
+        main_module.company_financial_restatements,
+        methods=["GET"],
+        response_model=CompanyFinancialRestatementsResponse,
     )
     return router

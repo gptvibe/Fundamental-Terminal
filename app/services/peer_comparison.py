@@ -7,9 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.model_engine.engine import ModelEngine
+from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
 from app.models import Company, FinancialStatement, ModelRun, PriceHistory
-from app.services.cache_queries import CompanyCacheSnapshot, get_company_snapshot
+from app.services.cache_queries import (
+    CompanyCacheSnapshot,
+    get_company_snapshot,
+    latest_price_as_of,
+    select_point_in_time_financials,
+)
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import ANNUAL_FORMS, CANONICAL_STATEMENT_TYPE
 
@@ -25,6 +30,7 @@ def build_peer_comparison(
     *,
     selected_tickers: list[str] | None = None,
     max_peers: int = DEFAULT_MAX_PEERS,
+    as_of: datetime | None = None,
 ) -> dict[str, Any] | None:
     focus_snapshot = get_company_snapshot(session, ticker)
     if focus_snapshot is None:
@@ -86,19 +92,54 @@ def build_peer_comparison(
     engine = ModelEngine(session)
     wrote_model_cache = False
     rows: list[dict[str, Any]] = []
-    for snapshot in comparison_snapshots:
-        if snapshot.cache_state == "fresh":
-            model_results = engine.compute_models(snapshot.company.id, model_names=PEER_MODEL_NAMES, force=False)
-            if any(not result.cached for result in model_results):
-                wrote_model_cache = True
-
-    if wrote_model_cache:
-        session.commit()
-
     comparison_company_ids = [snapshot.company.id for snapshot in comparison_snapshots]
     financials_by_company = _load_financials_for_companies(session, comparison_company_ids)
-    latest_prices_by_company = _load_latest_prices_for_companies(session, comparison_company_ids)
-    models_by_company = _load_latest_models_for_companies(session, comparison_company_ids)
+    if as_of is None:
+        for snapshot in comparison_snapshots:
+            if snapshot.cache_state == "fresh":
+                model_results = engine.compute_models(snapshot.company.id, model_names=PEER_MODEL_NAMES, force=False)
+                if any(not result.cached for result in model_results):
+                    wrote_model_cache = True
+
+        if wrote_model_cache:
+            session.commit()
+
+        latest_prices_by_company = _load_latest_prices_for_companies(session, comparison_company_ids)
+        models_by_company = _load_latest_models_for_companies(session, comparison_company_ids)
+    else:
+        financials_by_company = {
+            company_id: select_point_in_time_financials(statements, as_of)
+            for company_id, statements in financials_by_company.items()
+        }
+        price_history_by_company = _load_price_history_for_companies(session, comparison_company_ids)
+        latest_prices_by_company = {}
+        for company_id, price_history in price_history_by_company.items():
+            latest_price = latest_price_as_of(price_history, as_of)
+            if latest_price is not None:
+                latest_prices_by_company[company_id] = latest_price
+
+        evaluated_at = datetime.now(timezone.utc)
+        models_by_company: dict[int, dict[str, ModelRun | dict[str, Any]]] = {company_id: {} for company_id in comparison_company_ids}
+        for snapshot in comparison_snapshots:
+            company_financials = financials_by_company.get(snapshot.company.id, [])
+            dataset = build_company_dataset(
+                snapshot.company,
+                company_financials,
+                build_market_snapshot(latest_prices_by_company.get(snapshot.company.id)),
+                as_of_date=as_of,
+            )
+            if not dataset.financials:
+                continue
+            model_payloads = engine.evaluate_models(
+                dataset,
+                model_names=PEER_MODEL_NAMES,
+                created_at=evaluated_at,
+            )
+            models_by_company[snapshot.company.id] = {
+                str(model_payload.get("model_name") or "").lower(): model_payload
+                for model_payload in model_payloads
+            }
+
     for snapshot in comparison_snapshots:
         rows.append(
             _build_peer_row(
@@ -234,7 +275,7 @@ def _build_peer_row(
     is_focus: bool,
     financials_by_company: dict[int, list[FinancialStatement]],
     latest_prices_by_company: dict[int, PriceHistory],
-    models_by_company: dict[int, dict[str, ModelRun]],
+    models_by_company: dict[int, dict[str, ModelRun | dict[str, Any]]],
 ) -> dict[str, Any]:
     statements = financials_by_company.get(snapshot.company.id, [])
     current_statement = _latest_preferred_statement(statements)
@@ -397,6 +438,22 @@ def _load_latest_prices_for_companies(session: Session, company_ids: list[int]) 
     return {row.company_id: row for row in rows}
 
 
+def _load_price_history_for_companies(session: Session, company_ids: list[int]) -> dict[int, list[PriceHistory]]:
+    if not company_ids:
+        return {}
+
+    statement = (
+        select(PriceHistory)
+        .where(PriceHistory.company_id.in_(company_ids))
+        .order_by(PriceHistory.company_id.asc(), PriceHistory.trade_date.asc(), PriceHistory.id.asc())
+    )
+    rows = list(session.execute(statement).scalars())
+    grouped: dict[int, list[PriceHistory]] = {company_id: [] for company_id in company_ids}
+    for row in rows:
+        grouped.setdefault(row.company_id, []).append(row)
+    return grouped
+
+
 def _load_latest_models_for_companies(session: Session, company_ids: list[int]) -> dict[int, dict[str, ModelRun]]:
     if not company_ids:
         return {}
@@ -491,8 +548,13 @@ def _company_market_classification(company: Company) -> tuple[str | None, str | 
     return profile.market_sector, profile.market_industry
 
 
-def _model_result(model_run: ModelRun | None) -> dict[str, Any]:
-    if model_run is None or not isinstance(model_run.result, dict):
+def _model_result(model_run: ModelRun | dict[str, Any] | None) -> dict[str, Any]:
+    if model_run is None:
+        return {}
+    if isinstance(model_run, dict):
+        result = model_run.get("result")
+        return result if isinstance(result, dict) else {}
+    if not isinstance(model_run.result, dict):
         return {}
     return model_run.result
 
@@ -501,11 +563,11 @@ def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _collect_risk_free_sources(models_by_company: dict[int, dict[str, ModelRun]]) -> list[str]:
+def _collect_risk_free_sources(models_by_company: dict[int, dict[str, ModelRun | dict[str, Any]]]) -> list[str]:
     sources: set[str] = set()
     for company_models in models_by_company.values():
         for model in company_models.values():
-            result = model.result if isinstance(model.result, dict) else {}
+            result = _model_result(model)
             assumption_provenance = result.get("assumption_provenance")
             if not isinstance(assumption_provenance, dict):
                 continue

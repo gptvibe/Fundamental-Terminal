@@ -29,7 +29,7 @@ HEATMAP_SHIFTS = (-0.03, -0.015, 0.0, 0.015, 0.03)
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     applicability = valuation_applicability(dataset)
     if not applicability["is_supported"]:
-        risk_free = get_latest_risk_free_rate()
+        risk_free = get_latest_risk_free_rate(dataset.as_of_date)
         return {
             "status": "unsupported",
             "model_status": "unsupported",
@@ -73,7 +73,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     market_snapshot = dataset.market_snapshot
     price = market_snapshot.latest_price if market_snapshot is not None else None
 
-    risk_free = get_latest_risk_free_rate()
+    risk_free = get_latest_risk_free_rate(dataset.as_of_date)
     discount_rate = risk_free.rate_used + 0.055
     terminal_growth = min(0.03, max(0.005, risk_free.rate_used * 0.6))
 

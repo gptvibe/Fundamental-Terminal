@@ -156,6 +156,36 @@ def to_period_payload(rows: list[DerivedMetricPoint]) -> list[dict[str, Any]]:
     return payload
 
 
+def to_period_payload_from_points(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, date, date, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[(row["period_type"], row["period_start"], row["period_end"], row["filing_type"])].append(row)
+
+    payload: list[dict[str, Any]] = []
+    for key in sorted(grouped.keys(), key=lambda item: (item[0], item[2])):
+        period_type, period_start, period_end, filing_type = key
+        metric_rows = sorted(grouped[key], key=lambda item: str(item.get("metric_key") or ""))
+        payload.append(
+            {
+                "period_type": period_type,
+                "period_start": period_start,
+                "period_end": period_end,
+                "filing_type": filing_type,
+                "metrics": [
+                    {
+                        "metric_key": metric.get("metric_key"),
+                        "metric_value": metric.get("metric_value"),
+                        "is_proxy": bool(metric.get("is_proxy")),
+                        "provenance": metric.get("provenance") or {},
+                        "quality_flags": list(metric.get("quality_flags") or []),
+                    }
+                    for metric in metric_rows
+                ],
+            }
+        )
+    return payload
+
+
 def build_summary_payload(rows: list[DerivedMetricPoint], period_type: str) -> dict[str, Any]:
     if not rows:
         return {"period_type": period_type, "latest_period_end": None, "metrics": []}
@@ -182,6 +212,38 @@ def build_summary_payload(rows: list[DerivedMetricPoint], period_type: str) -> d
                 "is_proxy": row.is_proxy,
                 "provenance": row.provenance,
                 "quality_flags": row.quality_flags,
+            }
+            for row in latest_rows
+        ],
+    }
+
+
+def build_summary_payload_from_points(rows: list[dict[str, Any]], period_type: str) -> dict[str, Any]:
+    if not rows:
+        return {"period_type": period_type, "latest_period_end": None, "metrics": []}
+
+    preferred = [item for item in rows if item.get("period_type") == period_type]
+    if not preferred:
+        fallback_order = ["ttm", "annual", "quarterly"]
+        for fallback in fallback_order:
+            preferred = [item for item in rows if item.get("period_type") == fallback]
+            if preferred:
+                period_type = fallback
+                break
+
+    latest_period_end = max(item["period_end"] for item in preferred)
+    latest_rows = [item for item in preferred if item.get("period_end") == latest_period_end]
+    latest_rows.sort(key=lambda item: str(item.get("metric_key") or ""))
+    return {
+        "period_type": period_type,
+        "latest_period_end": latest_period_end,
+        "metrics": [
+            {
+                "metric_key": row.get("metric_key"),
+                "metric_value": row.get("metric_value"),
+                "is_proxy": bool(row.get("is_proxy")),
+                "provenance": row.get("provenance") or {},
+                "quality_flags": list(row.get("quality_flags") or []),
             }
             for row in latest_rows
         ],

@@ -1,0 +1,122 @@
+{
+  "cik": "0000123456",
+  "filings": [
+    {
+      "accession_number": "0000123456-26-000010",
+      "form": "10-K",
+      "filing_date": "2026-02-20",
+      "report_date": "2025-12-31",
+      "acceptance_datetime": "2026-02-20T20:30:00Z",
+      "primary_document": "original10k.htm"
+    },
+    {
+      "accession_number": "0000123456-26-000011",
+      "form": "10-K/A",
+      "filing_date": "2026-03-20",
+      "report_date": "2025-12-31",
+      "acceptance_datetime": "2026-03-20T21:15:00Z",
+      "primary_document": "amended10k.htm"
+    }
+  ],
+  "companyfacts": {
+    "facts": {
+      "us-gaap": {
+        "Revenues": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 1000
+              },
+              {
+                "accn": "0000123456-26-000011",
+                "form": "10-K/A",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-03-20",
+                "val": 950
+              }
+            ]
+          }
+        },
+        "NetIncomeLoss": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 180
+              },
+              {
+                "accn": "0000123456-26-000011",
+                "form": "10-K/A",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-03-20",
+                "val": 160
+              }
+            ]
+          }
+        },
+        "EarningsPerShareDiluted": {
+          "units": {
+            "USD/shares": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 4.2
+              },
+              {
+                "accn": "0000123456-26-000011",
+                "form": "10-K/A",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-03-20",
+                "val": 3.8
+              }
+            ]
+          }
+        },
+        "Assets": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000010",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 3000
+              },
+              {
+                "accn": "0000123456-26-000011",
+                "form": "10-K/A",
+                "end": "2025-12-31",
+                "filed": "2026-03-20",
+                "val": 3000
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expected": {
+    "detection_kind": "amended_filing",
+    "accession_number": "0000123456-26-000011",
+    "previous_accession_number": "0000123456-26-000010",
+    "changed_metric_keys": ["eps", "net_income", "revenue"],
+    "revenue_previous": 1000,
+    "revenue_current": 950,
+    "revenue_delta": -50
+  }
+}

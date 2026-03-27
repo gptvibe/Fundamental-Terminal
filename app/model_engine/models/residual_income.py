@@ -35,7 +35,7 @@ REQUIRED_FIELDS = [
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     applicability = valuation_applicability(dataset)
-    risk_free = get_latest_risk_free_rate()
+    risk_free = get_latest_risk_free_rate(dataset.as_of_date)
     coe = risk_free.rate_used + EQUITY_RISK_PREMIUM + FINANCIAL_FIRM_ADDITIONAL_RISK
 
     # Applicability: RI is *preferred* for financials, but works for all sectors

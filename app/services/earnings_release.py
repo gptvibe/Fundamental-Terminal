@@ -82,6 +82,7 @@ class NormalizedEarningsRelease:
     form: str
     filing_date: date | None
     report_date: date | None
+    filing_acceptance_at: datetime | None
     source_url: str
     primary_document: str | None
     exhibit_document: str | None
@@ -136,6 +137,7 @@ def upsert_earnings_releases(
                 form=release.form,
                 filing_date=release.filing_date,
                 report_date=release.report_date,
+                filing_acceptance_at=release.filing_acceptance_at,
                 source_url=release.source_url,
                 primary_document=release.primary_document,
                 exhibit_document=release.exhibit_document,
@@ -154,6 +156,7 @@ def upsert_earnings_releases(
                 dividend_per_share=release.dividend_per_share,
                 highlights=list(release.highlights),
                 parse_state=release.parse_state,
+                fetch_timestamp=checked_at,
                 last_checked=checked_at,
             )
             .on_conflict_do_update(
@@ -162,6 +165,7 @@ def upsert_earnings_releases(
                     "form": release.form,
                     "filing_date": release.filing_date,
                     "report_date": release.report_date,
+                    "filing_acceptance_at": release.filing_acceptance_at,
                     "source_url": release.source_url,
                     "primary_document": release.primary_document,
                     "exhibit_document": release.exhibit_document,
@@ -180,6 +184,7 @@ def upsert_earnings_releases(
                     "dividend_per_share": release.dividend_per_share,
                     "highlights": list(release.highlights),
                     "parse_state": release.parse_state,
+                    "fetch_timestamp": checked_at,
                     "last_checked": checked_at,
                     "last_updated": checked_at,
                 },
@@ -219,6 +224,7 @@ def _build_release(cik: str, filing: FilingMetadata, *, client: Any | None) -> N
         form=filing.form or "8-K",
         filing_date=filing.filing_date,
         report_date=filing.report_date,
+        filing_acceptance_at=filing.acceptance_datetime,
         source_url=source_url,
         primary_document=filing.primary_document,
         exhibit_document=exhibit_document,

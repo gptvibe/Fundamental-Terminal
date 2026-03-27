@@ -66,6 +66,8 @@ def test_models_route_supports_conditional_get(monkeypatch):
         "_refresh_for_snapshot",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
     monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)

@@ -23,7 +23,7 @@ def test_metrics_timeseries_openapi_contract_matches_frontend_shape():
 
     path_schema = schema["paths"]["/api/companies/{ticker}/metrics-timeseries"]["get"]
     parameter_names = {item["name"] for item in path_schema.get("parameters", [])}
-    assert {"ticker", "cadence", "max_points"}.issubset(parameter_names)
+    assert {"ticker", "cadence", "max_points", "as_of"}.issubset(parameter_names)
 
     response_fields = _response_fields(schema, "/api/companies/{ticker}/metrics-timeseries")
 
@@ -57,10 +57,10 @@ def test_metrics_mart_openapi_contract_matches_frontend_shape():
     summary_schema = schema["paths"]["/api/companies/{ticker}/metrics/summary"]["get"]
 
     metrics_parameter_names = {item["name"] for item in metrics_schema.get("parameters", [])}
-    assert {"ticker", "period_type", "max_periods"}.issubset(metrics_parameter_names)
+    assert {"ticker", "period_type", "max_periods", "as_of"}.issubset(metrics_parameter_names)
 
     summary_parameter_names = {item["name"] for item in summary_schema.get("parameters", [])}
-    assert {"ticker", "period_type"}.issubset(summary_parameter_names)
+    assert {"ticker", "period_type", "as_of"}.issubset(summary_parameter_names)
 
     metrics_fields = _response_fields(schema, "/api/companies/{ticker}/metrics")
     assert {

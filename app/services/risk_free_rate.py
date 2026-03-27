@@ -52,23 +52,24 @@ class RiskFreeRateClient:
     def close(self) -> None:
         self._http.close()
 
-    def get_latest_10y_rate(self) -> RiskFreeRateSnapshot:
+    def get_latest_10y_rate(self, as_of: date | None = None) -> RiskFreeRateSnapshot:
         cached = self._read_cache()
         now = datetime.now(timezone.utc)
-        if cached is not None and now - cached.fetched_at < timedelta(hours=24):
+        if as_of is None and cached is not None and now - cached.fetched_at < timedelta(hours=24):
             return cached
 
         try:
-            fresh = self._fetch_treasury_10y_rate()
-            self._write_cache(fresh)
+            fresh = self._fetch_treasury_10y_rate(as_of=as_of)
+            if as_of is None:
+                self._write_cache(fresh)
             return fresh
         except Exception:
-            if cached is not None:
+            if cached is not None and (as_of is None or cached.observation_date <= as_of):
                 logger.warning("Treasury rate unavailable, using cached value from %s", cached.observation_date.isoformat())
                 return cached
             raise
 
-    def _fetch_treasury_10y_rate(self) -> RiskFreeRateSnapshot:
+    def _fetch_treasury_10y_rate(self, *, as_of: date | None = None) -> RiskFreeRateSnapshot:
         try:
             response = _request_with_retries(
                 self._http,
@@ -76,7 +77,7 @@ class RiskFreeRateClient:
                 max_retries=settings.treasury_max_retries,
                 backoff_seconds=settings.treasury_retry_backoff_seconds,
             )
-            return _parse_treasury_csv_snapshot(response.text)
+            return _parse_treasury_csv_snapshot(response.text, as_of=as_of)
         except Exception as exc:
             logger.warning("Treasury CSV source unavailable (%s). Falling back to FiscalData proxy rate.", exc)
             response = _request_with_retries(
@@ -85,7 +86,7 @@ class RiskFreeRateClient:
                 max_retries=settings.treasury_max_retries,
                 backoff_seconds=settings.treasury_retry_backoff_seconds,
             )
-            return _parse_fiscaldata_proxy_snapshot(response.text)
+            return _parse_fiscaldata_proxy_snapshot(response.text, as_of=as_of)
 
     def _read_cache(self) -> RiskFreeRateSnapshot | None:
         if not self._cache_file.exists():
@@ -111,10 +112,10 @@ class RiskFreeRateClient:
         tmp.replace(self._cache_file)
 
 
-def get_latest_risk_free_rate() -> RiskFreeRateSnapshot:
+def get_latest_risk_free_rate(as_of: date | None = None) -> RiskFreeRateSnapshot:
     client = RiskFreeRateClient()
     try:
-        return client.get_latest_10y_rate()
+        return client.get_latest_10y_rate(as_of=as_of)
     finally:
         client.close()
 
@@ -126,7 +127,7 @@ def _parse_datetime_utc(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _parse_treasury_csv_snapshot(content: str) -> RiskFreeRateSnapshot:
+def _parse_treasury_csv_snapshot(content: str, *, as_of: date | None = None) -> RiskFreeRateSnapshot:
     latest_date: date | None = None
     latest_rate: float | None = None
     for row in csv.DictReader(StringIO(content)):
@@ -138,6 +139,8 @@ def _parse_treasury_csv_snapshot(content: str) -> RiskFreeRateSnapshot:
             observed = datetime.strptime(raw_date, "%m/%d/%Y").date()
             rate_percent = float(raw_10y)
         except ValueError:
+            continue
+        if as_of is not None and observed > as_of:
             continue
         if latest_date is None or observed > latest_date:
             latest_date = observed
@@ -155,7 +158,7 @@ def _parse_treasury_csv_snapshot(content: str) -> RiskFreeRateSnapshot:
     )
 
 
-def _parse_fiscaldata_proxy_snapshot(content: str) -> RiskFreeRateSnapshot:
+def _parse_fiscaldata_proxy_snapshot(content: str, *, as_of: date | None = None) -> RiskFreeRateSnapshot:
     payload = json.loads(content)
     records = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(records, list) or not records:
@@ -175,6 +178,8 @@ def _parse_fiscaldata_proxy_snapshot(content: str) -> RiskFreeRateSnapshot:
             observed = date.fromisoformat(record_date)
             rate_percent = float(rate_text)
         except ValueError:
+            continue
+        if as_of is not None and observed > as_of:
             continue
         return RiskFreeRateSnapshot(
             source_name=TREASURY_FALLBACK_SOURCE_NAME,

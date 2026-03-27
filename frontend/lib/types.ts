@@ -293,6 +293,182 @@ export interface CompanyFilingInsightsResponse {
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;
 }
+
+export interface FilingComparisonReferencePayload {
+  accession_number: string | null;
+  filing_type: string;
+  statement_type: string;
+  period_start: string;
+  period_end: string;
+  source: string;
+  last_updated: string;
+  last_checked: string;
+  filing_acceptance_at: string | null;
+  fetch_timestamp: string | null;
+}
+
+export interface FilingComparisonMetricDeltaPayload {
+  metric_key: string;
+  label: string;
+  unit: "usd" | "usd_per_share" | "shares" | "ratio";
+  previous_value: number | null;
+  current_value: number | null;
+  delta: number | null;
+  relative_change: number | null;
+  direction: "added" | "removed" | "increase" | "decrease" | "changed";
+}
+
+export interface FilingComparisonRiskIndicatorPayload {
+  indicator_key: string;
+  label: string;
+  severity: "medium" | "high";
+  description: string;
+  current_value: number | null;
+  previous_value: number | null;
+}
+
+export interface FilingComparisonSegmentShiftPayload {
+  segment_id: string;
+  segment_name: string;
+  kind: "business" | "geographic" | "other";
+  current_revenue: number | null;
+  previous_revenue: number | null;
+  revenue_delta: number | null;
+  current_share_of_revenue: number | null;
+  previous_share_of_revenue: number | null;
+  share_delta: number | null;
+  direction: "added" | "removed" | "increase" | "decrease" | "changed";
+}
+
+export interface FilingComparisonAmendedValuePayload {
+  metric_key: string;
+  label: string;
+  previous_value: number | null;
+  amended_value: number | null;
+  delta: number | null;
+  relative_change: number | null;
+  direction: "added" | "removed" | "increase" | "decrease" | "changed";
+  accession_number: string | null;
+  form: string | null;
+  detection_kind: "amended_filing" | "companyfacts_revision";
+  amended_at: string | null;
+  source: string;
+  confidence_severity: "low" | "medium" | "high";
+  confidence_flags: string[];
+}
+
+export interface ChangesSinceLastFilingSummaryPayload {
+  filing_type: string | null;
+  current_period_start: string | null;
+  current_period_end: string | null;
+  previous_period_start: string | null;
+  previous_period_end: string | null;
+  metric_delta_count: number;
+  new_risk_indicator_count: number;
+  segment_shift_count: number;
+  share_count_change_count: number;
+  capital_structure_change_count: number;
+  amended_prior_value_count: number;
+}
+
+export interface CompanyChangesSinceLastFilingResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  current_filing: FilingComparisonReferencePayload | null;
+  previous_filing: FilingComparisonReferencePayload | null;
+  summary: ChangesSinceLastFilingSummaryPayload;
+  metric_deltas: FilingComparisonMetricDeltaPayload[];
+  new_risk_indicators: FilingComparisonRiskIndicatorPayload[];
+  segment_shifts: FilingComparisonSegmentShiftPayload[];
+  share_count_changes: FilingComparisonMetricDeltaPayload[];
+  capital_structure_changes: FilingComparisonMetricDeltaPayload[];
+  amended_prior_values: FilingComparisonAmendedValuePayload[];
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
+export interface FinancialRestatementFactPayload {
+  accession_number: string | null;
+  form: string | null;
+  taxonomy: string | null;
+  tag: string | null;
+  unit: string | null;
+  filed_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  value: number | null;
+}
+
+export interface FinancialRestatementMetricChangePayload {
+  metric_key: string;
+  previous_value: number | null;
+  current_value: number | null;
+  delta: number | null;
+  relative_change: number | null;
+  direction: "added" | "removed" | "increase" | "decrease" | "changed";
+  previous_fact: FinancialRestatementFactPayload | null;
+  current_fact: FinancialRestatementFactPayload | null;
+  value_changed?: boolean | null;
+}
+
+export interface FinancialRestatementConfidenceImpactPayload {
+  severity: "low" | "medium" | "high";
+  flags: string[];
+  largest_relative_change: number | null;
+  changed_metric_count: number;
+}
+
+export interface FinancialRestatementPayload {
+  accession_number: string;
+  previous_accession_number: string | null;
+  filing_type: string;
+  form: string;
+  is_amendment: boolean;
+  detection_kind: "amended_filing" | "companyfacts_revision";
+  period_start: string;
+  period_end: string;
+  filing_date: string | null;
+  previous_filing_date: string | null;
+  filing_acceptance_at: string | null;
+  previous_filing_acceptance_at: string | null;
+  source: string;
+  previous_source: string | null;
+  changed_metric_keys: string[];
+  normalized_data_changes: FinancialRestatementMetricChangePayload[];
+  companyfacts_changes: FinancialRestatementMetricChangePayload[];
+  confidence_impact: FinancialRestatementConfidenceImpactPayload;
+  last_updated: string;
+  last_checked: string;
+}
+
+export interface FinancialRestatementPeriodSummaryPayload {
+  filing_type: string;
+  period_start: string;
+  period_end: string;
+  restatement_count: number;
+  changed_metric_keys: string[];
+  latest_accession_number: string | null;
+  latest_filing_date: string | null;
+}
+
+export interface FinancialRestatementSummaryPayload {
+  total_restatements: number;
+  amended_filings: number;
+  companyfacts_revisions: number;
+  amended_metric_keys: string[];
+  changed_periods: FinancialRestatementPeriodSummaryPayload[];
+  high_confidence_impacts: number;
+  medium_confidence_impacts: number;
+  low_confidence_impacts: number;
+  latest_filing_date: string | null;
+  latest_filing_acceptance_at: string | null;
+}
+
+export interface CompanyFinancialRestatementsResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  summary: FinancialRestatementSummaryPayload;
+  restatements: FinancialRestatementPayload[];
+  refresh: RefreshState;
+}
 export interface InsiderTradePayload {
   name: string;
   role: string | null;

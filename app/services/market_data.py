@@ -178,6 +178,7 @@ def upsert_price_history(
             "volume": bar.volume,
             "source": PRICE_SOURCE,
             "last_updated": checked_at,
+            "fetch_timestamp": checked_at,
             "last_checked": checked_at,
         }
         for bar in price_bars
@@ -207,6 +208,7 @@ def upsert_price_history(
                     (data_changed, statement.excluded.last_updated),
                     else_=PriceHistory.last_updated,
                 ),
+                "fetch_timestamp": statement.excluded.fetch_timestamp,
                 "last_checked": statement.excluded.last_checked,
             },
         )

@@ -40,6 +40,11 @@ class PriceHistory(Base):
         nullable=False,
         server_default=func.now(),
     )
+    fetch_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
     last_checked: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

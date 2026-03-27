@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.earnings_model_point import EarningsModelPoint
     from app.models.executive_compensation import ExecutiveCompensation
     from app.models.filing_event import FilingEvent
+    from app.models.financial_restatement import FinancialRestatement
     from app.models.financial_statement import FinancialStatement
     from app.models.form144_filing import Form144Filing
     from app.models.earnings_release import EarningsRelease
@@ -52,6 +53,11 @@ class Company(Base):
     proxy_statements_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    financial_restatements: Mapped[list["FinancialRestatement"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,
