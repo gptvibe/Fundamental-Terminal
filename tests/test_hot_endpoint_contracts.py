@@ -11,9 +11,39 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
     client = TestClient(app)
     schema = client.get("/openapi.json").json()
 
+    provenance_fields = {"provenance", "as_of", "last_refreshed_at", "source_mix", "confidence_flags"}
     endpoint_expectations = {
-        "/api/companies/{ticker}/financials": {"company", "financials", "price_history", "refresh", "diagnostics"},
-        "/api/companies/{ticker}/models": {"company", "requested_models", "models", "refresh", "diagnostics"},
+        "/api/companies/{ticker}/financials": {"company", "financials", "price_history", "refresh", "diagnostics", *provenance_fields},
+        "/api/companies/{ticker}/models": {"company", "requested_models", "models", "refresh", "diagnostics", *provenance_fields},
+        "/api/companies/{ticker}/market-context": {
+            "company",
+            "status",
+            "curve_points",
+            "fred_series",
+            "provenance_details",
+            "refresh",
+            *provenance_fields,
+        },
+        "/api/companies/{ticker}/peers": {
+            "company",
+            "peer_basis",
+            "available_companies",
+            "selected_tickers",
+            "peers",
+            "notes",
+            "refresh",
+            *provenance_fields,
+        },
+        "/api/companies/{ticker}/activity-overview": {
+            "company",
+            "entries",
+            "alerts",
+            "summary",
+            "market_context_status",
+            "refresh",
+            "error",
+            *provenance_fields,
+        },
         "/api/companies/{ticker}/earnings/workspace": {
             "company",
             "earnings_releases",
@@ -40,13 +70,21 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     frontend_types = Path("frontend/lib/types.ts").read_text(encoding="utf-8")
 
     for interface_name in (
+        "ProvenanceEnvelope",
         "CompanyFinancialsResponse",
         "CompanyModelsResponse",
+        "CompanyMarketContextResponse",
+        "CompanyPeersResponse",
+        "CompanyActivityOverviewResponse",
         "CompanyEarningsWorkspaceResponse",
         "CompanyFilingInsightsResponse",
     ):
         assert f"interface {interface_name}" in frontend_types
 
+    assert "provenance: ProvenanceEntryPayload[];" in frontend_types
+    assert "source_mix: SourceMixPayload;" in frontend_types
+    assert "confidence_flags: string[];" in frontend_types
+    assert "provenance_details: Record<string, unknown>;" in frontend_types
     assert "diagnostics: DataQualityDiagnosticsPayload;" in frontend_types
     assert "trace_id: string;" in frontend_types
     assert "ticker: string;" in frontend_types

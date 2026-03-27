@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { getCompanyMetricsTimeseries } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
@@ -209,6 +210,14 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
         {payload.staleness_reason ? <span className="pill">{payload.staleness_reason}</span> : null}
         {activeJobId ? <span className="pill">refreshing</span> : null}
       </div>
+
+      <SourceFreshnessSummary
+        provenance={payload.provenance}
+        asOf={payload.as_of}
+        lastRefreshedAt={payload.last_refreshed_at}
+        sourceMix={payload.source_mix}
+        confidenceFlags={payload.confidence_flags}
+      />
 
       {latest ? (
         <div className="metric-grid">

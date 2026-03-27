@@ -31,7 +31,12 @@ def _metric_row(period_type: str, period_end: date, metric_key: str, value: floa
         metric_key=metric_key,
         metric_value=value,
         is_proxy=False,
-        provenance={"formula_version": "sec_metrics_mart_v1", "unit": "ratio"},
+        provenance={
+            "formula_version": "sec_metrics_mart_v1",
+            "unit": "ratio",
+            "statement_source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+            "price_source": "yahoo_finance",
+        },
         quality_flags=[],
     )
 
@@ -66,6 +71,15 @@ def test_metrics_endpoint_returns_typed_payload(monkeypatch):
     assert payload["periods"][0]["period_type"] == "ttm"
     assert payload["periods"][0]["metrics"][0]["metric_key"] in {"gross_margin", "revenue_growth"}
     assert "available_metric_keys" in payload
+    assert payload["as_of"] == "2025-12-31"
+    assert payload["last_refreshed_at"] is not None
+    assert {entry["source_id"] for entry in payload["provenance"]} == {
+        "ft_derived_metrics_mart",
+        "sec_companyfacts",
+        "yahoo_finance",
+    }
+    assert payload["source_mix"]["fallback_source_ids"] == ["yahoo_finance"]
+    assert "commercial_fallback_present" in payload["confidence_flags"]
 
 
 def test_metrics_summary_endpoint_returns_latest_period(monkeypatch):
@@ -95,6 +109,15 @@ def test_metrics_summary_endpoint_returns_latest_period(monkeypatch):
     assert payload["company"]["ticker"] == "AAPL"
     assert payload["latest_period_end"] == "2025-12-31"
     assert payload["metrics"]
+    assert payload["as_of"] == "2025-12-31"
+    assert payload["last_refreshed_at"] is not None
+    assert {entry["source_id"] for entry in payload["provenance"]} == {
+        "ft_derived_metrics_mart",
+        "sec_companyfacts",
+        "yahoo_finance",
+    }
+    assert payload["source_mix"]["fallback_source_ids"] == ["yahoo_finance"]
+    assert "commercial_fallback_present" in payload["confidence_flags"]
 
 
 def test_metrics_endpoint_triggers_refresh_when_company_missing(monkeypatch):
@@ -113,3 +136,6 @@ def test_metrics_endpoint_triggers_refresh_when_company_missing(monkeypatch):
     assert payload["company"] is None
     assert payload["periods"] == []
     assert payload["refresh"]["triggered"] is True
+    assert payload["provenance"] == []
+    assert payload["source_mix"]["source_ids"] == []
+    assert payload["confidence_flags"] == ["company_missing"]

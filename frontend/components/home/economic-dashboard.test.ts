@@ -56,7 +56,41 @@ function makeContext(): CompanyMarketContextResponse {
       { series_id: "UNRATE", label: "Unemployment Rate", category: "labor", units: "percent", value: 0.041, observation_date: "2026-03-01", state: "ok" },
       { series_id: "USREC", label: "Recession Indicator", category: "regime", units: "index", value: 0, observation_date: "2026-03-01", state: "ok" },
     ],
-    provenance: {
+    provenance: [
+      {
+        source_id: "us_treasury_daily_par_yield_curve",
+        source_tier: "official_treasury_or_fed",
+        display_label: "U.S. Treasury Daily Par Yield Curve",
+        url: "https://home.treasury.gov/resource-center/data-chart-center/interest-rates",
+        default_freshness_ttl_seconds: 86400,
+        disclosure_note: "Official Treasury yield curve used for risk-free rates and macro term-structure context.",
+        role: "primary",
+        as_of: "2026-03-21",
+        last_refreshed_at: "2026-03-22T00:00:00Z",
+      },
+      {
+        source_id: "fred",
+        source_tier: "official_treasury_or_fed",
+        display_label: "Federal Reserve Economic Data (FRED)",
+        url: "https://fred.stlouisfed.org/",
+        default_freshness_ttl_seconds: 86400,
+        disclosure_note: "Federal Reserve public macro series used for supplemental rates, inflation, labor, and credit context.",
+        role: "supplemental",
+        as_of: "2026-03-01",
+        last_refreshed_at: "2026-03-22T00:00:00Z",
+      },
+    ],
+    as_of: "2026-03-21",
+    last_refreshed_at: "2026-03-22T00:00:00Z",
+    source_mix: {
+      source_ids: ["us_treasury_daily_par_yield_curve", "fred"],
+      source_tiers: ["official_treasury_or_fed"],
+      primary_source_ids: ["us_treasury_daily_par_yield_curve"],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: [],
+    provenance_details: {
       treasury: { status: "ok" },
       fred: { enabled: true, status: "ok" },
     },
@@ -84,5 +118,6 @@ describe("EconomicDashboard", () => {
     expect(html).toContain("Front-end avg");
     expect(html).toContain("10Y minus RRP");
     expect(html).toContain("Expansion regime");
+    expect(html).toContain("U.S. Treasury Daily Par Yield Curve");
   });
 });

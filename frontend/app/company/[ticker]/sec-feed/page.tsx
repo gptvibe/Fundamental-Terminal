@@ -7,6 +7,7 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyActivityOverview } from "@/lib/api";
@@ -125,6 +126,16 @@ export default function CompanySecFeedPage() {
           { label: "Low Alerts", value: (activityData?.summary.low ?? 0).toLocaleString(), accent: "green" },
         ]}
       />
+
+      <Panel title="Source & Freshness" subtitle="Registry-backed provenance for the unified SEC activity stream and supporting macro status">
+        <SourceFreshnessSummary
+          provenance={activityData?.provenance}
+          asOf={activityData?.as_of}
+          lastRefreshedAt={activityData?.last_refreshed_at}
+          sourceMix={activityData?.source_mix}
+          confidenceFlags={activityData?.confidence_flags}
+        />
+      </Panel>
 
       <Panel title="Priority Alerts" subtitle="Most important filing-driven signals from recent SEC activity">
         {error ? (

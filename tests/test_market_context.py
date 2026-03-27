@@ -222,7 +222,13 @@ def test_company_market_context_route_returns_payload(monkeypatch):
     payload = response.json()
     assert payload["status"] == "partial"
     assert payload["curve_points"]
-    assert payload["provenance"]["fred"]["status"] == "missing_api_key"
+    assert payload["provenance_details"]["fred"]["status"] == "missing_api_key"
+    assert {entry["source_id"] for entry in payload["provenance"]} == {"us_treasury_daily_par_yield_curve"}
+    assert payload["as_of"] == "2026-03-21"
+    assert payload["last_refreshed_at"].startswith("2026-03-22T00:00:00")
+    assert payload["source_mix"]["official_only"] is True
+    assert "market_context_partial" in payload["confidence_flags"]
+    assert "supplemental_fred_unconfigured" in payload["confidence_flags"]
 
 
 def test_parse_treasury_curve_textview_extracts_2m_and_4m():

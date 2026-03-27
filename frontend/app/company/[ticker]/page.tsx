@@ -9,6 +9,7 @@ import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/co
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyActivityOverview } from "@/lib/api";
@@ -140,6 +141,14 @@ export default function CompanyOverviewPage() {
               <div className="text-muted">Loading activity feed...</div>
             ) : (
               <div style={{ display: "grid", gap: 16 }}>
+                <SourceFreshnessSummary
+                  provenance={activityData?.provenance}
+                  asOf={activityData?.as_of}
+                  lastRefreshedAt={activityData?.last_refreshed_at}
+                  sourceMix={activityData?.source_mix}
+                  confidenceFlags={activityData?.confidence_flags}
+                />
+
                 <CompanyMetricGrid
                   items={[
                     { label: "Feed Entries", value: (activityData?.entries.length ?? 0).toLocaleString() },

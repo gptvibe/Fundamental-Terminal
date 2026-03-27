@@ -103,6 +103,46 @@ vi.mock("@/lib/api", () => ({
       },
     ],
     summary: { total: 3, high: 1, medium: 1, low: 1 },
+    provenance: [
+      {
+        source_id: "ft_activity_overview",
+        source_tier: "derived_from_official",
+        display_label: "Fundamental Terminal Activity Overview",
+        url: "https://github.com/gptvibe/Fundamental-Terminal",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Unified activity feed assembled from official SEC disclosures and official macro status signals.",
+        role: "derived",
+        as_of: "2026-03-11",
+        last_refreshed_at: "2026-03-10T00:00:00Z",
+      },
+      {
+        source_id: "sec_edgar",
+        source_tier: "official_regulator",
+        display_label: "SEC EDGAR Filing Archive",
+        url: "https://www.sec.gov/edgar/search/",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Official SEC filing archive used for filing metadata, ownership, governance, and event disclosures.",
+        role: "primary",
+        as_of: "2026-03-11",
+        last_refreshed_at: "2026-03-10T00:00:00Z",
+      },
+    ],
+    as_of: "2026-03-11",
+    last_refreshed_at: "2026-03-10T00:00:00Z",
+    source_mix: {
+      source_ids: ["ft_activity_overview", "sec_edgar"],
+      source_tiers: ["derived_from_official", "official_regulator"],
+      primary_source_ids: ["sec_edgar"],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: [],
+    market_context_status: {
+      state: "partial",
+      label: "Macro partial",
+      observation_date: "2026-03-10",
+      source: "U.S. Treasury Daily Par Yield Curve",
+    },
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
     error: null,
   })),
@@ -119,6 +159,7 @@ describe("CompanySecFeedPage interactions", () => {
 
     expect(screen.getByText("planned-sale")).toBeTruthy();
     expect(screen.getByText("Jane Doe filed Form 144 planned sale")).toBeTruthy();
+    expect(screen.getByText("SEC EDGAR Filing Archive")).toBeTruthy();
 
     const newest = screen.getByText("Newest Event");
     const older = screen.getByText("Older Event");

@@ -16,6 +16,7 @@ import {
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyMarketContextResponse, MacroSeriesItemPayload, MarketFredSeriesPayload } from "@/lib/types";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 
 interface EconomicDashboardProps {
   context: CompanyMarketContextResponse | null;
@@ -141,6 +142,14 @@ export function EconomicDashboard({ context }: EconomicDashboardProps) {
 
   return (
     <div className="econ-dashboard">
+      <SourceFreshnessSummary
+        provenance={context.provenance}
+        asOf={context.as_of}
+        lastRefreshedAt={context.last_refreshed_at}
+        sourceMix={context.source_mix}
+        confidenceFlags={context.confidence_flags}
+      />
+
       <section className="econ-hero">
         <div className="econ-hero-copy">
           <div className="grid-empty-kicker">Macro</div>
@@ -455,7 +464,7 @@ function normalizeStatus(status: string): string {
 }
 
 function readTreasuryStatus(context: CompanyMarketContextResponse): string {
-  const treasury = context.provenance.treasury;
+  const treasury = context.provenance_details.treasury;
   if (!treasury || typeof treasury !== "object") {
     return "unknown";
   }

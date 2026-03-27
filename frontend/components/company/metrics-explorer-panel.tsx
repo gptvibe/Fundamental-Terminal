@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useJobStream } from "@/hooks/use-job-stream";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { getCompanyDerivedMetricsSummary, invalidateApiReadCacheForTicker } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { CompanyDerivedMetricsSummaryResponse, DerivedMetricValuePayload } from "@/lib/types";
@@ -120,6 +121,14 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
         {payload.staleness_reason ? <span className="pill">{payload.staleness_reason}</span> : null}
         {activeJobId ? <span className="pill">refreshing</span> : null}
       </div>
+
+      <SourceFreshnessSummary
+        provenance={payload.provenance}
+        asOf={payload.as_of}
+        lastRefreshedAt={payload.last_refreshed_at}
+        sourceMix={payload.source_mix}
+        confidenceFlags={payload.confidence_flags}
+      />
 
       <div className="metric-grid">
         {DISPLAY_KEYS.map((key) => {

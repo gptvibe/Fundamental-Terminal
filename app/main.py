@@ -24,6 +24,7 @@ from app.db import get_db_session
 from app.model_engine.engine import ModelEngine
 from app.model_engine.models import dupont as dupont_model
 from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
+from app.source_registry import SourceTier, SourceUsage, build_provenance_entries, build_source_mix, infer_source_id
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -109,6 +110,34 @@ class DataQualityDiagnosticsPayload(BaseModel):
     stale_flags: list[str] = Field(default_factory=list)
     parser_confidence: Number = None
     missing_field_flags: list[str] = Field(default_factory=list)
+
+
+class SourceMixPayload(BaseModel):
+    source_ids: list[str] = Field(default_factory=list)
+    source_tiers: list[SourceTier] = Field(default_factory=list)
+    primary_source_ids: list[str] = Field(default_factory=list)
+    fallback_source_ids: list[str] = Field(default_factory=list)
+    official_only: bool = False
+
+
+class ProvenanceEntryPayload(BaseModel):
+    source_id: str
+    source_tier: SourceTier
+    display_label: str
+    url: str
+    default_freshness_ttl_seconds: int
+    disclosure_note: str
+    role: Literal["primary", "supplemental", "derived", "fallback"] = "primary"
+    as_of: str | None = None
+    last_refreshed_at: datetime | None = None
+
+
+class ProvenanceEnvelope(BaseModel):
+    provenance: list[ProvenanceEntryPayload] = Field(default_factory=list)
+    as_of: str | None = None
+    last_refreshed_at: datetime | None = None
+    source_mix: SourceMixPayload = Field(default_factory=SourceMixPayload)
+    confidence_flags: list[str] = Field(default_factory=list)
 
 
 class CompanyPayload(BaseModel):
@@ -226,7 +255,7 @@ class PriceHistoryPayload(BaseModel):
     volume: int | None = None
 
 
-class CompanyFinancialsResponse(BaseModel):
+class CompanyFinancialsResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     financials: list[FinancialPayload]
     price_history: list[PriceHistoryPayload]
@@ -276,7 +305,7 @@ class MetricsTimeseriesPointPayload(BaseModel):
     quality: MetricsQualityPayload
 
 
-class CompanyMetricsTimeseriesResponse(BaseModel):
+class CompanyMetricsTimeseriesResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     series: list[MetricsTimeseriesPointPayload]
     last_financials_check: datetime | None = None
@@ -302,7 +331,7 @@ class DerivedMetricPeriodPayload(BaseModel):
     metrics: list[DerivedMetricValuePayload]
 
 
-class CompanyDerivedMetricsResponse(BaseModel):
+class CompanyDerivedMetricsResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     period_type: Literal["quarterly", "annual", "ttm"]
     periods: list[DerivedMetricPeriodPayload]
@@ -315,7 +344,7 @@ class CompanyDerivedMetricsResponse(BaseModel):
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 
 
-class CompanyDerivedMetricsSummaryResponse(BaseModel):
+class CompanyDerivedMetricsSummaryResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     period_type: Literal["quarterly", "annual", "ttm"]
     latest_period_end: DateType | None = None
@@ -645,7 +674,7 @@ class ModelPayload(BaseModel):
     result: dict[str, Any]
 
 
-class CompanyModelsResponse(BaseModel):
+class CompanyModelsResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     requested_models: list[str]
     models: list[ModelPayload]
@@ -706,7 +735,7 @@ class PeerMetricsPayload(BaseModel):
     revenue_history: list[PeerRevenuePointPayload] = Field(default_factory=list)
 
 
-class CompanyPeersResponse(BaseModel):
+class CompanyPeersResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     peer_basis: str
     available_companies: list[PeerOptionPayload]
@@ -1010,7 +1039,7 @@ class CompanyAlertsResponse(BaseModel):
     error: str | None = None
 
 
-class CompanyActivityOverviewResponse(BaseModel):
+class CompanyActivityOverviewResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     entries: list[ActivityFeedEntryPayload]
     alerts: list[AlertPayload]
@@ -1065,14 +1094,14 @@ class MacroSeriesItemPayload(BaseModel):
     status: str
 
 
-class CompanyMarketContextResponse(BaseModel):
+class CompanyMarketContextResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     status: str
     curve_points: list[MarketCurvePointPayload]
     slope_2s10s: MarketSlopePayload
     slope_3m10y: MarketSlopePayload
     fred_series: list[MarketFredSeriesPayload]
-    provenance: dict[str, Any]
+    provenance_details: dict[str, Any] = Field(default_factory=dict)
     fetched_at: datetime
     refresh: RefreshState
     # v2 grouped sections
@@ -1367,6 +1396,7 @@ def company_financials(
                 update={
                     "refresh": stale_refresh,
                     "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                    "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
                 }
             )
 
@@ -1388,6 +1418,7 @@ def company_financials(
             price_history=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
         )
         _store_hot_cached_payload(hot_key, payload)
         return payload
@@ -1397,6 +1428,7 @@ def company_financials(
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = get_company_price_history(session, snapshot.company.id)
     serialized_financials = [_serialize_financial(statement) for statement in financials]
+    diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
     payload = CompanyFinancialsResponse(
         company=_serialize_company(
             snapshot,
@@ -1406,7 +1438,14 @@ def company_financials(
         financials=serialized_financials,
         price_history=[_serialize_price_history(point) for point in price_history],
         refresh=refresh,
-        diagnostics=_diagnostics_for_financial_response(serialized_financials, refresh),
+        diagnostics=diagnostics,
+        **_financials_provenance_contract(
+            financials,
+            price_history,
+            price_last_checked=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
     )
     _store_hot_cached_payload(hot_key, payload)
     not_modified = _apply_conditional_headers(
@@ -1467,6 +1506,7 @@ def company_metrics_timeseries(
             staleness_reason="company_missing",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
         )
 
     financials = get_company_financials(session, snapshot.company.id)
@@ -1476,6 +1516,7 @@ def company_metrics_timeseries(
     price_history = get_company_price_history(session, snapshot.company.id)
     series = build_metrics_timeseries(financials, price_history, cadence=cadence, max_points=max_points)
     point_payload = [MetricsTimeseriesPointPayload.model_validate(point) for point in series]
+    diagnostics = _diagnostics_for_metrics_timeseries(point_payload, refresh, staleness_reason)
     return CompanyMetricsTimeseriesResponse(
         company=_serialize_company(
             snapshot,
@@ -1487,7 +1528,14 @@ def company_metrics_timeseries(
         last_price_check=price_last_checked,
         staleness_reason=staleness_reason,
         refresh=refresh,
-        diagnostics=_diagnostics_for_metrics_timeseries(point_payload, refresh, staleness_reason),
+        diagnostics=diagnostics,
+        **_metrics_timeseries_provenance_contract(
+            point_payload,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
     )
 
 
@@ -1513,6 +1561,7 @@ def company_derived_metrics(
             staleness_reason="company_missing",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
         )
 
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
@@ -1534,6 +1583,9 @@ def company_derived_metrics(
 
     period_payload = [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
     available_metric_keys = sorted({item.metric_key for item in rows})
+    diagnostics = _diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason)
+    metric_values = [metric for period in period_payload for metric in period.metrics]
+    latest_period_end = max((period.period_end for period in period_payload), default=None)
     return CompanyDerivedMetricsResponse(
         company=_serialize_company(
             snapshot,
@@ -1548,7 +1600,17 @@ def company_derived_metrics(
         last_price_check=price_last_checked,
         staleness_reason=staleness_reason,
         refresh=refresh,
-        diagnostics=_diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason),
+        diagnostics=diagnostics,
+        **_derived_metrics_provenance_contract(
+            metric_values,
+            as_of=latest_period_end,
+            derived_source_id="ft_derived_metrics_mart",
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
     )
 
 
@@ -1573,6 +1635,7 @@ def company_derived_metrics_summary(
             staleness_reason="company_missing",
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
         )
 
     price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
@@ -1589,6 +1652,7 @@ def company_derived_metrics_summary(
 
     summary = build_summary_payload(rows, period_type)
     metric_payload = [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+    diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
     return CompanyDerivedMetricsSummaryResponse(
         company=_serialize_company(
             snapshot,
@@ -1603,7 +1667,17 @@ def company_derived_metrics_summary(
         last_price_check=price_last_checked,
         staleness_reason=staleness_reason,
         refresh=refresh,
-        diagnostics=_diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason),
+        diagnostics=diagnostics,
+        **_derived_metrics_provenance_contract(
+            metric_payload,
+            as_of=summary["latest_period_end"],
+            derived_source_id="ft_derived_metrics_mart",
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
     )
 
 
@@ -1966,6 +2040,7 @@ def company_models(
                 update={
                     "refresh": stale_refresh,
                     "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                    "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
                 }
             )
 
@@ -1987,6 +2062,7 @@ def company_models(
             models=[],
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
         )
         _store_hot_cached_payload(hot_key, payload)
         return payload
@@ -1997,6 +2073,8 @@ def company_models(
             token = dupont_model.set_mode_override(normalized_mode)
 
         refresh = _refresh_for_snapshot(background_tasks, snapshot)
+        financials = get_company_financials(session, snapshot.company.id)
+        price_last_checked, _price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
         if snapshot.cache_state == "fresh" and requested_models:
             model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
             if any(not result.cached for result in model_job_results):
@@ -2020,12 +2098,20 @@ def company_models(
             status_counts,
         )
         serialized_models = [_serialize_model(model_run) for model_run in models]
+        diagnostics = _diagnostics_for_models(serialized_models, refresh)
         payload = CompanyModelsResponse(
             company=_serialize_company(snapshot),
             requested_models=requested_models,
             models=serialized_models,
             refresh=refresh,
-            diagnostics=_diagnostics_for_models(serialized_models, refresh),
+            diagnostics=diagnostics,
+            **_models_provenance_contract(
+                models,
+                financials,
+                price_last_checked=price_last_checked,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
         )
         _store_hot_cached_payload(hot_key, payload)
         not_modified = _apply_conditional_headers(
@@ -2051,6 +2137,28 @@ def company_market_context(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
+        payload = {
+            "status": "insufficient_data",
+            "curve_points": [],
+            "slope_2s10s": {},
+            "slope_3m10y": {},
+            "fred_series": [],
+            "provenance": {
+                "treasury": {"status": "missing"},
+                "fred": {
+                    "enabled": bool(settings.fred_api_key),
+                    "status": "missing_api_key" if not settings.fred_api_key else "missing",
+                },
+            },
+            "rates_credit": [],
+            "inflation_labor": [],
+            "growth_activity": [],
+            "relevant_series": [],
+            "sector_exposure": [],
+            "hqm_snapshot": None,
+        }
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        fetched_at = datetime.now(timezone.utc)
         return CompanyMarketContextResponse(
             company=None,
             status="insufficient_data",
@@ -2058,15 +2166,10 @@ def company_market_context(
             slope_2s10s=MarketSlopePayload(label="2s10s", value=None, short_tenor="2y", long_tenor="10y", observation_date=None),
             slope_3m10y=MarketSlopePayload(label="3m10y", value=None, short_tenor="3m", long_tenor="10y", observation_date=None),
             fred_series=[],
-            provenance={
-                "treasury": {"status": "missing"},
-                "fred": {
-                    "enabled": bool(settings.fred_api_key),
-                    "status": "missing_api_key" if not settings.fred_api_key else "missing",
-                },
-            },
-            fetched_at=datetime.now(timezone.utc),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            provenance_details=payload["provenance"],
+            fetched_at=fetched_at,
+            refresh=refresh,
+            **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
@@ -2162,7 +2265,7 @@ def _v2_dict_to_response(
         slope_2s10s=slope_2s10s,
         slope_3m10y=slope_3m10y,
         fred_series=fred_series,
-        provenance=payload.get("provenance") or {},
+        provenance_details=payload.get("provenance") or {},
         fetched_at=fetched_at,
         refresh=refresh,
         rates_credit=_items("rates_credit"),
@@ -2171,6 +2274,7 @@ def _v2_dict_to_response(
         relevant_series=list(payload.get("relevant_series") or []),
         sector_exposure=list(payload.get("sector_exposure") or []),
         hqm_snapshot=payload.get("hqm_snapshot"),
+        **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
     )
 
 
@@ -2205,7 +2309,12 @@ def company_peers(
         cached_response = CompanyPeersResponse.model_validate(payload_data)
         if not is_fresh:
             stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
-            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+            cached_response = cached_response.model_copy(
+                update={
+                    "refresh": stale_refresh,
+                    "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
+                }
+            )
 
         not_modified = _apply_conditional_headers(
             request,
@@ -2226,6 +2335,7 @@ def company_peers(
             peers=[],
             notes={},
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            **_empty_provenance_contract("company_missing"),
         )
         _store_hot_cached_payload(hot_key, payload)
         return payload
@@ -2249,6 +2359,7 @@ def company_peers(
             peers=[],
             notes={},
             refresh=refresh,
+            **_empty_provenance_contract("peer_data_missing"),
         )
         _store_hot_cached_payload(hot_key, empty_payload)
         return empty_payload
@@ -2265,6 +2376,7 @@ def company_peers(
         peers=[PeerMetricsPayload(**item) for item in payload["peers"]],
         notes=payload["notes"],
         refresh=refresh,
+        **_peers_provenance_contract(payload, price_last_checked=price_last_checked, refresh=refresh),
     )
     _store_hot_cached_payload(hot_key, response_payload)
     not_modified = _apply_conditional_headers(
@@ -3179,6 +3291,130 @@ def _stale_flags_from_refresh(refresh: RefreshState | None, *reasons: str | None
     return sorted(set(flags))
 
 
+def _normalize_as_of(value: DateType | datetime | str | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, DateType):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
+def _parse_as_of(value: DateType | datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, DateType):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        try:
+            parsed_date = DateType.fromisoformat(text)
+        except ValueError:
+            return None
+        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_as_of(*values: DateType | datetime | str | None) -> str | None:
+    best_text: str | None = None
+    best_value: datetime | None = None
+    for value in values:
+        text = _normalize_as_of(value)
+        if text is None:
+            continue
+        parsed = _parse_as_of(text)
+        if parsed is None:
+            if best_text is None:
+                best_text = text
+            continue
+        if best_value is None or parsed > best_value:
+            best_value = parsed
+            best_text = text
+    return best_text
+
+
+def _source_usage_from_hint(
+    source_hint: str | None,
+    *,
+    role: Literal["primary", "supplemental", "derived", "fallback"],
+    as_of: DateType | datetime | str | None = None,
+    last_refreshed_at: datetime | str | None = None,
+    default_source_id: str | None = None,
+) -> SourceUsage | None:
+    source_id = infer_source_id(source_hint, default=default_source_id)
+    if source_id is None:
+        return None
+    return SourceUsage(
+        source_id=source_id,
+        role=role,
+        as_of=as_of,
+        last_refreshed_at=last_refreshed_at,
+    )
+
+
+def _build_provenance_contract(
+    usages: list[SourceUsage],
+    *,
+    as_of: DateType | datetime | str | None = None,
+    last_refreshed_at: datetime | None = None,
+    confidence_flags: list[str] | None = None,
+) -> dict[str, Any]:
+    entries = build_provenance_entries(usages)
+    source_mix = SourceMixPayload.model_validate(build_source_mix(entries))
+    combined_flags = {flag for flag in (confidence_flags or []) if flag}
+    if source_mix.fallback_source_ids:
+        combined_flags.add("commercial_fallback_present")
+    if any(str(entry.get("source_tier") or "") == "manual_override" for entry in entries):
+        combined_flags.add("manual_override_present")
+    return {
+        "provenance": [ProvenanceEntryPayload.model_validate(entry) for entry in entries],
+        "as_of": _normalize_as_of(as_of),
+        "last_refreshed_at": last_refreshed_at,
+        "source_mix": source_mix,
+        "confidence_flags": sorted(combined_flags),
+    }
+
+
+def _empty_provenance_contract(*flags: str) -> dict[str, Any]:
+    return _build_provenance_contract([], confidence_flags=[flag for flag in flags if flag])
+
+
+def _confidence_flags_from_diagnostics(diagnostics: DataQualityDiagnosticsPayload | None) -> list[str]:
+    if diagnostics is None:
+        return []
+    flags = set(diagnostics.stale_flags)
+    flags.update(diagnostics.missing_field_flags)
+    if diagnostics.fallback_ratio not in (None, 0):
+        flags.add("fallback_path_present")
+    if diagnostics.parser_confidence is not None and diagnostics.parser_confidence < 0.75:
+        flags.add("reduced_parser_confidence")
+    return sorted(flags)
+
+
+def _confidence_flags_from_refresh(refresh: RefreshState | None) -> list[str]:
+    if refresh is None:
+        return []
+    if refresh.reason == "stale":
+        return ["stale_data"]
+    if refresh.reason == "missing":
+        return ["missing_data"]
+    return []
+
+
 def _coverage_ratio_for_fields(payload: Any, field_names: tuple[str, ...]) -> float | None:
     if not field_names:
         return None
@@ -3505,6 +3741,501 @@ def _diagnostics_for_models(
         parser_confidence=confidence,
         missing_field_flags=missing_flags,
     )
+
+
+def _financials_provenance_contract(
+    financials: list[FinancialStatement],
+    price_history: list[PriceHistory],
+    *,
+    price_last_checked: datetime | None,
+    diagnostics: DataQualityDiagnosticsPayload,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    latest_statement = financials[0] if financials else None
+    latest_price = price_history[-1] if price_history else None
+    usages: list[SourceUsage] = []
+
+    for statement in financials[:12]:
+        usage = _source_usage_from_hint(
+            statement.source,
+            role="primary",
+            as_of=statement.period_end,
+            last_refreshed_at=statement.last_checked,
+            default_source_id="sec_companyfacts",
+        )
+        if usage is not None:
+            usages.append(usage)
+
+    if latest_price is not None:
+        usage = _source_usage_from_hint(
+            latest_price.source,
+            role="fallback",
+            as_of=latest_price.trade_date,
+            last_refreshed_at=price_last_checked,
+            default_source_id="yahoo_finance",
+        )
+        if usage is not None:
+            usages.append(usage)
+
+    confidence_flags = [
+        *_confidence_flags_from_diagnostics(diagnostics),
+        *_confidence_flags_from_refresh(refresh),
+    ]
+    return _build_provenance_contract(
+        usages,
+        as_of=latest_statement.period_end if latest_statement is not None else (latest_price.trade_date if latest_price is not None else None),
+        last_refreshed_at=_merge_last_checked(
+            latest_statement.last_checked if latest_statement is not None else None,
+            price_last_checked,
+        ),
+        confidence_flags=confidence_flags,
+    )
+
+
+def _metrics_timeseries_provenance_contract(
+    series: list[MetricsTimeseriesPointPayload],
+    *,
+    last_financials_check: datetime | None,
+    last_price_check: datetime | None,
+    diagnostics: DataQualityDiagnosticsPayload,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    latest_point = series[-1] if series else None
+    usages: list[SourceUsage] = []
+
+    if latest_point is not None:
+        usages.append(
+            SourceUsage(
+                source_id="ft_derived_metrics_engine",
+                role="derived",
+                as_of=latest_point.period_end,
+                last_refreshed_at=_merge_last_checked(last_financials_check, last_price_check),
+            )
+        )
+
+    for point in series:
+        statement_usage = _source_usage_from_hint(
+            point.provenance.statement_source,
+            role="primary",
+            as_of=point.period_end,
+            last_refreshed_at=last_financials_check,
+            default_source_id="sec_companyfacts",
+        )
+        if statement_usage is not None:
+            usages.append(statement_usage)
+        if point.provenance.price_source:
+            price_usage = _source_usage_from_hint(
+                point.provenance.price_source,
+                role="fallback",
+                as_of=point.period_end,
+                last_refreshed_at=last_price_check,
+                default_source_id="yahoo_finance",
+            )
+            if price_usage is not None:
+                usages.append(price_usage)
+
+    confidence_flags = [
+        *_confidence_flags_from_diagnostics(diagnostics),
+        *(latest_point.quality.flags if latest_point is not None else []),
+        *_confidence_flags_from_refresh(refresh),
+    ]
+    return _build_provenance_contract(
+        usages,
+        as_of=latest_point.period_end if latest_point is not None else None,
+        last_refreshed_at=_merge_last_checked(last_financials_check, last_price_check),
+        confidence_flags=confidence_flags,
+    )
+
+
+def _derived_metrics_provenance_contract(
+    metric_values: list[DerivedMetricValuePayload],
+    *,
+    as_of: DateType | datetime | str | None,
+    derived_source_id: str,
+    last_metrics_check: datetime | None,
+    last_financials_check: datetime | None,
+    last_price_check: datetime | None,
+    diagnostics: DataQualityDiagnosticsPayload,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = []
+    if as_of is not None:
+        usages.append(
+            SourceUsage(
+                source_id=derived_source_id,
+                role="derived",
+                as_of=as_of,
+                last_refreshed_at=_merge_last_checked(last_metrics_check, last_financials_check, last_price_check),
+            )
+        )
+
+    quality_flags: set[str] = set()
+    for metric in metric_values:
+        provenance = metric.provenance if isinstance(metric.provenance, dict) else {}
+        statement_usage = _source_usage_from_hint(
+            provenance.get("statement_source"),
+            role="primary",
+            as_of=as_of,
+            last_refreshed_at=last_financials_check,
+            default_source_id="sec_companyfacts",
+        )
+        if statement_usage is not None:
+            usages.append(statement_usage)
+        price_source = provenance.get("price_source")
+        if price_source:
+            price_usage = _source_usage_from_hint(
+                str(price_source),
+                role="fallback",
+                as_of=as_of,
+                last_refreshed_at=last_price_check,
+                default_source_id="yahoo_finance",
+            )
+            if price_usage is not None:
+                usages.append(price_usage)
+        quality_flags.update(str(flag) for flag in metric.quality_flags if flag)
+
+    confidence_flags = [
+        *_confidence_flags_from_diagnostics(diagnostics),
+        *sorted(quality_flags),
+        *_confidence_flags_from_refresh(refresh),
+    ]
+    return _build_provenance_contract(
+        usages,
+        as_of=as_of,
+        last_refreshed_at=_merge_last_checked(last_metrics_check, last_financials_check, last_price_check),
+        confidence_flags=confidence_flags,
+    )
+
+
+def _models_provenance_contract(
+    model_runs: list[ModelRun],
+    financials: list[FinancialStatement],
+    *,
+    price_last_checked: datetime | None,
+    diagnostics: DataQualityDiagnosticsPayload,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = []
+    latest_statement = financials[0] if financials else None
+    model_created_at = _merge_last_checked(*(model_run.created_at for model_run in model_runs)) if model_runs else None
+    model_as_of = latest_statement.period_end if latest_statement is not None else _model_response_as_of(model_runs)
+
+    if model_as_of is not None:
+        usages.append(
+            SourceUsage(
+                source_id="ft_model_engine",
+                role="derived",
+                as_of=model_as_of,
+                last_refreshed_at=model_created_at,
+            )
+        )
+
+    for statement in financials[:12]:
+        statement_usage = _source_usage_from_hint(
+            statement.source,
+            role="primary",
+            as_of=statement.period_end,
+            last_refreshed_at=statement.last_checked,
+            default_source_id="sec_companyfacts",
+        )
+        if statement_usage is not None:
+            usages.append(statement_usage)
+
+    extra_flags: set[str] = set()
+    for model_run in model_runs:
+        result = model_run.result if isinstance(model_run.result, dict) else {}
+        status_value = str(result.get("model_status") or result.get("status") or "").lower()
+        if status_value == "partial":
+            extra_flags.add("partial_model_inputs")
+        elif status_value == "proxy":
+            extra_flags.add("proxy_model_outputs")
+        elif status_value == "insufficient_data":
+            extra_flags.add("insufficient_model_inputs")
+        elif status_value == "unsupported":
+            extra_flags.add("unsupported_model_present")
+        for flag in result.get("status_flags") or []:
+            if flag:
+                extra_flags.add(str(flag))
+
+        price_snapshot = result.get("price_snapshot")
+        if isinstance(price_snapshot, dict):
+            price_usage = _source_usage_from_hint(
+                price_snapshot.get("price_source"),
+                role="fallback",
+                as_of=price_snapshot.get("price_date") or model_as_of,
+                last_refreshed_at=price_last_checked,
+                default_source_id="yahoo_finance",
+            )
+            if price_usage is not None:
+                usages.append(price_usage)
+
+        assumption_provenance = result.get("assumption_provenance")
+        if isinstance(assumption_provenance, dict):
+            risk_free = assumption_provenance.get("risk_free_rate")
+            if isinstance(risk_free, dict):
+                risk_free_usage = _source_usage_from_hint(
+                    str(risk_free.get("source_name") or ""),
+                    role="supplemental",
+                    as_of=risk_free.get("observation_date"),
+                    last_refreshed_at=model_run.created_at,
+                )
+                if risk_free_usage is not None:
+                    usages.append(risk_free_usage)
+
+    confidence_flags = [
+        *_confidence_flags_from_diagnostics(diagnostics),
+        *sorted(extra_flags),
+        *_confidence_flags_from_refresh(refresh),
+    ]
+    return _build_provenance_contract(
+        usages,
+        as_of=model_as_of,
+        last_refreshed_at=_merge_last_checked(
+            model_created_at,
+            latest_statement.last_checked if latest_statement is not None else None,
+            price_last_checked,
+        ),
+        confidence_flags=confidence_flags,
+    )
+
+
+def _market_context_provenance_contract(
+    payload: dict[str, Any],
+    *,
+    fetched_at: datetime,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = []
+    provenance_details = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+    treasury_details = provenance_details.get("treasury") if isinstance(provenance_details.get("treasury"), dict) else {}
+    fred_details = provenance_details.get("fred") if isinstance(provenance_details.get("fred"), dict) else {}
+
+    treasury_usage = _source_usage_from_hint(
+        str(treasury_details.get("source_name") or treasury_details.get("source_url") or ""),
+        role="primary",
+        as_of=treasury_details.get("observation_date"),
+        last_refreshed_at=fetched_at,
+        default_source_id="us_treasury_daily_par_yield_curve",
+    )
+    if treasury_usage is not None:
+        usages.append(treasury_usage)
+
+    fred_usage = _source_usage_from_hint(
+        str(fred_details.get("source") or fred_details.get("source_name") or ""),
+        role="supplemental",
+        as_of=_latest_as_of(*[item.get("observation_date") for item in payload.get("fred_series") or [] if isinstance(item, dict)]),
+        last_refreshed_at=fetched_at,
+    )
+    if fred_usage is not None:
+        usages.append(fred_usage)
+
+    for section_key in ("rates_credit", "inflation_labor", "growth_activity"):
+        for item in payload.get(section_key) or []:
+            if not isinstance(item, dict):
+                continue
+            usage = _source_usage_from_hint(
+                str(item.get("source_name") or item.get("source_url") or ""),
+                role="supplemental",
+                as_of=item.get("observation_date") or item.get("release_date"),
+                last_refreshed_at=fetched_at,
+            )
+            if usage is not None:
+                usages.append(usage)
+
+    hqm_snapshot = payload.get("hqm_snapshot")
+    if isinstance(hqm_snapshot, dict):
+        hqm_usage = _source_usage_from_hint(
+            str(hqm_snapshot.get("source_name") or hqm_snapshot.get("source_url") or ""),
+            role="supplemental",
+            as_of=hqm_snapshot.get("observation_date"),
+            last_refreshed_at=fetched_at,
+        )
+        if hqm_usage is not None:
+            usages.append(hqm_usage)
+
+    as_of_values: list[DateType | datetime | str | None] = []
+    as_of_values.extend(point.get("observation_date") for point in payload.get("curve_points") or [] if isinstance(point, dict))
+    as_of_values.extend(item.get("observation_date") for item in payload.get("fred_series") or [] if isinstance(item, dict))
+    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("rates_credit") or [] if isinstance(item, dict))
+    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("inflation_labor") or [] if isinstance(item, dict))
+    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("growth_activity") or [] if isinstance(item, dict))
+    if isinstance(hqm_snapshot, dict):
+        as_of_values.append(hqm_snapshot.get("observation_date"))
+
+    status_value = str(payload.get("status") or "ok")
+    confidence_flags = [
+        *_confidence_flags_from_refresh(refresh),
+    ]
+    if status_value != "ok":
+        confidence_flags.append(f"market_context_{status_value}")
+    treasury_status = str(treasury_details.get("status") or "ok")
+    if treasury_status != "ok":
+        confidence_flags.append(f"treasury_{treasury_status}")
+    if bool(treasury_details.get("fallback_used")):
+        confidence_flags.append("treasury_fallback_used")
+    fred_status = str(fred_details.get("status") or "ok")
+    if fred_status == "missing_api_key":
+        confidence_flags.append("supplemental_fred_unconfigured")
+    elif fred_status != "ok":
+        confidence_flags.append(f"fred_{fred_status}")
+
+    return _build_provenance_contract(
+        usages,
+        as_of=_latest_as_of(*as_of_values),
+        last_refreshed_at=fetched_at,
+        confidence_flags=confidence_flags,
+    )
+
+
+def _peers_provenance_contract(
+    payload: dict[str, Any],
+    *,
+    price_last_checked: datetime | None,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = []
+    peers = payload.get("peers") or []
+    focus_row = next((row for row in peers if isinstance(row, dict) and row.get("is_focus")), None)
+    source_hints = payload.get("source_hints") if isinstance(payload.get("source_hints"), dict) else {}
+    company = payload.get("company")
+    company_last_checked = getattr(company, "last_checked", None)
+    as_of = None
+    if isinstance(focus_row, dict):
+        as_of = focus_row.get("period_end") or focus_row.get("price_date")
+
+    usages.append(
+        SourceUsage(
+            source_id="ft_peer_comparison",
+            role="derived",
+            as_of=as_of,
+            last_refreshed_at=_merge_last_checked(company_last_checked, price_last_checked),
+        )
+    )
+
+    financial_sources = source_hints.get("financial_statement_sources") if isinstance(source_hints.get("financial_statement_sources"), list) else []
+    for source_hint in financial_sources or ["sec_companyfacts"]:
+        statement_usage = _source_usage_from_hint(
+            str(source_hint),
+            role="primary",
+            as_of=as_of,
+            last_refreshed_at=company_last_checked,
+            default_source_id="sec_companyfacts",
+        )
+        if statement_usage is not None:
+            usages.append(statement_usage)
+
+    price_sources = source_hints.get("price_sources") if isinstance(source_hints.get("price_sources"), list) else []
+    if not price_sources and isinstance(focus_row, dict) and focus_row.get("price_date"):
+        price_sources = ["yahoo_finance"]
+    for source_hint in price_sources:
+        price_usage = _source_usage_from_hint(
+            str(source_hint),
+            role="fallback",
+            as_of=focus_row.get("price_date") if isinstance(focus_row, dict) else None,
+            last_refreshed_at=price_last_checked,
+            default_source_id="yahoo_finance",
+        )
+        if price_usage is not None:
+            usages.append(price_usage)
+
+    risk_free_sources = source_hints.get("risk_free_sources") if isinstance(source_hints.get("risk_free_sources"), list) else []
+    for source_hint in risk_free_sources:
+        risk_free_usage = _source_usage_from_hint(
+            str(source_hint),
+            role="supplemental",
+            as_of=as_of,
+            last_refreshed_at=company_last_checked,
+        )
+        if risk_free_usage is not None:
+            usages.append(risk_free_usage)
+
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    if any(isinstance(row, dict) and str(row.get("cache_state") or "") != "fresh" for row in peers):
+        confidence_flags.add("stale_peer_inputs")
+    if any(isinstance(row, dict) and str(row.get("dcf_model_status") or "") == "partial" for row in peers):
+        confidence_flags.add("partial_peer_models")
+    if any(isinstance(row, dict) and str(row.get("dcf_model_status") or "") == "proxy" for row in peers):
+        confidence_flags.add("proxy_peer_models")
+    if any(isinstance(row, dict) and str(row.get("dcf_model_status") or "") == "unsupported" for row in peers):
+        confidence_flags.add("unsupported_peer_models")
+    if any(isinstance(row, dict) and str(row.get("reverse_dcf_model_status") or "") == "unsupported" for row in peers):
+        confidence_flags.add("unsupported_peer_models")
+
+    return _build_provenance_contract(
+        usages,
+        as_of=as_of,
+        last_refreshed_at=_merge_last_checked(company_last_checked, price_last_checked),
+        confidence_flags=sorted(confidence_flags),
+    )
+
+
+def _activity_overview_provenance_contract(
+    entries: list[ActivityFeedEntryPayload],
+    *,
+    market_context_status: dict[str, Any] | None,
+    last_refreshed_at: datetime | None,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    latest_entry_date = max((entry.date for entry in entries if entry.date is not None), default=None)
+    usages: list[SourceUsage] = [
+        SourceUsage(
+            source_id="ft_activity_overview",
+            role="derived",
+            as_of=latest_entry_date,
+            last_refreshed_at=last_refreshed_at,
+        ),
+        SourceUsage(
+            source_id="sec_edgar",
+            role="primary",
+            as_of=latest_entry_date,
+            last_refreshed_at=last_refreshed_at,
+        ),
+    ]
+
+    if market_context_status:
+        macro_usage = _source_usage_from_hint(
+            str(market_context_status.get("source") or ""),
+            role="supplemental",
+            as_of=market_context_status.get("observation_date"),
+            last_refreshed_at=last_refreshed_at,
+        )
+        if macro_usage is not None:
+            usages.append(macro_usage)
+
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    if not entries:
+        confidence_flags.add("activity_feed_empty")
+    if market_context_status:
+        state = str(market_context_status.get("state") or "ok")
+        if state != "ok":
+            confidence_flags.add(f"market_context_{state}")
+
+    return _build_provenance_contract(
+        usages,
+        as_of=latest_entry_date,
+        last_refreshed_at=last_refreshed_at,
+        confidence_flags=sorted(confidence_flags),
+    )
+
+
+def _model_response_as_of(model_runs: list[ModelRun]) -> str | None:
+    values: list[DateType | datetime | str | None] = []
+    for model_run in model_runs:
+        result = model_run.result if isinstance(model_run.result, dict) else {}
+        values.append(result.get("base_period_end"))
+        values.append(result.get("period_end"))
+        price_snapshot = result.get("price_snapshot")
+        if isinstance(price_snapshot, dict):
+            values.append(price_snapshot.get("price_date"))
+
+        input_periods = model_run.input_periods
+        if isinstance(input_periods, dict):
+            values.append(input_periods.get("period_end"))
+        elif isinstance(input_periods, list):
+            for item in input_periods:
+                if isinstance(item, dict):
+                    values.append(item.get("period_end"))
+    return _latest_as_of(*values)
 
 
 def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
@@ -4786,6 +5517,7 @@ def _build_company_activity_overview_response(
             market_context_status=get_cached_market_context_status(),
             refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
             error=None,
+            **_empty_provenance_contract("company_missing"),
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
@@ -4805,14 +5537,21 @@ def _build_company_activity_overview_response(
         insider_trades=activity["insider_trades"],
         institutional_holdings=activity["institutional_holdings"],
     )
+    market_context_status = get_cached_market_context_status()
     return CompanyActivityOverviewResponse(
         company=_serialize_company(snapshot),
         entries=entries,
         alerts=alerts,
         summary=_build_alerts_summary(alerts),
-        market_context_status=get_cached_market_context_status(),
+        market_context_status=market_context_status,
         refresh=refresh,
         error=None,
+        **_activity_overview_provenance_contract(
+            entries,
+            market_context_status=market_context_status,
+            last_refreshed_at=snapshot.last_checked,
+            refresh=refresh,
+        ),
     )
 
 

@@ -88,6 +88,21 @@ def build_peer_comparison(
         _serialize_option(focus_snapshot, is_focus=True),
         *[_serialize_option(snapshot, is_focus=False) for snapshot in available_peers],
     ]
+    financial_statement_sources = sorted(
+        {
+            statement.source
+            for statements in financials_by_company.values()
+            for statement in statements
+            if getattr(statement, "source", None)
+        }
+    )
+    price_sources = sorted(
+        {
+            price.source
+            for price in latest_prices_by_company.values()
+            if getattr(price, "source", None)
+        }
+    )
 
     return {
         "company": focus_snapshot,
@@ -101,6 +116,11 @@ def build_peer_comparison(
             "piotroski": "Piotroski in peer views uses the reported 9-point score when complete; otherwise it scales the available signals proportionally so partial filings still appear in the chart.",
             "fair_value_gap": "Fair value gap uses model fair value per share relative to latest cached price; positive values indicate implied undervaluation.",
             "valuation_band_percentile": "Valuation-band percentile combines where current P/E, P/FCF, and EV/EBIT proxy sit within each company's recent historical range.",
+        },
+        "source_hints": {
+            "financial_statement_sources": financial_statement_sources,
+            "price_sources": price_sources,
+            "risk_free_sources": _collect_risk_free_sources(models_by_company),
         },
     }
 
@@ -445,6 +465,23 @@ def _model_result(model_run: ModelRun | None) -> dict[str, Any]:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _collect_risk_free_sources(models_by_company: dict[int, dict[str, ModelRun]]) -> list[str]:
+    sources: set[str] = set()
+    for company_models in models_by_company.values():
+        for model in company_models.values():
+            result = model.result if isinstance(model.result, dict) else {}
+            assumption_provenance = result.get("assumption_provenance")
+            if not isinstance(assumption_provenance, dict):
+                continue
+            risk_free = assumption_provenance.get("risk_free_rate")
+            if not isinstance(risk_free, dict):
+                continue
+            source_name = str(risk_free.get("source_name") or "").strip()
+            if source_name:
+                sources.add(source_name)
+    return sorted(sources)
 
 
 def _as_float(value: Any) -> float | None:

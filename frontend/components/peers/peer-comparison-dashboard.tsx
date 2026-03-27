@@ -25,6 +25,7 @@ import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, chartLegendStyl
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyPeersResponse, PeerMetricsPayload, PeerRevenuePoint } from "@/lib/types";
 import { Panel } from "@/components/ui/panel";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 
 const MAX_SELECTED_PEERS = 4;
@@ -151,6 +152,15 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
         </div>
       ) : (
         <div className="peer-dashboard-shell">
+          <SourceFreshnessSummary
+            provenance={data?.provenance}
+            asOf={data?.as_of}
+            lastRefreshedAt={data?.last_refreshed_at}
+            sourceMix={data?.source_mix}
+            confidenceFlags={data?.confidence_flags}
+            emptyMessage="Peer source metadata will appear after the comparison payload loads."
+          />
+
           <div className="peer-dashboard-header">
             <div className="peer-compare-tray">
               <div className="peer-compare-tray-header">

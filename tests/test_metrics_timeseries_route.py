@@ -80,6 +80,15 @@ def test_metrics_timeseries_endpoint_returns_typed_payload(monkeypatch):
     assert payload["last_financials_check"] is not None
     assert payload["last_price_check"] is not None
     assert payload["staleness_reason"] == "fresh"
+    assert payload["as_of"] == "2025-12-31"
+    assert payload["last_refreshed_at"] is not None
+    assert {entry["source_id"] for entry in payload["provenance"]} == {
+        "ft_derived_metrics_engine",
+        "sec_edgar",
+        "yahoo_finance",
+    }
+    assert payload["source_mix"]["fallback_source_ids"] == ["yahoo_finance"]
+    assert "commercial_fallback_present" in payload["confidence_flags"]
 
 
 
@@ -103,3 +112,6 @@ def test_metrics_timeseries_endpoint_triggers_refresh_when_company_missing(monke
     assert payload["staleness_reason"] == "company_missing"
     assert payload["refresh"]["triggered"] is True
     assert payload["refresh"]["reason"] == "missing"
+    assert payload["provenance"] == []
+    assert payload["source_mix"]["source_ids"] == []
+    assert payload["confidence_flags"] == ["company_missing"]

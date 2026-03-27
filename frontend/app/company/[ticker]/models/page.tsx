@@ -11,6 +11,7 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
@@ -362,6 +363,16 @@ export default function CompanyModelsPage() {
 
           <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, DCF Scenario Analysis, and Model Analytics for the full model output.</div>
       </CompanyResearchHeader>
+
+      <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" className="models-page-span-full">
+        <SourceFreshnessSummary
+          provenance={data?.provenance}
+          asOf={data?.as_of}
+          lastRefreshedAt={data?.last_refreshed_at}
+          sourceMix={data?.source_mix}
+          confidenceFlags={data?.confidence_flags}
+        />
+      </Panel>
 
       <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
         <DeferredClientSection placeholder={<div className="text-muted">Loading DCF scenario analysis...</div>}>

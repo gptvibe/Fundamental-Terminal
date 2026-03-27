@@ -133,6 +133,51 @@ function buildResponse(selectedTickers: string[]) {
       price_to_free_cash_flow: "Uses cached free cash flow",
       piotroski: "Higher is stronger",
     },
+    provenance: [
+      {
+        source_id: "ft_peer_comparison",
+        source_tier: "derived_from_official",
+        display_label: "Fundamental Terminal Peer Comparison",
+        url: "https://github.com/gptvibe/Fundamental-Terminal",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Peer comparison metrics derived from cached public-company filings, model runs, and labeled price inputs.",
+        role: "derived",
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-03-22T00:00:00Z",
+      },
+      {
+        source_id: "sec_companyfacts",
+        source_tier: "official_regulator",
+        display_label: "SEC Company Facts (XBRL)",
+        url: "https://data.sec.gov/api/xbrl/companyfacts/",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
+        role: "primary",
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-03-22T00:00:00Z",
+      },
+      {
+        source_id: "yahoo_finance",
+        source_tier: "commercial_fallback",
+        display_label: "Yahoo Finance",
+        url: "https://finance.yahoo.com/",
+        default_freshness_ttl_seconds: 3600,
+        disclosure_note: "Commercial fallback used only for price, volume, and market-profile context; never for core fundamentals.",
+        role: "fallback",
+        as_of: "2026-03-21",
+        last_refreshed_at: "2026-03-22T00:00:00Z",
+      },
+    ],
+    as_of: "2025-12-31",
+    last_refreshed_at: "2026-03-22T00:00:00Z",
+    source_mix: {
+      source_ids: ["ft_peer_comparison", "sec_companyfacts", "yahoo_finance"],
+      source_tiers: ["commercial_fallback", "derived_from_official", "official_regulator"],
+      primary_source_ids: ["sec_companyfacts"],
+      fallback_source_ids: ["yahoo_finance"],
+      official_only: false,
+    },
+    confidence_flags: ["commercial_fallback_present"],
     refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
   };
 }
@@ -150,6 +195,7 @@ describe("PeerComparisonDashboard", () => {
 
     expect(screen.getByRole("button", { name: "Collapse compare tray" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Selected 1/4")).toBeTruthy();
+    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
 
     fireEvent.click(screen.getByTitle("GOOG — Alphabet"));
 

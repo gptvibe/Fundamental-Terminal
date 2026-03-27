@@ -9,6 +9,7 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { formatCompactNumber, formatDate } from "@/lib/format";
@@ -132,6 +133,16 @@ export default function CompanyFinancialsTabPage() {
 
       <Panel title="Data Quality Diagnostics" subtitle="Coverage, freshness, and missing-field flags for the cached financial workspace">
         <DataQualityDiagnostics diagnostics={data?.diagnostics} />
+      </Panel>
+
+      <Panel title="Source & Freshness" subtitle="Centralized registry metadata for filing inputs, price overlays, and disclosure notes">
+        <SourceFreshnessSummary
+          provenance={data?.provenance}
+          asOf={data?.as_of}
+          lastRefreshedAt={data?.last_refreshed_at}
+          sourceMix={data?.source_mix}
+          confidenceFlags={data?.confidence_flags}
+        />
       </Panel>
 
       <Panel title="Business Segment Breakdown" subtitle="Treemap, share, and growth from reported segment revenue">

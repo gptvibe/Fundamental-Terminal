@@ -2,6 +2,7 @@
 
 import { formatDate, formatPercent } from "@/lib/format";
 import type { CompanyMarketContextResponse, MarketCurvePointPayload } from "@/lib/types";
+import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 
 interface MarketContextPanelProps {
   context: CompanyMarketContextResponse | null;
@@ -21,6 +22,14 @@ export function MarketContextPanel({ context }: MarketContextPanelProps) {
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      <SourceFreshnessSummary
+        provenance={context.provenance}
+        asOf={context.as_of}
+        lastRefreshedAt={context.last_refreshed_at}
+        sourceMix={context.source_mix}
+        confidenceFlags={context.confidence_flags}
+      />
+
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <span className="pill">Status: {normalizeStatus(context.status)}</span>
         <span className="pill">Treasury: {curvePoints.length ? "Loaded" : "Missing"}</span>
@@ -125,7 +134,7 @@ function normalizeStatus(status: string): string {
 }
 
 function isFredEnabled(context: CompanyMarketContextResponse): boolean {
-  const fred = context.provenance.fred;
+  const fred = context.provenance_details.fred;
   if (!fred || typeof fred !== "object") {
     return false;
   }

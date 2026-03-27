@@ -16,6 +16,44 @@ export interface DataQualityDiagnosticsPayload {
   missing_field_flags: string[];
 }
 
+export type SourceTier =
+  | "official_regulator"
+  | "official_statistical"
+  | "official_treasury_or_fed"
+  | "derived_from_official"
+  | "commercial_fallback"
+  | "manual_override";
+
+export type SourceRole = "primary" | "supplemental" | "derived" | "fallback";
+
+export interface SourceMixPayload {
+  source_ids: string[];
+  source_tiers: SourceTier[];
+  primary_source_ids: string[];
+  fallback_source_ids: string[];
+  official_only: boolean;
+}
+
+export interface ProvenanceEntryPayload {
+  source_id: string;
+  source_tier: SourceTier;
+  display_label: string;
+  url: string;
+  default_freshness_ttl_seconds: number;
+  disclosure_note: string;
+  role: SourceRole;
+  as_of: string | null;
+  last_refreshed_at: string | null;
+}
+
+export interface ProvenanceEnvelope {
+  provenance: ProvenanceEntryPayload[];
+  as_of: string | null;
+  last_refreshed_at: string | null;
+  source_mix: SourceMixPayload;
+  confidence_flags: string[];
+}
+
 export interface CompanyPayload {
   ticker: string;
   cik: string;
@@ -127,7 +165,7 @@ export interface FinancialHistoryPoint {
   operating_cash_flow: number | null;
 }
 
-export interface CompanyFinancialsResponse {
+export interface CompanyFinancialsResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   financials: FinancialPayload[];
   price_history: PriceHistoryPoint[];
@@ -177,7 +215,7 @@ export interface MetricsTimeseriesPointPayload {
   quality: MetricsQualityPayload;
 }
 
-export interface CompanyMetricsTimeseriesResponse {
+export interface CompanyMetricsTimeseriesResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   series: MetricsTimeseriesPointPayload[];
   last_financials_check: string | null;
@@ -203,7 +241,7 @@ export interface DerivedMetricPeriodPayload {
   metrics: DerivedMetricValuePayload[];
 }
 
-export interface CompanyDerivedMetricsResponse {
+export interface CompanyDerivedMetricsResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   period_type: "quarterly" | "annual" | "ttm";
   periods: DerivedMetricPeriodPayload[];
@@ -216,7 +254,7 @@ export interface CompanyDerivedMetricsResponse {
   diagnostics: DataQualityDiagnosticsPayload;
 }
 
-export interface CompanyDerivedMetricsSummaryResponse {
+export interface CompanyDerivedMetricsSummaryResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   period_type: "quarterly" | "annual" | "ttm";
   latest_period_end: string | null;
@@ -374,7 +412,7 @@ export interface PriceSnapshotMetadata {
   price_available: boolean;
 }
 
-export interface CompanyModelsResponse {
+export interface CompanyModelsResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   requested_models: string[];
   models: ModelPayload[];
@@ -427,14 +465,14 @@ export interface MacroSeriesItemPayload {
   status: string;
 }
 
-export interface CompanyMarketContextResponse {
+export interface CompanyMarketContextResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   status: string;
   curve_points: MarketCurvePointPayload[];
   slope_2s10s: MarketSlopePayload;
   slope_3m10y: MarketSlopePayload;
   fred_series: MarketFredSeriesPayload[];
-  provenance: Record<string, unknown>;
+  provenance_details: Record<string, unknown>;
   fetched_at: string;
   refresh: RefreshState;
   // v2 grouped sections
@@ -889,7 +927,7 @@ export interface CompanyAlertsResponse {
   error: string | null;
 }
 
-export interface CompanyActivityOverviewResponse {
+export interface CompanyActivityOverviewResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   entries: ActivityFeedEntryPayload[];
   alerts: AlertPayload[];
@@ -999,7 +1037,7 @@ export interface PeerMetricsPayload {
   revenue_history: PeerRevenuePoint[];
 }
 
-export interface CompanyPeersResponse {
+export interface CompanyPeersResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   peer_basis: string;
   available_companies: PeerOptionPayload[];
