@@ -36,6 +36,7 @@ Keep the API composition layer thin, keep orchestration in backend services, and
 ## Automated guard
 - Standalone guard: `python scripts/check_architecture_boundaries.py`
 - Pytest guard: `tests/test_architecture_boundaries.py`
+- CI workflow: `.github/workflows/ci.yml` runs the standalone guard plus targeted backend/frontend compatibility tests on pull requests and pushes to `main`.
 - The guard currently enforces:
   - routers only import router-local dependencies and API schemas
   - services do not import `app.api` modules

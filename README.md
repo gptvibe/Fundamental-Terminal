@@ -94,6 +94,7 @@ API composition notes:
 - Route URLs and response payload shapes are unchanged by this refactor.
 - Routers stay registration-only; refresh orchestration and dataset jobs live under `app/services/`, with `app.main` acting as the compatibility bridge.
 - Run `python scripts/check_architecture_boundaries.py` to verify routers and services still respect the documented import boundaries.
+- Pull requests and pushes to `main` also run `.github/workflows/ci.yml`, which checks the import boundaries and the targeted backend/frontend compatibility tests.
 
 ## Run the Next.js frontend
 
