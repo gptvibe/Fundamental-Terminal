@@ -9,6 +9,7 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
+import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
@@ -68,6 +69,7 @@ export default function CompanyModelsPage() {
   const models = useMemo(() => data?.models ?? [], [data?.models]);
   const hasModels = models.length > 0;
   const dcfModel = useMemo(() => models.find((model) => model.model_name === "dcf") ?? null, [models]);
+  const strictOfficialMode = Boolean(data?.company?.strict_official_mode ?? financialData?.company?.strict_official_mode);
 
   useEffect(() => {
     let cancelled = false;
@@ -254,9 +256,17 @@ export default function CompanyModelsPage() {
             refreshing={refreshing}
             onRefresh={queueRefresh}
             actionTitle="Next Steps"
-            actionSubtitle="Refresh the latest data for this ticker or return to financial statements."
+            actionSubtitle={
+              strictOfficialMode
+                ? "Refresh SEC filings and model outputs, or return to financial statements for official-source context."
+                : "Refresh the latest data for this ticker or return to financial statements."
+            }
             primaryActionLabel="Refresh Model Inputs"
-            primaryActionDescription="Updates filings, market prices, and model calculations in the background."
+            primaryActionDescription={
+              strictOfficialMode
+                ? "Updates filings, official rate inputs, and model calculations in the background without commercial price fetches."
+                : "Updates filings, market prices, and model calculations in the background."
+            }
             secondaryActionHref={`/company/${encodeURIComponent(ticker)}/financials`}
             secondaryActionLabel="Open Financials"
             secondaryActionDescription="Review statements, charts, and historical company results."
@@ -283,11 +293,19 @@ export default function CompanyModelsPage() {
         subtitle={
           loading
             ? "Loading valuation, quality, and market inputs..."
-            : "Quick valuation snapshot based on company results and market prices"
+            : strictOfficialMode
+              ? "Quick valuation snapshot based on SEC filings, with market-price comparisons disabled in strict mode"
+              : "Quick valuation snapshot based on company results and market prices"
         }
         className="models-page-span-full"
       >
-        <InvestmentSummaryPanel ticker={ticker} models={models} financials={financialData?.financials ?? []} priceHistory={financialData?.price_history ?? []} />
+        <InvestmentSummaryPanel
+          ticker={ticker}
+          models={models}
+          financials={financialData?.financials ?? []}
+          priceHistory={financialData?.price_history ?? []}
+          strictOfficialMode={strictOfficialMode}
+        />
       </Panel>
 
       <Panel title="Financial Health Score" subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"} className="models-page-span-full">
@@ -300,7 +318,11 @@ export default function CompanyModelsPage() {
         companyName={data?.company?.name ?? financialData?.company?.name ?? ticker}
         sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
         cacheState={data?.company?.cache_state ?? financialData?.company?.cache_state ?? null}
-        description="Cached model outputs stay aligned with SEC fundamentals and cached price inputs, with refreshes queued in the background when inputs are stale."
+        description={
+          strictOfficialMode
+            ? "Cached model outputs stay aligned with SEC fundamentals and official macro rates, while commercial price-dependent valuation features are withheld."
+            : "Cached model outputs stay aligned with SEC fundamentals and cached price inputs, with refreshes queued in the background when inputs are stale."
+        }
         aside={data ? <StatusPill state={data.refresh} /> : undefined}
         facts={[
           { label: "Ticker", value: ticker },
@@ -310,7 +332,7 @@ export default function CompanyModelsPage() {
         ]}
         ribbonItems={[
           { label: "Financial Inputs", value: "SEC EDGAR/XBRL", tone: "green" },
-          { label: "Price Inputs", value: "Yahoo Finance", tone: "cyan" },
+          { label: strictOfficialMode ? "Market Classification" : "Price Inputs", value: strictOfficialMode ? "SEC SIC mapping" : "Yahoo Finance", tone: strictOfficialMode ? "green" : "cyan" },
           { label: "Financials Checked", value: financialData?.company?.last_checked_financials ? formatDate(financialData.company.last_checked_financials) : "Pending", tone: "green" },
           { label: "Refresh", value: activeJobId ? "Model update running" : "Background-first", tone: activeJobId ? "gold" : "cyan" }
         ]}
@@ -323,6 +345,18 @@ export default function CompanyModelsPage() {
         ]}
         className="model-hero models-page-hero models-page-span-full"
       >
+          {!strictOfficialMode ? (
+            <CommercialFallbackNotice
+              provenance={data?.provenance}
+              sourceMix={data?.source_mix}
+              subject="Price-sensitive valuation outputs on this surface"
+            />
+          ) : null}
+          {strictOfficialMode ? (
+            <div className="text-muted" style={{ marginBottom: 12 }}>
+              Strict official mode disables commercial equity price inputs. Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured.
+            </div>
+          ) : null}
           <div className="dupont-mode-bar">
             <div className="dupont-mode-select-col">
               <div className="metric-label">DuPont Basis</div>
@@ -374,9 +408,15 @@ export default function CompanyModelsPage() {
         />
       </Panel>
 
-      <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
+      <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : strictOfficialMode ? "Interactive intrinsic value range with market-price comparisons disabled in strict mode" : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
         <DeferredClientSection placeholder={<div className="text-muted">Loading DCF scenario analysis...</div>}>
-          <DcfScenarioAnalysis ticker={ticker} dcfModel={dcfModel} financials={financialData?.financials ?? []} priceHistory={financialData?.price_history ?? []} />
+          <DcfScenarioAnalysis
+            ticker={ticker}
+            dcfModel={dcfModel}
+            financials={financialData?.financials ?? []}
+            priceHistory={financialData?.price_history ?? []}
+            strictOfficialMode={strictOfficialMode}
+          />
         </DeferredClientSection>
       </Panel>
 

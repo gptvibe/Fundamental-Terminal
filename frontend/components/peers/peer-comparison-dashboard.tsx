@@ -99,6 +99,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
   }, [ticker, reloadKey, selectedTickers, selectionKey]);
 
   const peers = useMemo(() => data?.peers ?? [], [data?.peers]);
+  const strictModeNote = data?.notes?.strict_official_mode ?? null;
   const activeTickers = useMemo(() => selectedTickers ?? data?.selected_tickers ?? [], [data?.selected_tickers, selectedTickers]);
   const displayedPeers = useMemo(
     () => peers.filter((peer) => peer.is_focus || activeTickers.includes(peer.ticker)),
@@ -147,8 +148,8 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
       ) : !loading && peers.length === 0 ? (
         <div className="grid-empty-state" style={{ minHeight: 220 }}>
           <div className="grid-empty-kicker">Peer cache</div>
-          <div className="grid-empty-title">No peer data available yet</div>
-          <div className="grid-empty-copy">Refresh more cached companies to unlock richer industry comparisons.</div>
+          <div className="grid-empty-title">{strictModeNote ? "Peer comparison disabled in strict mode" : "No peer data available yet"}</div>
+          <div className="grid-empty-copy">{strictModeNote ?? "Refresh more cached companies to unlock richer industry comparisons."}</div>
         </div>
       ) : (
         <div className="peer-dashboard-shell">
@@ -161,7 +162,15 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
             emptyMessage="Peer source metadata will appear after the comparison payload loads."
           />
 
-          <div className="peer-dashboard-header">
+          {strictModeNote ? (
+            <div className="grid-empty-state" style={{ minHeight: 220 }}>
+              <div className="grid-empty-kicker">Strict official mode</div>
+              <div className="grid-empty-title">Peer comparison disabled</div>
+              <div className="grid-empty-copy">{strictModeNote}</div>
+            </div>
+          ) : null}
+
+          {!strictModeNote ? <div className="peer-dashboard-header">
             <div className="peer-compare-tray">
               <div className="peer-compare-tray-header">
                 <div>
@@ -216,9 +225,9 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                 Reset to Focus
               </button>
             </div>
-          </div>
+          </div> : null}
 
-          <div className="peer-chart-card">
+          {!strictModeNote ? <div className="peer-chart-card">
             <div className="peer-section-title">Quality Radar</div>
             <div className="peer-section-subtitle">ROIC, implied growth, shareholder yield, and fair-value gap normalized for decision-grade peer comparison.</div>
             <div className="peer-chart-shell peer-chart-tall">
@@ -243,9 +252,9 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                 </RadarChart>
               </ResponsiveContainer>
             </div>
-          </div>
+          </div> : null}
 
-          <div className="peer-chart-card">
+          {!strictModeNote ? <div className="peer-chart-card">
             <div className="peer-section-title">Valuation + Return Signals</div>
             <div className="peer-section-subtitle">Fair value gap, ROIC, and shareholder yield across the peer set.</div>
             <div className="peer-chart-shell peer-chart-medium">
@@ -274,9 +283,9 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </div>
+          </div> : null}
 
-          <div className="peer-bottom-grid">
+          {!strictModeNote ? <div className="peer-bottom-grid">
             <div className="peer-chart-card">
               <div className="peer-section-title">Revenue Growth Tracks</div>
               <div className="peer-section-subtitle">Small multiples show historical revenue growth from cached annual filings.</div>
@@ -386,7 +395,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
               <div className="peer-footnote">{data?.notes.price_to_free_cash_flow}</div>
               {data?.notes.piotroski ? <div className="peer-footnote">{data.notes.piotroski}</div> : null}
             </div>
-          </div>
+          </div> : null}
         </div>
       )}
     </Panel>

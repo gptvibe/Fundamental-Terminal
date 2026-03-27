@@ -48,8 +48,10 @@ describe("SourceFreshnessSummary", () => {
     );
 
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
-    expect(screen.getByText("Yahoo Finance")).toBeTruthy();
+    expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
     expect(screen.getByText("Official + labeled fallback")).toBeTruthy();
+    expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
+    expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("commercial fallback present")).toBeTruthy();
     expect(screen.getByText("TTL 6h")).toBeTruthy();
     expect(screen.getByText("TTL 1h")).toBeTruthy();

@@ -14,9 +14,10 @@ interface InvestmentSummaryPanelProps {
   models: ModelPayload[];
   financials: FinancialPayload[];
   priceHistory: PriceHistoryPoint[];
+  strictOfficialMode?: boolean;
 }
 
-export function InvestmentSummaryPanel({ ticker, models, financials, priceHistory }: InvestmentSummaryPanelProps) {
+export function InvestmentSummaryPanel({ ticker, models, financials, priceHistory, strictOfficialMode = false }: InvestmentSummaryPanelProps) {
   const summary = useMemo(() => buildInvestmentSummary(models, financials, priceHistory), [models, financials, priceHistory]);
 
   if (summary === null) {
@@ -24,13 +25,22 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
       <div className="grid-empty-state" style={{ minHeight: 260 }}>
         <div className="grid-empty-kicker">Investment view</div>
         <div className="grid-empty-title">Investment summary unavailable</div>
-        <div className="grid-empty-copy">Warm the cached DCF model, annual financials, and price series to unlock the summary panel.</div>
+        <div className="grid-empty-copy">
+          {strictOfficialMode
+            ? "Strict official mode disables commercial equity price inputs. Cached fair value and market-price comparison cards stay limited until an official end-of-day price source is configured."
+            : "Warm the cached DCF model, annual financials, and price series to unlock the summary panel."}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="investment-summary-shell">
+      {strictOfficialMode ? (
+        <div className="text-muted" style={{ marginBottom: 12 }}>
+          Strict official mode disables commercial equity price inputs. Latest price, fair value gap, and market-price comparison notes remain unavailable unless an official closing-price source is enabled.
+        </div>
+      ) : null}
       <div className="investment-summary-cards">
         <SummaryCard label="DCF Fair Value / Share" value={formatCurrency(summary.fairValuePerShare)} accent="cyan" detail={summary.fairValueBasis} />
         <SummaryCard label="Latest Price" value={formatCurrency(summary.latestPrice)} accent="gold" detail={summary.priceDateLabel} />

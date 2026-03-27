@@ -61,6 +61,7 @@ export interface CompanyPayload {
   sector: string | null;
   market_sector: string | null;
   market_industry: string | null;
+  strict_official_mode: boolean;
   last_checked: string | null;
   last_checked_financials: string | null;
   last_checked_prices: string | null;

@@ -77,6 +77,8 @@ def test_metrics_timeseries_endpoint_returns_typed_payload(monkeypatch):
     assert payload["series"][0]["cadence"] == "ttm"
     assert payload["series"][0]["metrics"]["revenue_growth"] == 0.12
     assert payload["series"][0]["provenance"]["formula_version"] == "sec_metrics_v1"
+    assert "price_source" in payload["series"][0]["provenance"]
+    assert payload["series"][0]["provenance"]["price_source"] == "yahoo_finance"
     assert payload["last_financials_check"] is not None
     assert payload["last_price_check"] is not None
     assert payload["staleness_reason"] == "fresh"
@@ -115,3 +117,68 @@ def test_metrics_timeseries_endpoint_triggers_refresh_when_company_missing(monke
     assert payload["provenance"] == []
     assert payload["source_mix"]["source_ids"] == []
     assert payload["confidence_flags"] == ["company_missing"]
+
+
+def test_metrics_timeseries_endpoint_hides_price_fields_in_strict_mode(monkeypatch):
+    snapshot = _snapshot()
+    snapshot.company.sector = "prepackaged software"
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "get_company_price_history",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("price history should be hidden in strict mode")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_price_cache_status",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("price cache should be hidden in strict mode")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_metrics_timeseries",
+        lambda *_args, **_kwargs: [
+            {
+                "cadence": "ttm",
+                "period_start": "2025-01-01",
+                "period_end": "2025-12-31",
+                "filing_type": "TTM",
+                "metrics": {
+                    "revenue_growth": 0.12,
+                    "gross_margin": 0.42,
+                    "buyback_yield": 0.03,
+                },
+                "provenance": {
+                    "statement_type": "canonical_xbrl",
+                    "statement_source": "https://data.sec.gov/example",
+                    "price_source": "yahoo_finance",
+                    "formula_version": "sec_metrics_v1",
+                },
+                "quality": {
+                    "available_metrics": 3,
+                    "missing_metrics": [],
+                    "coverage_ratio": 0.2,
+                    "flags": [],
+                },
+            }
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["company"]["strict_official_mode"] is True
+    assert payload["company"]["market_sector"] == "Technology"
+    assert payload["last_price_check"] is None
+    assert payload["series"][0]["provenance"]["price_source"] is None
+    assert {entry["source_id"] for entry in payload["provenance"]} == {"ft_derived_metrics_engine", "sec_edgar"}
+    assert payload["source_mix"]["fallback_source_ids"] == []
+    assert "strict_official_mode" in payload["confidence_flags"]

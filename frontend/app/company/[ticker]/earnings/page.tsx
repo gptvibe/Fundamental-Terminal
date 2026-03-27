@@ -118,6 +118,7 @@ export default function CompanyEarningsPage() {
   const alerts = workspaceData?.alerts ?? [];
   const peerContext = workspaceData?.peer_context ?? null;
   const backtests = workspaceData?.backtests ?? null;
+  const strictOfficialMode = Boolean(pageCompany?.strict_official_mode);
 
   useEffect(() => {
     if (!trackedJobId) {
@@ -227,7 +228,11 @@ export default function CompanyEarningsPage() {
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
         cacheState={pageCompany?.cache_state ?? null}
-        description="Release-level earnings analysis stays SEC-first, serving cached 8-K Item 2.02 data immediately and polling in the background when refresh jobs are active."
+        description={
+          strictOfficialMode
+            ? "Release-level earnings analysis stays SEC-first, while price-window backtests remain disabled in strict official mode."
+            : "Release-level earnings analysis stays SEC-first, serving cached 8-K Item 2.02 data immediately and polling in the background when refresh jobs are active."
+        }
         aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
         facts={[
           { label: "Releases", value: totalReleases.toLocaleString() },
@@ -248,6 +253,11 @@ export default function CompanyEarningsPage() {
           { label: "Latest Diluted EPS", value: formatEps(summary?.latest_diluted_eps ?? latestRelease?.diluted_eps), accent: "gold" }
         ]}
       >
+        {strictOfficialMode ? (
+          <div className="text-muted" style={{ marginBottom: 12 }}>
+            Strict official mode keeps SEC release analysis available, but disables price-window backtests because no official end-of-day equity price feed is configured.
+          </div>
+        ) : null}
         {combinedError ? (
           <div className="text-muted" style={{ marginBottom: 12 }}>
             {combinedError}
@@ -309,8 +319,10 @@ export default function CompanyEarningsPage() {
         )}
       </Panel>
 
-      <Panel title="Directional Backtests" subtitle="Directional consistency around earnings filing windows using cached price history only">
-        {backtests ? (
+      <Panel title="Directional Backtests" subtitle={strictOfficialMode ? "Disabled in strict mode because price windows require a non-official equity feed" : "Directional consistency around earnings filing windows using cached price history only"}>
+        {strictOfficialMode ? (
+          <PanelEmptyState message="Directional backtests are unavailable in strict official mode because post-filing price windows depend on commercial equity price data." />
+        ) : backtests ? (
           <div className="workspace-card-stack">
             <CompanyMetricGrid
               items={[

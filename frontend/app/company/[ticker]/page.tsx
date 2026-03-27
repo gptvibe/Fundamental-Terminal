@@ -8,6 +8,7 @@ import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -57,6 +58,7 @@ export default function CompanyOverviewPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const {
+    data,
     company,
     financials,
     priceHistory,
@@ -230,7 +232,13 @@ export default function CompanyOverviewPage() {
           { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" }
         ]}
         className="financial-hero"
-      />
+      >
+        <CommercialFallbackNotice
+          provenance={data?.provenance}
+          sourceMix={data?.source_mix}
+          subject="Price history and market profile data on this overview surface"
+        />
+      </CompanyResearchHeader>
 
       <PriceFundamentalsModule priceData={priceHistory} fundamentalsData={fundamentalsTrendData} />
 

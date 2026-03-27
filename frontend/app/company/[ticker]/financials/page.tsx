@@ -7,6 +7,7 @@ import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
@@ -129,7 +130,13 @@ export default function CompanyFinancialsTabPage() {
           { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" },
           { label: "Price History", value: priceHistory.length.toLocaleString(), accent: "cyan" }
         ]}
-      />
+      >
+        <CommercialFallbackNotice
+          provenance={data?.provenance}
+          sourceMix={data?.source_mix}
+          subject="Price history and market profile data on this surface"
+        />
+      </CompanyResearchHeader>
 
       <Panel title="Data Quality Diagnostics" subtitle="Coverage, freshness, and missing-field flags for the cached financial workspace">
         <DataQualityDiagnostics diagnostics={data?.diagnostics} />

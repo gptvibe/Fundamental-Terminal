@@ -39,9 +39,10 @@ interface DcfScenarioAnalysisProps {
   dcfModel: ModelPayload | null;
   financials: FinancialPayload[];
   priceHistory: PriceHistoryPoint[];
+  strictOfficialMode?: boolean;
 }
 
-export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory }: DcfScenarioAnalysisProps) {
+export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory, strictOfficialMode = false }: DcfScenarioAnalysisProps) {
   const annualFinancials = useMemo(
     () => financials.filter((statement) => ANNUAL_FORMS.has(statement.filing_type)),
     [financials]
@@ -162,6 +163,11 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
 
   return (
     <div className="dcf-scenario-shell">
+      {strictOfficialMode ? (
+        <div className="text-muted" style={{ marginBottom: 10 }}>
+          Strict official mode keeps the intrinsic value fan available from SEC filings, but disables commercial price comparisons such as margin of safety and current-price reference lines.
+        </div>
+      ) : null}
       {dcfStatus === "partial" || dcfStatus === "proxy" ? (
         <div className="text-muted" style={{ marginBottom: 10 }}>
           {dcfStatus === "partial"

@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { formatDate } from "@/lib/format";
@@ -19,6 +20,7 @@ export default function CompanyPeersPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const {
+    data,
     company,
     financials,
     loading,
@@ -29,6 +31,7 @@ export default function CompanyPeersPage() {
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker);
+  const strictOfficialMode = Boolean(company?.strict_official_mode);
 
   return (
     <CompanyWorkspaceShell
@@ -41,9 +44,17 @@ export default function CompanyPeersPage() {
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}
           actionTitle="Next Steps"
-          actionSubtitle="Refresh this company, then compare valuation and quality against close peers."
+          actionSubtitle={
+            strictOfficialMode
+              ? "Refresh this company for official-source filings and SEC SIC classification updates."
+              : "Refresh this company, then compare valuation and quality against close peers."
+          }
           primaryActionLabel="Refresh Peer Data"
-          primaryActionDescription="Updates cached filings, prices, and model metrics used by peer comparison panels."
+          primaryActionDescription={
+            strictOfficialMode
+              ? "Updates cached filings and official company classification metadata used by peer selection."
+              : "Updates cached filings, prices, and model metrics used by peer comparison panels."
+          }
           secondaryActionHref={`/company/${encodeURIComponent(ticker)}/financials`}
           secondaryActionLabel="Open Financials"
           secondaryActionDescription="Review statement context behind peer valuation, margin, and quality differences."
@@ -64,7 +75,11 @@ export default function CompanyPeersPage() {
         companyName={company?.name ?? ticker}
         sector={company?.sector}
         cacheState={company?.cache_state ?? null}
-        description="Compare valuation, quality, and growth against a cached peer set without blocking the page on live vendor fetches."
+        description={
+          strictOfficialMode
+            ? "Peer matching stays official-only in strict mode, using SEC SIC classification while price-dependent comparison charts remain disabled."
+            : "Compare valuation, quality, and growth against a cached peer set without blocking the page on live vendor fetches."
+        }
         aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
         facts={[
           { label: "Ticker", value: ticker },
@@ -74,7 +89,7 @@ export default function CompanyPeersPage() {
         ]}
         ribbonItems={[
           { label: "Financial Inputs", value: "SEC EDGAR/XBRL", tone: "green" },
-          { label: "Market Profile", value: "Yahoo Finance", tone: "cyan" },
+          { label: "Market Profile", value: strictOfficialMode ? "SEC SIC mapping" : "Yahoo Finance", tone: strictOfficialMode ? "green" : "cyan" },
           { label: "Selection Model", value: "Focus company + cached peers", tone: "gold" },
           { label: "Refresh", value: refreshState?.job_id ? "Queued" : "Background-first", tone: refreshState?.job_id ? "cyan" : "green" }
         ]}
@@ -84,7 +99,20 @@ export default function CompanyPeersPage() {
           { label: "Source Policy", value: "Official/public only", accent: "green" },
           { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : "Pending", accent: "cyan" }
         ]}
-      />
+      >
+        {!strictOfficialMode ? (
+          <CommercialFallbackNotice
+            provenance={data?.provenance}
+            sourceMix={data?.source_mix}
+            subject="Market profile and peer-comparison price inputs on this surface"
+          />
+        ) : null}
+        {strictOfficialMode ? (
+          <div className="text-muted" style={{ marginBottom: 12 }}>
+            Strict official mode disables peer valuation charts because no official end-of-day equity price source is enabled. Classification still uses SEC SIC mappings.
+          </div>
+        ) : null}
+      </CompanyResearchHeader>
 
       <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
     </CompanyWorkspaceShell>

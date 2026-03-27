@@ -108,6 +108,10 @@ def test_models_route_includes_registry_backed_provenance(monkeypatch):
                         "price_source": "yahoo_finance",
                     },
                     "assumption_provenance": {
+                        "price_snapshot": {
+                            "price_date": "2026-03-21",
+                            "price_source": "yahoo_finance",
+                        },
                         "risk_free_rate": {
                             "source_name": "U.S. Treasury Daily Par Yield Curve",
                             "observation_date": "2026-03-20",
@@ -130,6 +134,8 @@ def test_models_route_includes_registry_backed_provenance(monkeypatch):
     assert payload["as_of"] == "2025-12-31"
     assert payload["source_mix"]["fallback_source_ids"] == ["yahoo_finance"]
     assert "commercial_fallback_present" in payload["confidence_flags"]
+    assert payload["models"][0]["result"]["price_snapshot"]["price_source"] == "yahoo_finance"
+    assert payload["models"][0]["result"]["assumption_provenance"]["price_snapshot"]["price_source"] == "yahoo_finance"
 
 
 def test_peers_route_includes_registry_backed_provenance(monkeypatch):
@@ -246,3 +252,70 @@ def test_activity_overview_route_includes_registry_backed_provenance(monkeypatch
     assert payload["source_mix"]["official_only"] is True
     assert "activity_feed_empty" in payload["confidence_flags"]
     assert "market_context_partial" in payload["confidence_flags"]
+
+
+def test_models_route_hides_yahoo_provenance_and_price_snapshot_in_strict_mode(monkeypatch):
+    snapshot = _snapshot(ticker="STRICT")
+    snapshot.company.sector = "prepackaged software"
+    snapshot.cache_state = "stale"
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True, valuation_workbench_enabled=True))
+    monkeypatch.setattr(main_module, "_store_hot_cached_payload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="STRICT", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_models",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                model_name="dcf",
+                model_version="v2",
+                created_at=datetime(2026, 3, 22, tzinfo=timezone.utc),
+                input_periods={"period_end": "2025-12-31"},
+                result={
+                    "model_status": "ok",
+                    "base_period_end": "2025-12-31",
+                    "price_snapshot": {
+                        "latest_price": 190.5,
+                        "price_date": "2026-03-21",
+                        "price_source": "yahoo_finance",
+                        "price_available": True,
+                    },
+                    "assumption_provenance": {
+                        "price_snapshot": {
+                            "latest_price": 190.5,
+                            "price_date": "2026-03-21",
+                            "price_source": "yahoo_finance",
+                            "price_available": True,
+                        },
+                        "risk_free_rate": {
+                            "source_name": "U.S. Treasury Daily Par Yield Curve",
+                            "observation_date": "2026-03-20",
+                        },
+                    },
+                },
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/STRICT/models")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["company"]["strict_official_mode"] is True
+    assert payload["company"]["market_sector"] == "Technology"
+    assert {entry["source_id"] for entry in payload["provenance"]} == {
+        "ft_model_engine",
+        "us_treasury_daily_par_yield_curve",
+    }
+    assert payload["source_mix"]["fallback_source_ids"] == []
+    assert "strict_official_mode" in payload["confidence_flags"]
+    assert payload["models"][0]["result"]["price_snapshot"]["latest_price"] is None
+    assert payload["models"][0]["result"]["price_snapshot"]["price_source"] is None
+    assert payload["models"][0]["result"]["price_snapshot"]["price_available"] is False
+    assert payload["models"][0]["result"]["assumption_provenance"]["price_snapshot"]["latest_price"] is None

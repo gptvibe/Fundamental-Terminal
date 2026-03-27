@@ -212,4 +212,32 @@ describe("PeerComparisonDashboard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Collapse compare tray" }));
     expect(screen.getByRole("button", { name: "Open compare tray" }).getAttribute("aria-expanded")).toBe("false");
   });
+
+  it("shows a strict official mode note when peer valuation data is disabled", async () => {
+    vi.mocked(getCompanyPeers).mockResolvedValue({
+      ...buildResponse([]),
+      peers: [],
+      notes: {
+        strict_official_mode:
+          "Peer comparison is unavailable in strict official mode because this workspace depends on price-derived valuation signals and no official end-of-day equity price source is enabled.",
+      },
+      source_mix: {
+        source_ids: ["ft_peer_comparison", "sec_companyfacts"],
+        source_tiers: ["derived_from_official", "official_regulator"],
+        primary_source_ids: ["sec_companyfacts"],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: ["strict_official_mode"],
+    });
+
+    render(React.createElement(PeerComparisonDashboard, { ticker: "AAPL", reloadKey: "strict" }));
+
+    await waitFor(() => {
+      expect(getCompanyPeers).toHaveBeenCalledWith("AAPL", undefined);
+    });
+
+    expect(screen.getAllByText(/Peer comparison disabled/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/no official end-of-day equity price source is enabled/i)).toBeTruthy();
+  });
 });

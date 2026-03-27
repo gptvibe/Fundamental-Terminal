@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+from copy import deepcopy
 import hashlib
 import html
 import json
@@ -74,6 +75,7 @@ from app.services.market_context import (
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
+from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -95,6 +97,10 @@ _hot_response_cache: dict[str, tuple[float, float, dict[str, Any]]] = {}
 _hot_response_cache_lock = threading.Lock()
 _cache_metric_counts: dict[str, int] = {}
 _cache_metric_lock = threading.Lock()
+
+PriceCacheState = Literal["fresh", "stale", "missing"]
+PRICE_DEPENDENT_DERIVED_METRIC_KEYS = {"buyback_yield_proxy", "dividend_yield_proxy", "shareholder_yield"}
+PRICE_DEPENDENT_TIMESERIES_METRIC_KEYS = {"buyback_yield", "dividend_yield"}
 
 
 class RefreshState(BaseModel):
@@ -147,6 +153,7 @@ class CompanyPayload(BaseModel):
     sector: str | None = None
     market_sector: str | None = None
     market_industry: str | None = None
+    strict_official_mode: bool = False
     last_checked: datetime | None = None
     last_checked_financials: datetime | None = None
     last_checked_prices: datetime | None = None
@@ -1424,9 +1431,9 @@ def company_financials(
         return payload
 
     financials = get_company_financials(session, snapshot.company.id)
-    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
-    price_history = get_company_price_history(session, snapshot.company.id)
+    price_history = _visible_price_history(session, snapshot.company.id)
     serialized_financials = [_serialize_financial(statement) for statement in financials]
     diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
     payload = CompanyFinancialsResponse(
@@ -1510,12 +1517,14 @@ def company_metrics_timeseries(
         )
 
     financials = get_company_financials(session, snapshot.company.id)
-    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
-    price_history = get_company_price_history(session, snapshot.company.id)
+    price_history = _visible_price_history(session, snapshot.company.id)
     series = build_metrics_timeseries(financials, price_history, cadence=cadence, max_points=max_points)
-    point_payload = [MetricsTimeseriesPointPayload.model_validate(point) for point in series]
+    point_payload = _sanitize_metrics_timeseries_points_for_strict_official_mode(
+        [MetricsTimeseriesPointPayload.model_validate(point) for point in series]
+    )
     diagnostics = _diagnostics_for_metrics_timeseries(point_payload, refresh, staleness_reason)
     return CompanyMetricsTimeseriesResponse(
         company=_serialize_company(
@@ -1564,7 +1573,7 @@ def company_derived_metrics(
             **_empty_provenance_contract("company_missing"),
         )
 
-    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
@@ -1581,7 +1590,9 @@ def company_derived_metrics(
         if staleness_reason == "fresh":
             staleness_reason = "metrics_missing"
 
-    period_payload = [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
+    period_payload = _sanitize_derived_metric_periods_for_strict_official_mode(
+        [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
+    )
     available_metric_keys = sorted({item.metric_key for item in rows})
     diagnostics = _diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason)
     metric_values = [metric for period in period_payload for metric in period.metrics]
@@ -1638,7 +1649,7 @@ def company_derived_metrics_summary(
             **_empty_provenance_contract("company_missing"),
         )
 
-    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
@@ -1651,7 +1662,9 @@ def company_derived_metrics_summary(
             staleness_reason = "metrics_missing"
 
     summary = build_summary_payload(rows, period_type)
-    metric_payload = [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+    metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
+        [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+    )
     diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
     return CompanyDerivedMetricsSummaryResponse(
         company=_serialize_company(
@@ -1929,7 +1942,7 @@ def company_earnings_workspace(
         build_earnings_directional_backtest(
             model_rows,
             earnings_releases,
-            get_company_price_history(session, snapshot.company.id),
+            _visible_price_history(session, snapshot.company.id),
         )
     )
     latest_point = model_rows[-1] if model_rows else None
@@ -2074,7 +2087,7 @@ def company_models(
 
         refresh = _refresh_for_snapshot(background_tasks, snapshot)
         financials = get_company_financials(session, snapshot.company.id)
-        price_last_checked, _price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+        price_last_checked, _price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
         if snapshot.cache_state == "fresh" and requested_models:
             model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
             if any(not result.cached for result in model_job_results):
@@ -2340,7 +2353,7 @@ def company_peers(
         _store_hot_cached_payload(hot_key, payload)
         return payload
 
-    price_last_checked, price_cache_state = get_company_price_cache_status(session, snapshot.company.id)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = get_company_financials(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     payload = build_peer_comparison(session, snapshot.company.ticker, selected_tickers=selected_tickers)
@@ -3111,6 +3124,25 @@ def _record_cache_metric(key: str) -> None:
         _cache_metric_counts[key] = _cache_metric_counts.get(key, 0) + 1
 
 
+def _company_market_classification(company: Any) -> tuple[str | None, str | None]:
+    if not settings.strict_official_mode:
+        return getattr(company, "market_sector", None), getattr(company, "market_industry", None)
+    profile = resolve_sec_sic_profile(None, getattr(company, "sector", None))
+    return profile.market_sector, profile.market_industry
+
+
+def _visible_price_cache_status(session: Session, company_id: int) -> tuple[datetime | None, PriceCacheState]:
+    if settings.strict_official_mode:
+        return None, "fresh"
+    return get_company_price_cache_status(session, company_id)
+
+
+def _visible_price_history(session: Session, company_id: int) -> list[PriceHistory]:
+    if settings.strict_official_mode:
+        return []
+    return get_company_price_history(session, company_id)
+
+
 def _resolve_cached_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:
     snapshot = get_company_snapshot(session, ticker)
     if snapshot is not None:
@@ -3174,6 +3206,123 @@ def _metrics_staleness_reason(
     return "fresh"
 
 
+def _sanitize_metric_provenance_for_strict_official_mode(provenance: dict[str, Any]) -> dict[str, Any]:
+    if not settings.strict_official_mode:
+        return provenance
+    sanitized = dict(provenance)
+    if "price_source" in sanitized:
+        sanitized["price_source"] = None
+    return sanitized
+
+
+def _sanitize_metrics_timeseries_points_for_strict_official_mode(
+    points: list[MetricsTimeseriesPointPayload],
+) -> list[MetricsTimeseriesPointPayload]:
+    if not settings.strict_official_mode:
+        return points
+
+    sanitized_points: list[MetricsTimeseriesPointPayload] = []
+    for point in points:
+        metrics_updates = {
+            metric_key: None
+            for metric_key in PRICE_DEPENDENT_TIMESERIES_METRIC_KEYS
+            if getattr(point.metrics, metric_key, None) is not None
+        }
+        quality_flags = list(point.quality.flags)
+        if metrics_updates:
+            quality_flags = sorted(set([*quality_flags, "strict_official_mode_price_disabled"]))
+        sanitized_points.append(
+            point.model_copy(
+                update={
+                    "metrics": point.metrics.model_copy(update=metrics_updates),
+                    "provenance": point.provenance.model_copy(
+                        update=_sanitize_metric_provenance_for_strict_official_mode(point.provenance.model_dump())
+                    ),
+                    "quality": point.quality.model_copy(update={"flags": quality_flags}),
+                }
+            )
+        )
+    return sanitized_points
+
+
+def _sanitize_derived_metric_values_for_strict_official_mode(
+    metrics: list[DerivedMetricValuePayload],
+) -> list[DerivedMetricValuePayload]:
+    if not settings.strict_official_mode:
+        return metrics
+
+    sanitized_metrics: list[DerivedMetricValuePayload] = []
+    for metric in metrics:
+        provenance = metric.provenance if isinstance(metric.provenance, dict) else {}
+        next_quality_flags = list(metric.quality_flags)
+        next_value = metric.metric_value
+        if metric.metric_key in PRICE_DEPENDENT_DERIVED_METRIC_KEYS:
+            next_value = None
+            next_quality_flags = sorted(set([*next_quality_flags, "strict_official_mode_price_disabled"]))
+        sanitized_metrics.append(
+            metric.model_copy(
+                update={
+                    "metric_value": next_value,
+                    "provenance": _sanitize_metric_provenance_for_strict_official_mode(dict(provenance)),
+                    "quality_flags": next_quality_flags,
+                }
+            )
+        )
+    return sanitized_metrics
+
+
+def _sanitize_derived_metric_periods_for_strict_official_mode(
+    periods: list[DerivedMetricPeriodPayload],
+) -> list[DerivedMetricPeriodPayload]:
+    if not settings.strict_official_mode:
+        return periods
+    return [
+        period.model_copy(update={"metrics": _sanitize_derived_metric_values_for_strict_official_mode(period.metrics)})
+        for period in periods
+    ]
+
+
+def _sanitize_price_snapshot_for_strict_official_mode(snapshot: dict[str, Any]) -> dict[str, Any]:
+    sanitized = dict(snapshot)
+    sanitized["latest_price"] = None
+    sanitized["price_date"] = None
+    sanitized["price_source"] = None
+    sanitized["price_available"] = False
+    return sanitized
+
+
+def _sanitize_model_result_for_strict_official_mode(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
+    if not settings.strict_official_mode:
+        return result
+
+    sanitized = deepcopy(result)
+    price_snapshot = sanitized.get("price_snapshot")
+    if isinstance(price_snapshot, dict):
+        sanitized["price_snapshot"] = _sanitize_price_snapshot_for_strict_official_mode(price_snapshot)
+
+    assumption_provenance = sanitized.get("assumption_provenance")
+    if isinstance(assumption_provenance, dict):
+        nested_price_snapshot = assumption_provenance.get("price_snapshot")
+        if isinstance(nested_price_snapshot, dict):
+            assumption_provenance["price_snapshot"] = _sanitize_price_snapshot_for_strict_official_mode(nested_price_snapshot)
+
+    if str(model_name).lower() == "reverse_dcf":
+        sanitized.update(
+            {
+                "status": "insufficient_data",
+                "model_status": "insufficient_data",
+                "explanation": status_explanation("insufficient_data"),
+                "reason": "Strict official mode disables commercial price inputs, so reverse DCF is unavailable.",
+                "implied_growth": None,
+                "implied_margin": None,
+                "market_cap_proxy": None,
+                "heatmap": [],
+            }
+        )
+
+    return sanitized
+
+
 def _refresh_for_filing_insights(
     background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
@@ -3206,13 +3355,15 @@ def _serialize_company(
     last_checked_filings: datetime | None = None,
     last_checked_earnings: datetime | None = None,
 ) -> CompanyPayload:
+    market_sector, market_industry = _company_market_classification(snapshot.company)
     return CompanyPayload(
         ticker=snapshot.company.ticker,
         cik=snapshot.company.cik,
         name=snapshot.company.name,
         sector=snapshot.company.sector,
-        market_sector=snapshot.company.market_sector,
-        market_industry=snapshot.company.market_industry,
+        market_sector=market_sector,
+        market_industry=market_industry,
+        strict_official_mode=settings.strict_official_mode,
         last_checked=last_checked if last_checked is not None else snapshot.last_checked,
         last_checked_financials=snapshot.last_checked,
         last_checked_prices=last_checked_prices,
@@ -3376,6 +3527,8 @@ def _build_provenance_contract(
     entries = build_provenance_entries(usages)
     source_mix = SourceMixPayload.model_validate(build_source_mix(entries))
     combined_flags = {flag for flag in (confidence_flags or []) if flag}
+    if settings.strict_official_mode:
+        combined_flags.add("strict_official_mode")
     if source_mix.fallback_source_ids:
         combined_flags.add("commercial_fallback_present")
     if any(str(entry.get("source_tier") or "") == "manual_override" for entry in entries):
@@ -3943,7 +4096,10 @@ def _models_provenance_contract(
 
     extra_flags: set[str] = set()
     for model_run in model_runs:
-        result = model_run.result if isinstance(model_run.result, dict) else {}
+        result = _sanitize_model_result_for_strict_official_mode(
+            model_run.model_name,
+            model_run.result if isinstance(model_run.result, dict) else {},
+        )
         status_value = str(result.get("model_status") or result.get("status") or "").lower()
         if status_value == "partial":
             extra_flags.add("partial_model_inputs")
@@ -3959,15 +4115,17 @@ def _models_provenance_contract(
 
         price_snapshot = result.get("price_snapshot")
         if isinstance(price_snapshot, dict):
-            price_usage = _source_usage_from_hint(
-                price_snapshot.get("price_source"),
-                role="fallback",
-                as_of=price_snapshot.get("price_date") or model_as_of,
-                last_refreshed_at=price_last_checked,
-                default_source_id="yahoo_finance",
-            )
-            if price_usage is not None:
-                usages.append(price_usage)
+            price_source = price_snapshot.get("price_source")
+            if price_source:
+                price_usage = _source_usage_from_hint(
+                    str(price_source),
+                    role="fallback",
+                    as_of=price_snapshot.get("price_date") or model_as_of,
+                    last_refreshed_at=price_last_checked,
+                    default_source_id="yahoo_finance",
+                )
+                if price_usage is not None:
+                    usages.append(price_usage)
 
         assumption_provenance = result.get("assumption_provenance")
         if isinstance(assumption_provenance, dict):
@@ -4600,7 +4758,10 @@ def _serialize_model(model_run: ModelRun) -> ModelPayload:
         model_version=model_run.model_version,
         created_at=model_run.created_at,
         input_periods=model_run.input_periods,
-        result=model_run.result,
+        result=_sanitize_model_result_for_strict_official_mode(
+            model_run.model_name,
+            model_run.result if isinstance(model_run.result, dict) else {},
+        ),
     )
 
 
@@ -5950,16 +6111,31 @@ def _build_watchlist_summary_item(
                 model_names=["dcf", "roic", "reverse_dcf", "capital_allocation", "ratios"],
             )
         }
-        latest_price_series = get_company_price_history(session, snapshot.company.id)
+        latest_price_series = _visible_price_history(session, snapshot.company.id)
         latest_price = latest_price_series[-1].close if latest_price_series else None
     except Exception:
         logging.getLogger(__name__).exception("Unable to load watchlist model metrics for '%s'", snapshot.company.ticker)
 
-    dcf_result = models.get("dcf").result if models.get("dcf") is not None and isinstance(models.get("dcf").result, dict) else {}
-    roic_result = models.get("roic").result if models.get("roic") is not None and isinstance(models.get("roic").result, dict) else {}
-    reverse_result = models.get("reverse_dcf").result if models.get("reverse_dcf") is not None and isinstance(models.get("reverse_dcf").result, dict) else {}
-    capital_result = models.get("capital_allocation").result if models.get("capital_allocation") is not None and isinstance(models.get("capital_allocation").result, dict) else {}
-    ratios_result = models.get("ratios").result if models.get("ratios") is not None and isinstance(models.get("ratios").result, dict) else {}
+    dcf_result = _sanitize_model_result_for_strict_official_mode(
+        "dcf",
+        models.get("dcf").result if models.get("dcf") is not None and isinstance(models.get("dcf").result, dict) else {},
+    )
+    roic_result = _sanitize_model_result_for_strict_official_mode(
+        "roic",
+        models.get("roic").result if models.get("roic") is not None and isinstance(models.get("roic").result, dict) else {},
+    )
+    reverse_result = _sanitize_model_result_for_strict_official_mode(
+        "reverse_dcf",
+        models.get("reverse_dcf").result if models.get("reverse_dcf") is not None and isinstance(models.get("reverse_dcf").result, dict) else {},
+    )
+    capital_result = _sanitize_model_result_for_strict_official_mode(
+        "capital_allocation",
+        models.get("capital_allocation").result if models.get("capital_allocation") is not None and isinstance(models.get("capital_allocation").result, dict) else {},
+    )
+    ratios_result = _sanitize_model_result_for_strict_official_mode(
+        "ratios",
+        models.get("ratios").result if models.get("ratios") is not None and isinstance(models.get("ratios").result, dict) else {},
+    )
     ratios_values = ratios_result.get("values") if isinstance(ratios_result.get("values"), dict) else {}
     fair_value_per_share = _coerce_number(dcf_result.get("fair_value_per_share"), None)
     dcf_status = str(dcf_result.get("model_status") or dcf_result.get("status") or "unknown")

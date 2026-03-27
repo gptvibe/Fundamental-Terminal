@@ -249,6 +249,9 @@ def _load_canonical_financials(session: Session, company_id: int, *, limit: int)
 
 
 def _load_latest_market_snapshot(session: Session, company_id: int) -> MarketSnapshot | None:
+    if settings.strict_official_mode:
+        return None
+
     statement = (
         select(PriceHistory)
         .where(PriceHistory.company_id == company_id)

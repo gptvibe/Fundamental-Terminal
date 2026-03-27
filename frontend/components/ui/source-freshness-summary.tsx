@@ -1,5 +1,6 @@
 "use client";
 
+import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { formatDate } from "@/lib/format";
 import type { ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
 
@@ -35,6 +36,8 @@ export function SourceFreshnessSummary({
         <span className="pill">{formatSourceMix(sourceMix, entries)}</span>
         <span className="pill">Sources {entries.length}</span>
       </div>
+
+      <CommercialFallbackNotice provenance={entries} sourceMix={sourceMix} />
 
       {flags.length ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

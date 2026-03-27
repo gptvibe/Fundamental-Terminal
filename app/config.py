@@ -24,6 +24,13 @@ def _float_env(name: str, default: float, *, minimum: float = 0.0) -> float:
     return value if value >= minimum else default
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _load_sec_user_agent() -> str:
     raw_value = os.getenv("SEC_USER_AGENT", "").strip()
     value = raw_value or DEFAULT_SEC_USER_AGENT
@@ -80,6 +87,7 @@ class Settings:
     market_context_cache_ttl_hours: int = _int_env("MARKET_CONTEXT_CACHE_TTL_HOURS", 6, minimum=1)
     fred_api_key: str | None = os.getenv("FRED_API_KEY", "").strip() or None
     freshness_window_hours: int = _int_env("FRESHNESS_WINDOW_HOURS", 24, minimum=1)
+    strict_official_mode: bool = _bool_env("STRICT_OFFICIAL_MODE", False)
     db_pool_size: int = _int_env("DB_POOL_SIZE", 10, minimum=1)
     db_max_overflow: int = _int_env("DB_MAX_OVERFLOW", 20, minimum=0)
     db_pool_timeout_seconds: int = _int_env("DB_POOL_TIMEOUT_SECONDS", 30, minimum=1)

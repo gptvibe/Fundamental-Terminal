@@ -47,6 +47,9 @@ class MarketDataClient:
         self._http.close()
 
     def get_price_history(self, ticker: str) -> list[PriceBar]:
+        if settings.strict_official_mode:
+            return []
+
         symbol = _normalize_market_symbol(ticker)
         period_end = int(time.time())
         response = _request_with_retries(
@@ -91,6 +94,9 @@ class MarketDataClient:
         return bars
 
     def get_market_profile(self, ticker: str) -> MarketProfile:
+        if settings.strict_official_mode:
+            return MarketProfile(sector=None, industry=None)
+
         symbol = _normalize_market_symbol(ticker)
         response = _request_with_retries(
             self._http,

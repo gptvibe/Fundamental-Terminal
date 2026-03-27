@@ -37,6 +37,7 @@ describe("DerivedMetricsPanel", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Consumer Electronics",
+        strict_official_mode: false,
         last_checked: "2026-03-25T00:00:00Z",
         last_checked_financials: "2026-03-25T00:00:00Z",
         last_checked_prices: "2026-03-25T00:00:00Z",
@@ -149,5 +150,94 @@ describe("DerivedMetricsPanel", () => {
     expect(screen.getByText("Coverage")).toBeTruthy();
     expect(screen.getByText("12.0%")).toBeTruthy();
     expect(screen.getByText("Fundamental Terminal Derived Metrics Engine")).toBeTruthy();
+  });
+
+  it("disables price-derived yield selectors in strict official mode", async () => {
+    vi.mocked(getCompanyMetricsTimeseries).mockResolvedValue({
+      company: {
+        ticker: "AAPL",
+        cik: "0000320193",
+        name: "Apple Inc.",
+        sector: "Technology",
+        market_sector: "Technology",
+        market_industry: "Consumer Electronics",
+        strict_official_mode: true,
+        last_checked: "2026-03-25T00:00:00Z",
+        last_checked_financials: "2026-03-25T00:00:00Z",
+        last_checked_prices: null,
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        earnings_last_checked: null,
+        cache_state: "fresh",
+      },
+      series: [
+        {
+          cadence: "ttm",
+          period_start: "2025-01-01",
+          period_end: "2025-12-31",
+          filing_type: "TTM",
+          metrics: {
+            revenue_growth: 0.12,
+            gross_margin: 0.42,
+            operating_margin: 0.31,
+            fcf_margin: 0.21,
+            roic_proxy: 0.18,
+            leverage_ratio: 0.45,
+            current_ratio: 1.5,
+            share_dilution: 0.01,
+            sbc_burden: 0.04,
+            buyback_yield: null,
+            dividend_yield: null,
+            working_capital_days: 54,
+            accrual_ratio: -0.01,
+            cash_conversion: 1.2,
+            segment_concentration: 0.83,
+          },
+          provenance: {
+            statement_type: "canonical_xbrl",
+            statement_source: "https://data.sec.gov/example",
+            price_source: null,
+            formula_version: "sec_metrics_v1",
+          },
+          quality: {
+            available_metrics: 13,
+            missing_metrics: [],
+            coverage_ratio: 1,
+            flags: ["strict_official_mode_price_disabled"],
+          },
+        },
+      ],
+      last_financials_check: "2026-03-25T00:00:00Z",
+      last_price_check: null,
+      staleness_reason: "fresh",
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-25T00:00:00Z",
+      source_mix: {
+        source_ids: ["ft_derived_metrics_engine", "sec_edgar"],
+        source_tiers: ["derived_from_official", "official_regulator"],
+        primary_source_ids: ["sec_edgar"],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: ["strict_official_mode"],
+      refresh: {
+        triggered: false,
+        reason: "fresh",
+        ticker: "AAPL",
+        job_id: null,
+      },
+    });
+
+    render(React.createElement(DerivedMetricsPanel, { ticker: "AAPL", reloadKey: "strict" }));
+
+    await waitFor(() => {
+      expect(getCompanyMetricsTimeseries).toHaveBeenCalledWith("AAPL", { cadence: "ttm", maxPoints: 24 });
+    });
+
+    expect(screen.getByText(/Strict official mode disables price-derived yield overlays/i)).toBeTruthy();
+    expect(screen.getByText("Disabled in strict mode")).toBeTruthy();
+    expect((screen.getByRole("option", { name: /Buyback Yield \(strict mode unavailable\)/i }) as HTMLOptionElement).disabled).toBe(true);
   });
 });

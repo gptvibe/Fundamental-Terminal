@@ -50,6 +50,7 @@ const METRIC_OPTIONS: MetricOption[] = [
 const CADENCE_ORDER: Cadence[] = ["quarterly", "annual", "ttm"];
 const MAX_POINTS = 24;
 const REFRESH_POLL_INTERVAL_MS = 3000;
+const STRICT_DISABLED_METRIC_KEYS = new Set<MetricKey>(["buyback_yield", "dividend_yield"]);
 
 interface DerivedMetricsPanelProps {
   ticker: string;
@@ -133,6 +134,17 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
   }, [activeJobId, lastEvent?.status, loadMetrics]);
 
   const availableCadences = useMemo(() => CADENCE_ORDER, []);
+  const strictOfficialMode = Boolean(payload?.company?.strict_official_mode);
+
+  useEffect(() => {
+    if (!strictOfficialMode || !STRICT_DISABLED_METRIC_KEYS.has(metric)) {
+      return;
+    }
+    const fallbackMetric = METRIC_OPTIONS.find((option) => !STRICT_DISABLED_METRIC_KEYS.has(option.key));
+    if (fallbackMetric) {
+      setMetric(fallbackMetric.key);
+    }
+  }, [metric, strictOfficialMode]);
 
   useEffect(() => {
     if (!availableCadences.length) {
@@ -199,8 +211,10 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
             style={{ background: "transparent", color: "var(--text)", border: "none", outline: "none" }}
           >
             {METRIC_OPTIONS.map((option) => (
-              <option key={option.key} value={option.key}>
-                {option.label}
+              <option key={option.key} value={option.key} disabled={strictOfficialMode && STRICT_DISABLED_METRIC_KEYS.has(option.key)}>
+                {strictOfficialMode && STRICT_DISABLED_METRIC_KEYS.has(option.key)
+                  ? `${option.label} (strict mode unavailable)`
+                  : option.label}
               </option>
             ))}
           </select>
@@ -219,13 +233,19 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
         confidenceFlags={payload.confidence_flags}
       />
 
+      {strictOfficialMode ? (
+        <div className="text-muted">
+          Strict official mode disables price-derived yield overlays. Buyback yield and dividend yield stay unavailable until an official equity-price source is configured.
+        </div>
+      ) : null}
+
       {latest ? (
         <div className="metric-grid">
           <MetricCard label="Latest Period" value={formatDate(latest.period_end)} />
           <MetricCard label={selectedOption.label} value={formatMetric(latest.metrics[metric], selectedOption.isPercent)} />
           <MetricCard label="Coverage" value={`${Math.round(latest.quality.coverage_ratio * 100)}%`} />
           <MetricCard label="Financials Check" value={payload.last_financials_check ? formatDate(payload.last_financials_check) : "?"} />
-          <MetricCard label="Price Check" value={payload.last_price_check ? formatDate(payload.last_price_check) : "?"} />
+          <MetricCard label="Price Check" value={strictOfficialMode ? "Disabled in strict mode" : payload.last_price_check ? formatDate(payload.last_price_check) : "?"} />
           <MetricCard
             label="Provenance"
             value={`${latest.provenance.statement_type} • ${latest.provenance.price_source ?? "no-price"}`}

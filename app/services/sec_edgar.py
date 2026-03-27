@@ -37,6 +37,7 @@ from app.services.market_data import (
 from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
 from app.services.earnings_intelligence import recompute_and_persist_company_earnings_model_points
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
+from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
 from app.services.status_stream import JobReporter
 
@@ -532,6 +533,7 @@ class CompanyIdentity:
     sector: str | None = None
     market_sector: str | None = None
     market_industry: str | None = None
+    sic: str | None = None
 
 
 @dataclass(slots=True)
@@ -781,6 +783,7 @@ class EdgarClient:
                 name=str(submissions.get("name", cik)),
                 exchange=((submissions.get("exchanges") or [None])[0]),
                 sector=submissions.get("sicDescription"),
+                sic=str(submissions.get("sic") or "").strip() or None,
             )
 
         normalized_lookup = _normalize_identifier(lookup)
@@ -1523,6 +1526,9 @@ class EdgarIngestionService:
             freshness_cutoff = checked_at - timedelta(hours=settings.freshness_window_hours)
             statements_fresh = latest_statement_checked is not None and latest_statement_checked >= freshness_cutoff
             prices_fresh = latest_price_checked is not None and latest_price_checked >= freshness_cutoff
+            if settings.strict_official_mode:
+                latest_price_checked = None
+                prices_fresh = True
             insider_fresh = latest_insider_checked is not None and latest_insider_checked >= freshness_cutoff
             form144_fresh = latest_form144_checked is not None and latest_form144_checked >= freshness_cutoff
             earnings_fresh = latest_earnings_checked is not None and latest_earnings_checked >= freshness_cutoff
@@ -1782,22 +1788,31 @@ class EdgarIngestionService:
             ):
                 session.commit()
                 try:
-                    market_profile = self.market_data.get_market_profile(local_company.ticker)
-                    if market_profile.sector:
-                        local_company.market_sector = market_profile.sector
-                    if market_profile.industry:
-                        local_company.market_industry = market_profile.industry
-                    active_reporter.step("market", "Fetching price history...")
-                    price_bars = self.market_data.get_price_history(local_company.ticker)
-                    active_reporter.step("database", "Saving price history to database...")
-                    price_points_written = upsert_price_history(
-                        session=session,
-                        company=local_company,
-                        price_bars=price_bars,
-                        checked_at=checked_at,
-                    )
-                    if price_points_written > 0:
-                        touch_company_price_history(session, local_company.id, checked_at)
+                    if settings.strict_official_mode:
+                        strict_profile = resolve_sec_sic_profile(None, local_company.sector)
+                        if strict_profile.market_sector:
+                            local_company.market_sector = strict_profile.market_sector
+                        if strict_profile.market_industry:
+                            local_company.market_industry = strict_profile.market_industry
+                        active_reporter.step("market", "Strict official mode enabled; Yahoo market data disabled.")
+                        price_points_written = 0
+                    else:
+                        market_profile = self.market_data.get_market_profile(local_company.ticker)
+                        if market_profile.sector:
+                            local_company.market_sector = market_profile.sector
+                        if market_profile.industry:
+                            local_company.market_industry = market_profile.industry
+                        active_reporter.step("market", "Fetching price history...")
+                        price_bars = self.market_data.get_price_history(local_company.ticker)
+                        active_reporter.step("database", "Saving price history to database...")
+                        price_points_written = upsert_price_history(
+                            session=session,
+                            company=local_company,
+                            price_bars=price_bars,
+                            checked_at=checked_at,
+                        )
+                        if price_points_written > 0:
+                            touch_company_price_history(session, local_company.id, checked_at)
                 except Exception as exc:
                     logger.exception("Market data refresh failed for %s", local_company.ticker)
                     active_reporter.step("market", f"Market data refresh failed: {exc}")
@@ -1833,12 +1848,23 @@ class EdgarIngestionService:
             cik=company_identity.cik,
             filing_index=filing_index,
         )
+        sec_market_profile = resolve_sec_sic_profile(submissions.get("sic"), submissions.get("sicDescription") or company_identity.sector)
         try:
-            market_profile = self.market_data.get_market_profile(company_identity.ticker)
+            if settings.strict_official_mode:
+                market_profile = MarketProfile(
+                    sector=sec_market_profile.market_sector,
+                    industry=sec_market_profile.market_industry,
+                )
+                active_reporter.step("market", "Using SEC SIC classification for market sector and industry.")
+            else:
+                market_profile = self.market_data.get_market_profile(company_identity.ticker)
         except Exception as exc:
             logger.exception("Market profile lookup failed for %s", company_identity.ticker)
             active_reporter.step("market", f"Market profile lookup failed: {exc}")
-            market_profile = MarketProfile(sector=None, industry=None)
+            market_profile = MarketProfile(
+                sector=sec_market_profile.market_sector,
+                industry=sec_market_profile.market_industry,
+            )
 
         enriched_identity = CompanyIdentity(
             cik=company_identity.cik,
@@ -1848,6 +1874,7 @@ class EdgarIngestionService:
             sector=submissions.get("sicDescription") or company_identity.sector,
             market_sector=market_profile.sector,
             market_industry=market_profile.industry,
+            sic=str(submissions.get("sic") or company_identity.sic or "").strip() or None,
         )
 
         get_engine()
@@ -1964,17 +1991,20 @@ class EdgarIngestionService:
             price_points_written = 0
             if force or not prices_fresh:
                 try:
-                    active_reporter.step("market", "Fetching price history...")
-                    price_bars = self.market_data.get_price_history(company.ticker)
-                    active_reporter.step("database", "Saving price history to database...")
-                    price_points_written = upsert_price_history(
-                        session=session,
-                        company=company,
-                        price_bars=price_bars,
-                        checked_at=checked_at,
-                    )
-                    if price_points_written > 0:
-                        touch_company_price_history(session, company.id, checked_at)
+                    if settings.strict_official_mode:
+                        active_reporter.step("market", "Strict official mode enabled; Yahoo price refresh skipped.")
+                    else:
+                        active_reporter.step("market", "Fetching price history...")
+                        price_bars = self.market_data.get_price_history(company.ticker)
+                        active_reporter.step("database", "Saving price history to database...")
+                        price_points_written = upsert_price_history(
+                            session=session,
+                            company=company,
+                            price_bars=price_bars,
+                            checked_at=checked_at,
+                        )
+                        if price_points_written > 0:
+                            touch_company_price_history(session, company.id, checked_at)
                 except Exception as exc:
                     logger.exception("Market data refresh failed for %s", company.ticker)
                     active_reporter.step("market", f"Market data refresh failed: {exc}")

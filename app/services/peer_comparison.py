@@ -10,6 +10,7 @@ from app.config import settings
 from app.model_engine.engine import ModelEngine
 from app.models import Company, FinancialStatement, ModelRun, PriceHistory
 from app.services.cache_queries import CompanyCacheSnapshot, get_company_snapshot
+from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import ANNUAL_FORMS, CANONICAL_STATEMENT_TYPE
 
 
@@ -47,6 +48,41 @@ def build_peer_comparison(
         *[peer for peer in peer_snapshots if peer.company.ticker in set(selected)],
     ]
 
+    available_peers = peer_snapshots[: max(0, MAX_AVAILABLE_COMPANIES - 1)]
+    available_tickers = {peer.company.ticker for peer in available_peers}
+    for selected_ticker in selected:
+        if selected_ticker in available_tickers:
+            continue
+        selected_snapshot = next((peer for peer in peer_snapshots if peer.company.ticker == selected_ticker), None)
+        if selected_snapshot is not None:
+            available_peers.append(selected_snapshot)
+            available_tickers.add(selected_ticker)
+
+    available_companies = [
+        _serialize_option(focus_snapshot, is_focus=True),
+        *[_serialize_option(snapshot, is_focus=False) for snapshot in available_peers],
+    ]
+
+    if settings.strict_official_mode:
+        return {
+            "company": focus_snapshot,
+            "peer_basis": f"{_peer_basis_label(focus_snapshot.company, best_rank)} (official-only)",
+            "available_companies": available_companies,
+            "selected_tickers": selected,
+            "peers": [],
+            "notes": {
+                "strict_official_mode": (
+                    "Peer comparison is unavailable in strict official mode because this workspace depends on price-derived valuation signals "
+                    "and no official end-of-day equity price source is enabled."
+                ),
+            },
+            "source_hints": {
+                "financial_statement_sources": ["sec_companyfacts"],
+                "price_sources": [],
+                "risk_free_sources": [],
+            },
+        }
+
     engine = ModelEngine(session)
     wrote_model_cache = False
     rows: list[dict[str, Any]] = []
@@ -74,20 +110,6 @@ def build_peer_comparison(
             )
         )
 
-    available_peers = peer_snapshots[: max(0, MAX_AVAILABLE_COMPANIES - 1)]
-    available_tickers = {peer.company.ticker for peer in available_peers}
-    for selected_ticker in selected:
-        if selected_ticker in available_tickers:
-            continue
-        selected_snapshot = next((peer for peer in peer_snapshots if peer.company.ticker == selected_ticker), None)
-        if selected_snapshot is not None:
-            available_peers.append(selected_snapshot)
-            available_tickers.add(selected_ticker)
-
-    available_companies = [
-        _serialize_option(focus_snapshot, is_focus=True),
-        *[_serialize_option(snapshot, is_focus=False) for snapshot in available_peers],
-    ]
     financial_statement_sources = sorted(
         {
             statement.source
@@ -193,12 +215,13 @@ def _normalize_selected_tickers(values: list[str] | None, focus_ticker: str) -> 
 
 
 def _serialize_option(snapshot: CompanyCacheSnapshot, *, is_focus: bool) -> dict[str, Any]:
+    market_sector, market_industry = _company_market_classification(snapshot.company)
     return {
         "ticker": snapshot.company.ticker,
         "name": snapshot.company.name,
         "sector": snapshot.company.sector,
-        "market_sector": snapshot.company.market_sector,
-        "market_industry": snapshot.company.market_industry,
+        "market_sector": market_sector,
+        "market_industry": market_industry,
         "last_checked": snapshot.last_checked,
         "cache_state": snapshot.cache_state,
         "is_focus": is_focus,
@@ -218,6 +241,7 @@ def _build_peer_row(
     previous_statement = _previous_comparable_statement(statements, current_statement)
     latest_price = latest_prices_by_company.get(snapshot.company.id)
     models = models_by_company.get(snapshot.company.id, {})
+    market_sector, market_industry = _company_market_classification(snapshot.company)
 
     current_data = dict(current_statement.data or {}) if current_statement is not None else {}
     previous_data = dict(previous_statement.data or {}) if previous_statement is not None else {}
@@ -270,8 +294,8 @@ def _build_peer_row(
         "ticker": snapshot.company.ticker,
         "name": snapshot.company.name,
         "sector": snapshot.company.sector,
-        "market_sector": snapshot.company.market_sector,
-        "market_industry": snapshot.company.market_industry,
+        "market_sector": market_sector,
+        "market_industry": market_industry,
         "is_focus": is_focus,
         "cache_state": snapshot.cache_state,
         "last_checked": snapshot.last_checked,
@@ -432,10 +456,11 @@ def _build_revenue_history(statements: list[FinancialStatement], *, limit: int =
 
 
 def _peer_basis_label(company: Company, rank: int) -> str:
-    if rank == 0 and company.market_industry:
-        return f"{company.market_industry} peers"
-    if rank == 1 and company.market_sector:
-        return f"{company.market_sector} peers"
+    market_sector, market_industry = _company_market_classification(company)
+    if rank == 0 and market_industry:
+        return f"{market_industry} peers"
+    if rank == 1 and market_sector:
+        return f"{market_sector} peers"
     if rank == 2 and company.sector:
         return f"{company.sector} peers"
     return "Cached peer universe"
@@ -448,13 +473,22 @@ def _best_peer_rank(peer_snapshots: list[CompanyCacheSnapshot], focus_company: C
 
 
 def _peer_match_rank(company: Company, focus_company: Company) -> int:
-    if focus_company.market_industry and company.market_industry == focus_company.market_industry:
+    focus_market_sector, focus_market_industry = _company_market_classification(focus_company)
+    company_market_sector, company_market_industry = _company_market_classification(company)
+    if focus_market_industry and company_market_industry == focus_market_industry:
         return 0
-    if focus_company.market_sector and company.market_sector == focus_company.market_sector:
+    if focus_market_sector and company_market_sector == focus_market_sector:
         return 1
     if focus_company.sector and company.sector == focus_company.sector:
         return 2
     return 3
+
+
+def _company_market_classification(company: Company) -> tuple[str | None, str | None]:
+    if not settings.strict_official_mode:
+        return company.market_sector, company.market_industry
+    profile = resolve_sec_sic_profile(None, company.sector)
+    return profile.market_sector, profile.market_industry
 
 
 def _model_result(model_run: ModelRun | None) -> dict[str, Any]:

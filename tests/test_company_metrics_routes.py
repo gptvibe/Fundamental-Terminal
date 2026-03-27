@@ -70,6 +70,9 @@ def test_metrics_endpoint_returns_typed_payload(monkeypatch):
     assert payload["periods"]
     assert payload["periods"][0]["period_type"] == "ttm"
     assert payload["periods"][0]["metrics"][0]["metric_key"] in {"gross_margin", "revenue_growth"}
+    revenue_growth_metric = next(metric for metric in payload["periods"][0]["metrics"] if metric["metric_key"] == "revenue_growth")
+    assert "price_source" in revenue_growth_metric["provenance"]
+    assert revenue_growth_metric["provenance"]["price_source"] == "yahoo_finance"
     assert "available_metric_keys" in payload
     assert payload["as_of"] == "2025-12-31"
     assert payload["last_refreshed_at"] is not None
@@ -109,6 +112,8 @@ def test_metrics_summary_endpoint_returns_latest_period(monkeypatch):
     assert payload["company"]["ticker"] == "AAPL"
     assert payload["latest_period_end"] == "2025-12-31"
     assert payload["metrics"]
+    assert "price_source" in payload["metrics"][0]["provenance"]
+    assert payload["metrics"][0]["provenance"]["price_source"] == "yahoo_finance"
     assert payload["as_of"] == "2025-12-31"
     assert payload["last_refreshed_at"] is not None
     assert {entry["source_id"] for entry in payload["provenance"]} == {
@@ -139,3 +144,47 @@ def test_metrics_endpoint_triggers_refresh_when_company_missing(monkeypatch):
     assert payload["provenance"] == []
     assert payload["source_mix"]["source_ids"] == []
     assert payload["confidence_flags"] == ["company_missing"]
+
+
+def test_metrics_endpoint_hides_price_dependent_metric_values_in_strict_mode(monkeypatch):
+    snapshot = _snapshot()
+    snapshot.company.sector = "prepackaged software"
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "get_company_price_cache_status",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("price cache should be hidden in strict mode")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_derived_metric_points",
+        lambda *_args, **_kwargs: [
+            _metric_row("ttm", date(2025, 12, 31), "revenue_growth", 0.12),
+            _metric_row("ttm", date(2025, 12, 31), "buyback_yield_proxy", 0.03),
+        ],
+    )
+    monkeypatch.setattr(main_module, "get_company_derived_metrics_last_checked", lambda *_args, **_kwargs: datetime.now(timezone.utc))
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/metrics?period_type=ttm&max_periods=12")
+
+    assert response.status_code == 200
+    payload = response.json()
+    metrics = {metric["metric_key"]: metric for metric in payload["periods"][0]["metrics"]}
+    assert payload["company"]["strict_official_mode"] is True
+    assert payload["company"]["market_sector"] == "Technology"
+    assert payload["last_price_check"] is None
+    assert metrics["revenue_growth"]["metric_value"] == 0.12
+    assert metrics["buyback_yield_proxy"]["metric_value"] is None
+    assert metrics["buyback_yield_proxy"]["provenance"]["price_source"] is None
+    assert "strict_official_mode_price_disabled" in metrics["buyback_yield_proxy"]["quality_flags"]
+    assert {entry["source_id"] for entry in payload["provenance"]} == {"ft_derived_metrics_mart", "sec_companyfacts"}
+    assert payload["source_mix"]["fallback_source_ids"] == []
+    assert "strict_official_mode" in payload["confidence_flags"]

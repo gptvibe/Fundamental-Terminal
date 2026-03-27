@@ -9,7 +9,9 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Company, EarningsModelPoint, EarningsRelease, FinancialStatement, PriceHistory
+from app.services.sec_sic import resolve_sec_sic_profile
 
 QUARTERLY_FORMS = {"10-Q", "6-K"}
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
@@ -380,9 +382,10 @@ def build_earnings_peer_percentiles(
             "sector_eps_drift_percentile": None,
         }
 
+    market_sector, market_industry = _company_market_classification(company)
     sector_values = _latest_peer_metric_values(session, company, basis="market_sector")
     industry_values = _latest_peer_metric_values(session, company, basis="market_industry")
-    use_industry = bool(company.market_industry and len(industry_values["quality"]) >= 4)
+    use_industry = bool(market_industry and len(industry_values["quality"]) >= 4)
     peer_basis = "market_industry" if use_industry else "market_sector"
     peer_values = industry_values if use_industry else sector_values
 
@@ -404,7 +407,61 @@ def build_sector_alert_profile(session: Session, company: Company) -> dict[str, 
         "segment_change_threshold": SEGMENT_ALERT_THRESHOLD,
     }
 
-    if not company.market_sector:
+    market_sector, _market_industry = _company_market_classification(company)
+    if not market_sector:
+        return profile
+
+    if settings.strict_official_mode:
+        latest_periods = (
+            select(
+                EarningsModelPoint.company_id.label("company_id"),
+                func.max(EarningsModelPoint.period_end).label("period_end"),
+            )
+            .group_by(EarningsModelPoint.company_id)
+            .subquery()
+        )
+
+        quality_statement = (
+            select(Company, EarningsModelPoint.quality_score)
+            .join(
+                latest_periods,
+                (latest_periods.c.company_id == EarningsModelPoint.company_id)
+                & (latest_periods.c.period_end == EarningsModelPoint.period_end),
+            )
+            .join(Company, Company.id == EarningsModelPoint.company_id)
+            .where(
+                Company.id != company.id,
+                EarningsModelPoint.quality_score.is_not(None),
+            )
+        )
+        quality_values = [
+            float(value)
+            for peer_company, value in session.execute(quality_statement).all()
+            if value is not None and _company_market_classification(peer_company)[0] == market_sector
+        ]
+        if len(quality_values) >= 8:
+            profile["quality_mid_threshold"] = _percentile_value(quality_values, 0.40)
+            profile["quality_high_threshold"] = max(
+                profile["quality_mid_threshold"] + 5.0,
+                _percentile_value(quality_values, 0.75),
+            )
+
+        segment_statement = (
+            select(Company, func.abs(EarningsModelPoint.segment_contribution_delta))
+            .join(Company, Company.id == EarningsModelPoint.company_id)
+            .where(
+                Company.id != company.id,
+                EarningsModelPoint.segment_contribution_delta.is_not(None),
+            )
+        )
+        segment_values = [
+            float(value)
+            for peer_company, value in session.execute(segment_statement).all()
+            if value is not None and _company_market_classification(peer_company)[0] == market_sector
+        ]
+        if len(segment_values) >= 20:
+            tuned = _percentile_value(segment_values, 0.80)
+            profile["segment_change_threshold"] = max(0.04, min(0.20, tuned))
         return profile
 
     latest_periods = (
@@ -426,7 +483,7 @@ def build_sector_alert_profile(session: Session, company: Company) -> dict[str, 
         .join(Company, Company.id == EarningsModelPoint.company_id)
         .where(
             Company.id != company.id,
-            Company.market_sector == company.market_sector,
+            Company.market_sector == market_sector,
             EarningsModelPoint.quality_score.is_not(None),
         )
     )
@@ -443,7 +500,7 @@ def build_sector_alert_profile(session: Session, company: Company) -> dict[str, 
         .join(Company, Company.id == EarningsModelPoint.company_id)
         .where(
             Company.id != company.id,
-            Company.market_sector == company.market_sector,
+            Company.market_sector == market_sector,
             EarningsModelPoint.segment_contribution_delta.is_not(None),
         )
     )
@@ -640,15 +697,51 @@ def _segment_share_map(payload: list[Any]) -> dict[str, dict[str, Any]]:
 
 
 def _latest_peer_metric_values(session: Session, company: Company, *, basis: str) -> dict[str, list[float]]:
+    market_sector, market_industry = _company_market_classification(company)
     if basis == "market_industry":
-        value = company.market_industry
+        value = market_industry
         filter_column = Company.market_industry
     else:
-        value = company.market_sector
+        value = market_sector
         filter_column = Company.market_sector
 
     if not value:
         return {"quality": [], "eps_drift": []}
+
+    if settings.strict_official_mode:
+        latest_periods = (
+            select(
+                EarningsModelPoint.company_id.label("company_id"),
+                func.max(EarningsModelPoint.period_end).label("period_end"),
+            )
+            .group_by(EarningsModelPoint.company_id)
+            .subquery()
+        )
+
+        statement = (
+            select(Company, EarningsModelPoint.quality_score, EarningsModelPoint.eps_drift)
+            .join(
+                latest_periods,
+                (latest_periods.c.company_id == EarningsModelPoint.company_id)
+                & (latest_periods.c.period_end == EarningsModelPoint.period_end),
+            )
+            .join(Company, Company.id == EarningsModelPoint.company_id)
+            .where(Company.id != company.id)
+        )
+
+        quality_values: list[float] = []
+        eps_values: list[float] = []
+        for peer_company, quality_score, eps_drift in session.execute(statement).all():
+            peer_market_sector, peer_market_industry = _company_market_classification(peer_company)
+            peer_value = peer_market_industry if basis == "market_industry" else peer_market_sector
+            if peer_value != value:
+                continue
+            if quality_score is not None:
+                quality_values.append(float(quality_score))
+            if eps_drift is not None:
+                eps_values.append(float(eps_drift))
+
+        return {"quality": quality_values, "eps_drift": eps_values}
 
     latest_periods = (
         select(
@@ -678,6 +771,13 @@ def _latest_peer_metric_values(session: Session, company: Company, *, basis: str
             eps_values.append(float(eps_drift))
 
     return {"quality": quality_values, "eps_drift": eps_values}
+
+
+def _company_market_classification(company: Company) -> tuple[str | None, str | None]:
+    if not settings.strict_official_mode:
+        return company.market_sector, company.market_industry
+    profile = resolve_sec_sic_profile(None, company.sector)
+    return profile.market_sector, profile.market_industry
 
 
 def _price_on_or_before(prices: list[PriceHistory], trade_date: date) -> PriceHistory | None:

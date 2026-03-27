@@ -12,6 +12,39 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/hooks/use-company-workspace", () => ({
   useCompanyWorkspace: () => ({
+    data: {
+      provenance: [
+        {
+          source_id: "sec_companyfacts",
+          source_tier: "official_regulator",
+          display_label: "SEC Company Facts (XBRL)",
+          url: "https://data.sec.gov/api/xbrl/companyfacts/",
+          default_freshness_ttl_seconds: 21600,
+          disclosure_note: "Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
+          role: "primary",
+          as_of: "2025-12-31",
+          last_refreshed_at: "2026-03-10T00:00:00Z",
+        },
+        {
+          source_id: "yahoo_finance",
+          source_tier: "commercial_fallback",
+          display_label: "Yahoo Finance",
+          url: "https://finance.yahoo.com/",
+          default_freshness_ttl_seconds: 3600,
+          disclosure_note: "Commercial fallback used only for price, volume, and market-profile context; never for core fundamentals.",
+          role: "fallback",
+          as_of: "2026-03-10",
+          last_refreshed_at: "2026-03-10T00:00:00Z",
+        },
+      ],
+      source_mix: {
+        source_ids: ["sec_companyfacts", "yahoo_finance"],
+        source_tiers: ["commercial_fallback", "official_regulator"],
+        primary_source_ids: ["sec_companyfacts"],
+        fallback_source_ids: ["yahoo_finance"],
+        official_only: false,
+      },
+    },
     company: { ticker: "ACME", name: "Acme Corp", cik: "0000001", sector: "Tech", last_checked: "2026-03-10" },
     financials: [],
     priceHistory: [],
@@ -151,6 +184,8 @@ describe("CompanyOverviewPage activity feed", () => {
 
     expect(screen.getByText("planned-sale")).toBeTruthy();
     expect(screen.getByText("144")).toBeTruthy();
+    expect(screen.getByText("commercial_fallback")).toBeTruthy();
+    expect(screen.getByText(/Price history and market profile data on this overview surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("SEC EDGAR Filing Archive")).toBeTruthy();
   });
 });

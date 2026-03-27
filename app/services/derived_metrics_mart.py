@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import DerivedMetricPoint, FinancialStatement, PriceHistory
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
@@ -60,7 +61,9 @@ def recompute_and_persist_company_derived_metrics(
             )
         ).scalars()
     )
-    prices = list(session.execute(select(PriceHistory).where(PriceHistory.company_id == company_id)).scalars())
+    prices = []
+    if not settings.strict_official_mode:
+        prices = list(session.execute(select(PriceHistory).where(PriceHistory.company_id == company_id)).scalars())
     points = build_derived_metric_points(financials, prices)
 
     session.execute(delete(DerivedMetricPoint).where(DerivedMetricPoint.company_id == company_id))

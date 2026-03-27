@@ -12,6 +12,16 @@ Allowed upstream sources:
 - FRED as optional macro support
 - Yahoo Finance only for price, volume, and market profile context
 
+Strict official mode:
+- `STRICT_OFFICIAL_MODE=true` disables Yahoo-backed price and market-profile requests entirely.
+- Company market sector and industry should be derived from SEC SIC code and description mapping.
+- Price-dependent UI or model surfaces must either hide themselves or explain that no official equity-price source is configured.
+
+Default mode fallback disclosure:
+- Yahoo Finance remains allowed only as a labeled commercial fallback for price, volume, and market-profile context.
+- Any UI surface that shows price-backed or market-profile-backed data must display a visible `commercial_fallback` badge and disclosure text whenever that fallback is present.
+- Payloads that include fallback-backed price inputs must continue to expose explicit price provenance fields alongside `provenance[]` and `source_mix`.
+
 Not allowed for core fundamentals:
 - Paid or auth-gated vendor APIs
 - Unofficial scraped fundamentals feeds
@@ -87,3 +97,4 @@ This metadata is for reliability and UX transparency. It does not change the per
 - Prefer explicit source fields or source URLs where they already exist in backend models, then map them through the registry.
 - If a dataset blends official and supplemental sources, keep the official source dominant and label the supplemental input clearly in `provenance[]` and `source_mix`.
 - `commercial_fallback` and `manual_override` entries must always carry a disclosure note and should set a confidence flag when they influence the payload.
+- In strict official mode, payloads should set a `strict_official_mode` confidence flag and should not expose `yahoo_finance` in `provenance[]` or `source_mix`.

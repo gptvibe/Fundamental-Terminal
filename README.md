@@ -137,6 +137,7 @@ Reliability and diagnostics additions:
 - Hot company payloads expose a `diagnostics` block with coverage, fallback, stale, parser-confidence, and missing-field metadata.
 - Refresh jobs, model runs, and SSE events now share traceable job metadata (`job_id`, `trace_id`, `ticker`, `kind`).
 - Golden parser fixtures and hot-endpoint contract tests help catch regressions before they reach persisted routes.
+- Default-mode price and market-profile surfaces show a visible `commercial_fallback` disclosure whenever Yahoo-backed context is present, while strict official mode removes those fallbacks entirely.
 
 ## Docker Compose
 
@@ -262,6 +263,7 @@ Additional environment variables:
 - `SEC_13F_EXTRA_MANAGERS="Manager One,Manager Two"` provides optional manager names used only when `SEC_13F_UNIVERSE_MODE=expanded`
 - `SEC_MAX_RETRIES=3` and `SEC_RETRY_BACKOFF_SECONDS=0.5` for SEC request retries
 - `MARKET_MAX_RETRIES=3` and `MARKET_RETRY_BACKOFF_SECONDS=0.5` for market data retries
+- `STRICT_OFFICIAL_MODE=true` to disable Yahoo-backed price/profile fetches entirely, switch market classification to SEC SIC mapping, and hide price-dependent UI features that lack an official source
 - `TREASURY_YIELD_CURVE_CSV_URL` for no-key U.S. Treasury 10-year risk-free rate input
 - `TREASURY_HQM_CSV_URLS` (optional) comma-separated fallback URLs for Treasury HQM corporate bond yields; defaults to official Treasury paths
 - `TREASURY_MAX_RETRIES=3` and `TREASURY_RETRY_BACKOFF_SECONDS=0.5` for Treasury fetch retries
@@ -384,6 +386,8 @@ Official data sources:
 | U.S. Treasury HQM | 30-year corporate bond yield | `TREASURY_HQM_CSV_URLS` (optional, comma-separated fallback chain) |
 | BLS Public API v1 | CPI, Core CPI, PPI, Unemployment, Payrolls | none (public, rate-limited) |
 | FRED (BEA proxy) | Real GDP, Personal Income, PCE, Corporate Profits | `FRED_API_KEY` |
+
+When `STRICT_OFFICIAL_MODE=true`, company pages stay official-only: SEC SIC replaces Yahoo market-profile enrichment, commercial equity price fetches are disabled, and price-dependent product surfaces explicitly explain why they are unavailable.
 
 Company pages display a `MacroStrip` with the most relevant indicators filtered by sector exposure. The home dashboard groups indicators under the "Macro" heading.
 

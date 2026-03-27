@@ -84,6 +84,7 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "provenance: ProvenanceEntryPayload[];" in frontend_types
     assert "source_mix: SourceMixPayload;" in frontend_types
     assert "confidence_flags: string[];" in frontend_types
+    assert "strict_official_mode: boolean;" in frontend_types
     assert "provenance_details: Record<string, unknown>;" in frontend_types
     assert "diagnostics: DataQualityDiagnosticsPayload;" in frontend_types
     assert "trace_id: string;" in frontend_types

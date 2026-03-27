@@ -120,5 +120,7 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
     expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Price history and market profile data on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
   });
 });
