@@ -22,6 +22,7 @@ This update hardens backend latency and refresh coordination without changing pr
 - Added DB pool tuning knobs with safe defaults in environment-backed settings.
 - Added `dataset_refresh_state` table keyed by `(company_id, dataset)` to persist freshness and active refresh lock metadata.
 - Replaced repeated `MAX(last_checked)` scan patterns with refresh-state lookups where practical, with scan fallback for migration safety.
+- Refactored `EdgarIngestionService.refresh_company` into a policy-driven orchestrator with dataset-specific refresh jobs so partial refresh branches and failure isolation stay explicit.
 - Optimized model retrieval and peer assembly query paths to reduce N+1 database access.
 - Added stale-while-revalidate process cache for hot read endpoints:
   - `/api/companies/search`
@@ -70,6 +71,7 @@ Both were captured from local Docker runs against `AAPL` after a warm-up pass.
 ## Operational notes
 - Refresh orchestration remains cache-first and non-blocking:
   stale/missing data returns cached payload immediately and queues a background refresh.
+- Dataset jobs for statements, prices, insiders, Form 144, institutional holdings, beneficial ownership, earnings, filing events, and capital markets now sit behind a single service orchestrator while preserving the existing SSE event flow.
 - Dataset lock timeout is controlled with `REFRESH_LOCK_TIMEOUT_SECONDS`.
 - Structured logs now emit refresh, model-compute, and SSE job events with a shared traceable `job_id`/`trace_id` path.
 - Frontend console rows and SSE payloads expose `ticker` and `kind` metadata so operators can correlate UI events with backend logs.

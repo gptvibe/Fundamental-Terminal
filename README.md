@@ -27,6 +27,7 @@ Captured from the local app with `INTC` as the demo company.
 - See [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md) for the phased SEC dataset expansion plan, including backend models, API contracts, frontend visualizations, and sprint ordering.
 - See [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md) for the task-by-task execution checklist.
 - See [docs/cache-layers-architecture.md](docs/cache-layers-architecture.md) for the cache-first request-path and refresh orchestration rules.
+- See [docs/backend-architecture-boundaries.md](docs/backend-architecture-boundaries.md) for router, schema, `app.main`, and service-layer ownership rules.
 - See [docs/data-provenance.md](docs/data-provenance.md) for upstream source policy and diagnostics semantics.
 - See [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md) for performance, freshness, and benchmark notes.
 
@@ -85,6 +86,14 @@ alembic upgrade head
 ```bash
 uvicorn app.main:app --reload
 ```
+
+API composition notes:
+
+- Public routes still mount from `app.main:app`, but route registration now happens through domain routers under `app/api/routers/`.
+- Shared response/request models live under `app/api/schemas/`; importing from `app.main` remains compatible for existing tests and consumers.
+- Route URLs and response payload shapes are unchanged by this refactor.
+- Routers stay registration-only; refresh orchestration and dataset jobs live under `app/services/`, with `app.main` acting as the compatibility bridge.
+- Run `python scripts/check_architecture_boundaries.py` to verify routers and services still respect the documented import boundaries.
 
 ## Run the Next.js frontend
 

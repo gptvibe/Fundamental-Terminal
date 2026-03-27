@@ -245,6 +245,7 @@ def test_capital_markets_summary_endpoint_returns_aggregates(monkeypatch):
 
 def test_peers_route_returns_default_selected_tickers(monkeypatch):
     _install_common_overrides(monkeypatch, {})
+    main_module._hot_response_cache.clear()
     monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
@@ -325,6 +326,7 @@ def test_peers_route_returns_default_selected_tickers(monkeypatch):
 
 def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
     _install_common_overrides(monkeypatch, {})
+    main_module._hot_response_cache.clear()
     monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(

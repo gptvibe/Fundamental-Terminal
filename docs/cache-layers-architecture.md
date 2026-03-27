@@ -41,3 +41,10 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 - Reuse the existing refresh queue and SSE flow instead of inventing parallel status plumbing.
 - Keep backend and frontend contracts aligned whenever payload metadata changes.
 - Add contract tests when a hot endpoint response shape changes.
+
+## Module Boundaries
+- Routers under `app/api/routers/` stay registration-only and may depend on FastAPI, Starlette, and `app/api/schemas/` only.
+- `app.main` remains the compatibility layer that binds handlers to routers and serializes service output into frontend-facing schemas.
+- Orchestration belongs in `app/services/`, including policy-driven refresh coordination, dataset jobs, persistence, and SSE reporting helpers.
+- Service modules must not import `app/api/` modules or frontend-facing schemas.
+- Boundary violations are checked by `python scripts/check_architecture_boundaries.py` and `tests/test_architecture_boundaries.py`.

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
+import app.main as main_module
 from app.services.capital_markets import collect_capital_markets_events
 from app.services.eight_k_events import collect_filing_events
 from app.services.earnings_release import collect_earnings_releases
@@ -175,6 +177,46 @@ def test_capital_markets_and_event_classification_golden_fixture() -> None:
         for row in event_rows
     }
     assert actual_by_item == fixture["expected"]["filing_events"]
+
+
+def test_filing_parser_insight_serialization_regression() -> None:
+    statement = SimpleNamespace(
+        accession_number="0000320193-26-000010",
+        filing_type="10-Q",
+        period_start=date(2025, 10, 1),
+        period_end=date(2025, 12, 31),
+        source="https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+        last_updated=datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc),
+        last_checked=datetime(2026, 3, 22, 8, 30, tzinfo=timezone.utc),
+        data={
+            "revenue": 124_300_000_000,
+            "net_income": 36_300_000_000,
+            "operating_income": 42_100_000_000,
+            "segments": [
+                {"name": "Products", "revenue": 98_100_000_000},
+                {"name": "Services", "revenue": 26_200_000_000},
+            ],
+        },
+    )
+
+    payload = main_module._serialize_filing_parser_insight(statement)
+
+    assert payload.model_dump(mode="json") == {
+        "accession_number": None,
+        "filing_type": "10-Q",
+        "period_start": "2025-10-01",
+        "period_end": "2025-12-31",
+        "source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+        "last_updated": "2026-03-21T12:00:00Z",
+        "last_checked": "2026-03-22T08:30:00Z",
+        "revenue": 124300000000,
+        "net_income": 36300000000,
+        "operating_income": 42100000000,
+        "segments": [
+            {"name": "Products", "revenue": 98100000000},
+            {"name": "Services", "revenue": 26200000000},
+        ],
+    }
 
 
 def _load_golden(name: str) -> dict:

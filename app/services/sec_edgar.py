@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -651,6 +652,124 @@ class IngestionResult:
     fetched_from_sec: bool = False
     last_checked: datetime | None = None
     detail: str | None = None
+
+
+@dataclass(slots=True)
+class DatasetRefreshOutcome:
+    written: int = 0
+    error: str | None = None
+
+
+@dataclass(slots=True)
+class RefreshPolicy:
+    company: Company | None
+    force: bool
+    refresh_insider_data: bool
+    refresh_institutional_data: bool
+    refresh_beneficial_ownership_data: bool
+    statements_fresh: bool
+    prices_fresh: bool
+    insider_fresh: bool
+    form144_fresh: bool
+    earnings_fresh: bool
+    institutional_fresh: bool
+    beneficial_fresh: bool
+    has_segment_breakdown_key: bool
+    relevant_last_checked_values: list[datetime | None]
+
+    @property
+    def effective_insider_fresh(self) -> bool:
+        return (self.insider_fresh and self.form144_fresh) or not self.refresh_insider_data
+
+    @property
+    def effective_institutional_fresh(self) -> bool:
+        return self.institutional_fresh or not self.refresh_institutional_data
+
+    @property
+    def effective_beneficial_fresh(self) -> bool:
+        return self.beneficial_fresh or not self.refresh_beneficial_ownership_data
+
+    def can_skip_sec_refresh(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+        )
+
+    def needs_segment_backfill(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and self.prices_fresh
+            and not self.has_segment_breakdown_key
+        )
+
+    def can_refresh_beneficial_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.refresh_beneficial_ownership_data
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+            and not self.beneficial_fresh
+        )
+
+    def can_refresh_earnings_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and not self.earnings_fresh
+        )
+
+    def can_refresh_insiders_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.refresh_insider_data
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_institutional_fresh
+            and not self.effective_insider_fresh
+        )
+
+    def can_refresh_institutional_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.refresh_institutional_data
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and not self.institutional_fresh
+        )
+
+    def can_refresh_prices_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and not self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+        )
 
 
 @dataclass(slots=True)
@@ -1479,6 +1598,813 @@ class EdgarIngestionService:
         _touch_company_earnings_releases(session, company.id, checked_at)
         return releases_written
 
+    def refresh_statements(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        companyfacts: dict[str, Any],
+        parsed_filing_insights: list[ParsedFilingInsight],
+        checked_at: datetime,
+        reporter: JobReporter,
+    ) -> int:
+        reporter.step("normalize", "Normalizing XBRL...")
+        normalized_statements = self.normalizer.normalize(
+            cik=company.cik,
+            companyfacts=companyfacts,
+            filing_index=filing_index,
+        )
+        self._populate_segment_breakdowns(normalized_statements, reporter)
+
+        reporter.step("database", "Saving to database...")
+        statements_written = _upsert_statements(
+            session=session,
+            company=company,
+            normalized_statements=normalized_statements,
+            checked_at=checked_at,
+        )
+        parsed_statements_written = _upsert_filing_parser_statements(
+            session=session,
+            company=company,
+            parsed_insights=parsed_filing_insights,
+            checked_at=checked_at,
+        )
+        _touch_company_statements(session, company.id, checked_at)
+        precompute_core_models(session, company.id, reporter=reporter)
+        return statements_written + parsed_statements_written
+
+    def refresh_prices(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        checked_at: datetime,
+        reporter: JobReporter,
+        refresh_profile: bool = False,
+        strict_message: str = "Strict official mode enabled; Yahoo price refresh skipped.",
+    ) -> int:
+        if settings.strict_official_mode:
+            if refresh_profile:
+                strict_profile = resolve_sec_sic_profile(None, company.sector)
+                if strict_profile.market_sector:
+                    company.market_sector = strict_profile.market_sector
+                if strict_profile.market_industry:
+                    company.market_industry = strict_profile.market_industry
+            reporter.step("market", strict_message)
+            return 0
+
+        if refresh_profile:
+            market_profile = self.market_data.get_market_profile(company.ticker)
+            if market_profile.sector:
+                company.market_sector = market_profile.sector
+            if market_profile.industry:
+                company.market_industry = market_profile.industry
+
+        reporter.step("market", "Fetching price history...")
+        price_bars = self.market_data.get_price_history(company.ticker)
+        reporter.step("database", "Saving price history to database...")
+        price_points_written = upsert_price_history(
+            session=session,
+            company=company,
+            price_bars=price_bars,
+            checked_at=checked_at,
+        )
+        if price_points_written > 0:
+            touch_company_price_history(session, company.id, checked_at)
+        return price_points_written
+
+    def refresh_insiders(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        force: bool = False,
+    ) -> int:
+        return self._refresh_insider_trades(
+            session=session,
+            company=company,
+            filing_index=filing_index,
+            checked_at=checked_at,
+            reporter=reporter,
+            force=force,
+        )
+
+    def refresh_form144(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        force: bool = False,
+    ) -> int:
+        return self._refresh_form144_filings(
+            session=session,
+            company=company,
+            filing_index=filing_index,
+            checked_at=checked_at,
+            reporter=reporter,
+            force=force,
+        )
+
+    def refresh_institutional(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        checked_at: datetime,
+        reporter: JobReporter,
+        force: bool = False,
+    ) -> int:
+        return refresh_company_institutional_holdings(
+            session=session,
+            company=company,
+            checked_at=checked_at,
+            reporter=reporter,
+            force=force,
+        )
+
+    def refresh_beneficial_ownership(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        announce: bool = True,
+    ) -> int:
+        if announce:
+            reporter.step("beneficial", "Caching beneficial ownership filings...")
+        from app.services.beneficial_ownership import (  # local import avoids circular dependency
+            collect_beneficial_ownership_reports,
+            upsert_beneficial_ownership_reports,
+        )
+
+        reports = collect_beneficial_ownership_reports(company.cik, filing_index, client=self.client)
+        return upsert_beneficial_ownership_reports(session, company, reports, checked_at=checked_at)
+
+    def refresh_earnings(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        force: bool = False,
+    ) -> int:
+        return self._refresh_earnings_releases(
+            session=session,
+            company=company,
+            filing_index=filing_index,
+            checked_at=checked_at,
+            reporter=reporter,
+            force=force,
+        )
+
+    def refresh_events(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+    ) -> int:
+        reporter.step("events", "Caching 8-K filing events...")
+        from app.services.eight_k_events import collect_filing_events, upsert_filing_events
+
+        filing_events = collect_filing_events(company.cik, filing_index)
+        return upsert_filing_events(
+            session=session,
+            company=company,
+            events=filing_events,
+            checked_at=checked_at,
+        )
+
+    def refresh_capital_markets(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+    ) -> int:
+        reporter.step("capital", "Caching capital markets filings...")
+        from app.services.capital_markets import collect_capital_markets_events, upsert_capital_markets_events
+
+        capital_markets_events = collect_capital_markets_events(company.cik, filing_index)
+        return upsert_capital_markets_events(
+            session=session,
+            company=company,
+            events=capital_markets_events,
+            checked_at=checked_at,
+        )
+
+    def _build_refresh_policy(
+        self,
+        session: Session,
+        local_company: Company | None,
+        checked_at: datetime,
+        force: bool,
+        *,
+        refresh_insider_data: bool,
+        refresh_institutional_data: bool,
+        refresh_beneficial_ownership_data: bool,
+    ) -> RefreshPolicy:
+        latest_statement_checked = _latest_company_last_checked(session, local_company.id) if local_company else None
+        latest_price_checked = get_company_price_last_checked(session, local_company.id) if local_company else None
+        latest_insider_checked = _latest_insider_trade_last_checked(session, local_company) if local_company else None
+        latest_form144_checked = _latest_form144_last_checked(session, local_company) if local_company else None
+        latest_earnings_checked = _latest_earnings_last_checked(session, local_company) if local_company else None
+        latest_institutional_checked = (
+            get_company_institutional_holdings_last_checked(session, local_company) if local_company else None
+        )
+        latest_beneficial_checked = (
+            _latest_beneficial_ownership_last_checked(session, local_company) if local_company else None
+        )
+        has_segment_breakdown_key = (
+            _latest_statement_has_segment_breakdown_key(session, local_company.id) if local_company else False
+        )
+
+        freshness_cutoff = checked_at - timedelta(hours=settings.freshness_window_hours)
+        statements_fresh = latest_statement_checked is not None and latest_statement_checked >= freshness_cutoff
+        prices_fresh = latest_price_checked is not None and latest_price_checked >= freshness_cutoff
+        if settings.strict_official_mode:
+            latest_price_checked = None
+            prices_fresh = True
+        insider_fresh = latest_insider_checked is not None and latest_insider_checked >= freshness_cutoff
+        form144_fresh = latest_form144_checked is not None and latest_form144_checked >= freshness_cutoff
+        earnings_fresh = latest_earnings_checked is not None and latest_earnings_checked >= freshness_cutoff
+        institutional_fresh = latest_institutional_checked is not None and latest_institutional_checked >= freshness_cutoff
+        beneficial_fresh = latest_beneficial_checked is not None and latest_beneficial_checked >= freshness_cutoff
+
+        relevant_last_checked_values = [latest_statement_checked, latest_price_checked]
+        if refresh_insider_data:
+            relevant_last_checked_values.append(latest_insider_checked)
+            relevant_last_checked_values.append(latest_form144_checked)
+        relevant_last_checked_values.append(latest_earnings_checked)
+        if refresh_institutional_data:
+            relevant_last_checked_values.append(latest_institutional_checked)
+        if refresh_beneficial_ownership_data:
+            relevant_last_checked_values.append(latest_beneficial_checked)
+
+        return RefreshPolicy(
+            company=local_company,
+            force=force,
+            refresh_insider_data=refresh_insider_data,
+            refresh_institutional_data=refresh_institutional_data,
+            refresh_beneficial_ownership_data=refresh_beneficial_ownership_data,
+            statements_fresh=statements_fresh,
+            prices_fresh=prices_fresh,
+            insider_fresh=insider_fresh,
+            form144_fresh=form144_fresh,
+            earnings_fresh=earnings_fresh,
+            institutional_fresh=institutional_fresh,
+            beneficial_fresh=beneficial_fresh,
+            has_segment_breakdown_key=has_segment_breakdown_key,
+            relevant_last_checked_values=relevant_last_checked_values,
+        )
+
+    def _run_dataset_job(
+        self,
+        session: Session,
+        company: Company,
+        reporter: JobReporter,
+        *,
+        stage: str,
+        label: str,
+        job: Callable[[], int],
+    ) -> DatasetRefreshOutcome:
+        try:
+            written = job()
+            session.commit()
+            return DatasetRefreshOutcome(written=written)
+        except Exception as exc:
+            session.rollback()
+            logger.exception("%s refresh failed for %s", label, company.ticker)
+            message = f"{label} refresh failed: {exc}"
+            reporter.step(stage, message)
+            return DatasetRefreshOutcome(error=message)
+
+    def _refresh_cached_company(
+        self,
+        session: Session,
+        identifier: str,
+        checked_at: datetime,
+        reporter: JobReporter,
+        policy: RefreshPolicy,
+    ) -> IngestionResult | None:
+        local_company = policy.company
+        if local_company is None:
+            return None
+
+        if policy.can_skip_sec_refresh():
+            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
+            reporter.complete("Using fresh cached data.")
+            session.commit()
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="skipped",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=0,
+                earnings_releases_written=0,
+                price_points_written=0,
+                fetched_from_sec=False,
+                last_checked=min(
+                    value
+                    for value in policy.relevant_last_checked_values
+                    if value is not None
+                ),
+                detail="Freshness window still valid",
+            )
+
+        if policy.needs_segment_backfill():
+            reporter.step("cache", "Cached filings need segment metadata backfill...")
+
+        if policy.can_refresh_beneficial_only():
+            session.commit()
+            reporter.step("sec", "Checking SEC for new beneficial ownership filings...")
+            submissions = self.client.get_submissions(local_company.cik)
+            filing_index = self.client.build_filing_index(submissions)
+            beneficial_ownership_written = self.refresh_beneficial_ownership(
+                session=session,
+                company=local_company,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+                announce=False,
+            )
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=beneficial_ownership_written,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    f"Cached {beneficial_ownership_written} beneficial ownership filings"
+                    if beneficial_ownership_written
+                    else "Checked beneficial ownership filings; no new entries"
+                ),
+            )
+
+        if policy.can_refresh_earnings_only():
+            session.commit()
+            reporter.step("sec", "Checking SEC for new earnings releases...")
+            submissions = self.client.get_submissions(local_company.cik)
+            filing_index = self.client.build_filing_index(submissions)
+            earnings_releases_written = self.refresh_earnings(
+                session=session,
+                company=local_company,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+                force=policy.force,
+            )
+            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                form144_filings_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=0,
+                earnings_releases_written=earnings_releases_written,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    f"Cached {earnings_releases_written} earnings release filings"
+                    if earnings_releases_written
+                    else "Checked earnings releases"
+                ),
+            )
+
+        if policy.can_refresh_insiders_only():
+            session.commit()
+            reporter.step("sec", "Checking SEC for new Form 4/5 and Form 144 filings...")
+            submissions = self.client.get_submissions(local_company.cik)
+            filing_index = self.client.build_filing_index(submissions)
+            insider_trades_written = self.refresh_insiders(
+                session=session,
+                company=local_company,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+                force=policy.force,
+            )
+            form144_filings_written = self.refresh_form144(
+                session=session,
+                company=local_company,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+                force=policy.force,
+            )
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=insider_trades_written,
+                form144_filings_written=form144_filings_written,
+                institutional_holdings_written=0,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    (
+                        f"Cached {insider_trades_written} insider trades and {form144_filings_written} Form 144 filings"
+                        if insider_trades_written or form144_filings_written
+                        else "Checked Form 4/5 and Form 144 filings; no new insider activity records"
+                    )
+                ),
+            )
+
+        if policy.can_refresh_institutional_only():
+            session.commit()
+            institutional_holdings_written = self.refresh_institutional(
+                session=session,
+                company=local_company,
+                checked_at=checked_at,
+                reporter=reporter,
+                force=policy.force,
+            )
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=institutional_holdings_written,
+                beneficial_ownership_written=0,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    f"Cached {institutional_holdings_written} institutional holdings snapshots"
+                    if institutional_holdings_written
+                    else "Checked 13F filings; no institutional holdings matched"
+                ),
+            )
+
+        if policy.can_refresh_prices_only():
+            session.commit()
+            price_points_written = 0
+            try:
+                price_points_written = self.refresh_prices(
+                    session=session,
+                    company=local_company,
+                    checked_at=checked_at,
+                    reporter=reporter,
+                    refresh_profile=True,
+                    strict_message="Strict official mode enabled; Yahoo market data disabled.",
+                )
+            except Exception as exc:
+                logger.exception("Market data refresh failed for %s", local_company.ticker)
+                reporter.step("market", f"Market data refresh failed: {exc}")
+                session.rollback()
+            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=0,
+                price_points_written=price_points_written,
+                fetched_from_sec=False,
+                last_checked=checked_at,
+                detail=f"Cached {price_points_written} daily price bars",
+            )
+
+        return None
+
+    def _refresh_from_sec(
+        self,
+        identifier: str,
+        checked_at: datetime,
+        reporter: JobReporter,
+        policy: RefreshPolicy,
+    ) -> IngestionResult:
+        reporter.step("sec", "Checking SEC for new filings...")
+        company_identity = self.client.resolve_company(identifier)
+        submissions = self.client.get_submissions(company_identity.cik)
+        reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
+        filing_index = self.client.build_filing_index(submissions)
+        companyfacts = self.client.get_companyfacts(company_identity.cik)
+        reporter.step("filing", "Parsing filing reports...")
+        parsed_filing_insights = self.filing_parser.parse_financial_insights(
+            cik=company_identity.cik,
+            filing_index=filing_index,
+        )
+        sec_market_profile = resolve_sec_sic_profile(submissions.get("sic"), submissions.get("sicDescription") or company_identity.sector)
+        try:
+            if settings.strict_official_mode:
+                market_profile = MarketProfile(
+                    sector=sec_market_profile.market_sector,
+                    industry=sec_market_profile.market_industry,
+                )
+                reporter.step("market", "Using SEC SIC classification for market sector and industry.")
+            else:
+                market_profile = self.market_data.get_market_profile(company_identity.ticker)
+        except Exception as exc:
+            logger.exception("Market profile lookup failed for %s", company_identity.ticker)
+            reporter.step("market", f"Market profile lookup failed: {exc}")
+            market_profile = MarketProfile(
+                sector=sec_market_profile.market_sector,
+                industry=sec_market_profile.market_industry,
+            )
+
+        enriched_identity = CompanyIdentity(
+            cik=company_identity.cik,
+            ticker=((submissions.get("tickers") or [company_identity.ticker])[0]),
+            name=str(submissions.get("name") or company_identity.name),
+            exchange=((submissions.get("exchanges") or [company_identity.exchange])[0]),
+            sector=submissions.get("sicDescription") or company_identity.sector,
+            market_sector=market_profile.sector,
+            market_industry=market_profile.industry,
+            sic=str(submissions.get("sic") or company_identity.sic or "").strip() or None,
+        )
+
+        get_engine()
+        with SessionLocal() as session:
+            company = _upsert_company(session, enriched_identity)
+            statements_written = self.refresh_statements(
+                session=session,
+                company=company,
+                filing_index=filing_index,
+                companyfacts=companyfacts,
+                parsed_filing_insights=parsed_filing_insights,
+                checked_at=checked_at,
+                reporter=reporter,
+            )
+            session.commit()
+
+            insider_outcome = DatasetRefreshOutcome()
+            form144_outcome = DatasetRefreshOutcome()
+            if policy.refresh_insider_data and (policy.force or not policy.effective_insider_fresh):
+                insider_outcome = self._run_dataset_job(
+                    session,
+                    company,
+                    reporter,
+                    stage="insider",
+                    label="Insider",
+                    job=lambda: self.refresh_insiders(
+                        session=session,
+                        company=company,
+                        filing_index=filing_index,
+                        checked_at=checked_at,
+                        reporter=reporter,
+                        force=policy.force,
+                    ),
+                )
+                form144_outcome = self._run_dataset_job(
+                    session,
+                    company,
+                    reporter,
+                    stage="form144",
+                    label="Form 144",
+                    job=lambda: self.refresh_form144(
+                        session=session,
+                        company=company,
+                        filing_index=filing_index,
+                        checked_at=checked_at,
+                        reporter=reporter,
+                        force=policy.force,
+                    ),
+                )
+
+            institutional_outcome = DatasetRefreshOutcome()
+            if policy.refresh_institutional_data and (policy.force or not policy.institutional_fresh):
+                institutional_outcome = self._run_dataset_job(
+                    session,
+                    company,
+                    reporter,
+                    stage="13f",
+                    label="Institutional holdings",
+                    job=lambda: self.refresh_institutional(
+                        session=session,
+                        company=company,
+                        checked_at=checked_at,
+                        reporter=reporter,
+                        force=policy.force,
+                    ),
+                )
+
+            beneficial_outcome = DatasetRefreshOutcome()
+            if policy.refresh_beneficial_ownership_data and (policy.force or not policy.beneficial_fresh):
+                beneficial_outcome = self._run_dataset_job(
+                    session,
+                    company,
+                    reporter,
+                    stage="beneficial",
+                    label="Beneficial ownership",
+                    job=lambda: self.refresh_beneficial_ownership(
+                        session=session,
+                        company=company,
+                        filing_index=filing_index,
+                        checked_at=checked_at,
+                        reporter=reporter,
+                    ),
+                )
+
+            earnings_outcome = DatasetRefreshOutcome()
+            if policy.force or not policy.earnings_fresh:
+                earnings_outcome = self._run_dataset_job(
+                    session,
+                    company,
+                    reporter,
+                    stage="earnings",
+                    label="Earnings",
+                    job=lambda: self.refresh_earnings(
+                        session=session,
+                        company=company,
+                        filing_index=filing_index,
+                        checked_at=checked_at,
+                        reporter=reporter,
+                        force=policy.force,
+                    ),
+                )
+
+            filing_events_outcome = self._run_dataset_job(
+                session,
+                company,
+                reporter,
+                stage="events",
+                label="Filing events",
+                job=lambda: self.refresh_events(
+                    session=session,
+                    company=company,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=reporter,
+                ),
+            )
+
+            capital_markets_outcome = self._run_dataset_job(
+                session,
+                company,
+                reporter,
+                stage="capital",
+                label="Capital markets",
+                job=lambda: self.refresh_capital_markets(
+                    session=session,
+                    company=company,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=reporter,
+                ),
+            )
+
+            price_outcome = DatasetRefreshOutcome()
+            if policy.force or not policy.prices_fresh:
+                price_outcome = self._run_dataset_job(
+                    session,
+                    company,
+                    reporter,
+                    stage="market",
+                    label="Market data",
+                    job=lambda: self.refresh_prices(
+                        session=session,
+                        company=company,
+                        checked_at=checked_at,
+                        reporter=reporter,
+                    ),
+                )
+
+            _refresh_derived_metrics_cache(session, company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, company.id, checked_at, reporter)
+
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+
+            detail_parts: list[str] = [f"Normalized {statements_written} filings"]
+            if policy.refresh_insider_data and (policy.force or not policy.effective_insider_fresh):
+                detail_parts.append(
+                    insider_outcome.error
+                    or (
+                        f"Cached {insider_outcome.written} insider trades"
+                        if insider_outcome.written
+                        else "Checked Form 4/5 filings"
+                    )
+                )
+                detail_parts.append(
+                    form144_outcome.error
+                    or (
+                        f"Cached {form144_outcome.written} Form 144 planned sale filing rows"
+                        if form144_outcome.written
+                        else "Checked Form 144 filings"
+                    )
+                )
+            if policy.refresh_institutional_data and (policy.force or not policy.institutional_fresh):
+                detail_parts.append(
+                    institutional_outcome.error
+                    or (
+                        f"Cached {institutional_outcome.written} institutional holdings snapshots"
+                        if institutional_outcome.written
+                        else "Checked 13F filings"
+                    )
+                )
+            if policy.refresh_beneficial_ownership_data and (policy.force or not policy.beneficial_fresh):
+                detail_parts.append(
+                    beneficial_outcome.error
+                    or (
+                        f"Cached {beneficial_outcome.written} beneficial ownership filings"
+                        if beneficial_outcome.written
+                        else "Checked beneficial ownership filings"
+                    )
+                )
+            if policy.force or not policy.earnings_fresh:
+                detail_parts.append(
+                    earnings_outcome.error
+                    or (
+                        f"Cached {earnings_outcome.written} earnings release rows"
+                        if earnings_outcome.written
+                        else "Checked earnings releases"
+                    )
+                )
+            detail_parts.append(
+                filing_events_outcome.error
+                or (
+                    f"Cached {filing_events_outcome.written} filing event rows"
+                    if filing_events_outcome.written
+                    else "Checked 8-K filing events"
+                )
+            )
+            detail_parts.append(
+                capital_markets_outcome.error
+                or (
+                    f"Cached {capital_markets_outcome.written} capital markets rows"
+                    if capital_markets_outcome.written
+                    else "Checked capital markets filings"
+                )
+            )
+            if policy.force or not policy.prices_fresh:
+                detail_parts.append(
+                    price_outcome.error or f"Cached {price_outcome.written} daily price bars"
+                )
+
+            return IngestionResult(
+                identifier=identifier,
+                company_id=company.id,
+                cik=company.cik,
+                ticker=company.ticker,
+                status="fetched",
+                statements_written=statements_written,
+                insider_trades_written=insider_outcome.written,
+                form144_filings_written=form144_outcome.written,
+                institutional_holdings_written=institutional_outcome.written,
+                beneficial_ownership_written=beneficial_outcome.written,
+                earnings_releases_written=earnings_outcome.written,
+                price_points_written=price_outcome.written,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail="; ".join(detail_parts),
+            )
+
     def refresh_company(
         self,
         identifier: str,
@@ -1509,573 +2435,31 @@ class EdgarIngestionService:
         with SessionLocal() as session:
             active_reporter.step("cache", "Checking database cache...")
             local_company = _find_local_company(session, identifier)
-            latest_statement_checked = _latest_company_last_checked(session, local_company.id) if local_company else None
-            latest_price_checked = get_company_price_last_checked(session, local_company.id) if local_company else None
-            latest_insider_checked = _latest_insider_trade_last_checked(session, local_company) if local_company else None
-            latest_form144_checked = _latest_form144_last_checked(session, local_company) if local_company else None
-            latest_earnings_checked = _latest_earnings_last_checked(session, local_company) if local_company else None
-            latest_institutional_checked = (
-                get_company_institutional_holdings_last_checked(session, local_company) if local_company else None
+            policy = self._build_refresh_policy(
+                session,
+                local_company,
+                checked_at,
+                force,
+                refresh_insider_data=refresh_insider_data,
+                refresh_institutional_data=refresh_institutional_data,
+                refresh_beneficial_ownership_data=refresh_beneficial_ownership_data,
             )
-            latest_beneficial_checked = (
-                _latest_beneficial_ownership_last_checked(session, local_company) if local_company else None
-            )
-            has_segment_breakdown_key = (
-                _latest_statement_has_segment_breakdown_key(session, local_company.id) if local_company else False
-            )
-            freshness_cutoff = checked_at - timedelta(hours=settings.freshness_window_hours)
-            statements_fresh = latest_statement_checked is not None and latest_statement_checked >= freshness_cutoff
-            prices_fresh = latest_price_checked is not None and latest_price_checked >= freshness_cutoff
-            if settings.strict_official_mode:
-                latest_price_checked = None
-                prices_fresh = True
-            insider_fresh = latest_insider_checked is not None and latest_insider_checked >= freshness_cutoff
-            form144_fresh = latest_form144_checked is not None and latest_form144_checked >= freshness_cutoff
-            earnings_fresh = latest_earnings_checked is not None and latest_earnings_checked >= freshness_cutoff
-            institutional_fresh = (
-                latest_institutional_checked is not None and latest_institutional_checked >= freshness_cutoff
-            )
-            beneficial_fresh = (
-                latest_beneficial_checked is not None and latest_beneficial_checked >= freshness_cutoff
-            )
-            effective_insider_fresh = (insider_fresh and form144_fresh) or not refresh_insider_data
-            effective_institutional_fresh = institutional_fresh or not refresh_institutional_data
-            effective_beneficial_fresh = beneficial_fresh or not refresh_beneficial_ownership_data
-
-            relevant_last_checked_values = [latest_statement_checked, latest_price_checked]
-            if refresh_insider_data:
-                relevant_last_checked_values.append(latest_insider_checked)
-                relevant_last_checked_values.append(latest_form144_checked)
-            relevant_last_checked_values.append(latest_earnings_checked)
-            if refresh_institutional_data:
-                relevant_last_checked_values.append(latest_institutional_checked)
-            if refresh_beneficial_ownership_data:
-                relevant_last_checked_values.append(latest_beneficial_checked)
-
-            if (
-                local_company is not None
-                and not force
-                and statements_fresh
-                and prices_fresh
-                and has_segment_breakdown_key
-                and effective_insider_fresh
-                and effective_institutional_fresh
-                and effective_beneficial_fresh
-                and earnings_fresh
-            ):
-                _refresh_derived_metrics_cache(session, local_company.id, checked_at, active_reporter)
-                _refresh_earnings_model_cache(session, local_company.id, checked_at, active_reporter)
-                active_reporter.complete("Using fresh cached data.")
-                session.commit()
-                return IngestionResult(
-                    identifier=identifier,
-                    company_id=local_company.id,
-                    cik=local_company.cik,
-                    ticker=local_company.ticker,
-                    status="skipped",
-                    statements_written=0,
-                    insider_trades_written=0,
-                    institutional_holdings_written=0,
-                    beneficial_ownership_written=0,
-                    earnings_releases_written=0,
-                    price_points_written=0,
-                    fetched_from_sec=False,
-                    last_checked=min(
-                        value
-                        for value in relevant_last_checked_values
-                        if value is not None
-                    ),
-                    detail="Freshness window still valid",
-                )
-
-            if local_company is not None and not force and statements_fresh and prices_fresh and not has_segment_breakdown_key:
-                active_reporter.step("cache", "Cached filings need segment metadata backfill...")
-
-            if (
-                local_company is not None
-                and not force
-                and refresh_beneficial_ownership_data
-                and statements_fresh
-                and prices_fresh
-                and effective_insider_fresh
-                and effective_institutional_fresh
-                and not beneficial_fresh
-            ):
-                session.commit()
-                active_reporter.step("sec", "Checking SEC for new beneficial ownership filings...")
-                submissions = self.client.get_submissions(local_company.cik)
-                filing_index = self.client.build_filing_index(submissions)
-                from app.services.beneficial_ownership import (  # local import avoids circular dependency
-                    collect_beneficial_ownership_reports,
-                    upsert_beneficial_ownership_reports,
-                )
-                reports = collect_beneficial_ownership_reports(local_company.cik, filing_index, client=self.client)
-                beneficial_ownership_written = upsert_beneficial_ownership_reports(
-                    session, local_company, reports, checked_at=checked_at
-                )
-                session.commit()
-                active_reporter.complete("Refresh and compute complete.")
-                return IngestionResult(
-                    identifier=identifier,
-                    company_id=local_company.id,
-                    cik=local_company.cik,
-                    ticker=local_company.ticker,
-                    status="fetched",
-                    statements_written=0,
-                    insider_trades_written=0,
-                    institutional_holdings_written=0,
-                    beneficial_ownership_written=beneficial_ownership_written,
-                    price_points_written=0,
-                    fetched_from_sec=True,
-                    last_checked=checked_at,
-                    detail=(
-                        f"Cached {beneficial_ownership_written} beneficial ownership filings"
-                        if beneficial_ownership_written
-                    else "Checked beneficial ownership filings; no new entries"
-                    ),
-                )
-
-            if (
-                local_company is not None
-                and not force
-                and statements_fresh
-                and prices_fresh
-                and has_segment_breakdown_key
-                and effective_insider_fresh
-                and effective_institutional_fresh
-                and effective_beneficial_fresh
-                and not earnings_fresh
-            ):
-                session.commit()
-                active_reporter.step("sec", "Checking SEC for new earnings releases...")
-                submissions = self.client.get_submissions(local_company.cik)
-                filing_index = self.client.build_filing_index(submissions)
-                earnings_releases_written = self._refresh_earnings_releases(
-                    session=session,
-                    company=local_company,
-                    filing_index=filing_index,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                _refresh_earnings_model_cache(session, local_company.id, checked_at, active_reporter)
-                session.commit()
-                active_reporter.complete("Refresh and compute complete.")
-                return IngestionResult(
-                    identifier=identifier,
-                    company_id=local_company.id,
-                    cik=local_company.cik,
-                    ticker=local_company.ticker,
-                    status="fetched",
-                    statements_written=0,
-                    insider_trades_written=0,
-                    form144_filings_written=0,
-                    institutional_holdings_written=0,
-                    beneficial_ownership_written=0,
-                    earnings_releases_written=earnings_releases_written,
-                    price_points_written=0,
-                    fetched_from_sec=True,
-                    last_checked=checked_at,
-                    detail=(
-                        f"Cached {earnings_releases_written} earnings release filings"
-                        if earnings_releases_written
-                        else "Checked earnings releases"
-                    ),
-                )
-
-            if (
-                local_company is not None
-                and not force
-                and refresh_insider_data
-                and statements_fresh
-                and prices_fresh
-                and has_segment_breakdown_key
-                and effective_institutional_fresh
-                and not effective_insider_fresh
-            ):
-                session.commit()
-                active_reporter.step("sec", "Checking SEC for new Form 4/5 and Form 144 filings...")
-                submissions = self.client.get_submissions(local_company.cik)
-                filing_index = self.client.build_filing_index(submissions)
-                insider_trades_written = self._refresh_insider_trades(
-                    session=session,
-                    company=local_company,
-                    filing_index=filing_index,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                form144_filings_written = self._refresh_form144_filings(
-                    session=session,
-                    company=local_company,
-                    filing_index=filing_index,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                session.commit()
-                active_reporter.complete("Refresh and compute complete.")
-                return IngestionResult(
-                    identifier=identifier,
-                    company_id=local_company.id,
-                    cik=local_company.cik,
-                    ticker=local_company.ticker,
-                    status="fetched",
-                    statements_written=0,
-                    insider_trades_written=insider_trades_written,
-                    form144_filings_written=form144_filings_written,
-                    institutional_holdings_written=0,
-                    price_points_written=0,
-                    fetched_from_sec=True,
-                    last_checked=checked_at,
-                    detail=(
-                        (
-                            f"Cached {insider_trades_written} insider trades and {form144_filings_written} Form 144 filings"
-                            if insider_trades_written or form144_filings_written
-                            else "Checked Form 4/5 and Form 144 filings; no new insider activity records"
-                        )
-                    ),
-                )
-
-            if (
-                local_company is not None
-                and not force
-                and refresh_institutional_data
-                and statements_fresh
-                and prices_fresh
-                and has_segment_breakdown_key
-                and effective_insider_fresh
-                and not institutional_fresh
-            ):
-                session.commit()
-                institutional_holdings_written = refresh_company_institutional_holdings(
-                    session=session,
-                    company=local_company,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                session.commit()
-                active_reporter.complete("Refresh and compute complete.")
-                return IngestionResult(
-                    identifier=identifier,
-                    company_id=local_company.id,
-                    cik=local_company.cik,
-                    ticker=local_company.ticker,
-                    status="fetched",
-                    statements_written=0,
-                    insider_trades_written=0,
-                    institutional_holdings_written=institutional_holdings_written,
-                    beneficial_ownership_written=0,
-                    price_points_written=0,
-                    fetched_from_sec=True,
-                    last_checked=checked_at,
-                    detail=(
-                        f"Cached {institutional_holdings_written} institutional holdings snapshots"
-                        if institutional_holdings_written
-                        else "Checked 13F filings; no institutional holdings matched"
-                    ),
-                )
-
-            if (
-                local_company is not None
-                and not force
-                and statements_fresh
-                and not prices_fresh
-                and has_segment_breakdown_key
-                and effective_insider_fresh
-                and effective_institutional_fresh
-            ):
-                session.commit()
-                try:
-                    if settings.strict_official_mode:
-                        strict_profile = resolve_sec_sic_profile(None, local_company.sector)
-                        if strict_profile.market_sector:
-                            local_company.market_sector = strict_profile.market_sector
-                        if strict_profile.market_industry:
-                            local_company.market_industry = strict_profile.market_industry
-                        active_reporter.step("market", "Strict official mode enabled; Yahoo market data disabled.")
-                        price_points_written = 0
-                    else:
-                        market_profile = self.market_data.get_market_profile(local_company.ticker)
-                        if market_profile.sector:
-                            local_company.market_sector = market_profile.sector
-                        if market_profile.industry:
-                            local_company.market_industry = market_profile.industry
-                        active_reporter.step("market", "Fetching price history...")
-                        price_bars = self.market_data.get_price_history(local_company.ticker)
-                        active_reporter.step("database", "Saving price history to database...")
-                        price_points_written = upsert_price_history(
-                            session=session,
-                            company=local_company,
-                            price_bars=price_bars,
-                            checked_at=checked_at,
-                        )
-                        if price_points_written > 0:
-                            touch_company_price_history(session, local_company.id, checked_at)
-                except Exception as exc:
-                    logger.exception("Market data refresh failed for %s", local_company.ticker)
-                    active_reporter.step("market", f"Market data refresh failed: {exc}")
-                    price_points_written = 0
-                _refresh_derived_metrics_cache(session, local_company.id, checked_at, active_reporter)
-                _refresh_earnings_model_cache(session, local_company.id, checked_at, active_reporter)
-                session.commit()
-                active_reporter.complete("Refresh and compute complete.")
-                return IngestionResult(
-                    identifier=identifier,
-                    company_id=local_company.id,
-                    cik=local_company.cik,
-                    ticker=local_company.ticker,
-                    status="fetched",
-                    statements_written=0,
-                    insider_trades_written=0,
-                    institutional_holdings_written=0,
-                    beneficial_ownership_written=0,
-                    price_points_written=price_points_written,
-                    fetched_from_sec=False,
-                    last_checked=checked_at,
-                    detail=f"Cached {price_points_written} daily price bars",
-                )
-
-        active_reporter.step("sec", "Checking SEC for new filings...")
-        company_identity = self.client.resolve_company(identifier)
-        submissions = self.client.get_submissions(company_identity.cik)
-        active_reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
-        filing_index = self.client.build_filing_index(submissions)
-        companyfacts = self.client.get_companyfacts(company_identity.cik)
-        active_reporter.step("filing", "Parsing filing reports...")
-        parsed_filing_insights = self.filing_parser.parse_financial_insights(
-            cik=company_identity.cik,
-            filing_index=filing_index,
-        )
-        sec_market_profile = resolve_sec_sic_profile(submissions.get("sic"), submissions.get("sicDescription") or company_identity.sector)
-        try:
-            if settings.strict_official_mode:
-                market_profile = MarketProfile(
-                    sector=sec_market_profile.market_sector,
-                    industry=sec_market_profile.market_industry,
-                )
-                active_reporter.step("market", "Using SEC SIC classification for market sector and industry.")
-            else:
-                market_profile = self.market_data.get_market_profile(company_identity.ticker)
-        except Exception as exc:
-            logger.exception("Market profile lookup failed for %s", company_identity.ticker)
-            active_reporter.step("market", f"Market profile lookup failed: {exc}")
-            market_profile = MarketProfile(
-                sector=sec_market_profile.market_sector,
-                industry=sec_market_profile.market_industry,
-            )
-
-        enriched_identity = CompanyIdentity(
-            cik=company_identity.cik,
-            ticker=((submissions.get("tickers") or [company_identity.ticker])[0]),
-            name=str(submissions.get("name") or company_identity.name),
-            exchange=((submissions.get("exchanges") or [company_identity.exchange])[0]),
-            sector=submissions.get("sicDescription") or company_identity.sector,
-            market_sector=market_profile.sector,
-            market_industry=market_profile.industry,
-            sic=str(submissions.get("sic") or company_identity.sic or "").strip() or None,
-        )
-
-        get_engine()
-        with SessionLocal() as session:
-            company = _upsert_company(session, enriched_identity)
-            active_reporter.step("normalize", "Normalizing XBRL...")
-            normalized_statements = self.normalizer.normalize(
-                cik=company.cik,
-                companyfacts=companyfacts,
-                filing_index=filing_index,
-            )
-            self._populate_segment_breakdowns(normalized_statements, active_reporter)
-
-            active_reporter.step("database", "Saving to database...")
-            statements_written = _upsert_statements(
+            cached_result = self._refresh_cached_company(
                 session=session,
-                company=company,
-                normalized_statements=normalized_statements,
-                checked_at=checked_at,
-            )
-            parsed_statements_written = _upsert_filing_parser_statements(
-                session=session,
-                company=company,
-                parsed_insights=parsed_filing_insights,
-                checked_at=checked_at,
-            )
-            _touch_company_statements(session, company.id, checked_at)
-            precompute_core_models(session, company.id, reporter=active_reporter)
-            session.commit()
-
-            insider_trades_written = 0
-            form144_filings_written = 0
-            if refresh_insider_data and (force or not effective_insider_fresh):
-                insider_trades_written = self._refresh_insider_trades(
-                    session=session,
-                    company=company,
-                    filing_index=filing_index,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                form144_filings_written = self._refresh_form144_filings(
-                    session=session,
-                    company=company,
-                    filing_index=filing_index,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                session.commit()
-
-            institutional_holdings_written = 0
-            if refresh_institutional_data and (force or not institutional_fresh):
-                institutional_holdings_written = refresh_company_institutional_holdings(
-                    session=session,
-                    company=company,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                session.commit()
-
-            beneficial_ownership_written = 0
-            if refresh_beneficial_ownership_data and (force or not beneficial_fresh):
-                active_reporter.step("beneficial", "Caching beneficial ownership filings...")
-                from app.services.beneficial_ownership import (  # local import avoids circular dependency
-                    collect_beneficial_ownership_reports,
-                    upsert_beneficial_ownership_reports,
-                )
-                bo_reports = collect_beneficial_ownership_reports(company.cik, filing_index, client=self.client)
-                beneficial_ownership_written = upsert_beneficial_ownership_reports(
-                    session, company, bo_reports, checked_at=checked_at
-                )
-                session.commit()
-
-            earnings_releases_written = 0
-            if force or not earnings_fresh:
-                earnings_releases_written = self._refresh_earnings_releases(
-                    session=session,
-                    company=company,
-                    filing_index=filing_index,
-                    checked_at=checked_at,
-                    reporter=active_reporter,
-                    force=force,
-                )
-                session.commit()
-
-            filing_events_written = 0
-            active_reporter.step("events", "Caching 8-K filing events...")
-            from app.services.eight_k_events import collect_filing_events, upsert_filing_events
-
-            filing_events = collect_filing_events(company.cik, filing_index)
-            filing_events_written = upsert_filing_events(
-                session=session,
-                company=company,
-                events=filing_events,
-                checked_at=checked_at,
-            )
-            session.commit()
-
-            capital_markets_written = 0
-            active_reporter.step("capital", "Caching capital markets filings...")
-            from app.services.capital_markets import collect_capital_markets_events, upsert_capital_markets_events
-
-            capital_markets_events = collect_capital_markets_events(company.cik, filing_index)
-            capital_markets_written = upsert_capital_markets_events(
-                session=session,
-                company=company,
-                events=capital_markets_events,
-                checked_at=checked_at,
-            )
-            session.commit()
-
-            price_points_written = 0
-            if force or not prices_fresh:
-                try:
-                    if settings.strict_official_mode:
-                        active_reporter.step("market", "Strict official mode enabled; Yahoo price refresh skipped.")
-                    else:
-                        active_reporter.step("market", "Fetching price history...")
-                        price_bars = self.market_data.get_price_history(company.ticker)
-                        active_reporter.step("database", "Saving price history to database...")
-                        price_points_written = upsert_price_history(
-                            session=session,
-                            company=company,
-                            price_bars=price_bars,
-                            checked_at=checked_at,
-                        )
-                        if price_points_written > 0:
-                            touch_company_price_history(session, company.id, checked_at)
-                except Exception as exc:
-                    logger.exception("Market data refresh failed for %s", company.ticker)
-                    active_reporter.step("market", f"Market data refresh failed: {exc}")
-                    price_points_written = 0
-
-            _refresh_derived_metrics_cache(session, company.id, checked_at, active_reporter)
-            _refresh_earnings_model_cache(session, company.id, checked_at, active_reporter)
-
-            session.commit()
-            active_reporter.complete("Refresh and compute complete.")
-
-            detail_parts: list[str] = [f"Normalized {statements_written} filings"]
-            if refresh_insider_data and (force or not effective_insider_fresh):
-                detail_parts.append(
-                    f"Cached {insider_trades_written} insider trades"
-                    if insider_trades_written
-                    else "Checked Form 4/5 filings"
-                )
-                detail_parts.append(
-                    f"Cached {form144_filings_written} Form 144 planned sale filing rows"
-                    if form144_filings_written
-                    else "Checked Form 144 filings"
-                )
-            if refresh_institutional_data and (force or not institutional_fresh):
-                detail_parts.append(
-                    f"Cached {institutional_holdings_written} institutional holdings snapshots"
-                    if institutional_holdings_written
-                    else "Checked 13F filings"
-                )
-            if refresh_beneficial_ownership_data and (force or not beneficial_fresh):
-                detail_parts.append(
-                    f"Cached {beneficial_ownership_written} beneficial ownership filings"
-                    if beneficial_ownership_written
-                    else "Checked beneficial ownership filings"
-                )
-            if force or not earnings_fresh:
-                detail_parts.append(
-                    f"Cached {earnings_releases_written} earnings release rows"
-                    if earnings_releases_written
-                    else "Checked earnings releases"
-                )
-            detail_parts.append(
-                f"Cached {filing_events_written} filing event rows"
-                if filing_events_written
-                else "Checked 8-K filing events"
-            )
-            detail_parts.append(
-                f"Cached {capital_markets_written} capital markets rows"
-                if capital_markets_written
-                else "Checked capital markets filings"
-            )
-            if force or not prices_fresh:
-                detail_parts.append(f"Cached {price_points_written} daily price bars")
-
-            return IngestionResult(
                 identifier=identifier,
-                company_id=company.id,
-                cik=company.cik,
-                ticker=company.ticker,
-                status="fetched",
-                statements_written=statements_written + parsed_statements_written,
-                insider_trades_written=insider_trades_written,
-                form144_filings_written=form144_filings_written,
-                institutional_holdings_written=institutional_holdings_written,
-                beneficial_ownership_written=beneficial_ownership_written,
-                earnings_releases_written=earnings_releases_written,
-                price_points_written=price_points_written,
-                fetched_from_sec=True,
-                last_checked=checked_at,
-                detail="; ".join(detail_parts),
+                checked_at=checked_at,
+                reporter=active_reporter,
+                policy=policy,
             )
+            if cached_result is not None:
+                return cached_result
+
+        return self._refresh_from_sec(
+            identifier=identifier,
+            checked_at=checked_at,
+            reporter=active_reporter,
+            policy=policy,
+        )
 
 
 def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = None) -> dict[str, Any]:
