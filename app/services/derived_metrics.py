@@ -7,19 +7,8 @@ from typing import Any
 from app.models import FinancialStatement, PriceHistory
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
-QUARTERLY_FORMS = {"10-Q", "6-K"}
-FLOW_FIELDS = {
-    "revenue",
-    "gross_profit",
-    "operating_income",
-    "net_income",
-    "operating_cash_flow",
-    "free_cash_flow",
-    "stock_based_compensation",
-    "share_buybacks",
-    "dividends",
-}
-METRIC_KEYS = [
+QUARTERLY_FORMS = {"10-Q", "6-K", "CALL", "FR Y-9C"}
+GENERAL_METRIC_KEYS = [
     "revenue_growth",
     "gross_margin",
     "operating_margin",
@@ -36,6 +25,35 @@ METRIC_KEYS = [
     "cash_conversion",
     "segment_concentration",
 ]
+BANK_METRIC_KEYS = [
+    "net_interest_margin",
+    "provision_burden",
+    "asset_quality_ratio",
+    "cet1_ratio",
+    "tier1_capital_ratio",
+    "total_capital_ratio",
+    "core_deposit_ratio",
+    "uninsured_deposit_ratio",
+    "tangible_book_value_per_share",
+    "roatce",
+]
+FLOW_FIELDS = {
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "net_income",
+    "operating_cash_flow",
+    "free_cash_flow",
+    "stock_based_compensation",
+    "share_buybacks",
+    "dividends",
+    "net_interest_income",
+    "noninterest_income",
+    "noninterest_expense",
+    "pretax_income",
+    "provision_for_credit_losses",
+}
+METRIC_KEYS = [*GENERAL_METRIC_KEYS, *BANK_METRIC_KEYS]
 
 
 def build_metrics_timeseries(
@@ -151,7 +169,13 @@ def _build_cadence_points(
 
     for row in rows:
         matched_price = _price_on_or_before(prices, row["period_end"])
-        metrics = _compute_metrics(row["data"], previous["data"] if previous else None, matched_price)
+        metrics = _compute_metrics(
+            row["data"],
+            previous["data"] if previous else None,
+            matched_price,
+            cadence=cadence,
+            statement_type=row["statement_type"],
+        )
         output.append(
             {
                 "cadence": cadence,
@@ -182,6 +206,9 @@ def _compute_metrics(
     current: dict[str, Any],
     previous: dict[str, Any] | None,
     price_point: dict[str, Any] | None,
+    *,
+    cadence: str,
+    statement_type: str,
 ) -> dict[str, Any]:
     revenue = _to_float(current.get("revenue"))
     gross_profit = _to_float(current.get("gross_profit"))
@@ -207,18 +234,21 @@ def _compute_metrics(
         _to_float(current.get("cash_and_short_term_investments")),
         _to_float(current.get("cash_and_cash_equivalents")),
     )
+    tangible_common_equity = _to_float(current.get("tangible_common_equity"))
     shares_proxy = _first_non_null(
         _to_float(current.get("weighted_average_diluted_shares")),
         _to_float(current.get("shares_outstanding")),
     )
     previous_shares_proxy = None
     previous_revenue = None
+    previous_tangible_common_equity = None
     if previous is not None:
         previous_revenue = _to_float(previous.get("revenue"))
         previous_shares_proxy = _first_non_null(
             _to_float(previous.get("weighted_average_diluted_shares")),
             _to_float(previous.get("shares_outstanding")),
         )
+        previous_tangible_common_equity = _to_float(previous.get("tangible_common_equity"))
 
     invested_capital = _sum_non_null(stockholders_equity, long_term_debt, current_debt)
     if invested_capital is not None and cash_proxy is not None:
@@ -233,6 +263,9 @@ def _compute_metrics(
         net_debt = net_debt - cash_proxy
 
     segment_concentration = _segment_revenue_concentration(current.get("segment_breakdown"))
+    average_tangible_common_equity = None
+    if tangible_common_equity is not None:
+        average_tangible_common_equity = tangible_common_equity if previous_tangible_common_equity is None else (tangible_common_equity + previous_tangible_common_equity) / 2.0
 
     values: dict[str, float | None] = {
         "revenue_growth": _pct_change(revenue, previous_revenue),
@@ -250,11 +283,22 @@ def _compute_metrics(
         "accrual_ratio": _safe_div(_difference(net_income, operating_cash_flow), total_assets),
         "cash_conversion": _safe_div(free_cash_flow, net_income),
         "segment_concentration": segment_concentration,
+        "net_interest_margin": _to_float(current.get("net_interest_margin")),
+        "provision_burden": _safe_div(_to_float(current.get("provision_for_credit_losses")), _to_float(current.get("net_interest_income"))),
+        "asset_quality_ratio": _to_float(current.get("nonperforming_assets_ratio")),
+        "cet1_ratio": _to_float(current.get("common_equity_tier1_ratio")),
+        "tier1_capital_ratio": _to_float(current.get("tier1_risk_weighted_ratio")),
+        "total_capital_ratio": _to_float(current.get("total_risk_based_capital_ratio")),
+        "core_deposit_ratio": _safe_div(_to_float(current.get("core_deposits")), _to_float(current.get("deposits_total"))),
+        "uninsured_deposit_ratio": _safe_div(_to_float(current.get("uninsured_deposits")), _to_float(current.get("deposits_total"))),
+        "tangible_book_value_per_share": _safe_div(tangible_common_equity, shares_proxy),
+        "roatce": _safe_div(net_income, average_tangible_common_equity, scale=4.0 if cadence == "quarterly" else 1.0),
     }
 
-    missing_metrics = [key for key in METRIC_KEYS if values.get(key) is None]
-    available_metrics = len(METRIC_KEYS) - len(missing_metrics)
-    coverage_ratio = available_metrics / len(METRIC_KEYS)
+    metric_keys = BANK_METRIC_KEYS if statement_type == "canonical_bank_regulatory" else GENERAL_METRIC_KEYS
+    missing_metrics = [key for key in metric_keys if values.get(key) is None]
+    available_metrics = len(metric_keys) - len(missing_metrics)
+    coverage_ratio = available_metrics / len(metric_keys) if metric_keys else 0.0
     flags: list[str] = []
     if coverage_ratio < 0.65:
         flags.append("low_metric_coverage")
@@ -262,6 +306,8 @@ def _compute_metrics(
         flags.append("segment_data_unavailable")
     if market_cap is None:
         flags.append("missing_price_context")
+    if values["net_interest_margin"] is None and any(current.get(key) is not None for key in ("net_interest_income", "deposits_total", "common_equity_tier1_ratio")):
+        flags.append("bank_metric_inputs_partial")
 
     return {
         "values": values,

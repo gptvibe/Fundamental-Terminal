@@ -204,8 +204,67 @@ def test_company_market_context_route_returns_payload(monkeypatch):
             "fetched_at": "2026-03-22T00:00:00+00:00",
             "rates_credit": [],
             "inflation_labor": [],
-            "growth_activity": [],
+            "growth_activity": [{
+                "series_id": "bea_pce_total",
+                "label": "Personal Consumption Expenditures",
+                "source_name": "Bureau of Economic Analysis",
+                "source_url": "https://www.bea.gov/data/consumer-spending/main",
+                "units": "billions_usd",
+                "value": 20015.2,
+                "previous_value": 19987.3,
+                "change": 27.9,
+                "change_percent": 0.0014,
+                "observation_date": "2025-12-31",
+                "release_date": None,
+                "history": [],
+                "status": "ok",
+            }],
+            "cyclical_demand": [{
+                "series_id": "census_m3_new_orders_total",
+                "label": "Manufacturing New Orders (M3)",
+                "source_name": "U.S. Census Bureau Economic Indicators",
+                "source_url": "https://api.census.gov/data/timeseries/eits/m3",
+                "units": "millions_usd",
+                "value": 619137,
+                "previous_value": 621859,
+                "change": -2722,
+                "change_percent": -0.0044,
+                "observation_date": "2025-12-31",
+                "release_date": None,
+                "history": [],
+                "status": "ok",
+            }],
+            "cyclical_costs": [{
+                "series_id": "CIU1010000000000I",
+                "label": "Employment Cost Index (Total Compensation)",
+                "source_name": "U.S. Bureau of Labor Statistics",
+                "source_url": "https://www.bls.gov/data/",
+                "units": "percent",
+                "value": 0.0398,
+                "previous_value": 0.034,
+                "change": 0.0058,
+                "change_percent": 0.1705,
+                "observation_date": "2025-12-31",
+                "release_date": None,
+                "history": [],
+                "status": "ok",
+            }],
             "relevant_series": [],
+            "relevant_indicators": [{
+                "series_id": "census_m3_new_orders_total",
+                "label": "Manufacturing New Orders (M3)",
+                "source_name": "U.S. Census Bureau Economic Indicators",
+                "source_url": "https://api.census.gov/data/timeseries/eits/m3",
+                "units": "millions_usd",
+                "value": 619137,
+                "previous_value": 621859,
+                "change": -2722,
+                "change_percent": -0.0044,
+                "observation_date": "2025-12-31",
+                "release_date": None,
+                "history": [],
+                "status": "ok",
+            }],
             "sector_exposure": [],
             "hqm_snapshot": None,
         },
@@ -223,12 +282,20 @@ def test_company_market_context_route_returns_payload(monkeypatch):
     assert payload["status"] == "partial"
     assert payload["curve_points"]
     assert payload["provenance_details"]["fred"]["status"] == "missing_api_key"
-    assert {entry["source_id"] for entry in payload["provenance"]} == {"us_treasury_daily_par_yield_curve"}
+    assert {entry["source_id"] for entry in payload["provenance"]} == {
+        "bea_nipa",
+        "bls_public_data",
+        "census_eits_m3",
+        "us_treasury_daily_par_yield_curve",
+    }
     assert payload["as_of"] == "2026-03-21"
     assert payload["last_refreshed_at"].startswith("2026-03-22T00:00:00")
     assert payload["source_mix"]["official_only"] is True
     assert "market_context_partial" in payload["confidence_flags"]
     assert "supplemental_fred_unconfigured" in payload["confidence_flags"]
+    assert payload["cyclical_demand"][0]["series_id"] == "census_m3_new_orders_total"
+    assert payload["cyclical_costs"][0]["series_id"] == "CIU1010000000000I"
+    assert payload["relevant_indicators"][0]["series_id"] == "census_m3_new_orders_total"
 
 
 def test_parse_treasury_curve_textview_extracts_2m_and_4m():

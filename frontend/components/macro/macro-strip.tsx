@@ -53,7 +53,7 @@ function MacroStripPill({ item }: { item: MacroSeriesItemPayload }) {
   return (
     <div className="macro-strip-pill" title={`${item.label} — ${item.source_name}`}>
       <span className="macro-pill-label">{item.label}</span>
-      <span className="macro-pill-value">{item.value != null ? formatPercent(item.value) : "—"}</span>
+      <span className="macro-pill-value">{formatMacroValue(item)}</span>
       {hasChange ? (
         <span className={changeClass}>
           {isUp ? "▲" : "▼"} {Math.abs((item.change_percent as number) * 100).toFixed(2)}%
@@ -68,10 +68,14 @@ function MacroStripPill({ item }: { item: MacroSeriesItemPayload }) {
 
 function selectItems(context: CompanyMarketContextResponse, maxItems: number): MacroSeriesItemPayload[] {
   const relevant = context.relevant_series ?? [];
+  const relevantIndicators = context.relevant_indicators ?? [];
   const allItems = [
+    ...relevantIndicators,
     ...(context.rates_credit ?? []),
     ...(context.inflation_labor ?? []),
     ...(context.growth_activity ?? []),
+    ...(context.cyclical_demand ?? []),
+    ...(context.cyclical_costs ?? []),
   ].filter((item) => item.value != null && item.status !== "unavailable");
 
   if (relevant.length) {
@@ -86,4 +90,23 @@ function selectItems(context: CompanyMarketContextResponse, maxItems: number): M
 
   // No relevance mapping — show top items from rates_credit then inflation_labor
   return allItems.slice(0, maxItems);
+}
+
+function formatMacroValue(item: MacroSeriesItemPayload): string {
+  if (item.value == null) {
+    return "—";
+  }
+  if (item.units === "percent") {
+    return formatPercent(item.value);
+  }
+  if (item.units === "thousands") {
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(item.value * 1000);
+  }
+  if (item.units === "billions_usd") {
+    return `$${item.value.toFixed(1)}B`;
+  }
+  if (item.units === "millions_usd") {
+    return item.value >= 1000 ? `$${(item.value / 1000).toFixed(2)}B` : `$${item.value.toFixed(0)}M`;
+  }
+  return String(item.value);
 }

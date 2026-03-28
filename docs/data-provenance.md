@@ -6,6 +6,7 @@ Fundamental Terminal is SEC-first and public-data-first.
 Allowed upstream sources:
 - SEC EDGAR submissions and XBRL company facts
 - U.S. Treasury and FiscalData
+- U.S. Census Bureau economic indicators
 - BLS
 - BEA
 - Treasury HQM
@@ -44,8 +45,11 @@ Current canonical source ids include:
 - `us_treasury_daily_par_yield_curve`
 - `us_treasury_fiscaldata`
 - `fred`
+- `census_eits_m3`
+- `census_eits_retail_sales`
 - `bls_public_data`
 - `bea_nipa`
+- `bea_gdp_by_industry`
 - `treasury_hqm_corporate_yield_curve`
 - `yahoo_finance`
 - `ft_derived_metrics_engine`
@@ -69,6 +73,9 @@ Current canonical source ids include:
 - Financial restatement summaries use the amended filing acceptance time when available, then the filing date, so date-only `as_of` reviews include all SEC corrections known by the end of that day.
 - Price-backed inputs use the market observation date.
 - Risk-free-rate and macro assumptions use the latest published observation on or before the requested cutoff.
+- Census M3 and retail observations use the published survey month as the public market visibility date.
+- BLS JOLTS, PPI, and ECI observations use the published reference period as `as_of`, while fetch time remains separate in `last_refreshed_at`.
+- BEA PCE and GDP-by-industry observations use the underlying BEA period label as `as_of` and keep API fetch time in `last_refreshed_at`.
 - Fetch timestamps are stored separately from source observation timestamps so ingestion timing remains auditable without becoming the public market-visibility clock.
 - Date-only `as_of` values are interpreted as end-of-day UTC.
 

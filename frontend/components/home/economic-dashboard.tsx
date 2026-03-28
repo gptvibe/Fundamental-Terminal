@@ -272,7 +272,7 @@ export function EconomicDashboard({ context }: EconomicDashboardProps) {
         ))}
       </section>
 
-      {(context.rates_credit?.length || context.inflation_labor?.length || context.growth_activity?.length) ? (
+      {(context.rates_credit?.length || context.inflation_labor?.length || context.growth_activity?.length || context.cyclical_demand?.length || context.cyclical_costs?.length) ? (
         <section className="econ-macro-sections">
           <div className="econ-macro-header">
             <div className="grid-empty-kicker">Macro</div>
@@ -286,6 +286,12 @@ export function EconomicDashboard({ context }: EconomicDashboardProps) {
           ) : null}
           {context.growth_activity?.length ? (
             <MacroGroupedSection title="Growth &amp; Activity" items={context.growth_activity} />
+          ) : null}
+          {context.cyclical_demand?.length ? (
+            <MacroGroupedSection title="Cyclical Demand" items={context.cyclical_demand} />
+          ) : null}
+          {context.cyclical_costs?.length ? (
+            <MacroGroupedSection title="Cyclical Costs &amp; Labor" items={context.cyclical_costs} />
           ) : null}
         </section>
       ) : null}
@@ -720,6 +726,10 @@ function formatMacroValue(item: MacroSeriesItemPayload): string {
     return `$${item.value.toFixed(1)}B`;
   }
 
+  if (item.units === "millions_usd") {
+    return item.value >= 1000 ? `$${(item.value / 1000).toFixed(2)}B` : `$${item.value.toFixed(0)}M`;
+  }
+
   if (item.units === "thousands") {
     return `${formatCompactNumber(item.value * 1000)}`;
   }
@@ -731,7 +741,9 @@ function selectMacroAtAGlanceItems(title: string, items: MacroSeriesItemPayload[
   const desiredSeriesBySection: Record<string, string[]> = {
     "Rates & Credit": ["DGS_10Y", "slope_2s10s", "BAA10Y"],
     "Inflation & Labor": ["CPIAUCSL", "PCEPILFE", "UNRATE", "CUSR0000SA0", "CUSR0000SA0L1E", "LNS14000000"],
-    "Growth & Activity": ["A191RL1Q225SBEA", "PCE", "CP", "PI"],
+    "Growth & Activity": ["bea_pce_total"],
+    "Cyclical Demand": ["census_m3_new_orders_total", "census_m3_shipments_total", "census_retail_sales_total", "bea_gdp_manufacturing", "bea_gdp_retail_trade"],
+    "Cyclical Costs & Labor": ["WPSFD4", "CIU1010000000000I", "JTS000000000000000JOL", "JTS000000000000000QUL"],
   };
 
   const desired = desiredSeriesBySection[title] ?? [];

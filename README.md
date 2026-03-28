@@ -2,6 +2,10 @@
 
 Fundamental Terminal is a pull-first Dockerized SEC-first fundamental terminal. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js research UI for searching by ticker or company name.
 
+Banks and bank holding companies also support an official regulated-financial path built from FDIC quarterly BankFind financials and optional Federal Reserve FR Y-9C imports, while preserving the same public financials and metrics routes.
+
+The macro context layer also supports official cyclical demand and cost modules from the U.S. Census Bureau, BEA, and BLS, with company-specific relevance filtering so only materially related indicators are emphasized per issuer.
+
 ## Screenshots
 
 Captured from the local app with `INTC` as the demo company.
@@ -49,6 +53,21 @@ Captured from the local app with `INTC` as the demo company.
 - `operating_cash_flow`
 - `free_cash_flow`
 
+## Bank canonical metrics
+
+- `net_interest_income`
+- `provision_for_credit_losses`
+- `deposits_total`
+- `core_deposits`
+- `uninsured_deposits`
+- `loans_net`
+- `net_interest_margin`
+- `nonperforming_assets_ratio`
+- `common_equity_tier1_ratio`
+- `tier1_risk_weighted_ratio`
+- `total_risk_based_capital_ratio`
+- `tangible_common_equity`
+
 ## Setup
 
 1. Install dependencies:
@@ -63,6 +82,30 @@ Captured from the local app with `INTC` as the demo company.
    set DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/database_name
    set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
    ```
+
+   Optional regulated-bank source configuration:
+
+   ```bash
+   set FDIC_API_BASE_URL=https://api.fdic.gov
+   set FEDERAL_RESERVE_Y9C_JSON_URL=
+   set FEDERAL_RESERVE_Y9C_JSON_PATH=
+   ```
+
+   `FEDERAL_RESERVE_Y9C_JSON_URL` or `FEDERAL_RESERVE_Y9C_JSON_PATH` can point to an official FR Y-9C JSON export when bank holding company coverage is needed.
+
+   Optional macro source configuration:
+
+   ```bash
+   set CENSUS_API_BASE_URL=https://api.census.gov/data/timeseries/eits
+   set CENSUS_API_KEY=
+   set BLS_API_BASE_URL=https://api.bls.gov/publicAPI/v2/timeseries/data/
+   set BLS_API_KEY=
+   set BEA_API_BASE_URL=https://apps.bea.gov/api/data
+   set BEA_API_KEY=
+   ```
+
+   Get a BEA API key from https://apps.bea.gov/api/signup/ and a BLS API key from https://data.bls.gov/registrationEngine/.
+   `BEA_API_KEY` is required for official BEA PCE and GDP-by-industry pulls, and `BLS_API_KEY` is used for the official BLS v2 series requests.
 
 3. Run migrations:
 
@@ -109,12 +152,12 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 
 - `/` for search, autocomplete, and trending tickers
 - `/company/[ticker]` — company overview with unified activity feed, priority alerts, and quick peer comparison
-- `/company/[ticker]/financials` — dedicated financial workspace with statements, margin trends, cash-flow waterfall, liquidity/capital, balance-sheet history, and quality summary
-- `/company/[ticker]/financials` — dedicated financial workspace with statements, margin trends, derived SEC metrics (quarterly/annual/TTM with provenance and quality flags), cash-flow waterfall, liquidity/capital, balance-sheet history, and quality summary
+- `/company/[ticker]/financials` — dedicated financial workspace with statements, derived metrics, provenance/quality diagnostics, and a bank-specific regulated-financial view for banks and bank holding companies
 - `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
 - `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
 - `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
 - `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
+- `/company/[ticker]/models` now also includes a company-relevant official macro demand-and-cost panel built from Census M3/retail, BEA, and BLS data
 - `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel, executive pay table, and pay trend chart
 - `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
 - `/company/[ticker]/ownership` — institutional holdings analytics and manager activity trends

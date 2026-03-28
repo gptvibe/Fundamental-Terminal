@@ -108,4 +108,79 @@ describe("MetricsExplorerPanel", () => {
     expect(screen.getByText("12.0%")).toBeTruthy();
     expect(screen.getByText("Fundamental Terminal Derived Metrics Mart")).toBeTruthy();
   });
+
+  it("renders bank metric cards for regulated-bank issuers", async () => {
+    vi.mocked(getCompanyDerivedMetricsSummary).mockResolvedValue({
+      company: {
+        ticker: "WFC",
+        cik: "0000072971",
+        name: "Wells Fargo & Company",
+        sector: "Financials",
+        market_sector: "Financials",
+        market_industry: "Banks",
+        last_checked: "2026-03-25T00:00:00Z",
+        last_checked_financials: "2026-03-25T00:00:00Z",
+        last_checked_prices: null,
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        earnings_last_checked: null,
+        cache_state: "fresh",
+        regulated_entity: {
+          issuer_type: "bank",
+          reporting_basis: "fdic_call_report",
+          confidence_score: 0.99,
+          confidence_flags: [],
+        },
+      },
+      period_type: "ttm",
+      latest_period_end: "2025-12-31",
+      metrics: [
+        {
+          metric_key: "net_interest_margin",
+          metric_value: 0.038,
+          is_proxy: false,
+          provenance: { formula_version: "sec_metrics_mart_v1", unit: "ratio" },
+          quality_flags: [],
+        },
+        {
+          metric_key: "cet1_ratio",
+          metric_value: 0.121,
+          is_proxy: false,
+          provenance: { formula_version: "sec_metrics_mart_v1", unit: "ratio" },
+          quality_flags: [],
+        },
+      ],
+      last_metrics_check: "2026-03-25T00:00:00Z",
+      last_financials_check: "2026-03-25T00:00:00Z",
+      last_price_check: null,
+      staleness_reason: "fresh",
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-25T00:00:00Z",
+      source_mix: {
+        source_ids: ["ft_derived_metrics_mart", "fdic_bankfind_financials"],
+        source_tiers: ["derived_from_official", "official_regulator"],
+        primary_source_ids: ["fdic_bankfind_financials"],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      refresh: {
+        triggered: false,
+        reason: "fresh",
+        ticker: "WFC",
+        job_id: null,
+      },
+    });
+
+    render(React.createElement(MetricsExplorerPanel, { ticker: "WFC" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("net interest margin")).toBeTruthy();
+    });
+
+    expect(screen.getByText("3.8%")).toBeTruthy();
+    expect(screen.queryByText("revenue growth")).toBeNull();
+  });
 });

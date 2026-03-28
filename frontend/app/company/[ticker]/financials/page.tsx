@@ -3,6 +3,8 @@
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
+import { BankFinancialStatementsTable } from "@/components/company/bank-financial-statements-table";
+import { BankRegulatoryOverview } from "@/components/company/bank-regulatory-overview";
 import { CapitalStructureIntelligencePanel } from "@/components/company/capital-structure-intelligence-panel";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
@@ -14,7 +16,7 @@ import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { formatCompactNumber, formatDate } from "@/lib/format";
+import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 
 const BusinessSegmentBreakdown = dynamic(
   () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
@@ -76,6 +78,37 @@ export default function CompanyFinancialsTabPage() {
     queueRefresh,
     reloadKey
   } = useCompanyWorkspace(ticker);
+  const bankMode = Boolean(company?.regulated_entity && financials.some((statement) => statement.regulated_bank));
+  const latestRegulatedBank = latestFinancial?.regulated_bank ?? null;
+  const headerDescription = bankMode
+    ? "Official regulatory bank financials, deposit mix, credit costs, and capital ratios in one bank-specific review surface."
+    : "Statement history, derived SEC metrics, and balance-sheet quality in one review surface fed by cached filings first.";
+  const ribbonItems = bankMode
+    ? [
+        { label: "Financial Source", value: "FDIC / FR Y-9C + SEC", tone: "green" as const },
+        { label: "Market Profile", value: "Yahoo Finance", tone: "cyan" as const },
+        { label: "Financials Checked", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" as const },
+        { label: "Prices Checked", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" as const },
+      ]
+    : [
+        { label: "Financial Source", value: "SEC EDGAR/XBRL", tone: "green" as const },
+        { label: "Market Profile", value: "Yahoo Finance", tone: "cyan" as const },
+        { label: "Financials Checked", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" as const },
+        { label: "Prices Checked", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" as const },
+      ];
+  const summaryItems = bankMode
+    ? [
+        { label: "Latest NIM", value: formatPercent(latestRegulatedBank?.net_interest_margin ?? null), accent: "cyan" as const },
+        { label: "CET1", value: formatPercent(latestRegulatedBank?.common_equity_tier1_ratio ?? null), accent: "gold" as const },
+        { label: "Deposits", value: formatCompactNumber(latestRegulatedBank?.deposits_total ?? null), accent: "green" as const },
+        { label: "TCE", value: formatCompactNumber(latestRegulatedBank?.tangible_common_equity ?? null), accent: "cyan" as const },
+      ]
+    : [
+        { label: "Latest Revenue", value: formatCompactNumber(latestFinancial?.revenue), accent: "cyan" as const },
+        { label: "Operating Income", value: formatCompactNumber(latestFinancial?.operating_income), accent: "gold" as const },
+        { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" as const },
+        { label: "Price History", value: priceHistory.length.toLocaleString(), accent: "cyan" as const },
+      ];
 
   return (
     <CompanyWorkspaceShell
@@ -111,7 +144,7 @@ export default function CompanyFinancialsTabPage() {
         companyName={company?.name ?? ticker}
         sector={company?.sector}
         cacheState={company?.cache_state ?? null}
-        description="Statement history, derived SEC metrics, and balance-sheet quality in one review surface fed by cached filings first."
+        description={headerDescription}
         aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
         facts={[
           { label: "Ticker", value: ticker },
@@ -119,18 +152,8 @@ export default function CompanyFinancialsTabPage() {
           { label: "Annual Filings", value: annualStatements.length.toLocaleString() },
           { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null }
         ]}
-        ribbonItems={[
-          { label: "Financial Source", value: "SEC EDGAR/XBRL", tone: "green" },
-          { label: "Market Profile", value: "Yahoo Finance", tone: "cyan" },
-          { label: "Financials Checked", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" },
-          { label: "Prices Checked", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" }
-        ]}
-        summaries={[
-          { label: "Latest Revenue", value: formatCompactNumber(latestFinancial?.revenue), accent: "cyan" },
-          { label: "Operating Income", value: formatCompactNumber(latestFinancial?.operating_income), accent: "gold" },
-          { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" },
-          { label: "Price History", value: priceHistory.length.toLocaleString(), accent: "cyan" }
-        ]}
+        ribbonItems={ribbonItems}
+        summaries={summaryItems}
       >
         <CommercialFallbackNotice
           provenance={data?.provenance}
@@ -153,59 +176,83 @@ export default function CompanyFinancialsTabPage() {
         />
       </Panel>
 
-      <Panel title="Segment & Geography Breakdown" subtitle="Mix shifts, concentration, margin contribution, and chart views from reported segment disclosures">
-        {financials.length ? (
-          <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
-        ) : (
-          <PanelEmptyState message={loading ? "Loading segment data..." : "No business segment breakdowns are reported for this company."} />
-        )}
-      </Panel>
+      {bankMode ? (
+        <>
+          <Panel title="Regulated Bank Snapshot" subtitle="Net interest spread, credit costs, capital buffers, and funding mix from official bank regulatory filings">
+            <BankRegulatoryOverview latestFinancial={latestFinancial} />
+          </Panel>
 
-      <Panel title="Cash Flow Waterfall" subtitle="Bridge from revenue to free cash flow and capital allocation over time">
-        <CashFlowWaterfallChart financials={financials} />
-      </Panel>
+          <Panel title="Derived Bank Metrics" subtitle="Quarterly and TTM bank metrics computed from official FDIC and Federal Reserve regulatory financials">
+            <DerivedMetricsPanel ticker={ticker} reloadKey={reloadKey} />
+          </Panel>
 
-      <Panel title="Margin Trends" subtitle="Gross, operating, net, and free cash flow margins over time">
-        <MarginTrendChart financials={financials} />
-      </Panel>
+          <Panel title="Regulated Bank Statements" subtitle="Bank statement history with deposit mix, capital ratios, and credit-cost detail">
+            {error ? (
+              <div className="text-muted">{error}</div>
+            ) : financials.length ? (
+              <BankFinancialStatementsTable financials={financials} ticker={ticker} />
+            ) : (
+              <PanelEmptyState message={loading ? "Loading regulated bank statements..." : "No regulated bank statements are available yet for this ticker."} />
+            )}
+          </Panel>
+        </>
+      ) : (
+        <>
+          <Panel title="Segment & Geography Breakdown" subtitle="Mix shifts, concentration, margin contribution, and chart views from reported segment disclosures">
+            {financials.length ? (
+              <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
+            ) : (
+              <PanelEmptyState message={loading ? "Loading segment data..." : "No business segment breakdowns are reported for this company."} />
+            )}
+          </Panel>
 
-      <Panel title="Derived SEC Metrics" subtitle="Quarterly, annual, and TTM quality metrics derived from cached canonical SEC financials and cached market profile">
-        <DerivedMetricsPanel ticker={ticker} reloadKey={reloadKey} />
-      </Panel>
+          <Panel title="Cash Flow Waterfall" subtitle="Bridge from revenue to free cash flow and capital allocation over time">
+            <CashFlowWaterfallChart financials={financials} />
+          </Panel>
 
-      <Panel title="Capital Structure Intelligence" subtitle="Debt ladders, lease schedules, issuance and repayment flow, payout mix, SBC, and dilution bridges derived from persisted SEC extraction">
-        <CapitalStructureIntelligencePanel ticker={ticker} reloadKey={reloadKey} />
-      </Panel>
+          <Panel title="Margin Trends" subtitle="Gross, operating, net, and free cash flow margins over time">
+            <MarginTrendChart financials={financials} />
+          </Panel>
 
-      <Panel title="Balance Sheet" subtitle="Assets versus liabilities over time">
-        {financials.length ? <BalanceSheetChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading balance-sheet history..." : "No balance-sheet history is available yet."} />}
-      </Panel>
+          <Panel title="Derived SEC Metrics" subtitle="Quarterly, annual, and TTM quality metrics derived from cached canonical SEC financials and cached market profile">
+            <DerivedMetricsPanel ticker={ticker} reloadKey={reloadKey} />
+          </Panel>
 
-      <Panel title="Liquidity & Capital" subtitle="Current assets, liabilities, and retained earnings from reported filings">
-        <LiquidityCapitalChart financials={financials} />
-      </Panel>
+          <Panel title="Capital Structure Intelligence" subtitle="Debt ladders, lease schedules, issuance and repayment flow, payout mix, SBC, and dilution bridges derived from persisted SEC extraction">
+            <CapitalStructureIntelligencePanel ticker={ticker} reloadKey={reloadKey} />
+          </Panel>
 
-      <Panel title="Operating Cost Structure" subtitle="SG&A, R&D, stock-based compensation, interest, and tax expense trends from reported filings">
-        <OperatingCostStructureChart financials={financials} />
-      </Panel>
+          <Panel title="Balance Sheet" subtitle="Assets versus liabilities over time">
+            {financials.length ? <BalanceSheetChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading balance-sheet history..." : "No balance-sheet history is available yet."} />}
+          </Panel>
 
-      <Panel title="Financial Quality Summary" subtitle="Quick view of margins, balance-sheet leverage, profitability, and growth quality from annual filings">
-        <FinancialQualitySummary financials={financials} />
-      </Panel>
+          <Panel title="Liquidity & Capital" subtitle="Current assets, liabilities, and retained earnings from reported filings">
+            <LiquidityCapitalChart financials={financials} />
+          </Panel>
 
-      <Panel title="Share Dilution Tracker" subtitle="Shares outstanding trend with period-over-period dilution rates from reported filings">
-        {financials.length ? <ShareDilutionTrackerChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading share-count history..." : "No share-count history is available yet."} />}
-      </Panel>
+          <Panel title="Operating Cost Structure" subtitle="SG&A, R&D, stock-based compensation, interest, and tax expense trends from reported filings">
+            <OperatingCostStructureChart financials={financials} />
+          </Panel>
 
-      <Panel title="Financial Statements" subtitle="Full company statement history in one table">
-        {error ? (
-          <div className="text-muted">{error}</div>
-        ) : financials.length ? (
-          <FinancialStatementsTable financials={financials} ticker={ticker} />
-        ) : (
-          <PanelEmptyState message={loading ? "Loading financial statements..." : "No financial statements are available yet for this ticker."} />
-        )}
-      </Panel>
+          <Panel title="Financial Quality Summary" subtitle="Quick view of margins, balance-sheet leverage, profitability, and growth quality from annual filings">
+            <FinancialQualitySummary financials={financials} />
+          </Panel>
+
+          <Panel title="Share Dilution Tracker" subtitle="Shares outstanding trend with period-over-period dilution rates from reported filings">
+            {financials.length ? <ShareDilutionTrackerChart financials={financials} /> : <PanelEmptyState message={loading ? "Loading share-count history..." : "No share-count history is available yet."} />}
+          </Panel>
+
+          <Panel title="Financial Statements" subtitle="Full company statement history in one table">
+            {error ? (
+              <div className="text-muted">{error}</div>
+            ) : financials.length ? (
+              <FinancialStatementsTable financials={financials} ticker={ticker} />
+            ) : (
+              <PanelEmptyState message={loading ? "Loading financial statements..." : "No financial statements are available yet for this ticker."} />
+            )}
+          </Panel>
+        </>
+      )}
     </CompanyWorkspaceShell>
   );
 }

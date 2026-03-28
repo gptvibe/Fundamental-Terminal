@@ -66,6 +66,9 @@ class CompanyMarketContextResponse(ProvenanceEnvelope):
     rates_credit: list[MacroSeriesItemPayload] = Field(default_factory=list)
     inflation_labor: list[MacroSeriesItemPayload] = Field(default_factory=list)
     growth_activity: list[MacroSeriesItemPayload] = Field(default_factory=list)
+    cyclical_demand: list[MacroSeriesItemPayload] = Field(default_factory=list)
+    cyclical_costs: list[MacroSeriesItemPayload] = Field(default_factory=list)
     relevant_series: list[str] = Field(default_factory=list)
+    relevant_indicators: list[MacroSeriesItemPayload] = Field(default_factory=list)
     sector_exposure: list[str] = Field(default_factory=list)
     hqm_snapshot: dict[str, Any] | None = None

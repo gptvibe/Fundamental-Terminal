@@ -55,6 +55,13 @@ class ProvenanceEnvelope(BaseModel):
     confidence_flags: list[str] = Field(default_factory=list)
 
 
+class RegulatedEntityPayload(BaseModel):
+    issuer_type: Literal["bank", "bank_holding_company"]
+    reporting_basis: Literal["fdic_call_report", "fr_y9c", "mixed_regulatory"]
+    confidence_score: Number = None
+    confidence_flags: list[str] = Field(default_factory=list)
+
+
 class CompanyPayload(BaseModel):
     ticker: str
     cik: str
@@ -62,6 +69,7 @@ class CompanyPayload(BaseModel):
     sector: str | None = None
     market_sector: str | None = None
     market_industry: str | None = None
+    regulated_entity: RegulatedEntityPayload | None = None
     strict_official_mode: bool = False
     last_checked: datetime | None = None
     last_checked_financials: datetime | None = None

@@ -136,6 +136,30 @@ class FinancialReconciliationPayload(BaseModel):
     comparisons: list[FinancialReconciliationComparisonPayload] = Field(default_factory=list)
 
 
+class RegulatedBankFinancialPayload(BaseModel):
+    source_id: Literal["fdic_bankfind_financials", "federal_reserve_fr_y9c"]
+    reporting_basis: Literal["fdic_call_report", "fr_y9c"]
+    confidence_score: Number = None
+    confidence_flags: list[str] = Field(default_factory=list)
+    net_interest_income: Number = None
+    noninterest_income: Number = None
+    noninterest_expense: Number = None
+    pretax_income: Number = None
+    provision_for_credit_losses: Number = None
+    deposits_total: Number = None
+    core_deposits: Number = None
+    uninsured_deposits: Number = None
+    loans_net: Number = None
+    net_interest_margin: Number = None
+    nonperforming_assets_ratio: Number = None
+    common_equity_tier1_ratio: Number = None
+    tier1_risk_weighted_ratio: Number = None
+    total_risk_based_capital_ratio: Number = None
+    return_on_assets_ratio: Number = None
+    return_on_equity_ratio: Number = None
+    tangible_common_equity: Number = None
+
+
 class FinancialPayload(BaseModel):
     filing_type: str
     statement_type: str
@@ -180,6 +204,7 @@ class FinancialPayload(BaseModel):
     shares_outstanding: Number = None
     stock_based_compensation: Number = None
     weighted_average_diluted_shares: Number = None
+    regulated_bank: RegulatedBankFinancialPayload | None = None
     segment_breakdown: list[FinancialSegmentPayload] = Field(default_factory=list)
     reconciliation: FinancialReconciliationPayload | None = None
 
@@ -333,6 +358,16 @@ class MetricsValuesPayload(BaseModel):
     accrual_ratio: Number = None
     cash_conversion: Number = None
     segment_concentration: Number = None
+    net_interest_margin: Number = None
+    provision_burden: Number = None
+    asset_quality_ratio: Number = None
+    cet1_ratio: Number = None
+    tier1_capital_ratio: Number = None
+    total_capital_ratio: Number = None
+    core_deposit_ratio: Number = None
+    uninsured_deposit_ratio: Number = None
+    tangible_book_value_per_share: Number = None
+    roatce: Number = None
 
 
 class MetricsProvenancePayload(BaseModel):

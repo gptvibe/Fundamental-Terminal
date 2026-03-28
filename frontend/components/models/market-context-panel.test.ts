@@ -72,6 +72,57 @@ describe("MarketContextPanel", () => {
           },
           fetched_at: "2026-03-22T00:00:00Z",
           refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+          cyclical_demand: [
+            {
+              series_id: "census_m3_new_orders_total",
+              label: "Manufacturing New Orders (M3)",
+              source_name: "U.S. Census Bureau Economic Indicators",
+              source_url: "https://api.census.gov/data/timeseries/eits/m3",
+              units: "millions_usd",
+              value: 619137,
+              previous_value: 621859,
+              change: -2722,
+              change_percent: -0.0044,
+              observation_date: "2025-12-31",
+              release_date: null,
+              history: [],
+              status: "ok",
+            },
+          ],
+          cyclical_costs: [
+            {
+              series_id: "CIU1010000000000I",
+              label: "Employment Cost Index (Total Compensation)",
+              source_name: "U.S. Bureau of Labor Statistics",
+              source_url: "https://www.bls.gov/data/",
+              units: "percent",
+              value: 0.0398,
+              previous_value: 0.034,
+              change: 0.0058,
+              change_percent: 0.1705,
+              observation_date: "2025-12-31",
+              release_date: null,
+              history: [],
+              status: "ok",
+            },
+          ],
+          relevant_indicators: [
+            {
+              series_id: "census_m3_new_orders_total",
+              label: "Manufacturing New Orders (M3)",
+              source_name: "U.S. Census Bureau Economic Indicators",
+              source_url: "https://api.census.gov/data/timeseries/eits/m3",
+              units: "millions_usd",
+              value: 619137,
+              previous_value: 621859,
+              change: -2722,
+              change_percent: -0.0044,
+              observation_date: "2025-12-31",
+              release_date: null,
+              history: [],
+              status: "ok",
+            },
+          ],
         },
       })
     );
@@ -83,6 +134,8 @@ describe("MarketContextPanel", () => {
     expect(screen.getByText("4M")).toBeTruthy();
     expect(screen.getByText("U.S. Treasury Daily Par Yield Curve")).toBeTruthy();
     expect(screen.getByText("market context partial")).toBeTruthy();
-    expect(screen.getByText(/Supplemental macro indicators are unavailable/i)).toBeTruthy();
+    expect(screen.getByText("Relevant Cyclical Indicators")).toBeTruthy();
+    expect(screen.getByText("Cyclical Demand")).toBeTruthy();
+    expect(screen.getAllByText("Manufacturing New Orders (M3)")).toHaveLength(2);
   });
 });

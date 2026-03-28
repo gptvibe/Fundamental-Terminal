@@ -65,6 +65,19 @@ All derived metrics are computed through one central registry in `app/services/d
 - `current_ratio`
 - `cash_ratio`
 
+### Bank metrics
+
+- `net_interest_margin`
+- `provision_burden`
+- `asset_quality_ratio`
+- `cet1_ratio`
+- `tier1_capital_ratio`
+- `total_capital_ratio`
+- `core_deposit_ratio`
+- `uninsured_deposit_ratio`
+- `tangible_book_value_per_share`
+- `roatce`
+
 ### Capital allocation and dilution
 
 - `dilution_trend`
@@ -123,3 +136,11 @@ Metrics are computed within each cadence independently.
 
 - No silent mixing between quarterly, annual, and TTM series.
 - TTM is computed from trailing four quarterly periods.
+
+## Regulated Bank Inputs
+
+For issuers classified as banks or bank holding companies, the metrics mart prefers cached `canonical_bank_regulatory` statements over SEC canonical rows.
+
+- Banks use FDIC BankFind quarterly financials / call-report-derived fields.
+- Bank holding companies can use an official FR Y-9C JSON import configured through `FEDERAL_RESERVE_Y9C_JSON_URL` or `FEDERAL_RESERVE_Y9C_JSON_PATH`.
+- Provenance stays on the same response envelope and continues to expose `source_mix`, `as_of`, `last_refreshed_at`, and confidence flags.

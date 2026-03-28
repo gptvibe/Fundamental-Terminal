@@ -54,6 +54,30 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
     ),
+    "fdic_bankfind_institutions": SourceDefinition(
+        source_id="fdic_bankfind_institutions",
+        tier="official_regulator",
+        display_label="FDIC BankFind Suite Institutions",
+        url="https://api.fdic.gov/banks/institutions",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official FDIC institution directory used to match publicly traded banks and bank holding companies to regulatory identifiers.",
+    ),
+    "fdic_bankfind_financials": SourceDefinition(
+        source_id="fdic_bankfind_financials",
+        tier="official_regulator",
+        display_label="FDIC BankFind Suite Financials",
+        url="https://api.fdic.gov/banks/financials",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official FDIC quarterly financial and call-report-derived data used for bank issuer fundamentals.",
+    ),
+    "federal_reserve_fr_y9c": SourceDefinition(
+        source_id="federal_reserve_fr_y9c",
+        tier="official_regulator",
+        display_label="Federal Reserve FR Y-9C",
+        url="https://www.federalreserve.gov/apps/reportingforms/Report/Index/FR_Y-9C",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official Federal Reserve holding-company regulatory data used for consolidated bank holding company financial coverage.",
+    ),
     "us_treasury_daily_par_yield_curve": SourceDefinition(
         source_id="us_treasury_daily_par_yield_curve",
         tier="official_treasury_or_fed",
@@ -93,6 +117,30 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         url="https://www.bea.gov/data/gdp/",
         default_freshness_ttl_seconds=24 * 60 * 60,
         disclosure_note="Official BEA national accounts data used for growth and activity context.",
+    ),
+    "bea_gdp_by_industry": SourceDefinition(
+        source_id="bea_gdp_by_industry",
+        tier="official_statistical",
+        display_label="Bureau of Economic Analysis (GDP by Industry)",
+        url="https://www.bea.gov/data/gdp/gdp-industry",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official BEA industry value-added data used for company-specific cyclical demand context.",
+    ),
+    "census_eits_m3": SourceDefinition(
+        source_id="census_eits_m3",
+        tier="official_statistical",
+        display_label="U.S. Census M3 Manufacturers' Shipments, Inventories, and Orders",
+        url="https://api.census.gov/data/timeseries/eits/m3",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official Census M3 manufacturing demand and inventory data used for cyclical demand context.",
+    ),
+    "census_eits_retail_sales": SourceDefinition(
+        source_id="census_eits_retail_sales",
+        tier="official_statistical",
+        display_label="U.S. Census Monthly Retail Sales",
+        url="https://api.census.gov/data/timeseries/eits/marts",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official Census retail and food-services sales data used for consumer demand context.",
     ),
     "treasury_hqm_corporate_yield_curve": SourceDefinition(
         source_id="treasury_hqm_corporate_yield_curve",
@@ -212,6 +260,12 @@ def infer_source_id(source_hint: str | None, *, default: str | None = None) -> s
         return "sec_companyfacts"
     if "sec.gov" in normalized or "edgar" in normalized:
         return "sec_edgar"
+    if "api.fdic.gov/banks/institutions" in normalized:
+        return "fdic_bankfind_institutions"
+    if "api.fdic.gov/banks/financials" in normalized or "banks.data.fdic.gov/api/financials" in normalized:
+        return "fdic_bankfind_financials"
+    if "fr y-9c" in normalized or "fr_y-9c" in normalized or "federalreserve.gov" in normalized:
+        return "federal_reserve_fr_y9c"
     if "fiscaldata" in normalized or "average interest rates" in normalized:
         return "us_treasury_fiscaldata"
     if "hqm" in normalized and "treasury" in normalized:
@@ -220,6 +274,12 @@ def infer_source_id(source_hint: str | None, *, default: str | None = None) -> s
         return "fred"
     if "bureau of labor statistics" in normalized or " bls" in normalized or "bls.gov" in normalized:
         return "bls_public_data"
+    if "api.census.gov/data/timeseries/eits/m3" in normalized:
+        return "census_eits_m3"
+    if "api.census.gov/data/timeseries/eits/marts" in normalized:
+        return "census_eits_retail_sales"
+    if "gdp by industry" in normalized or "gdp-industry" in normalized:
+        return "bea_gdp_by_industry"
     if "bureau of economic analysis" in normalized or "bea" in normalized or "bea.gov" in normalized:
         return "bea_nipa"
     if "daily par yield curve" in normalized or "treasury yield curve" in normalized or "home.treasury.gov" in normalized:

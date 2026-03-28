@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CompanyModelsPage from "@/app/company/[ticker]/models/page";
-import { getCompanyFinancials, getCompanyModels } from "@/lib/api";
+import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 
 vi.mock("next/navigation", () => ({
@@ -44,9 +44,14 @@ vi.mock("@/components/company/capital-structure-intelligence-panel", () => ({
   CapitalStructureIntelligencePanel: () => React.createElement("div", null, "capital-structure-panel"),
 }));
 
+vi.mock("@/components/models/market-context-panel", () => ({
+  MarketContextPanel: () => React.createElement("div", null, "market-context-panel"),
+}));
+
 vi.mock("@/lib/api", () => ({
   getCompanyModels: vi.fn(),
   getCompanyFinancials: vi.fn(),
+  getCompanyMarketContext: vi.fn(),
   refreshCompany: vi.fn(),
 }));
 
@@ -168,6 +173,37 @@ describe("CompanyModelsPage", () => {
         reconciliation_disagreement_count: 0,
       },
     });
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      curve_points: [],
+      slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null },
+      slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null },
+      fred_series: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      provenance_details: {},
+      fetched_at: "2026-03-22T00:00:00Z",
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      rates_credit: [],
+      inflation_labor: [],
+      growth_activity: [],
+      cyclical_demand: [],
+      cyclical_costs: [],
+      relevant_series: [],
+      relevant_indicators: [],
+      sector_exposure: [],
+      hqm_snapshot: null,
+    });
 
     render(React.createElement(CompanyModelsPage));
 
@@ -176,7 +212,9 @@ describe("CompanyModelsPage", () => {
     });
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
+    expect(screen.getByText("Macro Demand & Cost Context")).toBeTruthy();
     expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
+    expect(screen.getByText("market-context-panel")).toBeTruthy();
     expect(screen.getByText("Fundamental Terminal Model Engine")).toBeTruthy();
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
     expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
@@ -266,12 +304,45 @@ describe("CompanyModelsPage", () => {
         reconciliation_disagreement_count: 0,
       },
     });
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      curve_points: [],
+      slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null },
+      slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null },
+      fred_series: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      provenance_details: {},
+      fetched_at: "2026-03-22T00:00:00Z",
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      rates_credit: [],
+      inflation_labor: [],
+      growth_activity: [],
+      cyclical_demand: [],
+      cyclical_costs: [],
+      relevant_series: [],
+      relevant_indicators: [],
+      sector_exposure: [],
+      hqm_snapshot: null,
+    });
 
     render(React.createElement(CompanyModelsPage));
 
     await waitFor(() => {
       expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, { dupontMode: "auto" });
     });
+
+    expect(getCompanyMarketContext).toHaveBeenCalledWith("ACME");
 
     expect(screen.getByText(/Strict official mode disables commercial equity price inputs/i)).toBeTruthy();
     expect(screen.getAllByText("SEC SIC mapping").length).toBeGreaterThan(0);

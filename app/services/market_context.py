@@ -828,6 +828,8 @@ class MacroV2Snapshot:
     rates_credit: tuple[MacroSeriesItem, ...]
     inflation_labor: tuple[MacroSeriesItem, ...]
     growth_activity: tuple[MacroSeriesItem, ...]
+    cyclical_demand: tuple[MacroSeriesItem, ...]
+    cyclical_costs: tuple[MacroSeriesItem, ...]
     # Legacy fields preserved for backward compat
     curve_points: tuple[MarketCurvePoint, ...]
     slope_2s10s: MarketSlope
@@ -1052,6 +1054,74 @@ def _build_growth_activity_section_from_bea(bea_results: Any) -> tuple[MacroSeri
     """Build growth_activity section from BEA provider results."""
     items: list[MacroSeriesItem] = []
     for result in bea_results:
+        if str(getattr(result, "section", "")) != "growth_activity":
+            continue
+        normalized_value = _normalize_percent_decimal(result.value, result.units)
+        normalized_previous = _normalize_percent_decimal(result.previous_value, result.units)
+        change, change_pct = _build_change(normalized_value, normalized_previous)
+        history = tuple(
+            MacroHistoryPoint(
+                date=p.observation_date.isoformat(),
+                value=_normalize_percent_decimal(p.value, result.units) or 0.0,
+            )
+            for p in result.history
+        )
+        items.append(MacroSeriesItem(
+            series_id=result.series_id,
+            label=result.label,
+            source_name=result.source_name,
+            source_url=result.source_url,
+            units=result.units,
+            value=normalized_value,
+            previous_value=normalized_previous,
+            change=change,
+            change_percent=change_pct,
+            observation_date=result.observation_date,
+            release_date=None,
+            history=history,
+            status=result.status,
+        ))
+    return tuple(items)
+
+
+def _build_cyclical_demand_section(census_results: Any, bea_results: Any) -> tuple[MacroSeriesItem, ...]:
+    items: list[MacroSeriesItem] = []
+    for result in [*(census_results or ()), *(bea_results or ())]:
+        if str(getattr(result, "section", "")) != "cyclical_demand":
+            continue
+        normalized_value = _normalize_percent_decimal(result.value, result.units)
+        normalized_previous = _normalize_percent_decimal(result.previous_value, result.units)
+        change, change_pct = _build_change(normalized_value, normalized_previous)
+        history = tuple(
+            MacroHistoryPoint(
+                date=p.observation_date.isoformat(),
+                value=_normalize_percent_decimal(p.value, result.units) or 0.0,
+            )
+            for p in result.history
+        )
+        items.append(MacroSeriesItem(
+            series_id=result.series_id,
+            label=result.label,
+            source_name=result.source_name,
+            source_url=result.source_url,
+            units=result.units,
+            value=normalized_value,
+            previous_value=normalized_previous,
+            change=change,
+            change_percent=change_pct,
+            observation_date=result.observation_date,
+            release_date=None,
+            history=history,
+            status=result.status,
+        ))
+    return tuple(items)
+
+
+def _build_cyclical_cost_section(bls_results: Any) -> tuple[MacroSeriesItem, ...]:
+    items: list[MacroSeriesItem] = []
+    for result in bls_results:
+        if str(getattr(result, "section", "")) != "cyclical_costs":
+            continue
         normalized_value = _normalize_percent_decimal(result.value, result.units)
         normalized_previous = _normalize_percent_decimal(result.previous_value, result.units)
         change, change_pct = _build_change(normalized_value, normalized_previous)
@@ -1105,6 +1175,8 @@ def _macro_v2_snapshot_to_dict(snap: MacroV2Snapshot) -> dict[str, Any]:
         "rates_credit": [_macro_series_item_to_dict(item) for item in snap.rates_credit],
         "inflation_labor": [_macro_series_item_to_dict(item) for item in snap.inflation_labor],
         "growth_activity": [_macro_series_item_to_dict(item) for item in snap.growth_activity],
+        "cyclical_demand": [_macro_series_item_to_dict(item) for item in snap.cyclical_demand],
+        "cyclical_costs": [_macro_series_item_to_dict(item) for item in snap.cyclical_costs],
         "curve_points": [
             {
                 "tenor": p.tenor,
@@ -1156,12 +1228,15 @@ def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
         logger.warning("HQM provider failed during enriched fetch", exc_info=True)
 
     # BLS provider
+    bls_results: tuple[Any, ...] = ()
     inflation_labor_items: tuple[MacroSeriesItem, ...] = ()
+    cyclical_cost_items: tuple[MacroSeriesItem, ...] = ()
     try:
         from app.services.macro_providers.bls_provider import fetch_bls_series
         bls_results = fetch_bls_series()
         if bls_results:
             inflation_labor_items = _build_inflation_labor_from_bls(bls_results)
+            cyclical_cost_items = _build_cyclical_cost_section(bls_results)
     except Exception:
         logger.warning("BLS provider failed during enriched fetch", exc_info=True)
 
@@ -1169,7 +1244,17 @@ def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
     if not inflation_labor_items or not any(item.status == "ok" and item.value is not None for item in inflation_labor_items):
         inflation_labor_items = _build_inflation_labor_section_from_fred(base_snapshot)
 
-    # BEA/FRED growth provider
+    # Census provider
+    census_results: tuple[Any, ...] = ()
+    cyclical_demand_items: tuple[MacroSeriesItem, ...] = ()
+    try:
+        from app.services.macro_providers.census_provider import fetch_census_series
+        census_results = fetch_census_series()
+    except Exception:
+        logger.warning("Census provider failed during enriched fetch", exc_info=True)
+
+    # BEA growth provider
+    bea_results: tuple[Any, ...] = ()
     growth_activity_items: tuple[MacroSeriesItem, ...] = ()
     try:
         from app.services.macro_providers.bea_provider import fetch_bea_series
@@ -1179,6 +1264,8 @@ def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
     except Exception:
         logger.warning("BEA provider failed during enriched fetch", exc_info=True)
 
+    cyclical_demand_items = _build_cyclical_demand_section(census_results, bea_results)
+
     # Rates & credit section
     rates_credit_items = _build_rates_credit_section(base_snapshot, hqm_snap)
 
@@ -1186,7 +1273,7 @@ def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
     provider_statuses = [base_snapshot.status]
     if hqm_snap:
         provider_statuses.append(str(hqm_snap.get("status") or "partial"))
-    all_items = list(rates_credit_items) + list(inflation_labor_items) + list(growth_activity_items)
+    all_items = list(rates_credit_items) + list(inflation_labor_items) + list(growth_activity_items) + list(cyclical_demand_items) + list(cyclical_cost_items)
     if any(item.status == "unavailable" for item in all_items):
         combined_status = "partial"
     elif provider_statuses and all(s == "ok" for s in provider_statuses):
@@ -1199,6 +1286,8 @@ def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
         rates_credit=rates_credit_items,
         inflation_labor=inflation_labor_items,
         growth_activity=growth_activity_items,
+        cyclical_demand=cyclical_demand_items,
+        cyclical_costs=cyclical_cost_items,
         curve_points=base_snapshot.curve_points,
         slope_2s10s=base_snapshot.slope_2s10s,
         slope_3m10y=base_snapshot.slope_3m10y,
@@ -1206,8 +1295,22 @@ def _fetch_enriched_market_context_v2() -> MacroV2Snapshot:
         provenance={
             **base_snapshot.provenance,
             "hqm": hqm_snap,
-            "bls_available": bool(inflation_labor_items and any(i.status == "ok" for i in inflation_labor_items)),
-            "bea_available": bool(growth_activity_items and any(i.status == "ok" for i in growth_activity_items)),
+            "census": {
+                "status": "ok" if cyclical_demand_items and any(item.source_url.endswith("/m3") or item.source_url.endswith("/marts") for item in cyclical_demand_items if item.status == "ok") else "unavailable",
+                "source_name": "U.S. Census Bureau Economic Indicators",
+                "source_url": "https://api.census.gov/data/timeseries/eits/",
+            },
+            "bls": {
+                "status": "ok" if bls_results and any(getattr(item, "status", "") == "ok" for item in bls_results) else "unavailable",
+                "source_name": "U.S. Bureau of Labor Statistics",
+                "source_url": "https://www.bls.gov/data/",
+            },
+            "bea": {
+                "status": "ok" if bea_results and any(getattr(item, "status", "") == "ok" for item in bea_results) else "unavailable",
+                "configured": bool(settings.bea_api_key),
+                "source_name": "Bureau of Economic Analysis",
+                "source_url": "https://apps.bea.gov/api/data",
+            },
         },
         fetched_at=datetime.now(timezone.utc),
         hqm_snapshot=hqm_snap,
@@ -1281,6 +1384,7 @@ def get_company_market_context_v2(
     company_specific = {
         **global_payload,
         "relevant_series": relevance.relevant_series,
+        "relevant_indicators": _filter_relevant_indicator_dicts(global_payload, relevance.relevant_series),
         "sector_exposure": relevance.sector_exposure,
     }
 
@@ -1303,6 +1407,8 @@ def _empty_macro_payload() -> dict[str, Any]:
         "rates_credit": [],
         "inflation_labor": [],
         "growth_activity": [],
+        "cyclical_demand": [],
+        "cyclical_costs": [],
         "curve_points": [],
         "slope_2s10s": {"label": "2s10s", "value": None, "long_tenor": "10y", "short_tenor": "2y", "observation_date": None},
         "slope_3m10y": {"label": "3m10y", "value": None, "long_tenor": "10y", "short_tenor": "3m", "observation_date": None},
@@ -1310,7 +1416,21 @@ def _empty_macro_payload() -> dict[str, Any]:
         "provenance": {},
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "hqm_snapshot": None,
+        "relevant_indicators": [],
     }
+
+
+def _filter_relevant_indicator_dicts(payload: dict[str, Any], relevant_series: list[str]) -> list[dict[str, Any]]:
+    if not relevant_series:
+        return []
+    matched: list[dict[str, Any]] = []
+    for section_key in ("cyclical_demand", "cyclical_costs", "growth_activity", "inflation_labor", "rates_credit"):
+        for item in payload.get(section_key) or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("series_id") or "") in relevant_series:
+                matched.append(item)
+    return matched
 
 
 def refresh_market_context_v2_sync(session: "Session") -> None:

@@ -1,12 +1,13 @@
 """Official-source macro data provider package.
 
-Providers (Phase 1):
+Providers:
 - treasury: U.S. Treasury daily yield curve (existing, extended)
 - hqm: U.S. Treasury HQM corporate bond yield curve
-- bls: Bureau of Labor Statistics (CPI, Core CPI, PPI, Unemployment, Payrolls)
-- bea: Bureau of Economic Analysis (GDP, PCE, Personal Income, Corporate Profits)
+- bls: Bureau of Labor Statistics (CPI, PPI, ECI, labor, JOLTS)
+- bea: Bureau of Economic Analysis (PCE, GDP by industry)
+- census: Census economic indicators (M3, retail sales)
 
-FRED is used as supplemental fallback only, not primary source.
+FRED remains supplemental only for legacy macro context fields.
 """
 
 from __future__ import annotations

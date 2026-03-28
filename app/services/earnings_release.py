@@ -13,6 +13,7 @@ from app.models import Company, EarningsRelease
 from app.services.sec_edgar import FilingMetadata
 
 _EARNINGS_ITEM_CODES = {"2.02"}
+_TEXT_DOCUMENT_EXTENSIONS = {".htm", ".html", ".txt", ".xml", ".xhtml"}
 _GUIDANCE_HINTS = ("guidance", "expect", "expects", "forecast", "project", "projected", "outlook", "anticipate")
 _MONEY_RANGE_PATTERN = re.compile(
     r"(?P<low>\$?\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:billion|million|thousand|bn|mm|m|k))?)\s*(?:to|and|-)\s*(?P<high>\$?\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:billion|million|thousand|bn|mm|m|k))?)",
@@ -208,9 +209,13 @@ def _build_release(cik: str, filing: FilingMetadata, *, client: Any | None) -> N
         if client is None:
             break
         document_name = candidate["document_name"]
+        if not _is_supported_text_document(document_name):
+            continue
         try:
             source_url, document_payload = client.get_filing_document_text(cik, filing.accession_number, document_name)
         except Exception:
+            continue
+        if not _looks_like_text_payload(document_payload):
             continue
         exhibit_document = candidate["exhibit_document"]
         exhibit_type = candidate["exhibit_type"]
@@ -257,7 +262,7 @@ def _candidate_documents(client: Any | None, cik: str, filing: FilingMetadata) -
         candidates.extend(_documents_from_directory(items))
 
     primary_document = (filing.primary_document or "").strip() or None
-    if primary_document:
+    if primary_document and _is_supported_text_document(primary_document):
         candidates.append(
             {
                 "document_name": primary_document,
@@ -292,6 +297,8 @@ def _documents_from_directory(items: list[Any]) -> list[dict[str, str | None]]:
             continue
         document_name = str(item.get("name") or item.get("document") or "").strip()
         if not document_name:
+            continue
+        if not _is_supported_text_document(document_name):
             continue
         exhibit_type = _extract_exhibit_type(item)
         if exhibit_type not in {"99.1", "99.2"}:
@@ -557,10 +564,39 @@ def _build_filing_document_url(cik: str, accession_number: str, primary_document
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{str(cik).zfill(10)}.json#accn={accession_number}"
 
 
+def _is_supported_text_document(document_name: str | None) -> bool:
+    if not document_name:
+        return False
+    normalized = document_name.strip().lower()
+    if not normalized:
+        return False
+    if "." not in normalized:
+        return True
+    for extension in _TEXT_DOCUMENT_EXTENSIONS:
+        if normalized.endswith(extension):
+            return True
+    return False
+
+
+def _looks_like_text_payload(document_payload: str | None) -> bool:
+    if not document_payload:
+        return False
+    if "\x00" in document_payload:
+        return False
+    sample = document_payload[:2048]
+    if not sample:
+        return False
+    control_count = sum(1 for char in sample if ord(char) < 32 and char not in "\t\n\r")
+    if control_count:
+        return False
+    return any(token in sample.lower() for token in ("<html", "<body", "<table", "<p", "<div", "<xml", "revenue", "earnings", "guidance"))
+
+
 def _clean_text(value: str | None) -> str | None:
     if value is None:
         return None
-    cleaned = re.sub(r"\s+", " ", value).strip(" \t\r\n;:,")
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", value)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n;:,")
     return cleaned or None
 
 

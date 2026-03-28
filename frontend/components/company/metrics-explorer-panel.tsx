@@ -9,7 +9,7 @@ import { formatDate } from "@/lib/format";
 import type { CompanyDerivedMetricsSummaryResponse, DerivedMetricValuePayload } from "@/lib/types";
 
 const REFRESH_POLL_INTERVAL_MS = 3000;
-const DISPLAY_KEYS = [
+const GENERAL_DISPLAY_KEYS = [
   "revenue_growth",
   "eps_growth",
   "gross_margin",
@@ -22,7 +22,20 @@ const DISPLAY_KEYS = [
   "cash_ratio",
   "shareholder_yield",
   "cash_conversion_cycle_days",
-];
+] as const;
+
+const BANK_DISPLAY_KEYS = [
+  "net_interest_margin",
+  "provision_burden",
+  "asset_quality_ratio",
+  "cet1_ratio",
+  "tier1_capital_ratio",
+  "total_capital_ratio",
+  "core_deposit_ratio",
+  "uninsured_deposit_ratio",
+  "tangible_book_value_per_share",
+  "roatce",
+] as const;
 
 interface MetricsExplorerPanelProps {
   ticker: string;
@@ -93,6 +106,10 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
     }
     return map;
   }, [payload?.metrics]);
+  const bankMode = Boolean(
+    payload?.company?.regulated_entity && (BANK_DISPLAY_KEYS as readonly string[]).some((key) => metricMap.has(key))
+  );
+  const displayKeys = bankMode ? BANK_DISPLAY_KEYS : GENERAL_DISPLAY_KEYS;
 
   if (loading) {
     return <div className="text-muted">Loading derived metrics explorer...</div>;
@@ -131,7 +148,7 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
       />
 
       <div className="metric-grid">
-        {DISPLAY_KEYS.map((key) => {
+        {displayKeys.map((key) => {
           const metric = metricMap.get(key);
           return <MetricValueCard key={key} metricKey={key} metric={metric} />;
         })}

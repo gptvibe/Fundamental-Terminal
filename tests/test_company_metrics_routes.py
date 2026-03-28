@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.db import get_db_session
 from app.main import RefreshState, app
 
 
@@ -41,6 +44,21 @@ def _metric_row(period_type: str, period_end: date, metric_key: str, value: floa
     )
 
 
+@contextmanager
+def _client():
+    app.dependency_overrides[get_db_session] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+
+@pytest.fixture(autouse=True)
+def _stub_regulated_bank_query(monkeypatch):
+    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
+
+
 def test_metrics_endpoint_returns_typed_payload(monkeypatch):
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
@@ -60,8 +78,8 @@ def test_metrics_endpoint_returns_typed_payload(monkeypatch):
     )
     monkeypatch.setattr(main_module, "get_company_derived_metrics_last_checked", lambda *_args, **_kwargs: datetime.now(timezone.utc))
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics?period_type=ttm&max_periods=12")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics?period_type=ttm&max_periods=12")
 
     assert response.status_code == 200
     payload = response.json()
@@ -104,8 +122,8 @@ def test_metrics_summary_endpoint_returns_latest_period(monkeypatch):
     )
     monkeypatch.setattr(main_module, "get_company_derived_metrics_last_checked", lambda *_args, **_kwargs: datetime.now(timezone.utc))
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics/summary?period_type=ttm")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics/summary?period_type=ttm")
 
     assert response.status_code == 200
     payload = response.json()
@@ -133,8 +151,8 @@ def test_metrics_endpoint_triggers_refresh_when_company_missing(monkeypatch):
         lambda *_args, **_kwargs: RefreshState(triggered=True, reason="missing", ticker="AAPL", job_id="job-1"),
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics")
 
     assert response.status_code == 200
     payload = response.json()
@@ -172,8 +190,8 @@ def test_metrics_endpoint_hides_price_dependent_metric_values_in_strict_mode(mon
     )
     monkeypatch.setattr(main_module, "get_company_derived_metrics_last_checked", lambda *_args, **_kwargs: datetime.now(timezone.utc))
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics?period_type=ttm&max_periods=12")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics?period_type=ttm&max_periods=12")
 
     assert response.status_code == 200
     payload = response.json()

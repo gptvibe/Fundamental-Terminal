@@ -12,13 +12,15 @@ def _statement(
     period_end: date,
     filing_type: str,
     data: dict[str, float | int | list[dict[str, float | str | None]] | None],
+    *,
+    statement_type: str = "canonical_xbrl",
 ):
     return SimpleNamespace(
         id=statement_id,
         period_start=period_start,
         period_end=period_end,
         filing_type=filing_type,
-        statement_type="canonical_xbrl",
+        statement_type=statement_type,
         source="https://data.sec.gov/example",
         last_updated=datetime.now(timezone.utc),
         data=data,
@@ -156,3 +158,109 @@ def test_build_derived_metric_points_handles_missing_and_partial_segment_data():
     geo = next(item for item in segment_rows if item["metric_key"] == "geography_concentration")
     assert geo["metric_value"] is None
     assert "segment_data_unavailable" in geo["quality_flags"]
+
+
+def test_build_derived_metric_points_includes_bank_metrics():
+    statements = [
+        _statement(
+            1,
+            date(2025, 1, 1),
+            date(2025, 3, 31),
+            "CALL",
+            {
+                "net_income": 10.0,
+                "total_assets": 1000.0,
+                "stockholders_equity": 100.0,
+                "net_interest_income": 30.0,
+                "provision_for_credit_losses": 3.0,
+                "deposits_total": 700.0,
+                "core_deposits": 500.0,
+                "uninsured_deposits": 100.0,
+                "net_interest_margin": 0.031,
+                "nonperforming_assets_ratio": 0.01,
+                "common_equity_tier1_ratio": 0.11,
+                "tier1_risk_weighted_ratio": 0.12,
+                "total_risk_based_capital_ratio": 0.14,
+                "tangible_common_equity": 82.0,
+                "weighted_average_diluted_shares": 10.0,
+            },
+            statement_type="canonical_bank_regulatory",
+        ),
+        _statement(
+            2,
+            date(2025, 4, 1),
+            date(2025, 6, 30),
+            "CALL",
+            {
+                "net_income": 11.0,
+                "total_assets": 1010.0,
+                "stockholders_equity": 101.0,
+                "net_interest_income": 31.0,
+                "provision_for_credit_losses": 3.0,
+                "deposits_total": 710.0,
+                "core_deposits": 505.0,
+                "uninsured_deposits": 102.0,
+                "net_interest_margin": 0.032,
+                "nonperforming_assets_ratio": 0.011,
+                "common_equity_tier1_ratio": 0.112,
+                "tier1_risk_weighted_ratio": 0.121,
+                "total_risk_based_capital_ratio": 0.141,
+                "tangible_common_equity": 83.0,
+                "weighted_average_diluted_shares": 10.0,
+            },
+            statement_type="canonical_bank_regulatory",
+        ),
+        _statement(
+            3,
+            date(2025, 7, 1),
+            date(2025, 9, 30),
+            "CALL",
+            {
+                "net_income": 12.0,
+                "total_assets": 1020.0,
+                "stockholders_equity": 102.0,
+                "net_interest_income": 32.0,
+                "provision_for_credit_losses": 4.0,
+                "deposits_total": 720.0,
+                "core_deposits": 510.0,
+                "uninsured_deposits": 105.0,
+                "net_interest_margin": 0.033,
+                "nonperforming_assets_ratio": 0.012,
+                "common_equity_tier1_ratio": 0.113,
+                "tier1_risk_weighted_ratio": 0.122,
+                "total_risk_based_capital_ratio": 0.142,
+                "tangible_common_equity": 84.0,
+                "weighted_average_diluted_shares": 10.0,
+            },
+            statement_type="canonical_bank_regulatory",
+        ),
+        _statement(
+            4,
+            date(2025, 10, 1),
+            date(2025, 12, 31),
+            "CALL",
+            {
+                "net_income": 13.0,
+                "total_assets": 1030.0,
+                "stockholders_equity": 103.0,
+                "net_interest_income": 33.0,
+                "provision_for_credit_losses": 4.0,
+                "deposits_total": 730.0,
+                "core_deposits": 515.0,
+                "uninsured_deposits": 108.0,
+                "net_interest_margin": 0.034,
+                "nonperforming_assets_ratio": 0.013,
+                "common_equity_tier1_ratio": 0.114,
+                "tier1_risk_weighted_ratio": 0.123,
+                "total_risk_based_capital_ratio": 0.143,
+                "tangible_common_equity": 85.0,
+                "weighted_average_diluted_shares": 10.0,
+            },
+            statement_type="canonical_bank_regulatory",
+        ),
+    ]
+
+    points = build_derived_metric_points(statements, [])
+
+    metric_keys = {point["metric_key"] for point in points}
+    assert {"net_interest_margin", "provision_burden", "cet1_ratio", "roatce"}.issubset(metric_keys)

@@ -19,6 +19,9 @@ export function MarketContextPanel({ context }: MarketContextPanelProps) {
     .filter((point) => point.tenor !== "2y")
     .sort((left, right) => tenorRank(left.tenor) - tenorRank(right.tenor));
   const fredEnabled = isFredEnabled(context);
+  const relevantIndicators = (context.relevant_indicators ?? []).filter((item) => item.value != null && item.status === "ok");
+  const cyclicalDemand = (context.cyclical_demand ?? []).filter((item) => item.value != null && item.status === "ok");
+  const cyclicalCosts = (context.cyclical_costs ?? []).filter((item) => item.value != null && item.status === "ok");
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -76,6 +79,56 @@ export function MarketContextPanel({ context }: MarketContextPanelProps) {
           )}
         </div>
       </div>
+
+      {relevantIndicators.length ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>Relevant Cyclical Indicators</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {relevantIndicators.map((item) => (
+              <div key={item.series_id} className="filing-link-card" style={{ display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <strong>{item.label}</strong>
+                  <span className="pill">{formatSeriesValue(item.value, item.units)}</span>
+                </div>
+                <div className="text-muted">
+                  {item.observation_date ? `${item.observation_date} | ` : ""}
+                  {item.source_name}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {cyclicalDemand.length ? (
+        <MacroGroupedSection title="Cyclical Demand" items={cyclicalDemand} />
+      ) : null}
+      {cyclicalCosts.length ? (
+        <MacroGroupedSection title="Cyclical Costs & Labor" items={cyclicalCosts} />
+      ) : null}
+    </div>
+  );
+}
+
+function MacroGroupedSection({ title, items }: { title: string; items: MarketContextPanelProps["context"] extends infer _T ? import("@/lib/types").MacroSeriesItemPayload[] : never }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ fontWeight: 600, color: "var(--text)" }}>{title}</div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {items.map((item) => (
+          <div key={item.series_id} className="filing-link-card" style={{ display: "grid", gap: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <strong>{item.label}</strong>
+              <span className="pill">{formatSeriesValue(item.value, item.units)}</span>
+            </div>
+            <div className="text-muted">
+              {item.change_percent != null ? `${(item.change_percent * 100).toFixed(2)}% vs prior | ` : ""}
+              {item.observation_date ? `${item.observation_date} | ` : ""}
+              {item.source_name}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -105,6 +158,15 @@ function formatSeriesValue(value: number | null, units: string): string {
   }
   if (units === "percent") {
     return formatPercent(value);
+  }
+  if (units === "thousands") {
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value * 1000);
+  }
+  if (units === "billions_usd") {
+    return `$${value.toFixed(1)}B`;
+  }
+  if (units === "millions_usd") {
+    return value >= 1000 ? `$${(value / 1000).toFixed(2)}B` : `$${value.toFixed(0)}M`;
   }
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(value);
 }

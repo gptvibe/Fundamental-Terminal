@@ -2,16 +2,14 @@
 
 import * as React from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CompanyFinancialsTabPage from "@/app/company/[ticker]/financials/page";
 
-vi.mock("next/navigation", () => ({
-  useParams: () => ({ ticker: "acme" }),
-}));
+const workspaceFixture = vi.hoisted(() => ({ current: null as any }));
 
-vi.mock("@/hooks/use-company-workspace", () => ({
-  useCompanyWorkspace: () => ({
+function makeWorkspaceFixture() {
+  return {
     data: {
       company: {
         ticker: "ACME",
@@ -27,6 +25,7 @@ vi.mock("@/hooks/use-company-workspace", () => ({
         last_checked_institutional: null,
         last_checked_filings: null,
         cache_state: "fresh",
+        regulated_entity: null,
       },
       financials: [],
       price_history: [],
@@ -83,6 +82,7 @@ vi.mock("@/hooks/use-company-workspace", () => ({
       last_checked: "2026-03-22T00:00:00Z",
       last_checked_financials: "2026-03-22T00:00:00Z",
       last_checked_prices: "2026-03-21T00:00:00Z",
+      regulated_entity: null,
     },
     financials: [],
     annualStatements: [],
@@ -132,6 +132,7 @@ vi.mock("@/hooks/use-company-workspace", () => ({
       stock_based_compensation: null,
       weighted_average_diluted_shares: null,
       segment_breakdown: [],
+      regulated_bank: null,
       reconciliation: {
         status: "disagreement",
         as_of: "2025-12-31",
@@ -192,7 +193,15 @@ vi.mock("@/hooks/use-company-workspace", () => ({
     connectionState: "connected",
     queueRefresh: vi.fn(),
     reloadKey: "reload-1",
-  }),
+  };
+}
+
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ ticker: "acme" }),
+}));
+
+vi.mock("@/hooks/use-company-workspace", () => ({
+  useCompanyWorkspace: () => workspaceFixture.current,
 }));
 
 vi.mock("@/components/layout/company-workspace-shell", () => ({
@@ -216,6 +225,10 @@ vi.mock("@/components/company/capital-structure-intelligence-panel", () => ({
 }));
 
 describe("CompanyFinancialsTabPage", () => {
+  beforeEach(() => {
+    workspaceFixture.current = makeWorkspaceFixture();
+  });
+
   it("renders registry-backed source freshness metadata for financials", () => {
     render(React.createElement(CompanyFinancialsTabPage));
 
@@ -228,5 +241,69 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
     expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
     expect(screen.getByText(/Price history and market profile data on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
+  });
+
+  it("switches to the regulated bank workspace for bank issuers", () => {
+    const bankStatement = {
+      ...workspaceFixture.current.latestFinancial,
+      filing_type: "CALL",
+      statement_type: "canonical_bank_regulatory",
+      source: "https://api.fdic.gov/banks/financials",
+      revenue: null,
+      operating_income: null,
+      free_cash_flow: null,
+      regulated_bank: {
+        source_id: "fdic_bankfind_financials",
+        reporting_basis: "fdic_call_report",
+        confidence_score: 0.94,
+        confidence_flags: ["matched_by_cert"],
+        net_interest_income: 1_200_000_000,
+        noninterest_income: 400_000_000,
+        noninterest_expense: 900_000_000,
+        pretax_income: 500_000_000,
+        provision_for_credit_losses: 200_000_000,
+        deposits_total: 80_000_000_000,
+        core_deposits: 60_000_000_000,
+        uninsured_deposits: 12_000_000_000,
+        loans_net: 55_000_000_000,
+        net_interest_margin: 0.038,
+        nonperforming_assets_ratio: 0.011,
+        common_equity_tier1_ratio: 0.121,
+        tier1_risk_weighted_ratio: 0.133,
+        total_risk_based_capital_ratio: 0.149,
+        return_on_assets_ratio: 0.011,
+        return_on_equity_ratio: 0.124,
+        tangible_common_equity: 9_000_000_000,
+      },
+    };
+    workspaceFixture.current.company = {
+      ...workspaceFixture.current.company,
+      sector: "Financials",
+      regulated_entity: {
+        issuer_type: "bank",
+        reporting_basis: "fdic_call_report",
+        confidence_score: 0.98,
+        confidence_flags: [],
+      },
+    };
+    workspaceFixture.current.data.company = {
+      ...workspaceFixture.current.data.company,
+      sector: "Financials",
+      market_sector: "Financials",
+      market_industry: "Banks",
+      regulated_entity: workspaceFixture.current.company.regulated_entity,
+    };
+    workspaceFixture.current.latestFinancial = bankStatement;
+    workspaceFixture.current.financials = [bankStatement];
+    workspaceFixture.current.annualStatements = [bankStatement];
+
+    render(React.createElement(CompanyFinancialsTabPage));
+
+    expect(screen.getByText("Regulated Bank Snapshot")).toBeTruthy();
+    expect(screen.getByText("Derived Bank Metrics")).toBeTruthy();
+    expect(screen.getByText("Regulated Bank Statements")).toBeTruthy();
+    expect(screen.getByText("FDIC / FR Y-9C + SEC")).toBeTruthy();
+    expect(screen.getAllByText("3.80%").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Capital Structure Intelligence")).toBeNull();
   });
 });

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.db import get_db_session
 from app.main import app
+
+
+@contextmanager
+def _client():
+    app.dependency_overrides[get_db_session] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
 
 
 def _response_fields(schema: dict, path: str) -> set[str]:
@@ -18,8 +30,8 @@ PROVENANCE_FIELDS = {"provenance", "as_of", "last_refreshed_at", "source_mix", "
 
 
 def test_metrics_timeseries_openapi_contract_matches_frontend_shape():
-    client = TestClient(app)
-    schema = client.get("/openapi.json").json()
+    with _client() as client:
+        schema = client.get("/openapi.json").json()
 
     path_schema = schema["paths"]["/api/companies/{ticker}/metrics-timeseries"]["get"]
     parameter_names = {item["name"] for item in path_schema.get("parameters", [])}
@@ -50,8 +62,8 @@ def test_metrics_timeseries_openapi_contract_matches_frontend_shape():
 
 
 def test_metrics_mart_openapi_contract_matches_frontend_shape():
-    client = TestClient(app)
-    schema = client.get("/openapi.json").json()
+    with _client() as client:
+        schema = client.get("/openapi.json").json()
 
     metrics_schema = schema["paths"]["/api/companies/{ticker}/metrics"]["get"]
     summary_schema = schema["paths"]["/api/companies/{ticker}/metrics/summary"]["get"]
@@ -95,3 +107,32 @@ def test_metrics_mart_openapi_contract_matches_frontend_shape():
     frontend_types = Path("frontend/lib/types.ts").read_text(encoding="utf-8")
     assert "interface CompanyDerivedMetricsResponse" in frontend_types
     assert "interface CompanyDerivedMetricsSummaryResponse" in frontend_types
+
+
+def test_financial_and_metric_component_schemas_include_bank_contract_fields():
+    with _client() as client:
+        schema = client.get("/openapi.json").json()
+
+    company_schema = schema["components"]["schemas"]["CompanyPayload"]
+    financial_schema = schema["components"]["schemas"]["FinancialPayload"]
+    metrics_schema = schema["components"]["schemas"]["MetricsValuesPayload"]
+
+    assert "regulated_entity" in company_schema.get("properties", {})
+    assert "regulated_bank" in financial_schema.get("properties", {})
+    assert {
+        "net_interest_margin",
+        "provision_burden",
+        "asset_quality_ratio",
+        "cet1_ratio",
+        "tier1_capital_ratio",
+        "total_capital_ratio",
+        "core_deposit_ratio",
+        "uninsured_deposit_ratio",
+        "tangible_book_value_per_share",
+        "roatce",
+    }.issubset(metrics_schema.get("properties", {}).keys())
+
+    frontend_types = Path("frontend/lib/types.ts").read_text(encoding="utf-8")
+    assert "interface RegulatedEntityPayload" in frontend_types
+    assert "interface RegulatedBankFinancialPayload" in frontend_types
+    assert "net_interest_margin: number | null;" in frontend_types

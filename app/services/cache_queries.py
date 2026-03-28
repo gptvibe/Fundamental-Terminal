@@ -29,6 +29,7 @@ from app.models import (
     ProxyStatement,
 )
 from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked
+from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, FILING_PARSER_STATEMENT_TYPE
 
 
@@ -213,6 +214,18 @@ def get_company_financials(session: Session, company_id: int) -> list[FinancialS
         .where(
             FinancialStatement.company_id == company_id,
             FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
+        )
+        .order_by(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_regulated_bank_financials(session: Session, company_id: int) -> list[FinancialStatement]:
+    statement = (
+        select(FinancialStatement)
+        .where(
+            FinancialStatement.company_id == company_id,
+            FinancialStatement.statement_type == BANK_REGULATORY_STATEMENT_TYPE,
         )
         .order_by(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
     )

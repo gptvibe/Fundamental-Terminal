@@ -45,6 +45,9 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
             "curve_points",
             "fred_series",
             "provenance_details",
+            "cyclical_demand",
+            "cyclical_costs",
+            "relevant_indicators",
             "refresh",
             *provenance_fields,
         },
@@ -132,6 +135,9 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "confidence_flags: string[];" in frontend_types
     assert "strict_official_mode: boolean;" in frontend_types
     assert "provenance_details: Record<string, unknown>;" in frontend_types
+    assert "cyclical_demand?: MacroSeriesItemPayload[];" in frontend_types
+    assert "cyclical_costs?: MacroSeriesItemPayload[];" in frontend_types
+    assert "relevant_indicators?: MacroSeriesItemPayload[];" in frontend_types
     assert "diagnostics: DataQualityDiagnosticsPayload;" in frontend_types
     assert "interface FinancialReconciliationPayload" in frontend_types
     assert "interface FinancialFactReferencePayload" in frontend_types

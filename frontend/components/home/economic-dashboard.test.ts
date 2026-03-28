@@ -96,6 +96,15 @@ function makeContext(): CompanyMarketContextResponse {
     },
     fetched_at: "2026-03-22T00:00:00Z",
     refresh: { triggered: false, reason: "fresh", ticker: null, job_id: null },
+    cyclical_demand: [
+      { series_id: "census_m3_new_orders_total", label: "Manufacturing New Orders (M3)", source_name: "U.S. Census Bureau Economic Indicators", source_url: "https://api.census.gov/data/timeseries/eits/m3", units: "millions_usd", value: 619137, previous_value: 621859, change: -2722, change_percent: -0.0044, observation_date: "2025-12-31", release_date: null, history: [], status: "ok" },
+      { series_id: "census_retail_sales_total", label: "Retail & Food Services Sales", source_name: "U.S. Census Bureau Economic Indicators", source_url: "https://api.census.gov/data/timeseries/eits/marts", units: "millions_usd", value: 734685, previous_value: 734718, change: -33, change_percent: -0.00004, observation_date: "2025-12-31", release_date: null, history: [], status: "ok" },
+    ],
+    cyclical_costs: [
+      { series_id: "WPSFD4", label: "PPI Final Demand", source_name: "U.S. Bureau of Labor Statistics", source_url: "https://www.bls.gov/data/", units: "percent", value: 0.021, previous_value: 0.019, change: 0.002, change_percent: 0.105, observation_date: "2026-03-01", release_date: null, history: [], status: "ok" },
+      { series_id: "CIU1010000000000I", label: "Employment Cost Index (Total Compensation)", source_name: "U.S. Bureau of Labor Statistics", source_url: "https://www.bls.gov/data/", units: "percent", value: 0.0398, previous_value: 0.034, change: 0.0058, change_percent: 0.1705, observation_date: "2025-12-31", release_date: null, history: [], status: "ok" },
+    ],
+    relevant_indicators: [],
   };
 }
 
@@ -119,5 +128,8 @@ describe("EconomicDashboard", () => {
     expect(html).toContain("10Y minus RRP");
     expect(html).toContain("Expansion regime");
     expect(html).toContain("U.S. Treasury Daily Par Yield Curve");
+    expect(html).toContain("Cyclical Demand");
+    expect(html).toContain("Manufacturing New Orders (M3)");
+    expect(html).toContain("Cyclical Costs &amp; Labor");
   });
 });

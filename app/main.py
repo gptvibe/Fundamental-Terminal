@@ -54,6 +54,7 @@ from app.services import (
     get_company_filing_events,
     get_company_filing_insights,
     get_company_financials,
+    get_company_regulated_bank_financials,
     get_company_form144_cache_status,
     get_company_form144_filings,
     get_company_insider_trade_cache_status,
@@ -95,6 +96,7 @@ from app.services.market_context import (
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
+from app.services.regulated_financials import build_regulated_entity_payload, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
@@ -382,7 +384,7 @@ def company_financials(
         _store_hot_cached_payload(hot_key, payload)
         return payload
 
-    financials = get_company_financials(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
@@ -397,6 +399,7 @@ def company_financials(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
             last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
         ),
         financials=serialized_financials,
         price_history=[_serialize_price_history(point) for point in price_history],
@@ -563,7 +566,7 @@ def company_changes_since_last_filing(
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    financials = get_company_financials(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
     if parsed_as_of is not None:
         financials = select_point_in_time_financials(financials, parsed_as_of)
     restatements = get_company_financial_restatements(session, snapshot.company.id)
@@ -680,7 +683,7 @@ def company_metrics_timeseries(
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    financials = get_company_financials(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
@@ -698,6 +701,7 @@ def company_metrics_timeseries(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
             last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
         ),
         series=point_payload,
         last_financials_check=snapshot.last_checked,
@@ -746,7 +750,7 @@ def company_derived_metrics(
         return _apply_requested_as_of(payload, requested_as_of)
 
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-    financials = get_company_financials(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
 
@@ -775,6 +779,7 @@ def company_derived_metrics(
                 snapshot,
                 last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
                 last_checked_prices=price_last_checked,
+                regulated_entity=_regulated_entity_payload(snapshot.company, financials),
             ),
             period_type=period_type,
             periods=period_payload,
@@ -821,6 +826,7 @@ def company_derived_metrics(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
             last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
         ),
         period_type=period_type,
         periods=period_payload,
@@ -874,7 +880,7 @@ def company_derived_metrics_summary(
         return _apply_requested_as_of(payload, requested_as_of)
 
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-    financials = get_company_financials(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
 
@@ -896,6 +902,7 @@ def company_derived_metrics_summary(
                 snapshot,
                 last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
                 last_checked_prices=price_last_checked,
+                regulated_entity=_regulated_entity_payload(snapshot.company, financials),
             ),
             period_type=summary["period_type"],
             latest_period_end=summary["latest_period_end"],
@@ -933,6 +940,7 @@ def company_derived_metrics_summary(
             snapshot,
             last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
             last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
         ),
         period_type=summary["period_type"],
         latest_period_end=summary["latest_period_end"],
@@ -1575,7 +1583,10 @@ def _v2_dict_to_response(
         rates_credit=_items("rates_credit"),
         inflation_labor=_items("inflation_labor"),
         growth_activity=_items("growth_activity"),
+        cyclical_demand=_items("cyclical_demand"),
+        cyclical_costs=_items("cyclical_costs"),
         relevant_series=list(payload.get("relevant_series") or []),
+        relevant_indicators=_items("relevant_indicators"),
         sector_exposure=list(payload.get("sector_exposure") or []),
         hqm_snapshot=payload.get("hqm_snapshot"),
         **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
@@ -2520,6 +2531,17 @@ def _visible_price_history(session: Session, company_id: int) -> list[PriceHisto
     return get_company_price_history(session, company_id)
 
 
+def _visible_financials_for_company(session: Session, company: Any) -> list[FinancialStatement]:
+    sec_financials = get_company_financials(session, company.id)
+    regulated_financials = get_company_regulated_bank_financials(session, company.id)
+    return select_preferred_financials(company, sec_financials, regulated_financials)
+
+
+def _regulated_entity_payload(company: Any, financials: list[Any] | None = None) -> RegulatedEntityPayload | None:
+    payload = build_regulated_entity_payload(company, financials)
+    return RegulatedEntityPayload.model_validate(payload) if payload is not None else None
+
+
 def _resolve_cached_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:
     snapshot = get_company_snapshot(session, ticker)
     if snapshot is not None:
@@ -2731,6 +2753,7 @@ def _serialize_company(
     last_checked_institutional: datetime | None = None,
     last_checked_filings: datetime | None = None,
     last_checked_earnings: datetime | None = None,
+    regulated_entity: RegulatedEntityPayload | None = None,
 ) -> CompanyPayload:
     market_sector, market_industry = _company_market_classification(snapshot.company)
     return CompanyPayload(
@@ -2740,6 +2763,7 @@ def _serialize_company(
         sector=snapshot.company.sector,
         market_sector=market_sector,
         market_industry=market_industry,
+        regulated_entity=regulated_entity,
         strict_official_mode=settings.strict_official_mode,
         last_checked=last_checked if last_checked is not None else snapshot.last_checked,
         last_checked_financials=snapshot.last_checked,
@@ -3723,12 +3747,12 @@ def _market_context_provenance_contract(
     if fred_usage is not None:
         usages.append(fred_usage)
 
-    for section_key in ("rates_credit", "inflation_labor", "growth_activity"):
+    for section_key in ("rates_credit", "inflation_labor", "growth_activity", "cyclical_demand", "cyclical_costs", "relevant_indicators"):
         for item in payload.get(section_key) or []:
             if not isinstance(item, dict):
                 continue
             usage = _source_usage_from_hint(
-                str(item.get("source_name") or item.get("source_url") or ""),
+                str(item.get("source_url") or item.get("source_name") or ""),
                 role="supplemental",
                 as_of=item.get("observation_date") or item.get("release_date"),
                 last_refreshed_at=fetched_at,
@@ -3739,7 +3763,7 @@ def _market_context_provenance_contract(
     hqm_snapshot = payload.get("hqm_snapshot")
     if isinstance(hqm_snapshot, dict):
         hqm_usage = _source_usage_from_hint(
-            str(hqm_snapshot.get("source_name") or hqm_snapshot.get("source_url") or ""),
+            str(hqm_snapshot.get("source_url") or hqm_snapshot.get("source_name") or ""),
             role="supplemental",
             as_of=hqm_snapshot.get("observation_date"),
             last_refreshed_at=fetched_at,
@@ -3753,6 +3777,8 @@ def _market_context_provenance_contract(
     as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("rates_credit") or [] if isinstance(item, dict))
     as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("inflation_labor") or [] if isinstance(item, dict))
     as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("growth_activity") or [] if isinstance(item, dict))
+    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("cyclical_demand") or [] if isinstance(item, dict))
+    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("cyclical_costs") or [] if isinstance(item, dict))
     if isinstance(hqm_snapshot, dict):
         as_of_values.append(hqm_snapshot.get("observation_date"))
 
@@ -3772,6 +3798,20 @@ def _market_context_provenance_contract(
         confidence_flags.append("supplemental_fred_unconfigured")
     elif fred_status != "ok":
         confidence_flags.append(f"fred_{fred_status}")
+    census_details = provenance_details.get("census") if isinstance(provenance_details.get("census"), dict) else {}
+    census_status = str(census_details.get("status") or "ok")
+    if census_status != "ok":
+        confidence_flags.append(f"census_{census_status}")
+    bls_details = provenance_details.get("bls") if isinstance(provenance_details.get("bls"), dict) else {}
+    bls_status = str(bls_details.get("status") or "ok")
+    if bls_status != "ok":
+        confidence_flags.append(f"bls_{bls_status}")
+    bea_details = provenance_details.get("bea") if isinstance(provenance_details.get("bea"), dict) else {}
+    if not bool(bea_details.get("configured", True)):
+        confidence_flags.append("bea_unconfigured")
+    bea_status = str(bea_details.get("status") or "ok")
+    if bea_status != "ok":
+        confidence_flags.append(f"bea_{bea_status}")
 
     return _build_provenance_contract(
         usages,
@@ -3978,8 +4018,42 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         shares_outstanding=data.get("shares_outstanding"),
         stock_based_compensation=data.get("stock_based_compensation"),
         weighted_average_diluted_shares=data.get("weighted_average_diluted_shares"),
+        regulated_bank=_serialize_regulated_bank_financial(data),
         segment_breakdown=[_serialize_financial_segment(item) for item in data.get("segment_breakdown", []) if isinstance(item, dict)],
         reconciliation=_serialize_financial_reconciliation(getattr(statement, "reconciliation", None)),
+    )
+
+
+def _serialize_regulated_bank_financial(data: dict[str, Any]) -> RegulatedBankFinancialPayload | None:
+    source_id = data.get("regulated_bank_source_id")
+    reporting_basis = data.get("regulated_bank_reporting_basis")
+    if source_id not in {"fdic_bankfind_financials", "federal_reserve_fr_y9c"}:
+        return None
+    if reporting_basis not in {"fdic_call_report", "fr_y9c"}:
+        return None
+
+    return RegulatedBankFinancialPayload(
+        source_id=source_id,
+        reporting_basis=reporting_basis,
+        confidence_score=data.get("regulated_bank_confidence_score"),
+        confidence_flags=[str(flag) for flag in data.get("regulated_bank_confidence_flags", []) if flag],
+        net_interest_income=data.get("net_interest_income"),
+        noninterest_income=data.get("noninterest_income"),
+        noninterest_expense=data.get("noninterest_expense"),
+        pretax_income=data.get("pretax_income"),
+        provision_for_credit_losses=data.get("provision_for_credit_losses"),
+        deposits_total=data.get("deposits_total"),
+        core_deposits=data.get("core_deposits"),
+        uninsured_deposits=data.get("uninsured_deposits"),
+        loans_net=data.get("loans_net"),
+        net_interest_margin=data.get("net_interest_margin"),
+        nonperforming_assets_ratio=data.get("nonperforming_assets_ratio"),
+        common_equity_tier1_ratio=data.get("common_equity_tier1_ratio"),
+        tier1_risk_weighted_ratio=data.get("tier1_risk_weighted_ratio"),
+        total_risk_based_capital_ratio=data.get("total_risk_based_capital_ratio"),
+        return_on_assets_ratio=data.get("return_on_assets_ratio"),
+        return_on_equity_ratio=data.get("return_on_equity_ratio"),
+        tangible_common_equity=data.get("tangible_common_equity"),
     )
 
 

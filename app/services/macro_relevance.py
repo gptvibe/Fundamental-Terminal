@@ -37,32 +37,35 @@ class MacroRelevanceResult(NamedTuple):
 
 # Relevance definitions by profile tag
 _PROFILE_RELEVANCE: dict[str, list[str]] = {
-    "technology": [
+    "technology_hardware": [
+        "DGS2", "DGS10", "HQM_30Y",
+        "census_m3_shipments_total", "census_m3_new_orders_total", "census_m3_inventories_total",
+        "bea_gdp_information", "WPSFD4", "CIU1010000000000I",
+    ],
+    "technology_software": [
         "DGS2", "DGS10", "HQM_30Y", "CP",                        # rates + credit + corporate profits
-        "A191RL1Q225SBEA",                                         # GDP growth (capex env)
+        "bea_gdp_information", "CIU1010000000000I", "JTS000000000000000JOL",
     ],
     "financials": [
         "DGS2", "DGS10", "slope_2s10s",                           # yield curve shape
         "HQM_30Y", "BAA10Y",                                       # credit conditions
         "LNS14000000", "CUSR0000SA0",                              # labor/inflation backdrop
-        "A191RL1Q225SBEA",                                         # growth conditions
+        "bea_pce_total",
     ],
     "consumer_discretionary": [
-        "CUSR0000SA0", "CUSR0000SA0L1E", "PI", "PCE",             # CPI, core CPI, income, PCE
-        "LNS14000000",                                             # unemployment
+        "CUSR0000SA0", "CUSR0000SA0L1E", "bea_pce_total", "census_retail_sales_total",
+        "LNS14000000", "CIU1010000000000I",
     ],
     "consumer_staples": [
-        "CUSR0000SA0", "CUSR0000SA0L1E", "PI", "PCE",
-        "WPSFD4",                                                  # PPI input costs
+        "CUSR0000SA0", "CUSR0000SA0L1E", "bea_pce_total", "census_retail_sales_total",
+        "WPSFD4", "CIU1010000000000I",
     ],
     "industrials": [
-        "WPSFD4", "A191RL1Q225SBEA",                               # PPI + GDP
-        "CP",                                                      # corporate profits
-        "LNS14000000", "CES0000000001",                            # labor market
+        "census_m3_shipments_total", "census_m3_new_orders_total", "census_m3_backlog_total", "census_m3_inventories_total",
+        "bea_gdp_manufacturing", "WPSFD4", "CIU1010000000000I", "JTS000000000000000JOL",
     ],
     "energy": [
-        "DGS10", "A191RL1Q225SBEA", "PCE",                        # rates + growth + consumer demand
-        "CP",
+        "DGS10", "bea_pce_total", "WPSFD4", "JTS000000000000000JOL",
     ],
     "utilities": [
         "DGS2", "DGS10", "slope_2s10s",                           # rate sensitivity
@@ -75,34 +78,34 @@ _PROFILE_RELEVANCE: dict[str, list[str]] = {
     ],
     "healthcare": [
         "CUSR0000SA0", "CUSR0000SA0L1E",                           # inflation (drug costs)
-        "A191RL1Q225SBEA", "CP",                                   # growth + profits
-        "LNS14000000",                                             # labor (staff costs)
+        "bea_gdp_health_care", "CIU1010000000000I", "JTS000000000000000JOL",
     ],
     "materials": [
-        "WPSFD4", "A191RL1Q225SBEA",
-        "CP", "CES0000000001",
+        "census_m3_shipments_total", "census_m3_inventories_total", "bea_gdp_manufacturing",
+        "WPSFD4", "CIU1010000000000I",
     ],
     "communication_services": [
-        "DGS10", "CP", "PCE",
-        "CUSR0000SA0L1E",
+        "DGS10", "bea_pce_total", "census_retail_sales_total",
+        "CUSR0000SA0L1E", "CIU1010000000000I",
     ],
     # Default for unknown sectors
     "default": [
-        "DGS10", "CUSR0000SA0", "LNS14000000", "A191RL1Q225SBEA",
+        "DGS10", "CUSR0000SA0", "LNS14000000", "bea_pce_total",
     ],
 }
 
 _SECTOR_EXPOSURE_TAGS: dict[str, list[str]] = {
-    "technology": ["growth_sensitive", "rate_sensitive", "credit_spread"],
+    "technology_hardware": ["capex_cycle", "inventory_cycle", "input_cost_sensitive", "rate_sensitive"],
+    "technology_software": ["enterprise_spending", "labor_sensitive", "rate_sensitive"],
     "financials": ["yield_curve", "credit_spread", "rate_sensitive", "labor_inflation_backdrop"],
-    "consumer_discretionary": ["consumer_spending", "inflation_sensitive", "income_sensitive"],
-    "consumer_staples": ["consumer_spending", "inflation_sensitive", "input_cost_sensitive"],
-    "industrials": ["input_cost_sensitive", "gdp_sensitive", "labor_sensitive"],
+    "consumer_discretionary": ["consumer_spending", "retail_cycle", "inflation_sensitive", "income_sensitive"],
+    "consumer_staples": ["consumer_spending", "retail_cycle", "inflation_sensitive", "input_cost_sensitive"],
+    "industrials": ["manufacturing_cycle", "order_backlog", "input_cost_sensitive", "labor_sensitive"],
     "energy": ["gdp_sensitive", "rate_sensitive", "consumer_demand"],
     "utilities": ["rate_sensitive", "yield_curve", "inflation_sensitive"],
     "real_estate": ["rate_sensitive", "yield_curve", "income_sensitive", "credit_spread"],
-    "healthcare": ["inflation_sensitive", "labor_sensitive", "gdp_sensitive"],
-    "materials": ["input_cost_sensitive", "gdp_sensitive", "labor_sensitive"],
+    "healthcare": ["labor_sensitive", "services_demand", "inflation_sensitive"],
+    "materials": ["manufacturing_cycle", "inventory_cycle", "input_cost_sensitive", "labor_sensitive"],
     "communication_services": ["growth_sensitive", "consumer_spending"],
     "default": ["rate_sensitive", "gdp_sensitive"],
 }
@@ -140,8 +143,10 @@ def _resolve_profile(
         if keyword in combined:
             return "financials"
 
-    if any(kw in combined for kw in ("technology", "software", "semiconductor", "tech")):
-        return "technology"
+    if any(kw in combined for kw in ("semiconductor", "semiconductors", "electronics", "electronic", "computer hardware", "communications equipment", "consumer electronics")):
+        return "technology_hardware"
+    if any(kw in combined for kw in ("technology", "software", "saas", "cloud", "internet software", "tech")):
+        return "technology_software"
     if any(kw in combined for kw in ("consumer discretionary", "retail", "restaurants", "apparel", "leisure", "auto")):
         return "consumer_discretionary"
     if any(kw in combined for kw in ("consumer staples", "food", "beverage", "household", "personal products")):

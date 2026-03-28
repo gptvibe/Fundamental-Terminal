@@ -56,6 +56,13 @@ export interface ProvenanceEnvelope {
   confidence_flags: string[];
 }
 
+export interface RegulatedEntityPayload {
+  issuer_type: "bank" | "bank_holding_company";
+  reporting_basis: "fdic_call_report" | "fr_y9c" | "mixed_regulatory";
+  confidence_score: number | null;
+  confidence_flags: string[];
+}
+
 export interface CompanyPayload {
   ticker: string;
   cik: string;
@@ -63,6 +70,7 @@ export interface CompanyPayload {
   sector: string | null;
   market_sector: string | null;
   market_industry: string | null;
+  regulated_entity?: RegulatedEntityPayload | null;
   strict_official_mode: boolean;
   last_checked: string | null;
   last_checked_financials: string | null;
@@ -132,8 +140,33 @@ export interface FinancialPayload {
   shares_outstanding: number | null;
   stock_based_compensation: number | null;
   weighted_average_diluted_shares: number | null;
+  regulated_bank?: RegulatedBankFinancialPayload | null;
   segment_breakdown: FinancialSegmentPayload[];
   reconciliation: FinancialReconciliationPayload | null;
+}
+
+export interface RegulatedBankFinancialPayload {
+  source_id: "fdic_bankfind_financials" | "federal_reserve_fr_y9c";
+  reporting_basis: "fdic_call_report" | "fr_y9c";
+  confidence_score: number | null;
+  confidence_flags: string[];
+  net_interest_income: number | null;
+  noninterest_income: number | null;
+  noninterest_expense: number | null;
+  pretax_income: number | null;
+  provision_for_credit_losses: number | null;
+  deposits_total: number | null;
+  core_deposits: number | null;
+  uninsured_deposits: number | null;
+  loans_net: number | null;
+  net_interest_margin: number | null;
+  nonperforming_assets_ratio: number | null;
+  common_equity_tier1_ratio: number | null;
+  tier1_risk_weighted_ratio: number | null;
+  total_risk_based_capital_ratio: number | null;
+  return_on_assets_ratio: number | null;
+  return_on_equity_ratio: number | null;
+  tangible_common_equity: number | null;
 }
 
 export interface FinancialSegmentPayload {
@@ -409,6 +442,16 @@ export interface MetricsValuesPayload {
   accrual_ratio: number | null;
   cash_conversion: number | null;
   segment_concentration: number | null;
+  net_interest_margin: number | null;
+  provision_burden: number | null;
+  asset_quality_ratio: number | null;
+  cet1_ratio: number | null;
+  tier1_capital_ratio: number | null;
+  total_capital_ratio: number | null;
+  core_deposit_ratio: number | null;
+  uninsured_deposit_ratio: number | null;
+  tangible_book_value_per_share: number | null;
+  roatce: number | null;
 }
 
 export interface MetricsProvenancePayload {
@@ -875,7 +918,10 @@ export interface CompanyMarketContextResponse extends ProvenanceEnvelope {
   rates_credit?: MacroSeriesItemPayload[];
   inflation_labor?: MacroSeriesItemPayload[];
   growth_activity?: MacroSeriesItemPayload[];
+  cyclical_demand?: MacroSeriesItemPayload[];
+  cyclical_costs?: MacroSeriesItemPayload[];
   relevant_series?: string[];
+  relevant_indicators?: MacroSeriesItemPayload[];
   sector_exposure?: string[];
   hqm_snapshot?: Record<string, unknown> | null;
 }

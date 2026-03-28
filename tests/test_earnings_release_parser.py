@@ -123,3 +123,65 @@ def test_collect_earnings_releases_returns_metadata_only_without_document_payloa
     assert release.parse_state == "metadata_only"
     assert release.highlights == ()
     assert release.exhibit_document is None
+
+
+def test_collect_earnings_releases_skips_binary_exhibit_and_falls_back_to_primary_document():
+    filing_index = {
+        "0004": FilingMetadata(
+            accession_number="0004",
+            form="8-K",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2025, 12, 31),
+            primary_document="acme-8k.htm",
+            primary_doc_description="Item 2.02 Results of Operations and Financial Condition",
+            items="2.02,9.01",
+        )
+    }
+    client = _FakeEarningsClient(
+        payload_by_name={
+            "g123ex99_1logo.jpg": "\ufffd\ufffd\ufffd\ufffd\x00\x10JFIF\x00\x01\x02",
+            "acme-8k.htm": load_fixture("form_8k_earnings.html"),
+        },
+        directory_items=[
+            {"name": "g123ex99_1logo.jpg", "type": "EX-99.1", "description": "Exhibit 99.1 earnings release image"},
+            {"name": "acme-8k.htm", "type": "8-K"},
+        ],
+    )
+
+    releases = collect_earnings_releases("0000000004", filing_index, client=client)
+
+    assert len(releases) == 1
+    release = releases[0]
+    assert release.parse_state == "parsed"
+    assert release.exhibit_document is None
+    assert release.exhibit_type is None
+    assert release.source_url.endswith("/acme-8k.htm")
+    assert release.revenue == 2_850_000_000.0
+    assert all("\x00" not in highlight for highlight in release.highlights)
+
+
+def test_collect_earnings_releases_sanitizes_highlights_control_characters():
+    filing_index = {
+        "0005": FilingMetadata(
+            accession_number="0005",
+            form="8-K",
+            filing_date=date(2026, 2, 20),
+            report_date=date(2025, 12, 31),
+            primary_document="clean.htm",
+            primary_doc_description="Item 2.02 Results of Operations and Financial Condition",
+            items="2.02,9.01",
+        )
+    }
+    client = _FakeEarningsClient(
+        payload_by_name={
+            "clean.htm": "<html><body><p>Revenue was $1.2 million.\x00 Guidance remains unchanged.</p></body></html>",
+        },
+        directory_items=[],
+    )
+
+    releases = collect_earnings_releases("0000000005", filing_index, client=client)
+
+    assert len(releases) == 1
+    release = releases[0]
+    assert release.highlights
+    assert all("\x00" not in highlight for highlight in release.highlights)

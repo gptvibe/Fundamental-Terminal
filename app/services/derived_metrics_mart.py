@@ -11,10 +11,11 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import DerivedMetricPoint, FinancialStatement, PriceHistory
+from app.models import Company, DerivedMetricPoint, FinancialStatement, PriceHistory
+from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, select_preferred_financials
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
-QUARTERLY_FORMS = {"10-Q", "6-K"}
+QUARTERLY_FORMS = {"10-Q", "6-K", "CALL", "FR Y-9C"}
 FLOW_FIELDS = {
     "revenue",
     "gross_profit",
@@ -26,6 +27,11 @@ FLOW_FIELDS = {
     "share_buybacks",
     "dividends",
     "eps",
+    "net_interest_income",
+    "noninterest_income",
+    "noninterest_expense",
+    "pretax_income",
+    "provision_for_credit_losses",
 }
 FORMULA_VERSION = "sec_metrics_mart_v1"
 
@@ -53,14 +59,21 @@ def recompute_and_persist_company_derived_metrics(
     *,
     checked_at: datetime | None = None,
 ) -> int:
-    financials = list(
+    company = session.get(Company, company_id)
+    if company is None:
+        return 0
+
+    all_financials = list(
         session.execute(
             select(FinancialStatement).where(
                 FinancialStatement.company_id == company_id,
-                FinancialStatement.statement_type == "canonical_xbrl",
+                FinancialStatement.statement_type.in_(("canonical_xbrl", BANK_REGULATORY_STATEMENT_TYPE)),
             )
         ).scalars()
     )
+    sec_financials = [item for item in all_financials if item.statement_type == "canonical_xbrl"]
+    regulated_financials = [item for item in all_financials if item.statement_type == BANK_REGULATORY_STATEMENT_TYPE]
+    financials = select_preferred_financials(company, sec_financials, regulated_financials)
     prices = []
     if not settings.strict_official_mode:
         prices = list(session.execute(select(PriceHistory).where(PriceHistory.company_id == company_id)).scalars())
@@ -637,6 +650,64 @@ def _cash_conversion_ratio(context: MetricContext) -> tuple[float | None, bool, 
     return _safe_div(_num(context, "free_cash_flow"), _num(context, "net_income")), True, []
 
 
+def _net_interest_margin_metric(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _num(context, "net_interest_margin")
+    return value, False, (["source_value_missing"] if value is None else [])
+
+
+def _provision_burden(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _safe_div(_num(context, "provision_for_credit_losses"), _num(context, "net_interest_income"))
+    return value, True, (["bank_provision_inputs_missing"] if value is None else [])
+
+
+def _asset_quality_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _num(context, "nonperforming_assets_ratio")
+    return value, False, (["source_value_missing"] if value is None else [])
+
+
+def _cet1_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _num(context, "common_equity_tier1_ratio")
+    return value, False, (["source_value_missing"] if value is None else [])
+
+
+def _tier1_capital_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _num(context, "tier1_risk_weighted_ratio")
+    return value, False, (["source_value_missing"] if value is None else [])
+
+
+def _total_capital_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _num(context, "total_risk_based_capital_ratio")
+    return value, False, (["source_value_missing"] if value is None else [])
+
+
+def _core_deposit_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _safe_div(_num(context, "core_deposits"), _num(context, "deposits_total"))
+    return value, True, (["bank_deposit_inputs_missing"] if value is None else [])
+
+
+def _uninsured_deposit_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _safe_div(_num(context, "uninsured_deposits"), _num(context, "deposits_total"))
+    return value, True, (["bank_deposit_inputs_missing"] if value is None else [])
+
+
+def _tangible_book_value_per_share(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    value = _safe_div(_num(context, "tangible_common_equity"), _shares_proxy(context.current.get("data") or {}))
+    return value, True, (["tangible_book_inputs_missing"] if value is None else [])
+
+
+def _roatce(context: MetricContext) -> tuple[float | None, bool, list[str]]:
+    current_tce = _num(context, "tangible_common_equity")
+    previous_tce = _prev_num(context, "tangible_common_equity")
+    if current_tce is None:
+        return None, True, ["roatce_inputs_missing"]
+    average_tce = current_tce if previous_tce is None else (current_tce + previous_tce) / 2.0
+    net_income = _num(context, "net_income")
+    if net_income is None or average_tce == 0:
+        return None, True, ["roatce_inputs_missing"]
+    annualization = 4.0 if context.period_type == "quarterly" else 1.0
+    return (net_income * annualization) / average_tce, True, ([] if previous_tce is not None else ["roatce_average_equity_proxy"])
+
+
 def _business_segment_concentration(context: MetricContext) -> tuple[float | None, bool, list[str]]:
     return _segment_concentration(context.current.get("data") or {}, kind="business")
 
@@ -679,6 +750,16 @@ METRIC_REGISTRY: tuple[MetricDefinition, ...] = (
     MetricDefinition("cash_conversion_ratio", "ratio", _cash_conversion_ratio),
     MetricDefinition("segment_concentration", "ratio", _business_segment_concentration),
     MetricDefinition("geography_concentration", "ratio", _geography_segment_concentration),
+    MetricDefinition("net_interest_margin", "ratio", _net_interest_margin_metric),
+    MetricDefinition("provision_burden", "ratio", _provision_burden),
+    MetricDefinition("asset_quality_ratio", "ratio", _asset_quality_ratio),
+    MetricDefinition("cet1_ratio", "ratio", _cet1_ratio),
+    MetricDefinition("tier1_capital_ratio", "ratio", _tier1_capital_ratio),
+    MetricDefinition("total_capital_ratio", "ratio", _total_capital_ratio),
+    MetricDefinition("core_deposit_ratio", "ratio", _core_deposit_ratio),
+    MetricDefinition("uninsured_deposit_ratio", "ratio", _uninsured_deposit_ratio),
+    MetricDefinition("tangible_book_value_per_share", "usd_per_share", _tangible_book_value_per_share),
+    MetricDefinition("roatce", "ratio", _roatce),
     MetricDefinition("filing_lag_days", "days", _compute_filing_lag_days),
     MetricDefinition("stale_period_flag", "flag", _compute_stale_period_flag),
     MetricDefinition(

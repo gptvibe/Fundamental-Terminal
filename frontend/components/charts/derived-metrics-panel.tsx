@@ -29,7 +29,7 @@ type MetricOption = {
   isPercent: boolean;
 };
 
-const METRIC_OPTIONS: MetricOption[] = [
+const GENERAL_METRIC_OPTIONS: MetricOption[] = [
   { key: "revenue_growth", label: "Revenue Growth", isPercent: true },
   { key: "gross_margin", label: "Gross Margin", isPercent: true },
   { key: "operating_margin", label: "Operating Margin", isPercent: true },
@@ -45,6 +45,19 @@ const METRIC_OPTIONS: MetricOption[] = [
   { key: "accrual_ratio", label: "Accrual Ratio", isPercent: true },
   { key: "cash_conversion", label: "Cash Conversion", isPercent: false },
   { key: "segment_concentration", label: "Segment Concentration", isPercent: true },
+];
+
+const BANK_METRIC_OPTIONS: MetricOption[] = [
+  { key: "net_interest_margin", label: "Net Interest Margin", isPercent: true },
+  { key: "provision_burden", label: "Provision Burden", isPercent: true },
+  { key: "asset_quality_ratio", label: "Asset Quality", isPercent: true },
+  { key: "cet1_ratio", label: "CET1 Ratio", isPercent: true },
+  { key: "tier1_capital_ratio", label: "Tier 1 Capital Ratio", isPercent: true },
+  { key: "total_capital_ratio", label: "Total Capital Ratio", isPercent: true },
+  { key: "core_deposit_ratio", label: "Core Deposit Ratio", isPercent: true },
+  { key: "uninsured_deposit_ratio", label: "Uninsured Deposit Ratio", isPercent: true },
+  { key: "tangible_book_value_per_share", label: "Tangible Book / Share", isPercent: false },
+  { key: "roatce", label: "ROATCE", isPercent: true },
 ];
 
 const CADENCE_ORDER: Cadence[] = ["quarterly", "annual", "ttm"];
@@ -135,16 +148,27 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
 
   const availableCadences = useMemo(() => CADENCE_ORDER, []);
   const strictOfficialMode = Boolean(payload?.company?.strict_official_mode);
+  const bankMode = Boolean(
+    payload?.company?.regulated_entity && payload.series.some((point) => point.provenance.statement_type === "canonical_bank_regulatory")
+  );
+  const metricOptions = bankMode ? BANK_METRIC_OPTIONS : GENERAL_METRIC_OPTIONS;
 
   useEffect(() => {
     if (!strictOfficialMode || !STRICT_DISABLED_METRIC_KEYS.has(metric)) {
       return;
     }
-    const fallbackMetric = METRIC_OPTIONS.find((option) => !STRICT_DISABLED_METRIC_KEYS.has(option.key));
+    const fallbackMetric = metricOptions.find((option) => !STRICT_DISABLED_METRIC_KEYS.has(option.key));
     if (fallbackMetric) {
       setMetric(fallbackMetric.key);
     }
-  }, [metric, strictOfficialMode]);
+  }, [metric, metricOptions, strictOfficialMode]);
+
+  useEffect(() => {
+    if (metricOptions.some((option) => option.key === metric)) {
+      return;
+    }
+    setMetric(metricOptions[0]?.key ?? "revenue_growth");
+  }, [metric, metricOptions]);
 
   useEffect(() => {
     if (!availableCadences.length) {
@@ -155,7 +179,7 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
     }
   }, [availableCadences, cadence]);
 
-  const selectedOption = METRIC_OPTIONS.find((option) => option.key === metric) ?? METRIC_OPTIONS[0];
+  const selectedOption = metricOptions.find((option) => option.key === metric) ?? metricOptions[0];
 
   const series = useMemo(
     () =>
@@ -210,7 +234,7 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
             onChange={(event) => setMetric(event.target.value as MetricKey)}
             style={{ background: "transparent", color: "var(--text)", border: "none", outline: "none" }}
           >
-            {METRIC_OPTIONS.map((option) => (
+            {metricOptions.map((option) => (
               <option key={option.key} value={option.key} disabled={strictOfficialMode && STRICT_DISABLED_METRIC_KEYS.has(option.key)}>
                 {strictOfficialMode && STRICT_DISABLED_METRIC_KEYS.has(option.key)
                   ? `${option.label} (strict mode unavailable)`

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.db import get_db_session
 from app.main import RefreshState, app
 
 
@@ -21,6 +24,30 @@ def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
         market_industry="Consumer Electronics",
     )
     return SimpleNamespace(company=company, cache_state="fresh", last_checked=datetime.now(timezone.utc))
+
+
+def _bank_snapshot():
+    snapshot = _snapshot(ticker="WFC", cik="0000072971")
+    snapshot.company.name = "Wells Fargo Bank, National Association"
+    snapshot.company.sector = "Financials"
+    snapshot.company.market_sector = "Financials"
+    snapshot.company.market_industry = "Banks"
+    return snapshot
+
+
+@contextmanager
+def _client():
+    app.dependency_overrides[get_db_session] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+
+@pytest.fixture(autouse=True)
+def _stub_regulated_bank_query(monkeypatch):
+    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
 
 
 
@@ -66,8 +93,8 @@ def test_metrics_timeseries_endpoint_returns_typed_payload(monkeypatch):
 
     monkeypatch.setattr(main_module, "build_metrics_timeseries", _build_metrics_timeseries)
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=10")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=10")
 
     assert response.status_code == 200
     payload = response.json()
@@ -102,8 +129,8 @@ def test_metrics_timeseries_endpoint_triggers_refresh_when_company_missing(monke
         lambda *_args, **_kwargs: RefreshState(triggered=True, reason="missing", ticker="AAPL", job_id="job-1"),
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics-timeseries")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics-timeseries")
 
     assert response.status_code == 200
     payload = response.json()
@@ -170,8 +197,8 @@ def test_metrics_timeseries_endpoint_hides_price_fields_in_strict_mode(monkeypat
         ],
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=10")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=10")
 
     assert response.status_code == 200
     payload = response.json()
@@ -182,3 +209,83 @@ def test_metrics_timeseries_endpoint_hides_price_fields_in_strict_mode(monkeypat
     assert {entry["source_id"] for entry in payload["provenance"]} == {"ft_derived_metrics_engine", "sec_edgar"}
     assert payload["source_mix"]["fallback_source_ids"] == []
     assert "strict_official_mode" in payload["confidence_flags"]
+
+
+def test_metrics_timeseries_endpoint_prefers_regulated_bank_statements(monkeypatch):
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _bank_snapshot())
+    monkeypatch.setattr(
+        main_module,
+        "get_company_financials",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                statement_type="canonical_xbrl",
+                filing_type="10-K",
+                period_start=date(2025, 1, 1),
+                period_end=date(2025, 12, 31),
+                source="https://data.sec.gov/api/xbrl/companyfacts/CIK0000072971.json",
+                last_updated=datetime.now(timezone.utc),
+                data={"revenue": 1.0},
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_regulated_bank_financials",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                statement_type="canonical_bank_regulatory",
+                filing_type="CALL",
+                period_start=date(2025, 10, 1),
+                period_end=date(2025, 12, 31),
+                source="https://api.fdic.gov/banks/financials",
+                last_updated=datetime.now(timezone.utc),
+                data={"net_interest_margin": 0.038},
+            )
+        ],
+    )
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="WFC", job_id=None),
+    )
+    observed: dict[str, object] = {}
+
+    def _build_metrics_timeseries(statements, *_args, **_kwargs):
+        observed["statement_types"] = [statement.statement_type for statement in statements]
+        return [
+            {
+                "cadence": "ttm",
+                "period_start": "2025-01-01",
+                "period_end": "2025-12-31",
+                "filing_type": "TTM",
+                "metrics": {
+                    "net_interest_margin": 0.038,
+                },
+                "provenance": {
+                    "statement_type": "canonical_bank_regulatory",
+                    "statement_source": "https://api.fdic.gov/banks/financials",
+                    "price_source": None,
+                    "formula_version": "sec_metrics_v1",
+                },
+                "quality": {
+                    "available_metrics": 1,
+                    "missing_metrics": [],
+                    "coverage_ratio": 1.0,
+                    "flags": [],
+                },
+            }
+        ]
+
+    monkeypatch.setattr(main_module, "build_metrics_timeseries", _build_metrics_timeseries)
+
+    with _client() as client:
+        response = client.get("/api/companies/WFC/metrics-timeseries?cadence=ttm&max_points=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert observed["statement_types"] == ["canonical_bank_regulatory"]
+    assert payload["company"]["regulated_entity"]["issuer_type"] == "bank"
+    assert payload["series"][0]["metrics"]["net_interest_margin"] == 0.038
+    assert {entry["source_id"] for entry in payload["provenance"]} == {"fdic_bankfind_financials", "ft_derived_metrics_engine"}

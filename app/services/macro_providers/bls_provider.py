@@ -1,17 +1,11 @@
 """Bureau of Labor Statistics (BLS) official-source provider.
 
-Primary source: BLS Public Data API v1 (no registration key required)
-  https://api.bls.gov/publicAPI/v1/timeseries/data/
+Primary source: BLS Public Data API v2.
 
 Series tracked:
-- CUSR0000SA0   CPI for All Urban Consumers (All Items)
-- CUSR0000SA0L1E CPI for All Urban Consumers (All Items Less Food & Energy) - Core CPI
-- WPSFD4        PPI Final Demand
-- LNS14000000   Unemployment Rate
-- CES0000000001 Total Nonfarm Payrolls
-
-Rate (year-over-year change) is computed where applicable (CPI, Core CPI, PPI).
-Level is returned for unemployment and payrolls.
+- CPI, core CPI, PPI, unemployment, payrolls
+- ECI total compensation
+- JOLTS job openings, hires, quits, and total separations
 """
 
 from __future__ import annotations
@@ -28,7 +22,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-BLS_API_URL = "https://api.bls.gov/publicAPI/v1/timeseries/data/"
 BLS_SOURCE_NAME = "U.S. Bureau of Labor Statistics"
 BLS_SOURCE_URL = "https://www.bls.gov/data/"
 
@@ -36,9 +29,14 @@ BLS_SOURCE_URL = "https://www.bls.gov/data/"
 BLS_SERIES: tuple[tuple[str, str, str, str, bool], ...] = (
     ("CUSR0000SA0", "CPI (Urban, All Items)", "percent", "inflation_labor", True),
     ("CUSR0000SA0L1E", "Core CPI (ex Food & Energy)", "percent", "inflation_labor", True),
-    ("WPSFD4", "PPI Final Demand", "percent", "inflation_labor", True),
+    ("WPSFD4", "PPI Final Demand", "percent", "cyclical_costs", True),
     ("LNS14000000", "Unemployment Rate", "percent", "inflation_labor", False),
     ("CES0000000001", "Nonfarm Payrolls", "thousands", "inflation_labor", False),
+    ("CIU1010000000000I", "Employment Cost Index (Total Compensation)", "percent", "cyclical_costs", True),
+    ("JTS000000000000000JOL", "JOLTS Job Openings", "thousands", "cyclical_costs", False),
+    ("JTS000000000000000HIL", "JOLTS Hires", "thousands", "cyclical_costs", False),
+    ("JTS000000000000000QUL", "JOLTS Quits", "thousands", "cyclical_costs", False),
+    ("JTS000000000000000TSL", "JOLTS Total Separations", "thousands", "cyclical_costs", False),
 )
 
 HISTORY_MONTHS = 13  # request enough history to compute YoY and 12m sparkline
@@ -76,7 +74,7 @@ def fetch_bls_series(http_client: httpx.Client | None = None) -> tuple[BlsSeries
                 "Accept": "application/json",
             },
             follow_redirects=True,
-            timeout=settings.sec_timeout_seconds,
+            timeout=settings.bls_timeout_seconds,
         )
 
     try:
@@ -92,13 +90,16 @@ def _fetch_all(http_client: httpx.Client) -> tuple[BlsSeriesResult, ...]:
     end_year = str(now.year)
 
     series_ids = [s[0] for s in BLS_SERIES]
-    request_body = json.dumps({"seriesid": series_ids, "startyear": start_year, "endyear": end_year})
+    request_payload = {"seriesid": series_ids, "startyear": start_year, "endyear": end_year}
+    if settings.bls_api_key:
+        request_payload["registrationkey"] = settings.bls_api_key
+    request_body = json.dumps(request_payload)
 
     raw_data: dict[str, list[dict]] = {}
     try:
         for attempt in range(settings.market_max_retries):
             try:
-                response = http_client.post(BLS_API_URL, content=request_body)
+                response = http_client.post(settings.bls_api_base_url, content=request_body)
             except Exception as exc:
                 # Transient network failures are common; retry before falling back.
                 is_last = attempt >= settings.market_max_retries - 1
@@ -258,7 +259,7 @@ def _decode_period(year: str, period: str) -> date | None:
             month_int = int(period[1:])
             if 1 <= month_int <= 12:
                 return date(year_int, month_int, 28)
-        elif period.startswith("Q") and len(period) == 2:
+        elif period.startswith("Q") and len(period) == 3:
             quarter = int(period[1:])
             month = quarter * 3
             if 1 <= month <= 12:

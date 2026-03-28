@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.db import get_db_session
 from app.main import RefreshState, app
 
 
@@ -20,6 +23,30 @@ def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
         market_industry="Consumer Electronics",
     )
     return SimpleNamespace(company=company, cache_state="fresh", last_checked=datetime.now(timezone.utc))
+
+
+def _bank_snapshot():
+    snapshot = _snapshot(ticker="WFC", cik="0000072971")
+    snapshot.company.name = "Wells Fargo Bank, National Association"
+    snapshot.company.sector = "Financials"
+    snapshot.company.market_sector = "Financials"
+    snapshot.company.market_industry = "Banks"
+    return snapshot
+
+
+@contextmanager
+def _client():
+    app.dependency_overrides[get_db_session] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+
+@pytest.fixture(autouse=True)
+def _stub_regulated_bank_query(monkeypatch):
+    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
 
 
 def _financial_statement(source: str = "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"):
@@ -37,6 +64,35 @@ def _financial_statement(source: str = "https://data.sec.gov/api/xbrl/companyfac
             "operating_income": 123_000_000_000,
             "free_cash_flow": 110_000_000_000,
             "segment_breakdown": [],
+        },
+    )
+
+
+def _regulated_financial_statement(source: str = "https://api.fdic.gov/banks/financials"):
+    return SimpleNamespace(
+        filing_type="CALL",
+        statement_type="canonical_bank_regulatory",
+        period_start=date(2025, 10, 1),
+        period_end=date(2025, 12, 31),
+        source=source,
+        last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
+        last_checked=datetime(2026, 3, 22, tzinfo=timezone.utc),
+        data={
+            "net_income": 1_000_000_000,
+            "net_interest_income": 1_200_000_000,
+            "provision_for_credit_losses": 200_000_000,
+            "deposits_total": 80_000_000_000,
+            "core_deposits": 60_000_000_000,
+            "uninsured_deposits": 12_000_000_000,
+            "net_interest_margin": 0.038,
+            "common_equity_tier1_ratio": 0.121,
+            "tier1_risk_weighted_ratio": 0.133,
+            "total_risk_based_capital_ratio": 0.149,
+            "tangible_common_equity": 9_000_000_000,
+            "regulated_bank_source_id": "fdic_bankfind_financials",
+            "regulated_bank_reporting_basis": "fdic_call_report",
+            "regulated_bank_confidence_score": 0.97,
+            "regulated_bank_confidence_flags": ["matched_by_cert"],
         },
     )
 
@@ -71,8 +127,8 @@ def test_financials_route_includes_registry_backed_provenance(monkeypatch):
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/financials")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/financials")
 
     assert response.status_code == 200
     payload = response.json()
@@ -146,8 +202,8 @@ def test_financials_route_exposes_reconciliation_metadata(monkeypatch):
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/financials")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/financials")
 
     assert response.status_code == 200
     payload = response.json()
@@ -200,8 +256,8 @@ def test_financials_route_exposes_segment_analysis_metadata(monkeypatch):
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
 
-    client = TestClient(app)
-    response = client.get("/api/companies/AAPL/financials")
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/financials")
 
     assert response.status_code == 200
     payload = response.json()
@@ -211,6 +267,30 @@ def test_financials_route_exposes_segment_analysis_metadata(monkeypatch):
     assert payload["segment_analysis"]["geographic"]["concentration"]["top_segment_name"] == "United States"
     assert "sec_companyfacts" in payload["segment_analysis"]["business"]["provenance_sources"]
     assert any(item["code"] == "geographic_revenue_only" for item in payload["segment_analysis"]["geographic"]["unusual_disclosures"])
+
+
+def test_financials_route_exposes_regulated_bank_payload_and_provenance(monkeypatch):
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _bank_snapshot())
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
+    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [_regulated_financial_statement()])
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="WFC", job_id=None),
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/WFC/financials")
+
+    assert response.status_code == 200
+    payload = response.json()
+    _assert_provenance_envelope(payload, {"fdic_bankfind_financials", "yahoo_finance"})
+    assert payload["company"]["regulated_entity"]["issuer_type"] == "bank"
+    assert payload["financials"][0]["statement_type"] == "canonical_bank_regulatory"
+    assert payload["financials"][0]["regulated_bank"]["source_id"] == "fdic_bankfind_financials"
+    assert payload["financials"][0]["regulated_bank"]["confidence_flags"] == ["matched_by_cert"]
 
 
 def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch):

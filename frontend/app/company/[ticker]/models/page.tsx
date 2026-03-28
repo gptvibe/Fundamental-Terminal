@@ -9,6 +9,7 @@ import { CapitalStructureIntelligencePanel } from "@/components/company/capital-
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { MarketContextPanel } from "@/components/models/market-context-panel";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
@@ -17,15 +18,16 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
-import { getCompanyFinancials, getCompanyModels, refreshCompany } from "@/lib/api";
+import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyFinancialsResponse, CompanyModelsResponse, ModelPayload } from "@/lib/types";
+import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
+  marketContextData: CompanyMarketContextResponse;
   activeJobId: string | null;
 }
 
@@ -59,6 +61,7 @@ export default function CompanyModelsPage() {
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const [data, setData] = useState<CompanyModelsResponse | null>(null);
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
+  const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -84,6 +87,7 @@ export default function CompanyModelsPage() {
         if (!cancelled) {
           setData(workspaceData.modelData);
           setFinancialData(workspaceData.financialData);
+          setMarketContextData(workspaceData.marketContextData);
           setActiveJobId(workspaceData.activeJobId);
         }
       } catch (nextError) {
@@ -124,6 +128,7 @@ export default function CompanyModelsPage() {
         setError(null);
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
+        setMarketContextData(workspaceData.marketContextData);
         setActiveJobId(workspaceData.activeJobId);
       })
       .catch((nextError) => {
@@ -160,6 +165,7 @@ export default function CompanyModelsPage() {
         setError(null);
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
+        setMarketContextData(workspaceData.marketContextData);
         setActiveJobId(workspaceData.activeJobId);
 
         if (workspaceData.activeJobId !== activeJobId) {
@@ -410,6 +416,14 @@ export default function CompanyModelsPage() {
       </Panel>
 
       <Panel
+        title="Macro Demand & Cost Context"
+        subtitle="Company-relevant official Census, BEA, and BLS indicators for cyclical demand, cost pressure, and labor tightness"
+        className="models-page-span-full"
+      >
+        <MarketContextPanel context={marketContextData} />
+      </Panel>
+
+      <Panel
         title="Capital Structure Intelligence"
         subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
         className="models-page-span-full"
@@ -476,14 +490,16 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData] = await Promise.all([
+  const [modelData, financialData, marketContextData] = await Promise.all([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
+    getCompanyMarketContext(ticker),
   ]);
 
   return {
     modelData,
     financialData,
+    marketContextData,
     activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id
   };
 }

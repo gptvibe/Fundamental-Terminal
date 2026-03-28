@@ -38,6 +38,7 @@ from app.services.market_data import (
 from app.services.capital_structure_intelligence import recompute_and_persist_company_capital_structure
 from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
 from app.services.earnings_intelligence import recompute_and_persist_company_earnings_model_points
+from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, collect_regulated_financial_statements
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
@@ -1727,6 +1728,12 @@ class EdgarIngestionService:
             companyfacts=companyfacts,
             filing_index=filing_index,
         )
+        regulated_financial_statements = []
+        try:
+            regulated_financial_statements = collect_regulated_financial_statements(company, sec_financials=normalized_statements)
+        except Exception as exc:
+            logger.exception("Unable to refresh regulated financial statements for %s", company.ticker)
+            reporter.step("regulated", f"Regulated financial refresh unavailable: {exc}")
         self._populate_segment_breakdowns(normalized_statements, reporter)
         _attach_statement_reconciliations(normalized_statements, parsed_filing_insights, checked_at)
 
@@ -1737,6 +1744,14 @@ class EdgarIngestionService:
             normalized_statements=normalized_statements,
             checked_at=checked_at,
         )
+        if regulated_financial_statements:
+            statements_written += _upsert_statements(
+                session=session,
+                company=company,
+                normalized_statements=regulated_financial_statements,
+                checked_at=checked_at,
+                statement_type=BANK_REGULATORY_STATEMENT_TYPE,
+            )
         _replace_financial_restatements(
             session=session,
             company=company,
@@ -3676,6 +3691,8 @@ def _upsert_statements(
     company: Company,
     normalized_statements: list[NormalizedStatement],
     checked_at: datetime,
+    *,
+    statement_type: str = CANONICAL_STATEMENT_TYPE,
 ) -> int:
     if not normalized_statements:
         return 0
@@ -3686,7 +3703,7 @@ def _upsert_statements(
             "period_start": statement.period_start,
             "period_end": statement.period_end,
             "filing_type": statement.filing_type,
-            "statement_type": CANONICAL_STATEMENT_TYPE,
+            "statement_type": statement_type,
             "data": statement.data,
             "selected_facts": _json_ready(statement.selected_facts),
             "reconciliation": _json_ready(statement.reconciliation),
@@ -4024,7 +4041,7 @@ def _touch_company_statements(session: Session, company_id: int, checked_at: dat
         update(FinancialStatement)
         .where(
             FinancialStatement.company_id == company_id,
-            FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
+            FinancialStatement.statement_type.in_((CANONICAL_STATEMENT_TYPE, BANK_REGULATORY_STATEMENT_TYPE)),
         )
         .values(last_checked=checked_at)
     )

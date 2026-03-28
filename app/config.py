@@ -62,6 +62,23 @@ class Settings:
     sec_search_base_url: str = "https://efts.sec.gov/LATEST/search-index"
     sec_timeout_seconds: float = _float_env("SEC_TIMEOUT_SECONDS", 30.0, minimum=1.0)
     sec_min_request_interval_seconds: float = _float_env("SEC_MIN_REQUEST_INTERVAL_SECONDS", 0.2)
+    fdic_api_base_url: str = os.getenv("FDIC_API_BASE_URL", "https://api.fdic.gov/banks")
+    fdic_timeout_seconds: float = _float_env("FDIC_TIMEOUT_SECONDS", 30.0, minimum=1.0)
+    federal_reserve_y9c_json_url: str | None = os.getenv("FEDERAL_RESERVE_Y9C_JSON_URL", "").strip() or None
+    federal_reserve_y9c_json_path: str | None = os.getenv("FEDERAL_RESERVE_Y9C_JSON_PATH", "").strip() or None
+    federal_reserve_y9c_timeout_seconds: float = _float_env("FEDERAL_RESERVE_Y9C_TIMEOUT_SECONDS", 60.0, minimum=1.0)
+    census_api_base_url: str = os.getenv("CENSUS_API_BASE_URL", "https://api.census.gov/data/timeseries/eits")
+    census_api_key: str | None = os.getenv("CENSUS_API_KEY", "").strip() or None
+    census_timeout_seconds: float = _float_env("CENSUS_TIMEOUT_SECONDS", 30.0, minimum=1.0)
+    bls_api_base_url: str = os.getenv("BLS_API_BASE_URL", "https://api.bls.gov/publicAPI/v2/timeseries/data/")
+    bls_api_key: str | None = os.getenv("BLS_API_KEY", "").strip() or None
+    bls_timeout_seconds: float = _float_env("BLS_TIMEOUT_SECONDS", 30.0, minimum=1.0)
+    bea_api_base_url: str = os.getenv("BEA_API_BASE_URL", "https://apps.bea.gov/api/data")
+    bea_api_key: str | None = os.getenv("BEA_API_KEY", "").strip() or None
+    bea_timeout_seconds: float = _float_env("BEA_TIMEOUT_SECONDS", 30.0, minimum=1.0)
+    bea_pce_table_name: str = os.getenv("BEA_PCE_TABLE_NAME", "T20805")
+    bea_pce_line_number: str = os.getenv("BEA_PCE_LINE_NUMBER", "1")
+    bea_gdp_by_industry_table_id: str = os.getenv("BEA_GDP_BY_INDUSTRY_TABLE_ID", "1")
     sec_filings_timeline_ttl_seconds: int = _int_env("SEC_FILINGS_TIMELINE_TTL_SECONDS", 300, minimum=30)
     sec_form4_max_filings_per_refresh: int = _int_env("SEC_FORM4_MAX_FILINGS_PER_REFRESH", 80, minimum=1)
     sec_13f_manager_limit: int = _int_env("SEC_13F_MANAGER_LIMIT", 8, minimum=1)
