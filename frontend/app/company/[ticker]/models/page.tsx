@@ -10,6 +10,7 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { MarketContextPanel } from "@/components/models/market-context-panel";
+import { SectorContextPanel } from "@/components/models/sector-context-panel";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
@@ -18,16 +19,17 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
-import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, refreshCompany } from "@/lib/api";
+import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, ModelPayload } from "@/lib/types";
+import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
   marketContextData: CompanyMarketContextResponse;
+  sectorContextData: CompanySectorContextResponse;
   activeJobId: string | null;
 }
 
@@ -62,6 +64,7 @@ export default function CompanyModelsPage() {
   const [data, setData] = useState<CompanyModelsResponse | null>(null);
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
   const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
+  const [sectorContextData, setSectorContextData] = useState<CompanySectorContextResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -88,6 +91,7 @@ export default function CompanyModelsPage() {
           setData(workspaceData.modelData);
           setFinancialData(workspaceData.financialData);
           setMarketContextData(workspaceData.marketContextData);
+          setSectorContextData(workspaceData.sectorContextData);
           setActiveJobId(workspaceData.activeJobId);
         }
       } catch (nextError) {
@@ -129,6 +133,7 @@ export default function CompanyModelsPage() {
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
         setMarketContextData(workspaceData.marketContextData);
+        setSectorContextData(workspaceData.sectorContextData);
         setActiveJobId(workspaceData.activeJobId);
       })
       .catch((nextError) => {
@@ -166,6 +171,7 @@ export default function CompanyModelsPage() {
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
         setMarketContextData(workspaceData.marketContextData);
+        setSectorContextData(workspaceData.sectorContextData);
         setActiveJobId(workspaceData.activeJobId);
 
         if (workspaceData.activeJobId !== activeJobId) {
@@ -424,6 +430,14 @@ export default function CompanyModelsPage() {
       </Panel>
 
       <Panel
+        title="Sector Exposure Context"
+        subtitle="Official sector plug-ins for power, housing, airlines, air cargo, and agricultural supply-demand exposures"
+        className="models-page-span-full"
+      >
+        <SectorContextPanel context={sectorContextData} />
+      </Panel>
+
+      <Panel
         title="Capital Structure Intelligence"
         subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
         className="models-page-span-full"
@@ -490,16 +504,18 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData, marketContextData] = await Promise.all([
+  const [modelData, financialData, marketContextData, sectorContextData] = await Promise.all([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
     getCompanyMarketContext(ticker),
+    getCompanySectorContext(ticker),
   ]);
 
   return {
     modelData,
     financialData,
     marketContextData,
+    sectorContextData,
     activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id
   };
 }

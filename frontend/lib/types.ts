@@ -926,6 +926,85 @@ export interface CompanyMarketContextResponse extends ProvenanceEnvelope {
   hqm_snapshot?: Record<string, unknown> | null;
 }
 
+export interface SectorChartPointPayload {
+  label: string;
+  value: number | null;
+}
+
+export interface SectorChartSeriesPayload {
+  series_key: string;
+  label: string;
+  unit: string;
+  points: SectorChartPointPayload[];
+}
+
+export interface SectorChartPayload {
+  chart_id: string;
+  title: string;
+  subtitle: string | null;
+  unit: string;
+  series: SectorChartSeriesPayload[];
+}
+
+export interface SectorMetricPayload {
+  metric_id: string;
+  label: string;
+  unit: string;
+  value: number | null;
+  previous_value: number | null;
+  change: number | null;
+  change_percent: number | null;
+  as_of: string | null;
+  status: string;
+}
+
+export interface SectorDetailRowPayload {
+  label: string;
+  unit: string;
+  current_value: number | null;
+  prior_value: number | null;
+  change: number | null;
+  change_percent: number | null;
+  as_of: string | null;
+  note: string | null;
+}
+
+export interface SectorDetailViewPayload {
+  title: string;
+  rows: SectorDetailRowPayload[];
+}
+
+export interface SectorRefreshPolicyPayload {
+  cadence_label: string;
+  ttl_seconds: number;
+  notes: string[];
+}
+
+export interface SectorPluginPayload {
+  plugin_id: string;
+  title: string;
+  description: string;
+  status: string;
+  relevance_reasons: string[];
+  source_ids: string[];
+  refresh_policy: SectorRefreshPolicyPayload;
+  summary_metrics: SectorMetricPayload[];
+  charts: SectorChartPayload[];
+  detail_view: SectorDetailViewPayload;
+  confidence_flags: string[];
+  as_of: string | null;
+  last_refreshed_at: string | null;
+}
+
+export interface CompanySectorContextResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  status: string;
+  matched_plugin_ids: string[];
+  plugins: SectorPluginPayload[];
+  fetched_at: string;
+  refresh: RefreshState;
+}
+
 export interface MarketContextStatusPayload {
   state: string;
   label: string;

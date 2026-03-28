@@ -28,6 +28,7 @@ import {
   CompanyInstitutionalHoldingsSummaryResponse,
   CompanyModelsResponse,
   CompanyMarketContextResponse,
+  CompanySectorContextResponse,
   CompanyMetricsTimeseriesResponse,
   CompanyResolutionResponse,
   CompanyPeersResponse,
@@ -60,6 +61,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/peers(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/sector-context(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/metrics(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/metrics-timeseries(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
   { pattern: /^\/market-context(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
@@ -548,6 +550,10 @@ export function getCompanyModels(
 
 export function getCompanyMarketContext(ticker: string): Promise<CompanyMarketContextResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/market-context`);
+}
+
+export function getCompanySectorContext(ticker: string): Promise<CompanySectorContextResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/sector-context`);
 }
 
 export function getGlobalMarketContext(): Promise<CompanyMarketContextResponse> {

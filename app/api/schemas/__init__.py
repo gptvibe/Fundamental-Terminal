@@ -9,6 +9,7 @@ from app.api.schemas.market_context import *
 from app.api.schemas.models import *
 from app.api.schemas.ownership import *
 from app.api.schemas.search import *
+from app.api.schemas.sector_context import *
 from app.api.schemas.workspace import *
 
 __all__ = [name for name in globals() if not name.startswith("_")]

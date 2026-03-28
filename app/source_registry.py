@@ -118,6 +118,46 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=24 * 60 * 60,
         disclosure_note="Official BEA national accounts data used for growth and activity context.",
     ),
+    "eia_electricity_retail_sales": SourceDefinition(
+        source_id="eia_electricity_retail_sales",
+        tier="official_statistical",
+        display_label="U.S. Energy Information Administration Retail Electricity Sales",
+        url="https://api.eia.gov/v2/electricity/retail-sales/data/",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official EIA electricity demand and retail pricing data used for power-sector context.",
+    ),
+    "fhfa_house_price_index": SourceDefinition(
+        source_id="fhfa_house_price_index",
+        tier="official_statistical",
+        display_label="FHFA House Price Index",
+        url="https://www.fhfa.gov/data/hpi/datasets",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official FHFA home-price index used for housing and mortgage exposure context.",
+    ),
+    "bts_t100_segment_summary": SourceDefinition(
+        source_id="bts_t100_segment_summary",
+        tier="official_statistical",
+        display_label="BTS T-100 Segment Summary",
+        url="https://data.transportation.gov/Aviation/AFF-T100-Segment-Summary/bu82-4pwz",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official BTS T-100 segment summary used for airline traffic and air cargo demand context.",
+    ),
+    "bts_form41_financial_review": SourceDefinition(
+        source_id="bts_form41_financial_review",
+        tier="official_statistical",
+        display_label="BTS Form 41 Airline Quarterly Financial Review",
+        url="https://data.transportation.gov/Aviation/Airline-Quarterly-Financial-Review-Majors/evch-7vws",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official BTS Form 41 operating and profitability review used for airline and air cargo sector context.",
+    ),
+    "usda_wasde": SourceDefinition(
+        source_id="usda_wasde",
+        tier="official_statistical",
+        display_label="USDA WASDE",
+        url="https://www.usda.gov/oce/commodity/wasde",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official USDA World Agricultural Supply and Demand Estimates used for crop and ag-input exposure context.",
+    ),
     "bea_gdp_by_industry": SourceDefinition(
         source_id="bea_gdp_by_industry",
         tier="official_statistical",
@@ -282,6 +322,16 @@ def infer_source_id(source_hint: str | None, *, default: str | None = None) -> s
         return "bea_gdp_by_industry"
     if "bureau of economic analysis" in normalized or "bea" in normalized or "bea.gov" in normalized:
         return "bea_nipa"
+    if "api.eia.gov" in normalized or "eia.gov" in normalized:
+        return "eia_electricity_retail_sales"
+    if "fhfa.gov" in normalized and "hpi" in normalized:
+        return "fhfa_house_price_index"
+    if "data.transportation.gov" in normalized and "bu82-4pwz" in normalized:
+        return "bts_t100_segment_summary"
+    if "data.transportation.gov" in normalized and "evch-7vws" in normalized:
+        return "bts_form41_financial_review"
+    if "usda.gov" in normalized and "wasde" in normalized:
+        return "usda_wasde"
     if "daily par yield curve" in normalized or "treasury yield curve" in normalized or "home.treasury.gov" in normalized:
         return "us_treasury_daily_par_yield_curve"
     return default

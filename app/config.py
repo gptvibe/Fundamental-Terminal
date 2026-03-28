@@ -73,6 +73,9 @@ class Settings:
     bls_api_base_url: str = os.getenv("BLS_API_BASE_URL", "https://api.bls.gov/publicAPI/v2/timeseries/data/")
     bls_api_key: str | None = os.getenv("BLS_API_KEY", "").strip() or None
     bls_timeout_seconds: float = _float_env("BLS_TIMEOUT_SECONDS", 30.0, minimum=1.0)
+    eia_api_base_url: str = os.getenv("EIA_API_BASE_URL", "https://api.eia.gov/v2")
+    eia_api_key: str | None = os.getenv("EIA_API_KEY", "").strip() or None
+    eia_timeout_seconds: float = _float_env("EIA_TIMEOUT_SECONDS", 30.0, minimum=1.0)
     bea_api_base_url: str = os.getenv("BEA_API_BASE_URL", "https://apps.bea.gov/api/data")
     bea_api_key: str | None = os.getenv("BEA_API_KEY", "").strip() or None
     bea_timeout_seconds: float = _float_env("BEA_TIMEOUT_SECONDS", 30.0, minimum=1.0)
@@ -102,6 +105,7 @@ class Settings:
     treasury_max_retries: int = _int_env("TREASURY_MAX_RETRIES", 3, minimum=1)
     treasury_retry_backoff_seconds: float = _float_env("TREASURY_RETRY_BACKOFF_SECONDS", 0.5)
     market_context_cache_ttl_hours: int = _int_env("MARKET_CONTEXT_CACHE_TTL_HOURS", 6, minimum=1)
+    sector_context_cache_ttl_hours: int = _int_env("SECTOR_CONTEXT_CACHE_TTL_HOURS", 24, minimum=1)
     fred_api_key: str | None = os.getenv("FRED_API_KEY", "").strip() or None
     freshness_window_hours: int = _int_env("FRESHNESS_WINDOW_HOURS", 24, minimum=1)
     strict_official_mode: bool = _bool_env("STRICT_OFFICIAL_MODE", False)

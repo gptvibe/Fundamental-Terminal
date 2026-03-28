@@ -51,6 +51,15 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
             "refresh",
             *provenance_fields,
         },
+        "/api/companies/{ticker}/sector-context": {
+            "company",
+            "status",
+            "matched_plugin_ids",
+            "plugins",
+            "fetched_at",
+            "refresh",
+            *provenance_fields,
+        },
         "/api/companies/{ticker}/peers": {
             "company",
             "peer_basis",
@@ -123,6 +132,7 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
         "CompanyChangesSinceLastFilingResponse",
         "CompanyModelsResponse",
         "CompanyMarketContextResponse",
+        "CompanySectorContextResponse",
         "CompanyPeersResponse",
         "CompanyActivityOverviewResponse",
         "CompanyEarningsWorkspaceResponse",
@@ -138,6 +148,8 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "cyclical_demand?: MacroSeriesItemPayload[];" in frontend_types
     assert "cyclical_costs?: MacroSeriesItemPayload[];" in frontend_types
     assert "relevant_indicators?: MacroSeriesItemPayload[];" in frontend_types
+    assert "interface SectorPluginPayload" in frontend_types
+    assert "interface CompanySectorContextResponse" in frontend_types
     assert "diagnostics: DataQualityDiagnosticsPayload;" in frontend_types
     assert "interface FinancialReconciliationPayload" in frontend_types
     assert "interface FinancialFactReferencePayload" in frontend_types

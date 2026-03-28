@@ -93,6 +93,7 @@ from app.services.market_context import (
     get_market_context_snapshot,
     get_market_context_v2,
 )
+from app.services.sector_context import get_company_sector_context
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
@@ -1602,6 +1603,61 @@ def global_market_context(
         payload,
         company=None,
         refresh=RefreshState(triggered=False, reason="none", ticker=None, job_id=None),
+    )
+
+
+@app.get("/api/companies/{ticker}/sector-context", response_model=CompanySectorContextResponse)
+def company_sector_context(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanySectorContextResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        fetched_at = datetime.now(timezone.utc)
+        return CompanySectorContextResponse(
+            company=None,
+            status="insufficient_data",
+            matched_plugin_ids=[],
+            plugins=[],
+            fetched_at=fetched_at,
+            refresh=refresh,
+            provenance=[],
+            as_of=None,
+            last_refreshed_at=fetched_at.isoformat(),
+            source_mix={
+                "source_ids": [],
+                "source_tiers": [],
+                "primary_source_ids": [],
+                "fallback_source_ids": [],
+                "official_only": False,
+            },
+            confidence_flags=["company_missing", "no_relevant_sector_plugins"],
+        )
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    company = snapshot.company
+    payload = get_company_sector_context(
+        session,
+        company.id,
+        sector=company.sector,
+        market_sector=company.market_sector,
+        market_industry=company.market_industry,
+    )
+    return CompanySectorContextResponse(
+        company=_serialize_company(snapshot),
+        status=str(payload.get("status") or "unavailable"),
+        matched_plugin_ids=list(payload.get("matched_plugin_ids") or []),
+        plugins=list(payload.get("plugins") or []),
+        fetched_at=payload.get("fetched_at") or datetime.now(timezone.utc).isoformat(),
+        refresh=refresh,
+        provenance=list(payload.get("provenance") or []),
+        as_of=payload.get("as_of"),
+        last_refreshed_at=payload.get("last_refreshed_at"),
+        source_mix=dict(payload.get("source_mix") or {}),
+        confidence_flags=list(payload.get("confidence_flags") or []),
     )
 
 

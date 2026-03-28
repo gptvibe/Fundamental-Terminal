@@ -100,12 +100,14 @@ Captured from the local app with `INTC` as the demo company.
    set CENSUS_API_KEY=
    set BLS_API_BASE_URL=https://api.bls.gov/publicAPI/v2/timeseries/data/
    set BLS_API_KEY=
+   set EIA_API_BASE_URL=https://api.eia.gov/v2
+   set EIA_API_KEY=
    set BEA_API_BASE_URL=https://apps.bea.gov/api/data
    set BEA_API_KEY=
    ```
 
-   Get a BEA API key from https://apps.bea.gov/api/signup/ and a BLS API key from https://data.bls.gov/registrationEngine/.
-   `BEA_API_KEY` is required for official BEA PCE and GDP-by-industry pulls, and `BLS_API_KEY` is used for the official BLS v2 series requests.
+   Get a BEA API key from https://apps.bea.gov/api/signup/, a BLS API key from https://data.bls.gov/registrationEngine/, and an EIA API key from https://www.eia.gov/opendata/register.php.
+   `BEA_API_KEY` is required for official BEA PCE and GDP-by-industry pulls, `BLS_API_KEY` is used for official BLS v2 series requests, and `EIA_API_KEY` powers the official energy and power sector plug-in.
 
 3. Run migrations:
 
@@ -466,7 +468,8 @@ Official data sources:
 |--------|--------|-----------------|
 | U.S. Treasury (CSV) | Daily par yield curve | `TREASURY_YIELD_CURVE_CSV_URL` |
 | U.S. Treasury HQM | 30-year corporate bond yield | `TREASURY_HQM_CSV_URLS` (optional, comma-separated fallback chain) |
-| BLS Public API v1 | CPI, Core CPI, PPI, Unemployment, Payrolls | none (public, rate-limited) |
+| BLS Public API v2 | CPI, Core CPI, PPI, Unemployment, Payrolls | `BLS_API_KEY` |
+| EIA Retail Electricity Sales | U.S. and industrial electricity sales and pricing | `EIA_API_KEY` |
 | FRED (BEA proxy) | Real GDP, Personal Income, PCE, Corporate Profits | `FRED_API_KEY` |
 
 When `STRICT_OFFICIAL_MODE=true`, company pages stay official-only: SEC SIC replaces Yahoo market-profile enrichment, commercial equity price fetches are disabled, and price-dependent product surfaces explicitly explain why they are unavailable.
