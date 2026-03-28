@@ -363,3 +363,82 @@ def test_serialize_financial_includes_expanded_fields():
     assert payload.depreciation_and_amortization == 70
     assert payload.stock_based_compensation == 33
     assert payload.weighted_average_diluted_shares == 999
+
+
+def test_edgar_normalizer_maps_capital_structure_supplemental_facts():
+    accn = "0000000000-26-000020"
+    companyfacts = {
+        "facts": {
+            "us-gaap": {
+                "LongTermDebtCurrent": {"units": {"USD": [{"accn": accn, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-20", "val": 30}]}},
+                "LongTermDebt": {"units": {"USD": [{"accn": accn, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-20", "val": 70}]}},
+                "ProceedsFromIssuanceOfLongTermDebt": {"units": {"USD": [{"accn": accn, "form": "10-K", "start": "2025-01-01", "end": "2025-12-31", "filed": "2026-02-20", "val": 20}]}},
+                "RepaymentsOfLongTermDebt": {"units": {"USD": [{"accn": accn, "form": "10-K", "start": "2025-01-01", "end": "2025-12-31", "filed": "2026-02-20", "val": -8}]}},
+                "CommonStockSharesIssued": {"units": {"shares": [{"accn": accn, "form": "10-K", "start": "2025-01-01", "end": "2025-12-31", "filed": "2026-02-20", "val": 5}]}},
+                "CommonStockSharesRepurchased": {"units": {"shares": [{"accn": accn, "form": "10-K", "start": "2025-01-01", "end": "2025-12-31", "filed": "2026-02-20", "val": 2}]}},
+                "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths": {"units": {"USD": [{"accn": accn, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-20", "val": 10}]}},
+                "LongTermDebtMaturitiesRepaymentsOfPrincipalThereafter": {"units": {"USD": [{"accn": accn, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-20", "val": 20}]}},
+                "OperatingLeaseLiabilityPaymentsDueNextTwelveMonths": {"units": {"USD": [{"accn": accn, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-20", "val": 3}]}},
+                "OperatingLeaseLiabilityPaymentsDueThereafter": {"units": {"USD": [{"accn": accn, "form": "10-K", "end": "2025-12-31", "filed": "2026-02-20", "val": 6}]}},
+            }
+        }
+    }
+    filing_index = {
+        accn: FilingMetadata(
+            accession_number=accn,
+            form="10-K",
+            filing_date=date(2026, 2, 20),
+            report_date=date(2025, 12, 31),
+            primary_document="annual.htm",
+        )
+    }
+
+    statements = EdgarNormalizer().normalize("0000123456", companyfacts, filing_index)
+
+    assert len(statements) == 1
+    data = statements[0].data
+    assert data["current_debt"] == 30
+    assert data["long_term_debt"] == 70
+    assert data["debt_issuance"] == 20
+    assert data["debt_repayment"] == 8
+    assert data["debt_changes"] == 12
+    assert data["shares_issued"] == 5
+    assert data["shares_repurchased"] == 2
+    assert data["debt_maturity_due_next_twelve_months"] == 10
+    assert data["debt_maturity_due_thereafter"] == 20
+    assert data["lease_due_next_twelve_months"] == 3
+    assert data["lease_due_thereafter"] == 6
+
+
+def test_serialize_capital_structure_snapshot_includes_new_sections():
+    snapshot = SimpleNamespace(
+        accession_number="0000000000-26-000020",
+        filing_type="10-K",
+        statement_type="canonical_xbrl",
+        period_start=date(2025, 1, 1),
+        period_end=date(2025, 12, 31),
+        source="https://data.sec.gov/api/xbrl/companyfacts/CIK0000123456.json",
+        filing_acceptance_at=datetime(2026, 2, 20, tzinfo=timezone.utc),
+        last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
+        last_checked=datetime(2026, 3, 22, tzinfo=timezone.utc),
+        data={
+            "summary": {"total_debt": 100, "gross_shareholder_payout": 17},
+            "debt_maturity_ladder": {"buckets": [{"bucket_key": "debt_maturity_due_next_twelve_months", "label": "Next 12 months", "amount": 10}], "meta": {"confidence_score": 1}},
+            "lease_obligations": {"buckets": [], "meta": {"confidence_score": 0}},
+            "debt_rollforward": {"debt_issued": 20, "debt_repaid": 8, "net_debt_change": 12, "meta": {"confidence_score": 1}},
+            "interest_burden": {"interest_to_average_debt": 0.04, "meta": {"confidence_score": 1}},
+            "capital_returns": {"dividends": 5, "share_repurchases": 12, "meta": {"confidence_score": 1}},
+            "net_dilution_bridge": {"shares_issued": 5, "shares_repurchased": 2, "meta": {"confidence_score": 1}},
+        },
+        provenance={"formula_version": "capital_structure_v1", "official_source_id": "sec_companyfacts"},
+        quality_flags=["debt_maturity_ladder_partial"],
+        confidence_score=0.75,
+    )
+
+    payload = main_module._serialize_capital_structure_snapshot(snapshot)
+
+    assert payload.summary.total_debt == 100
+    assert payload.debt_rollforward.debt_issued == 20
+    assert payload.capital_returns.share_repurchases == 12
+    assert payload.net_dilution_bridge.shares_repurchased == 2
+    assert payload.provenance_details["official_source_id"] == "sec_companyfacts"

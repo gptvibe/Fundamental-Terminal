@@ -34,10 +34,14 @@ from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
 from app.services.ownership_analytics import build_ownership_analytics
 from app.services.peer_comparison import build_peer_comparison
+from app.services.capital_structure_intelligence import snapshot_effective_at
+from app.services.segment_analysis import build_segment_analysis
 from app.services import (
     CompanyCacheSnapshot,
     build_changes_since_last_filing,
     get_company_capital_markets_events,
+    get_company_capital_structure_last_checked,
+    get_company_capital_structure_snapshots,
     get_company_coverage_counts,
     get_company_earnings_cache_status,
     get_company_earnings_model_cache_status,
@@ -386,6 +390,7 @@ def company_financials(
         financials = select_point_in_time_financials(financials, parsed_as_of)
         price_history = filter_price_history_as_of(price_history, parsed_as_of)
     serialized_financials = [_serialize_financial(statement) for statement in financials]
+    segment_analysis_payload = build_segment_analysis(serialized_financials)
     diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
     payload = CompanyFinancialsResponse(
         company=_serialize_company(
@@ -395,12 +400,103 @@ def company_financials(
         ),
         financials=serialized_financials,
         price_history=[_serialize_price_history(point) for point in price_history],
+        segment_analysis=SegmentAnalysisPayload.model_validate(segment_analysis_payload) if segment_analysis_payload is not None else None,
         refresh=refresh,
         diagnostics=diagnostics,
         **_financials_provenance_contract(
             financials,
             price_history,
             price_last_checked=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    payload = _apply_requested_as_of(payload, requested_as_of)
+    _store_hot_cached_payload(hot_key, payload)
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        payload,
+        last_modified=payload.company.last_checked if payload.company else None,
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return payload
+
+
+def company_capital_structure(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    max_periods: int = Query(default=8, ge=1, le=40),
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalStructureResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    hot_key = f"capital_structure:{normalized_ticker}:periods={max_periods}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload_data, is_fresh = cached_hot
+        cached_response = CompanyCapitalStructureResponse.model_validate(payload_data)
+        if not is_fresh:
+            stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+            cached_response = cached_response.model_copy(
+                update={
+                    "refresh": stale_refresh,
+                    "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                    "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
+                }
+            )
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=cached_response.company.last_checked if cached_response.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyCapitalStructureResponse(
+            company=None,
+            latest=None,
+            history=[],
+            last_capital_structure_check=None,
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
+            **_empty_provenance_contract("company_missing", "capital_structure_missing"),
+        )
+        payload = _apply_requested_as_of(payload, requested_as_of)
+        _store_hot_cached_payload(hot_key, payload)
+        return payload
+
+    history = get_company_capital_structure_snapshots(session, snapshot.company.id, limit=max(48, max_periods * 6))
+    last_capital_structure_check = get_company_capital_structure_last_checked(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        floor = datetime.min.replace(tzinfo=timezone.utc)
+        history = [item for item in history if (snapshot_effective_at(item) or floor) <= parsed_as_of]
+    history = history[:max_periods]
+    refresh = _refresh_for_capital_structure(background_tasks, snapshot, last_capital_structure_check, history)
+    serialized_history = [_serialize_capital_structure_snapshot(item) for item in history]
+    latest = serialized_history[0] if serialized_history else None
+    diagnostics = _diagnostics_for_capital_structure(serialized_history, refresh)
+    payload = CompanyCapitalStructureResponse(
+        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_capital_structure_check)),
+        latest=latest,
+        history=serialized_history,
+        last_capital_structure_check=last_capital_structure_check,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_capital_structure_provenance_contract(
+            history,
+            latest=latest,
+            last_capital_structure_check=last_capital_structure_check,
             diagnostics=diagnostics,
             refresh=refresh,
         ),
@@ -2265,6 +2361,19 @@ def _refresh_for_snapshot(background_tasks: BackgroundTasks, snapshot: CompanyCa
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_capital_structure(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    last_capital_structure_check: datetime | None,
+    history: list[Any],
+) -> RefreshState:
+    if snapshot.cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+    if last_capital_structure_check is None or not history:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _refresh_for_governance(
     background_tasks: BackgroundTasks,
     session: Session,
@@ -2682,6 +2791,8 @@ def _build_data_quality_diagnostics(
     stale_flags: list[str] | None = None,
     parser_confidence: float | None = None,
     missing_field_flags: list[str] | None = None,
+    reconciliation_penalty: float | None = None,
+    reconciliation_disagreement_count: int = 0,
 ) -> DataQualityDiagnosticsPayload:
     return DataQualityDiagnosticsPayload(
         coverage_ratio=_round_ratio(coverage_ratio),
@@ -2689,6 +2800,8 @@ def _build_data_quality_diagnostics(
         stale_flags=sorted(set(stale_flags or [])),
         parser_confidence=_round_ratio(parser_confidence),
         missing_field_flags=sorted(set(missing_field_flags or [])),
+        reconciliation_penalty=_round_ratio(reconciliation_penalty),
+        reconciliation_disagreement_count=max(0, int(reconciliation_disagreement_count or 0)),
     )
 
 
@@ -2842,6 +2955,8 @@ def _confidence_flags_from_diagnostics(diagnostics: DataQualityDiagnosticsPayloa
     flags.update(diagnostics.missing_field_flags)
     if diagnostics.fallback_ratio not in (None, 0):
         flags.add("fallback_path_present")
+    if diagnostics.reconciliation_disagreement_count > 0:
+        flags.add("financial_reconciliation_disagreement")
     if diagnostics.parser_confidence is not None and diagnostics.parser_confidence < 0.75:
         flags.add("reduced_parser_confidence")
     return sorted(flags)
@@ -2874,11 +2989,51 @@ def _diagnostics_for_financial_response(
 ) -> DataQualityDiagnosticsPayload:
     coverage_ratio = _mean_ratio([_coverage_ratio_for_fields(item, _FINANCIAL_DIAGNOSTIC_FIELDS) for item in financials])
     latest_missing = _missing_fields_for_fields(financials[0], _FINANCIAL_DIAGNOSTIC_FIELDS) if financials else []
+    latest_reconciliation = financials[0].reconciliation if financials else None
     return _build_data_quality_diagnostics(
         coverage_ratio=coverage_ratio,
         stale_flags=_stale_flags_from_refresh(refresh),
-        parser_confidence=coverage_ratio,
-        missing_field_flags=latest_missing,
+        parser_confidence=(latest_reconciliation.confidence_score if latest_reconciliation is not None else coverage_ratio),
+        missing_field_flags=sorted(
+            set(
+                [
+                    *latest_missing,
+                    *(latest_reconciliation.missing_field_flags if latest_reconciliation is not None else []),
+                ]
+            )
+        ),
+        reconciliation_penalty=(latest_reconciliation.confidence_penalty if latest_reconciliation is not None else None),
+        reconciliation_disagreement_count=(latest_reconciliation.disagreement_count if latest_reconciliation is not None else 0),
+    )
+
+
+def _diagnostics_for_capital_structure(
+    history: list[CapitalStructureSnapshotPayload],
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    if not history:
+        return _build_data_quality_diagnostics(
+            coverage_ratio=0.0,
+            stale_flags=_stale_flags_from_refresh(refresh),
+            parser_confidence=0.0,
+            missing_field_flags=["capital_structure_missing"],
+        )
+
+    latest = history[0]
+    section_scores = [
+        latest.debt_maturity_ladder.meta.confidence_score,
+        latest.lease_obligations.meta.confidence_score,
+        latest.debt_rollforward.meta.confidence_score,
+        latest.interest_burden.meta.confidence_score,
+        latest.capital_returns.meta.confidence_score,
+        latest.net_dilution_bridge.meta.confidence_score,
+    ]
+    coverage_ratio = _mean_ratio([float(score) for score in section_scores if score is not None])
+    return _build_data_quality_diagnostics(
+        coverage_ratio=coverage_ratio,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        parser_confidence=latest.confidence_score if latest.confidence_score is not None else coverage_ratio,
+        missing_field_flags=sorted(set(latest.quality_flags)),
     )
 
 
@@ -3234,6 +3389,18 @@ def _financials_provenance_contract(
         if usage is not None:
             usages.append(usage)
 
+        reconciliation = getattr(statement, "reconciliation", None)
+        if isinstance(reconciliation, dict) and reconciliation.get("status") in {"matched", "disagreement", "parser_missing"}:
+            usage = _source_usage_from_hint(
+                reconciliation.get("matched_source"),
+                role="supplemental",
+                as_of=reconciliation.get("matched_period_end") or statement.period_end,
+                last_refreshed_at=reconciliation.get("last_refreshed_at") or statement.last_checked,
+                default_source_id="sec_edgar",
+            )
+            if usage is not None:
+                usages.append(usage)
+
     if latest_price is not None:
         usage = _source_usage_from_hint(
             latest_price.source,
@@ -3256,6 +3423,60 @@ def _financials_provenance_contract(
             latest_statement.last_checked if latest_statement is not None else None,
             price_last_checked,
         ),
+        confidence_flags=confidence_flags,
+    )
+
+
+def _capital_structure_provenance_contract(
+    snapshots: list[Any],
+    *,
+    latest: CapitalStructureSnapshotPayload | None,
+    last_capital_structure_check: datetime | None,
+    diagnostics: DataQualityDiagnosticsPayload,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = []
+    if latest is not None:
+        usages.append(
+            SourceUsage(
+                source_id="ft_capital_structure_intelligence",
+                role="derived",
+                as_of=latest.period_end,
+                last_refreshed_at=last_capital_structure_check,
+            )
+        )
+
+    for snapshot in snapshots[:12]:
+        provenance_details = getattr(snapshot, "provenance", None)
+        official_source_id = provenance_details.get("official_source_id") if isinstance(provenance_details, dict) else None
+        if official_source_id:
+            usages.append(
+                SourceUsage(
+                    source_id=str(official_source_id),
+                    role="primary",
+                    as_of=getattr(snapshot, "period_end", None),
+                    last_refreshed_at=getattr(snapshot, "last_checked", None),
+                )
+            )
+        statement_usage = _source_usage_from_hint(
+            getattr(snapshot, "source", None),
+            role="supplemental" if official_source_id else "primary",
+            as_of=getattr(snapshot, "period_end", None),
+            last_refreshed_at=getattr(snapshot, "last_checked", None),
+            default_source_id="sec_companyfacts",
+        )
+        if statement_usage is not None:
+            usages.append(statement_usage)
+
+    confidence_flags = [
+        *_confidence_flags_from_diagnostics(diagnostics),
+        *(latest.quality_flags if latest is not None else []),
+        *_confidence_flags_from_refresh(refresh),
+    ]
+    return _build_provenance_contract(
+        usages,
+        as_of=latest.period_end if latest is not None else None,
+        last_refreshed_at=last_capital_structure_check,
         confidence_flags=confidence_flags,
     )
 
@@ -3758,6 +3979,32 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         stock_based_compensation=data.get("stock_based_compensation"),
         weighted_average_diluted_shares=data.get("weighted_average_diluted_shares"),
         segment_breakdown=[_serialize_financial_segment(item) for item in data.get("segment_breakdown", []) if isinstance(item, dict)],
+        reconciliation=_serialize_financial_reconciliation(getattr(statement, "reconciliation", None)),
+    )
+
+
+def _serialize_capital_structure_snapshot(snapshot: Any) -> CapitalStructureSnapshotPayload:
+    data = snapshot.data if isinstance(getattr(snapshot, "data", None), dict) else {}
+    return CapitalStructureSnapshotPayload(
+        accession_number=getattr(snapshot, "accession_number", None),
+        filing_type=getattr(snapshot, "filing_type", ""),
+        statement_type=getattr(snapshot, "statement_type", ""),
+        period_start=getattr(snapshot, "period_start"),
+        period_end=getattr(snapshot, "period_end"),
+        source=getattr(snapshot, "source", ""),
+        filing_acceptance_at=getattr(snapshot, "filing_acceptance_at", None),
+        last_updated=getattr(snapshot, "last_updated"),
+        last_checked=getattr(snapshot, "last_checked"),
+        summary=CapitalStructureSummaryPayload.model_validate(data.get("summary") or {}),
+        debt_maturity_ladder=CapitalStructureDebtMaturityPayload.model_validate(data.get("debt_maturity_ladder") or {}),
+        lease_obligations=CapitalStructureLeaseObligationsPayload.model_validate(data.get("lease_obligations") or {}),
+        debt_rollforward=CapitalStructureDebtRollforwardPayload.model_validate(data.get("debt_rollforward") or {}),
+        interest_burden=CapitalStructureInterestBurdenPayload.model_validate(data.get("interest_burden") or {}),
+        capital_returns=CapitalStructureCapitalReturnsPayload.model_validate(data.get("capital_returns") or {}),
+        net_dilution_bridge=CapitalStructureNetDilutionBridgePayload.model_validate(data.get("net_dilution_bridge") or {}),
+        provenance_details=getattr(snapshot, "provenance", None) if isinstance(getattr(snapshot, "provenance", None), dict) else {},
+        quality_flags=list(getattr(snapshot, "quality_flags", None) or []),
+        confidence_score=getattr(snapshot, "confidence_score", None),
     )
 
 
@@ -3800,6 +4047,52 @@ def _serialize_filing_parser_insight(statement: FinancialStatement) -> FilingPar
             for item in data.get("segments", [])
             if isinstance(item, dict)
         ],
+    )
+
+
+def _serialize_financial_reconciliation(payload: Any) -> FinancialReconciliationPayload | None:
+    if not isinstance(payload, dict) or not payload:
+        return None
+    status = str(payload.get("status") or "parser_missing")
+    if status not in {"matched", "disagreement", "parser_missing", "unsupported_form"}:
+        status = "parser_missing"
+    return FinancialReconciliationPayload(
+        status=status,
+        as_of=payload.get("as_of"),
+        last_refreshed_at=payload.get("last_refreshed_at"),
+        provenance_sources=[str(source) for source in payload.get("provenance_sources", []) if source],
+        confidence_score=payload.get("confidence_score"),
+        confidence_penalty=payload.get("confidence_penalty"),
+        confidence_flags=[str(flag) for flag in payload.get("confidence_flags", []) if flag],
+        missing_field_flags=[str(flag) for flag in payload.get("missing_field_flags", []) if flag],
+        matched_accession_number=payload.get("matched_accession_number"),
+        matched_filing_type=payload.get("matched_filing_type"),
+        matched_period_start=payload.get("matched_period_start"),
+        matched_period_end=payload.get("matched_period_end"),
+        matched_source=payload.get("matched_source"),
+        disagreement_count=int(payload.get("disagreement_count") or 0),
+        comparisons=[
+            _serialize_financial_reconciliation_comparison(item)
+            for item in payload.get("comparisons", [])
+            if isinstance(item, dict)
+        ],
+    )
+
+
+def _serialize_financial_reconciliation_comparison(payload: dict[str, Any]) -> FinancialReconciliationComparisonPayload:
+    status = str(payload.get("status") or "unavailable")
+    if status not in {"match", "disagreement", "companyfacts_only", "parser_only", "unavailable"}:
+        status = "unavailable"
+    return FinancialReconciliationComparisonPayload(
+        metric_key=str(payload.get("metric_key") or "unknown"),
+        status=status,
+        companyfacts_value=payload.get("companyfacts_value"),
+        filing_parser_value=payload.get("filing_parser_value"),
+        delta=payload.get("delta"),
+        relative_delta=payload.get("relative_delta"),
+        confidence_penalty=payload.get("confidence_penalty"),
+        companyfacts_fact=_serialize_financial_fact_reference(payload.get("companyfacts_fact")),
+        filing_parser_fact=_serialize_financial_fact_reference(payload.get("filing_parser_fact")),
     )
 
 
@@ -3852,26 +4145,27 @@ def _serialize_financial_restatement_metric_change(payload: dict[str, Any]) -> F
             if str(payload.get("direction") or "changed") in {"added", "removed", "increase", "decrease", "changed"}
             else "changed"
         ),
-        previous_fact=_serialize_financial_restatement_fact(payload.get("previous_fact")),
-        current_fact=_serialize_financial_restatement_fact(payload.get("current_fact")),
+        previous_fact=_serialize_financial_fact_reference(payload.get("previous_fact")),
+        current_fact=_serialize_financial_fact_reference(payload.get("current_fact")),
         value_changed=payload.get("value_changed"),
     )
 
 
-def _serialize_financial_restatement_fact(payload: Any) -> FinancialRestatementFactPayload | None:
+def _serialize_financial_fact_reference(payload: Any) -> FinancialFactReferencePayload | None:
     if not isinstance(payload, dict):
         return None
     if not any(
         key in payload
-        for key in ("accession_number", "form", "taxonomy", "tag", "unit", "filed_at", "period_start", "period_end", "value")
+        for key in ("accession_number", "form", "taxonomy", "tag", "unit", "source", "filed_at", "period_start", "period_end", "value")
     ):
         return None
-    return FinancialRestatementFactPayload(
+    return FinancialFactReferencePayload(
         accession_number=payload.get("accession_number"),
         form=payload.get("form"),
         taxonomy=payload.get("taxonomy"),
         tag=payload.get("tag"),
         unit=payload.get("unit"),
+        source=payload.get("source"),
         filed_at=payload.get("filed_at"),
         period_start=payload.get("period_start"),
         period_end=payload.get("period_end"),

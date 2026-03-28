@@ -7,6 +7,47 @@
 - Keep backend and frontend types in sync before merging.
 - Prefer small pull requests grouped by one page or one dataset family.
 
+## Sprint 11: Capital Structure Intelligence Pack (Shipped 2026-03-28)
+
+### SEC extraction and persistence
+
+- [x] Extend canonical SEC normalization in `app/services/sec_edgar.py` with supplemental facts for:
+  - [x] debt maturity ladder buckets
+  - [x] lease obligation buckets
+  - [x] debt issuance and repayment
+  - [x] shares issued and repurchased
+- [x] Add persisted `capital_structure_snapshots` storage with migration `20260327_0027_add_capital_structure_snapshots.py`.
+- [x] Recompute capital structure intelligence during the existing SEC refresh flow and keep it cache-first.
+
+### Derived intelligence pack
+
+- [x] Build persisted snapshot sections for:
+  - [x] debt maturity ladder
+  - [x] lease obligations
+  - [x] debt issuance and repayment roll-forward
+  - [x] interest burden trend inputs
+  - [x] capital returns and payout mix
+  - [x] SBC and net dilution bridge
+- [x] Attach provenance, `as_of`, `last_refreshed_at`, confidence score, and quality flags to each section.
+
+### API and frontend integration
+
+- [x] Add `GET /api/companies/{ticker}/capital-structure` with point-in-time `as_of` and `max_periods` support.
+- [x] Add matching backend/frontend response types and provenance contract coverage.
+- [x] Add `CapitalStructureIntelligencePanel` to:
+  - [x] `frontend/app/company/[ticker]/financials/page.tsx`
+  - [x] `frontend/app/company/[ticker]/models/page.tsx`
+
+### Tests and fixtures
+
+- [x] Add parser expansion tests for supplemental SEC facts.
+- [x] Add golden fixture coverage for the capital structure intelligence snapshot.
+- [x] Add API route, OpenAPI contract, provenance contract, refresh orchestrator, and frontend panel tests.
+
+Definition of done:
+
+- Persisted SEC-derived capital structure intelligence is available through a cache-first API and visible on financials/models with explicit provenance and confidence metadata. ✓
+
 ## Sprint 9: Valuation Workbench Depth (Shipped 2026-03-22)
 
 ### Valuation foundations

@@ -14,6 +14,8 @@ export interface DataQualityDiagnosticsPayload {
   stale_flags: string[];
   parser_confidence: number | null;
   missing_field_flags: string[];
+  reconciliation_penalty: number | null;
+  reconciliation_disagreement_count: number;
 }
 
 export type SourceTier =
@@ -131,6 +133,7 @@ export interface FinancialPayload {
   stock_based_compensation: number | null;
   weighted_average_diluted_shares: number | null;
   segment_breakdown: FinancialSegmentPayload[];
+  reconciliation: FinancialReconciliationPayload | null;
 }
 
 export interface FinancialSegmentPayload {
@@ -143,6 +146,103 @@ export interface FinancialSegmentPayload {
   share_of_revenue: number | null;
   operating_income: number | null;
   assets: number | null;
+}
+
+export interface SegmentMixDriverPayload {
+  segment_id: string;
+  segment_name: string;
+  kind: "business" | "geographic" | "other";
+  status: "existing" | "new" | "removed";
+  current_revenue: number | null;
+  previous_revenue: number | null;
+  revenue_delta: number | null;
+  current_share_of_revenue: number | null;
+  previous_share_of_revenue: number | null;
+  share_delta: number | null;
+  operating_income: number | null;
+  operating_margin: number | null;
+  previous_operating_margin: number | null;
+  operating_margin_delta: number | null;
+  share_of_operating_income: number | null;
+}
+
+export interface SegmentConcentrationPayload {
+  segment_count: number;
+  top_segment_id: string | null;
+  top_segment_name: string | null;
+  top_segment_share: number | null;
+  top_two_share: number | null;
+  hhi: number | null;
+}
+
+export interface SegmentDisclosurePayload {
+  code: string;
+  label: string;
+  detail: string;
+  severity: "info" | "medium" | "high";
+}
+
+export interface SegmentLensPayload {
+  kind: "business" | "geographic";
+  axis_label: string | null;
+  as_of: string | null;
+  last_refreshed_at: string | null;
+  provenance_sources: string[];
+  confidence_score: number | null;
+  confidence_flags: string[];
+  summary: string | null;
+  top_mix_movers: SegmentMixDriverPayload[];
+  top_margin_contributors: SegmentMixDriverPayload[];
+  concentration: SegmentConcentrationPayload;
+  unusual_disclosures: SegmentDisclosurePayload[];
+}
+
+export interface SegmentAnalysisPayload {
+  business: SegmentLensPayload | null;
+  geographic: SegmentLensPayload | null;
+}
+
+export interface FinancialFactReferencePayload {
+  accession_number: string | null;
+  form: string | null;
+  taxonomy: string | null;
+  tag: string | null;
+  unit: string | null;
+  source: string | null;
+  filed_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  value: number | null;
+}
+
+export interface FinancialReconciliationComparisonPayload {
+  metric_key: string;
+  status: "match" | "disagreement" | "companyfacts_only" | "parser_only" | "unavailable";
+  companyfacts_value: number | null;
+  filing_parser_value: number | null;
+  delta: number | null;
+  relative_delta: number | null;
+  confidence_penalty: number | null;
+  companyfacts_fact: FinancialFactReferencePayload | null;
+  filing_parser_fact: FinancialFactReferencePayload | null;
+}
+
+export interface FinancialReconciliationPayload {
+  status: "matched" | "disagreement" | "parser_missing" | "unsupported_form";
+  as_of: string | null;
+  last_refreshed_at: string | null;
+  provenance_sources: string[];
+  confidence_score: number | null;
+  confidence_penalty: number | null;
+  confidence_flags: string[];
+  missing_field_flags: string[];
+  matched_accession_number: string | null;
+  matched_filing_type: string | null;
+  matched_period_start: string | null;
+  matched_period_end: string | null;
+  matched_source: string | null;
+  disagreement_count: number;
+  comparisons: FinancialReconciliationComparisonPayload[];
 }
 
 export interface PriceHistoryPoint {
@@ -170,6 +270,125 @@ export interface CompanyFinancialsResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   financials: FinancialPayload[];
   price_history: PriceHistoryPoint[];
+  segment_analysis?: SegmentAnalysisPayload | null;
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
+export interface CapitalStructureSectionMetaPayload {
+  as_of: string | null;
+  last_refreshed_at: string | null;
+  provenance_sources: string[];
+  confidence_score: number | null;
+  confidence_flags: string[];
+}
+
+export interface CapitalStructureBucketPayload {
+  bucket_key: string;
+  label: string;
+  amount: number | null;
+}
+
+export interface CapitalStructureSummaryPayload {
+  total_debt: number | null;
+  lease_liabilities: number | null;
+  interest_expense: number | null;
+  debt_due_next_twelve_months: number | null;
+  lease_due_next_twelve_months: number | null;
+  gross_shareholder_payout: number | null;
+  net_shareholder_payout: number | null;
+  net_share_change: number | null;
+  net_dilution_ratio: number | null;
+}
+
+export interface CapitalStructureDebtMaturityPayload {
+    buckets: CapitalStructureBucketPayload[];
+    meta: CapitalStructureSectionMetaPayload;
+}
+
+export interface CapitalStructureLeaseObligationsPayload {
+  buckets: CapitalStructureBucketPayload[];
+  meta: CapitalStructureSectionMetaPayload;
+}
+
+export interface CapitalStructureDebtRollforwardPayload {
+  opening_total_debt: number | null;
+  ending_total_debt: number | null;
+  debt_issued: number | null;
+  debt_repaid: number | null;
+  net_debt_change: number | null;
+  unexplained_change: number | null;
+  meta: CapitalStructureSectionMetaPayload;
+}
+
+export interface CapitalStructureInterestBurdenPayload {
+  interest_expense: number | null;
+  average_total_debt: number | null;
+  interest_to_average_debt: number | null;
+  interest_to_revenue: number | null;
+  interest_to_operating_cash_flow: number | null;
+  interest_coverage_proxy: number | null;
+  meta: CapitalStructureSectionMetaPayload;
+}
+
+export interface CapitalStructurePayoutMixPayload {
+  dividends_share: number | null;
+  repurchases_share: number | null;
+  sbc_offset_share: number | null;
+}
+
+export interface CapitalStructureCapitalReturnsPayload {
+  dividends: number | null;
+  share_repurchases: number | null;
+  stock_based_compensation: number | null;
+  gross_shareholder_payout: number | null;
+  net_shareholder_payout: number | null;
+  payout_mix: CapitalStructurePayoutMixPayload;
+  meta: CapitalStructureSectionMetaPayload;
+}
+
+export interface CapitalStructureNetDilutionBridgePayload {
+    opening_shares: number | null;
+    shares_issued: number | null;
+    shares_issued_proxy: number | null;
+    shares_repurchased: number | null;
+    other_share_change: number | null;
+    ending_shares: number | null;
+    weighted_average_diluted_shares: number | null;
+    net_share_change: number | null;
+    net_dilution_ratio: number | null;
+    share_repurchase_cash: number | null;
+    stock_based_compensation: number | null;
+    meta: CapitalStructureSectionMetaPayload;
+}
+
+export interface CapitalStructureSnapshotPayload {
+  accession_number: string | null;
+  filing_type: string;
+  statement_type: string;
+  period_start: string;
+  period_end: string;
+  source: string;
+  filing_acceptance_at: string | null;
+  last_updated: string;
+  last_checked: string;
+  summary: CapitalStructureSummaryPayload;
+  debt_maturity_ladder: CapitalStructureDebtMaturityPayload;
+  lease_obligations: CapitalStructureLeaseObligationsPayload;
+  debt_rollforward: CapitalStructureDebtRollforwardPayload;
+  interest_burden: CapitalStructureInterestBurdenPayload;
+  capital_returns: CapitalStructureCapitalReturnsPayload;
+  net_dilution_bridge: CapitalStructureNetDilutionBridgePayload;
+  provenance_details: Record<string, unknown>;
+  quality_flags: string[];
+  confidence_score: number | null;
+}
+
+export interface CompanyCapitalStructureResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  latest: CapitalStructureSnapshotPayload | null;
+  history: CapitalStructureSnapshotPayload[];
+  last_capital_structure_check: string | null;
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;
 }

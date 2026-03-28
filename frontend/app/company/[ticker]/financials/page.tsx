@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
+import { CapitalStructureIntelligencePanel } from "@/components/company/capital-structure-intelligence-panel";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -139,7 +140,7 @@ export default function CompanyFinancialsTabPage() {
       </CompanyResearchHeader>
 
       <Panel title="Data Quality Diagnostics" subtitle="Coverage, freshness, and missing-field flags for the cached financial workspace">
-        <DataQualityDiagnostics diagnostics={data?.diagnostics} />
+        <DataQualityDiagnostics diagnostics={data?.diagnostics} reconciliation={latestFinancial?.reconciliation} />
       </Panel>
 
       <Panel title="Source & Freshness" subtitle="Centralized registry metadata for filing inputs, price overlays, and disclosure notes">
@@ -152,9 +153,9 @@ export default function CompanyFinancialsTabPage() {
         />
       </Panel>
 
-      <Panel title="Business Segment Breakdown" subtitle="Treemap, share, and growth from reported segment revenue">
+      <Panel title="Segment & Geography Breakdown" subtitle="Mix shifts, concentration, margin contribution, and chart views from reported segment disclosures">
         {financials.length ? (
-          <BusinessSegmentBreakdown financials={financials} />
+          <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
         ) : (
           <PanelEmptyState message={loading ? "Loading segment data..." : "No business segment breakdowns are reported for this company."} />
         )}
@@ -170,6 +171,10 @@ export default function CompanyFinancialsTabPage() {
 
       <Panel title="Derived SEC Metrics" subtitle="Quarterly, annual, and TTM quality metrics derived from cached canonical SEC financials and cached market profile">
         <DerivedMetricsPanel ticker={ticker} reloadKey={reloadKey} />
+      </Panel>
+
+      <Panel title="Capital Structure Intelligence" subtitle="Debt ladders, lease schedules, issuance and repayment flow, payout mix, SBC, and dilution bridges derived from persisted SEC extraction">
+        <CapitalStructureIntelligencePanel ticker={ticker} reloadKey={reloadKey} />
       </Panel>
 
       <Panel title="Balance Sheet" subtitle="Assets versus liabilities over time">

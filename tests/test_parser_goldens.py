@@ -7,10 +7,11 @@ from types import SimpleNamespace
 
 import app.main as main_module
 from app.services.capital_markets import collect_capital_markets_events
+from app.services.capital_structure_intelligence import build_capital_structure_snapshots
 from app.services.eight_k_events import collect_filing_events
 from app.services.earnings_release import collect_earnings_releases
 from app.services.proxy_parser import parse_proxy_filing_signals
-from app.services.sec_edgar import EdgarNormalizer, FilingMetadata
+from app.services.sec_edgar import EdgarNormalizer, FilingMetadata, ParsedFilingInsight, _build_statement_reconciliation, _segment_axis_metadata_from_title
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -52,6 +53,49 @@ def test_canonical_financial_extraction_golden_fixture() -> None:
     assert statement.source.endswith(expected["source_suffix"])
     for key, value in expected["data"].items():
         assert statement.data[key] == value
+
+
+def test_capital_structure_intelligence_golden_fixture() -> None:
+    fixture = _load_golden("capital_structure_intelligence.json")
+    filing_index = {
+        fixture["accession_number"]: FilingMetadata(
+            accession_number=fixture["accession_number"],
+            form=fixture["filing"]["form"],
+            filing_date=_parse_date(fixture["filing"]["filing_date"]),
+            report_date=_parse_date(fixture["filing"]["report_date"]),
+            primary_document=fixture["filing"]["primary_document"],
+        )
+    }
+
+    statements = EdgarNormalizer().normalize(fixture["cik"], fixture["companyfacts"], filing_index)
+
+    assert len(statements) == 1
+    statement = statements[0]
+    for key, value in fixture["expected"]["canonical_data"].items():
+        assert statement.data[key] == value
+
+    snapshots = build_capital_structure_snapshots(
+        [
+                SimpleNamespace(
+                    id=1,
+                    period_start=statement.period_start,
+                    period_end=statement.period_end,
+                    filing_type=statement.filing_type,
+                    statement_type="canonical_xbrl",
+                    source=statement.source,
+                    filing_acceptance_at=statement.filing_acceptance_at,
+                    last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
+                last_checked=datetime(2026, 3, 22, tzinfo=timezone.utc),
+                data=statement.data,
+            )
+        ]
+    )
+
+    assert len(snapshots) == 1
+    latest = snapshots[0]["data"]
+    for section_name, expected_payload in fixture["expected"]["snapshot"].items():
+        for key, value in expected_payload.items():
+            assert latest[section_name][key] == value
 
 
 def test_earnings_release_parser_golden_fixture() -> None:
@@ -217,6 +261,76 @@ def test_filing_parser_insight_serialization_regression() -> None:
             {"name": "Services", "revenue": 26200000000},
         ],
     }
+
+
+def test_financial_reconciliation_preserves_exact_tags_and_periods() -> None:
+    statement = SimpleNamespace(
+        filing_type="10-K",
+        period_end=date(2025, 12, 31),
+        data={
+            "revenue": 1_000,
+            "net_income": 200,
+            "operating_income": 260,
+        },
+        selected_facts={
+            "revenue": {
+                "accession_number": "0000123456-26-000010",
+                "form": "10-K",
+                "taxonomy": "us-gaap",
+                "tag": "Revenues",
+                "unit": "USD",
+                "source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000123456.json",
+                "filed_at": date(2026, 2, 20),
+                "period_start": date(2025, 1, 1),
+                "period_end": date(2025, 12, 31),
+                "value": 1_000,
+            },
+            "net_income": {
+                "accession_number": "0000123456-26-000010",
+                "form": "10-K",
+                "taxonomy": "us-gaap",
+                "tag": "NetIncomeLoss",
+                "unit": "USD",
+                "source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000123456.json",
+                "filed_at": date(2026, 2, 20),
+                "period_start": date(2025, 1, 1),
+                "period_end": date(2025, 12, 31),
+                "value": 200,
+            },
+        },
+    )
+    parser_insight = ParsedFilingInsight(
+        accession_number="0000123456-26-000010",
+        filing_type="10-K",
+        period_start=date(2025, 1, 1),
+        period_end=date(2025, 12, 31),
+        source="https://www.sec.gov/Archives/edgar/data/123456/000012345626000010/form10k.htm",
+        data={
+            "revenue": 950,
+            "net_income": 200,
+            "operating_income": 240,
+        },
+    )
+
+    reconciliation = _build_statement_reconciliation(
+        statement,
+        parser_insight,
+        datetime(2026, 3, 28, 9, 0, tzinfo=timezone.utc),
+    )
+
+    revenue = next(item for item in reconciliation["comparisons"] if item["metric_key"] == "revenue")
+    assert reconciliation["status"] == "disagreement"
+    assert reconciliation["matched_accession_number"] == "0000123456-26-000010"
+    assert revenue["companyfacts_fact"]["tag"] == "Revenues"
+    assert revenue["companyfacts_fact"]["period_start"] == date(2025, 1, 1)
+    assert revenue["filing_parser_fact"]["period_end"] == date(2025, 12, 31)
+    assert revenue["status"] == "disagreement"
+    assert reconciliation["confidence_penalty"] > 0
+
+
+def test_segment_axis_metadata_distinguishes_business_and_geography_titles() -> None:
+    assert _segment_axis_metadata_from_title("Net sales by geographic region")[2] == "geographic"
+    assert _segment_axis_metadata_from_title("Revenue by reportable operating segments")[2] == "business"
 
 
 def _load_golden(name: str) -> dict:

@@ -160,6 +160,8 @@ describe("ChangesSinceLastFilingCard", () => {
         stale_flags: [],
         parser_confidence: null,
         missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
       },
     });
 

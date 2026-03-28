@@ -265,8 +265,8 @@ export default function CompanyOverviewPage() {
         <ShareDilutionTrackerChart financials={financials} />
       </Panel>
 
-      <Panel title="Business Segments" subtitle="Reported segment revenue mix and growth from cached SEC filing data">
-        <BusinessSegmentBreakdown financials={financials} />
+      <Panel title="Segments & Geography" subtitle="Mix shifts, concentration, margin contribution, and chart views from cached SEC disclosures">
+        <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
       </Panel>
 
       <Panel title="Changes Since Last Filing" subtitle="Latest filing versus the prior comparable filing, including amended prior values">

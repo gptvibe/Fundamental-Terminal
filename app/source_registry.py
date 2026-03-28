@@ -158,6 +158,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Latest-versus-prior filing comparison derived from cached SEC statements and amendment history.",
     ),
+    "ft_capital_structure_intelligence": SourceDefinition(
+        source_id="ft_capital_structure_intelligence",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Capital Structure Intelligence",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Persisted capital structure roll-forwards, maturities, payout mix, and dilution bridges derived from official SEC companyfacts statements.",
+    ),
     "manual_override": SourceDefinition(
         source_id="manual_override",
         tier="manual_override",

@@ -57,6 +57,9 @@ Current canonical source ids include:
 
 ## Product Semantics
 - Canonical financials are normalized from SEC XBRL facts and filing metadata.
+- Canonical financial statements now persist the exact companyfacts fact lineage selected for each derived metric, including accession number, taxonomy, tag, filing date, source URL, and period bounds.
+- Supported 10-K and 10-Q statement rows also persist a reconciliation payload against filing-parser-derived values so disagreements, missing parser coverage, and confidence penalties remain auditable after refresh.
+- Segment and geography analysis on the financials route is derived at read time from the cached canonical statement history and remains official-source only.
 - Governance, filing events, earnings release signals, ownership, and capital-markets datasets are derived from official SEC filings.
 - Price-based overlays are supplemental and should never replace official filing-derived fundamentals.
 
@@ -101,6 +104,16 @@ Each `provenance[]` entry carries:
 
 `source_mix` is the summary layer used by the frontend to disclose whether the payload is official-only or includes a labeled fallback.
 
+For financial statement reconciliation specifically:
+- The route-level provenance for `/api/companies/{ticker}/financials` includes both `sec_companyfacts` and `sec_edgar` whenever the persisted reconciliation layer is present.
+- Each financial statement can include a `reconciliation` object with its own `as_of`, `last_refreshed_at`, `provenance_sources`, `confidence_score`, `confidence_penalty`, `confidence_flags`, and `missing_field_flags`.
+- Each reconciliation comparison row exposes the exact companyfacts taxonomy/tag pair and the companyfacts and parser periods that produced the compared values.
+
+For segment and geography analysis specifically:
+- `/api/companies/{ticker}/financials` can include a `segment_analysis` object with `business` and `geographic` lenses.
+- Each lens carries its own `as_of`, `last_refreshed_at`, `provenance_sources`, `confidence_score`, and `confidence_flags` so the UI can disclose whether the mix summary came from current-only or comparable multi-period history.
+- Each lens also carries structured `top_mix_movers`, `top_margin_contributors`, `concentration`, and `unusual_disclosures` payloads so the frontend can explain what changed rather than relying on charts alone.
+
 ## Diagnostics Surface
 The `diagnostics` block still summarizes:
 - `coverage_ratio`
@@ -108,6 +121,8 @@ The `diagnostics` block still summarizes:
 - `stale_flags`
 - `parser_confidence`
 - `missing_field_flags`
+- `reconciliation_penalty`
+- `reconciliation_disagreement_count`
 
 This metadata is for reliability and UX transparency. It does not change the persisted source-of-truth model.
 

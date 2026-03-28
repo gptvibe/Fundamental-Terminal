@@ -4,6 +4,7 @@ import {
   CompanyAlertsResponse,
   CompanyCapitalRaisesResponse,
   CompanyCapitalMarketsSummaryResponse,
+  CompanyCapitalStructureResponse,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsResponse,
   CompanyEarningsSummaryResponse,
@@ -56,6 +57,7 @@ const DEFAULT_READ_POLICY: ReadCachePolicy = {
 const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> = [
   { pattern: /^\/companies\/search\?/, policy: { ttlMs: 20_000, staleMs: 90_000 } },
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
+  { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/peers(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/metrics(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
@@ -353,6 +355,19 @@ export function getCompanyFinancials(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyCapitalStructure(
+  ticker: string,
+  options?: { maxPeriods?: number; asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyCapitalStructureResponse> {
+  const params = new URLSearchParams();
+  if (options?.maxPeriods != null) {
+    params.set("max_periods", String(options.maxPeriods));
+  }
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-structure${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyChangesSinceLastFiling(

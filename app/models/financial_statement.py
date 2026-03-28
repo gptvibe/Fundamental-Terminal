@@ -41,6 +41,8 @@ class FinancialStatement(Base):
     filing_type: Mapped[str] = mapped_column(String(32), nullable=False)
     statement_type: Mapped[str] = mapped_column(String(32), nullable=False)
     data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    selected_facts: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    reconciliation: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     source: Mapped[str] = mapped_column(String(255), nullable=False)
     last_updated: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

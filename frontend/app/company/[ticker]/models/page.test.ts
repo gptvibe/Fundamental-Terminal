@@ -40,6 +40,10 @@ vi.mock("@/components/ui/status-pill", () => ({
   StatusPill: () => React.createElement("span", null, "status"),
 }));
 
+vi.mock("@/components/company/capital-structure-intelligence-panel", () => ({
+  CapitalStructureIntelligencePanel: () => React.createElement("div", null, "capital-structure-panel"),
+}));
+
 vi.mock("@/lib/api", () => ({
   getCompanyModels: vi.fn(),
   getCompanyFinancials: vi.fn(),
@@ -119,6 +123,8 @@ describe("CompanyModelsPage", () => {
         stale_flags: [],
         parser_confidence: 0.95,
         missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
       },
     });
     vi.mocked(getCompanyFinancials).mockResolvedValue({
@@ -158,6 +164,8 @@ describe("CompanyModelsPage", () => {
         stale_flags: [],
         parser_confidence: 1,
         missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
       },
     });
 
@@ -168,6 +176,7 @@ describe("CompanyModelsPage", () => {
     });
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
+    expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
     expect(screen.getByText("Fundamental Terminal Model Engine")).toBeTruthy();
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
     expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
@@ -212,6 +221,8 @@ describe("CompanyModelsPage", () => {
         stale_flags: [],
         parser_confidence: 0.95,
         missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
       },
     });
     vi.mocked(getCompanyFinancials).mockResolvedValue({
@@ -251,6 +262,8 @@ describe("CompanyModelsPage", () => {
         stale_flags: [],
         parser_confidence: 1,
         missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
       },
     });
 

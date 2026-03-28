@@ -16,11 +16,19 @@ import {
 } from "recharts";
 
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
-import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
-import type { FinancialPayload, FinancialSegmentPayload } from "@/lib/types";
+import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
+import type {
+  FinancialPayload,
+  FinancialSegmentPayload,
+  SegmentAnalysisPayload,
+  SegmentDisclosurePayload,
+  SegmentLensPayload,
+} from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const SEGMENT_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7", "#7CFFCB", "#64D2FF"];
+
+type SegmentKind = "business" | "geographic";
 
 type SegmentPoint = {
   id: string;
@@ -44,24 +52,52 @@ type TooltipEntry = {
 
 interface BusinessSegmentBreakdownProps {
   financials: FinancialPayload[];
+  segmentAnalysis?: SegmentAnalysisPayload | null;
 }
 
-export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdownProps) {
+export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }: BusinessSegmentBreakdownProps) {
   const noFinancials = financials.length === 0;
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
 
+  const availableKinds = useMemo(() => {
+    const kinds = new Set<SegmentKind>();
+    for (const statement of financials) {
+      for (const segment of statement.segment_breakdown) {
+        if ((segment.kind === "business" || segment.kind === "geographic") && typeof segment.revenue === "number" && segment.revenue > 0) {
+          kinds.add(segment.kind);
+        }
+      }
+    }
+    if (segmentAnalysis?.business) {
+      kinds.add("business");
+    }
+    if (segmentAnalysis?.geographic) {
+      kinds.add("geographic");
+    }
+    return kinds;
+  }, [financials, segmentAnalysis]);
+
+  const preferredKind: SegmentKind = availableKinds.has("business") ? "business" : "geographic";
+  const [activeKind, setActiveKind] = useState<SegmentKind>(preferredKind);
+
+  useEffect(() => {
+    if (!availableKinds.has(activeKind)) {
+      setActiveKind(preferredKind);
+    }
+  }, [activeKind, availableKinds, preferredKind]);
+
   const segmentStatements = useMemo(() => {
-    const annual = financials.filter(
-      (statement) => ANNUAL_FORMS.has(statement.filing_type) && statement.segment_breakdown.length > 0
-    );
+    const statementsWithKind = financials.filter((statement) => hasKindSegments(statement, activeKind));
+    const annual = statementsWithKind.filter((statement) => ANNUAL_FORMS.has(statement.filing_type));
     if (annual.length > 0) {
       return annual;
     }
-    return financials.filter((statement) => statement.segment_breakdown.length > 0);
-  }, [financials]);
+    return statementsWithKind;
+  }, [activeKind, financials]);
 
   const latestStatement = segmentStatements[0] ?? null;
   const previousStatement = segmentStatements[1] ?? null;
+  const activeLens = activeKind === "business" ? segmentAnalysis?.business ?? null : segmentAnalysis?.geographic ?? null;
 
   const segmentPoints = useMemo(() => {
     if (!latestStatement) {
@@ -69,11 +105,13 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
     }
 
     const previousMap = new Map<string, FinancialSegmentPayload>(
-      (previousStatement?.segment_breakdown ?? []).map((segment) => [segment.segment_id, segment])
+      (previousStatement?.segment_breakdown ?? [])
+        .filter((segment) => segment.kind === activeKind)
+        .map((segment) => [segment.segment_id, segment])
     );
 
     const latestSegments = latestStatement.segment_breakdown
-      .filter((segment) => typeof segment.revenue === "number" && segment.revenue > 0)
+      .filter((segment) => segment.kind === activeKind && typeof segment.revenue === "number" && segment.revenue > 0)
       .sort((left, right) => (right.revenue ?? 0) - (left.revenue ?? 0));
 
     const totalRevenue = latestStatement.revenue ?? latestSegments.reduce((sum, segment) => sum + (segment.revenue ?? 0), 0);
@@ -98,7 +136,7 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
         color: SEGMENT_COLORS[index % SEGMENT_COLORS.length]
       } satisfies SegmentPoint;
     });
-  }, [latestStatement, previousStatement]);
+  }, [activeKind, latestStatement, previousStatement]);
 
   useEffect(() => {
     if (selectedSegmentId && !segmentPoints.some((segment) => segment.id === selectedSegmentId)) {
@@ -123,15 +161,15 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
 
   const marginChartData = useMemo(
     () =>
-      (selectedSegment ? [selectedSegment] : segmentPoints).filter(
-        (segment) => segment.operatingIncome !== null
-      ).map((segment) => ({
-        ...segment,
-        operatingMargin:
-          segment.operatingIncome !== null && segment.revenue !== 0
-            ? segment.operatingIncome / segment.revenue
-            : null,
-      })),
+      (selectedSegment ? [selectedSegment] : segmentPoints)
+        .filter((segment) => segment.operatingIncome !== null)
+        .map((segment) => ({
+          ...segment,
+          operatingMargin:
+            segment.operatingIncome !== null && segment.revenue !== 0
+              ? segment.operatingIncome / segment.revenue
+              : null,
+        })),
     [segmentPoints, selectedSegment]
   );
 
@@ -194,7 +232,23 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
 
   return (
     <div className="segment-breakdown-shell">
-      <div className="segment-breakdown-toolbar">
+      <div className="segment-breakdown-toolbar" style={{ gap: 14 }}>
+        <div className="segment-filter-row">
+          {[...availableKinds].map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className={`chart-chip ${activeKind === kind ? "chart-chip-active" : ""}`}
+              onClick={() => {
+                setActiveKind(kind);
+                setSelectedSegmentId(null);
+              }}
+            >
+              {kind === "business" ? "Business" : "Geography"}
+            </button>
+          ))}
+        </div>
+
         <div className="segment-filter-row">
           <button
             type="button"
@@ -218,11 +272,13 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
 
         <div className="segment-meta-row">
           <span className="pill">{latestStatement?.filing_type ?? "Filing"}</span>
-          <span className="pill">{latestStatement?.period_end ? formatDate(latestStatement.period_end) : "—"}</span>
-          <span className="pill">Axis: {segmentPoints[0]?.axisLabel ?? "Reported segments"}</span>
+          <span className="pill">{latestStatement?.period_end ? formatDate(latestStatement.period_end) : "-"}</span>
+          <span className="pill">Axis: {activeLens?.axis_label ?? segmentPoints[0]?.axisLabel ?? "Reported segments"}</span>
           <span className="pill">Focus: {selectedSegment?.name ?? "All segments"}</span>
         </div>
       </div>
+
+      {activeLens ? <LensSummary lens={activeLens} /> : null}
 
       <div className="segment-breakdown-top-grid">
         <div className="segment-chart-card">
@@ -276,9 +332,9 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
       </div>
 
       <div className="segment-chart-card">
-        <div className="segment-section-title">Segment Growth</div>
+        <div className="segment-section-title">{titleCase(activeKind)} Growth</div>
         <div className="segment-section-subtitle">
-          Latest reported segment revenue growth versus {previousStatement ? `${previousStatement.filing_type} ${formatDate(previousStatement.period_end)}` : "the previous period"}.
+          Latest reported {activeKind} revenue growth versus {previousStatement ? `${previousStatement.filing_type} ${formatDate(previousStatement.period_end)}` : "the previous period"}.
         </div>
         <div className="segment-chart-shell segment-chart-shell-bar">
           <ResponsiveContainer>
@@ -311,7 +367,7 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
 
       {hasMarginData ? (
         <div className="segment-chart-card">
-          <div className="segment-section-title">Segment Operating Margin</div>
+          <div className="segment-section-title">{titleCase(activeKind)} Operating Margin</div>
           <div className="segment-section-subtitle">
             Operating income as a percentage of reported segment revenue.
           </div>
@@ -348,6 +404,136 @@ export function BusinessSegmentBreakdown({ financials }: BusinessSegmentBreakdow
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function LensSummary({ lens }: { lens: SegmentLensPayload }) {
+  return (
+    <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
+      <div className="segment-chart-card" style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <div className="segment-section-title">What Moved The {titleCase(lens.kind)} Mix</div>
+            <div className="segment-section-subtitle">{lens.summary ?? "Recent disclosures are available, but there is not enough comparable history to explain the mix shift yet."}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span className="pill">As of {formatDate(lens.as_of)}</span>
+            <span className="pill">Refreshed {formatDate(lens.last_refreshed_at)}</span>
+            <span className="pill">Confidence {formatPercent(lens.confidence_score)}</span>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+          <MetricCard
+            label="Top Line"
+            value={lens.concentration.top_segment_name ? `${lens.concentration.top_segment_name} (${formatPercent(lens.concentration.top_segment_share)})` : "-"}
+          />
+          <MetricCard label="Top Two Share" value={formatPercent(lens.concentration.top_two_share)} />
+          <MetricCard label="HHI" value={formatHhi(lens.concentration.hhi)} />
+          <MetricCard label="Sources" value={lens.provenance_sources.join(", ") || "-"} />
+        </div>
+
+        {lens.top_mix_movers.length ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div className="segment-section-title" style={{ fontSize: 15 }}>Top Mix Movers</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+                <thead>
+                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
+                    <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Share Delta</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Revenue Delta</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lens.top_mix_movers.map((row) => (
+                    <tr key={`${row.segment_id}:${row.status}`}>
+                      <td style={{ padding: "10px 10px" }}>{row.segment_name}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "right", color: (row.share_delta ?? 0) >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                        {formatSignedPoints(row.share_delta)}
+                      </td>
+                      <td style={{ padding: "10px 10px", textAlign: "right", color: (row.revenue_delta ?? 0) >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                        {formatSignedCompactNumber(row.revenue_delta)}
+                      </td>
+                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{titleCase(row.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {lens.top_margin_contributors.length ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div className="segment-section-title" style={{ fontSize: 15 }}>Margin Contribution</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+                <thead>
+                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
+                    <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Op. Income Share</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Op. Margin</th>
+                    <th align="right" style={{ padding: "8px 10px" }}>Margin Delta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lens.top_margin_contributors.map((row) => (
+                    <tr key={`${row.segment_id}:margin`}>
+                      <td style={{ padding: "10px 10px" }}>{row.segment_name}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.share_of_operating_income)}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.operating_margin)}</td>
+                      <td style={{ padding: "10px 10px", textAlign: "right", color: (row.operating_margin_delta ?? 0) >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                        {formatSignedPoints(row.operating_margin_delta)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {lens.unusual_disclosures.length ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div className="segment-section-title" style={{ fontSize: 15 }}>Unusual Disclosures</div>
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+              {lens.unusual_disclosures.map((disclosure) => (
+                <DisclosureCard key={disclosure.code} disclosure={disclosure} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 12, background: "rgba(255,255,255,0.02)", display: "grid", gap: 4 }}>
+      <div className="text-muted" style={{ fontSize: 12 }}>{label}</div>
+      <div style={{ fontWeight: 700, wordBreak: "break-word" }}>{value}</div>
+    </div>
+  );
+}
+
+function DisclosureCard({ disclosure }: { disclosure: SegmentDisclosurePayload }) {
+  const palette = disclosure.severity === "high"
+    ? { border: "rgba(255,107,107,0.35)", background: "rgba(255,107,107,0.08)", text: "#FFB3B3" }
+    : disclosure.severity === "medium"
+      ? { border: "rgba(255,215,0,0.28)", background: "rgba(255,215,0,0.07)", text: "#FFE07A" }
+      : { border: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", text: "#D6E2EA" };
+
+  return (
+    <div style={{ border: `1px solid ${palette.border}`, background: palette.background, borderRadius: 12, padding: 12, display: "grid", gap: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+        <div style={{ fontWeight: 700 }}>{disclosure.label}</div>
+        <span style={{ color: palette.text, fontSize: 12, fontWeight: 700 }}>{titleCase(disclosure.severity)}</span>
+      </div>
+      <div className="text-muted" style={{ fontSize: 13 }}>{disclosure.detail}</div>
     </div>
   );
 }
@@ -463,9 +649,38 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
   );
 }
 
+function hasKindSegments(statement: FinancialPayload, kind: SegmentKind): boolean {
+  return statement.segment_breakdown.some(
+    (segment) => segment.kind === kind && typeof segment.revenue === "number" && segment.revenue > 0
+  );
+}
+
+function formatSignedPoints(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "-";
+  }
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${(value * 100).toFixed(1)} pts`;
+}
+
+function formatSignedCompactNumber(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "-";
+  }
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatCompactNumber(value)}`;
+}
+
+function formatHhi(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "-";
+  }
+  return value.toFixed(2);
+}
+
 function trimLabel(value: string, maxLength: number) {
   if (value.length <= maxLength) {
     return value;
   }
-  return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }

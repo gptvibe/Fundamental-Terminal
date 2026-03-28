@@ -13,6 +13,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/search"),
         ("GET", "/api/companies/resolve"),
         ("GET", "/api/companies/{ticker}/financials"),
+        ("GET", "/api/companies/{ticker}/capital-structure"),
         ("GET", "/api/companies/{ticker}/filing-insights"),
         ("GET", "/api/companies/{ticker}/changes-since-last-filing"),
         ("GET", "/api/companies/{ticker}/metrics-timeseries"),

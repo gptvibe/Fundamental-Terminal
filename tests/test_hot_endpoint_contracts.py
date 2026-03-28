@@ -14,6 +14,15 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
     provenance_fields = {"provenance", "as_of", "last_refreshed_at", "source_mix", "confidence_flags"}
     endpoint_expectations = {
         "/api/companies/{ticker}/financials": {"company", "financials", "price_history", "refresh", "diagnostics", *provenance_fields},
+        "/api/companies/{ticker}/capital-structure": {
+            "company",
+            "latest",
+            "history",
+            "last_capital_structure_check",
+            "refresh",
+            "diagnostics",
+            *provenance_fields,
+        },
         "/api/companies/{ticker}/changes-since-last-filing": {
             "company",
             "current_filing",
@@ -80,6 +89,11 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
         response_fields = set(response_schema.get("properties", {}).keys())
         assert expected_fields.issubset(response_fields), path
 
+    financial_payload_fields = set(schema["components"]["schemas"]["FinancialPayload"].get("properties", {}).keys())
+    assert "reconciliation" in financial_payload_fields
+    company_financial_fields = set(schema["components"]["schemas"]["CompanyFinancialsResponse"].get("properties", {}).keys())
+    assert "segment_analysis" in company_financial_fields
+
 
 def test_hot_endpoint_openapi_contracts_include_point_in_time_query_params() -> None:
     client = TestClient(app)
@@ -87,6 +101,7 @@ def test_hot_endpoint_openapi_contracts_include_point_in_time_query_params() -> 
 
     for path in (
         "/api/companies/{ticker}/financials",
+        "/api/companies/{ticker}/capital-structure",
         "/api/companies/{ticker}/changes-since-last-filing",
         "/api/companies/{ticker}/models",
         "/api/companies/{ticker}/peers",
@@ -101,6 +116,7 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     for interface_name in (
         "ProvenanceEnvelope",
         "CompanyFinancialsResponse",
+        "CompanyCapitalStructureResponse",
         "CompanyChangesSinceLastFilingResponse",
         "CompanyModelsResponse",
         "CompanyMarketContextResponse",
@@ -117,6 +133,14 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "strict_official_mode: boolean;" in frontend_types
     assert "provenance_details: Record<string, unknown>;" in frontend_types
     assert "diagnostics: DataQualityDiagnosticsPayload;" in frontend_types
+    assert "interface FinancialReconciliationPayload" in frontend_types
+    assert "interface FinancialFactReferencePayload" in frontend_types
+    assert "reconciliation: FinancialReconciliationPayload | null;" in frontend_types
+    assert "interface SegmentAnalysisPayload" in frontend_types
+    assert "interface SegmentLensPayload" in frontend_types
+    assert "segment_analysis?: SegmentAnalysisPayload | null;" in frontend_types
+    assert "reconciliation_penalty: number | null;" in frontend_types
+    assert "reconciliation_disagreement_count: number;" in frontend_types
     assert "trace_id: string;" in frontend_types
     assert "ticker: string;" in frontend_types
     assert "kind: string;" in frontend_types

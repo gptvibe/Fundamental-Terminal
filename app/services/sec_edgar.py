@@ -23,7 +23,7 @@ from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
 from app.models import BeneficialOwnershipReport, Company, EarningsRelease, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
-from app.services.filing_parser import FilingParser, ParsedFilingInsight
+from app.services.filing_parser import FilingParser, ParsedFilingInsight, SUPPORTED_PARSER_FORMS
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
     refresh_company_institutional_holdings,
@@ -35,6 +35,7 @@ from app.services.market_data import (
     touch_company_price_history,
     upsert_price_history,
 )
+from app.services.capital_structure_intelligence import recompute_and_persist_company_capital_structure
 from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
 from app.services.earnings_intelligence import recompute_and_persist_company_earnings_model_points
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
@@ -50,6 +51,8 @@ INTERIM_FORMS = {"10-Q", "6-K"}
 CANONICAL_STATEMENT_TYPE = "canonical_xbrl"
 FILING_PARSER_STATEMENT_TYPE = "filing_parser"
 RESTATEMENT_TRACKED_FORMS = {"10-K", "10-Q"}
+RECONCILIATION_METRICS = ("revenue", "net_income", "operating_income")
+RECONCILIATION_SUPPORTED_FORMS = SUPPORTED_PARSER_FORMS & RESTATEMENT_TRACKED_FORMS
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -525,6 +528,69 @@ DEBT_REPAYMENT_FACTS: list[tuple[str, list[str]]] = [
     ),
 ]
 
+SUPPLEMENTAL_CAPITAL_STRUCTURE_FACTS: dict[str, list[tuple[str, list[str]]]] = {
+    "shares_issued": [
+        (
+            "us-gaap",
+            [
+                "CommonStockSharesIssued",
+                "CommonStockIssuedDuringPeriodSharesNewIssues",
+            ],
+        ),
+    ],
+    "shares_repurchased": [
+        (
+            "us-gaap",
+            [
+                "CommonStockSharesRepurchased",
+                "ShareRepurchasedAndRetiredDuringPeriodShares",
+            ],
+        ),
+    ],
+    "debt_maturity_due_next_twelve_months": [
+        ("us-gaap", ["LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths"]),
+    ],
+    "debt_maturity_due_year_two": [
+        ("us-gaap", ["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo"]),
+    ],
+    "debt_maturity_due_year_three": [
+        ("us-gaap", ["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree"]),
+    ],
+    "debt_maturity_due_year_four": [
+        ("us-gaap", ["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour"]),
+    ],
+    "debt_maturity_due_year_five": [
+        ("us-gaap", ["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive"]),
+    ],
+    "debt_maturity_due_thereafter": [
+        (
+            "us-gaap",
+            [
+                "LongTermDebtMaturitiesRepaymentsOfPrincipalThereafter",
+                "LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive",
+            ],
+        ),
+    ],
+    "lease_due_next_twelve_months": [
+        ("us-gaap", ["OperatingLeaseLiabilityPaymentsDueNextTwelveMonths"]),
+    ],
+    "lease_due_year_two": [
+        ("us-gaap", ["OperatingLeaseLiabilityPaymentsDueYearTwo"]),
+    ],
+    "lease_due_year_three": [
+        ("us-gaap", ["OperatingLeaseLiabilityPaymentsDueYearThree"]),
+    ],
+    "lease_due_year_four": [
+        ("us-gaap", ["OperatingLeaseLiabilityPaymentsDueYearFour"]),
+    ],
+    "lease_due_year_five": [
+        ("us-gaap", ["OperatingLeaseLiabilityPaymentsDueYearFive"]),
+    ],
+    "lease_due_thereafter": [
+        ("us-gaap", ["OperatingLeaseLiabilityPaymentsDueThereafter"]),
+    ],
+}
+
 
 @dataclass(slots=True)
 class CompanyIdentity:
@@ -595,6 +661,7 @@ class NormalizedStatement:
     filing_acceptance_at: datetime | None
     data: dict[str, Any]
     selected_facts: dict[str, dict[str, Any]]
+    reconciliation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -1041,6 +1108,16 @@ class EdgarNormalizer:
                 cik=cik,
             )
 
+        for metric, taxonomy_groups in SUPPLEMENTAL_CAPITAL_STRUCTURE_FACTS.items():
+            self._collect_metric_candidates(
+                metric=metric,
+                taxonomy_groups=taxonomy_groups,
+                facts_root=facts_root,
+                filing_index=filing_index,
+                statements=statements,
+                cik=cik,
+            )
+
         self._collect_segment_revenue_candidates(
             facts_root=facts_root,
             filing_index=filing_index,
@@ -1320,7 +1397,11 @@ class EdgarNormalizer:
 
         target_duration_days = (period_end - period_start).days if period_start and period_end else None
         data = {metric: None for metric in CANONICAL_FACTS}
+        for metric in SUPPLEMENTAL_CAPITAL_STRUCTURE_FACTS:
+            data[metric] = None
         data["capex"] = None
+        data["debt_issuance"] = None
+        data["debt_repayment"] = None
         data["debt_changes"] = None
         data["free_cash_flow"] = None
         data["segment_breakdown"] = []
@@ -1336,7 +1417,7 @@ class EdgarNormalizer:
             )
             data[metric] = selected.value if selected is not None else None
             if selected is not None:
-                selected_facts[metric] = _candidate_fact_metadata(selected)
+                selected_facts[metric] = _candidate_fact_metadata(selected, source=accumulator.source)
 
         capex_candidate = _select_best_candidate(
             candidates=accumulator.capex_candidates,
@@ -1361,14 +1442,20 @@ class EdgarNormalizer:
         )
         if capex_candidate is not None:
             data["capex"] = _json_number(abs(capex_candidate.value))
-            selected_facts["capex"] = _candidate_fact_metadata(capex_candidate)
+            selected_facts["capex"] = _candidate_fact_metadata(capex_candidate, source=accumulator.source)
         if debt_issuance_candidate is not None or debt_repayment_candidate is not None:
             issuance_value = abs(debt_issuance_candidate.value) if debt_issuance_candidate is not None else 0
             repayment_value = abs(debt_repayment_candidate.value) if debt_repayment_candidate is not None else 0
+            data["debt_issuance"] = _json_number(issuance_value) if debt_issuance_candidate is not None else None
+            data["debt_repayment"] = _json_number(repayment_value) if debt_repayment_candidate is not None else None
             data["debt_changes"] = _json_number(issuance_value - repayment_value)
+            if debt_issuance_candidate is not None:
+                selected_facts["debt_issuance"] = _candidate_fact_metadata(debt_issuance_candidate, source=accumulator.source)
+            if debt_repayment_candidate is not None:
+                selected_facts["debt_repayment"] = _candidate_fact_metadata(debt_repayment_candidate, source=accumulator.source)
             selected_facts["debt_changes"] = {
-                "issued": _candidate_fact_metadata(debt_issuance_candidate) if debt_issuance_candidate is not None else None,
-                "repaid": _candidate_fact_metadata(debt_repayment_candidate) if debt_repayment_candidate is not None else None,
+                "issued": _candidate_fact_metadata(debt_issuance_candidate, source=accumulator.source) if debt_issuance_candidate is not None else None,
+                "repaid": _candidate_fact_metadata(debt_repayment_candidate, source=accumulator.source) if debt_repayment_candidate is not None else None,
             }
         if data.get("operating_cash_flow") is not None and capex_candidate is not None:
             data["free_cash_flow"] = _json_number(data["operating_cash_flow"] - abs(capex_candidate.value))
@@ -1641,6 +1728,7 @@ class EdgarIngestionService:
             filing_index=filing_index,
         )
         self._populate_segment_breakdowns(normalized_statements, reporter)
+        _attach_statement_reconciliations(normalized_statements, parsed_filing_insights, checked_at)
 
         reporter.step("database", "Saving to database...")
         statements_written = _upsert_statements(
@@ -1939,6 +2027,7 @@ class EdgarIngestionService:
 
         if policy.can_skip_sec_refresh():
             _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
+            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
             reporter.complete("Using fresh cached data.")
             session.commit()
@@ -2132,6 +2221,7 @@ class EdgarIngestionService:
                 reporter.step("market", f"Market data refresh failed: {exc}")
                 session.rollback()
             _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
+            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
@@ -2347,6 +2437,7 @@ class EdgarIngestionService:
                 )
 
             _refresh_derived_metrics_cache(session, company.id, checked_at, reporter)
+            _refresh_capital_structure_cache(session, company.id, checked_at, reporter)
             _refresh_earnings_model_cache(session, company.id, checked_at, reporter)
 
             session.commit()
@@ -2580,6 +2671,18 @@ def _refresh_derived_metrics_cache(
     return rows_written
 
 
+def _refresh_capital_structure_cache(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    reporter: JobReporter,
+) -> int:
+    reporter.step("capital_structure", "Recomputing capital structure intelligence cache...")
+    rows_written = recompute_and_persist_company_capital_structure(session, company_id, checked_at=checked_at)
+    reporter.step("capital_structure", f"Updated {rows_written} capital structure rows")
+    return rows_written
+
+
 def _refresh_earnings_model_cache(
     session: Session,
     company_id: int,
@@ -2674,6 +2777,217 @@ def _latest_beneficial_ownership_last_checked(session: Session, company: Company
         BeneficialOwnershipReport.company_id == company.id
     )
     return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _attach_statement_reconciliations(
+    normalized_statements: list[NormalizedStatement],
+    parsed_insights: list[ParsedFilingInsight],
+    checked_at: datetime,
+) -> None:
+    parser_by_key: dict[tuple[str, date], ParsedFilingInsight] = {}
+    for insight in parsed_insights:
+        parser_by_key.setdefault((insight.filing_type, insight.period_end), insight)
+
+    for statement in normalized_statements:
+        parser_insight = parser_by_key.get((statement.filing_type, statement.period_end))
+        statement.reconciliation = _build_statement_reconciliation(statement, parser_insight, checked_at)
+
+
+def _build_statement_reconciliation(
+    statement: NormalizedStatement,
+    parser_insight: ParsedFilingInsight | None,
+    checked_at: datetime,
+) -> dict[str, Any]:
+    provenance_sources = ["sec_companyfacts"]
+    if statement.filing_type in RECONCILIATION_SUPPORTED_FORMS:
+        provenance_sources.append("sec_edgar")
+
+    if statement.filing_type not in RECONCILIATION_SUPPORTED_FORMS:
+        return {
+            "status": "unsupported_form",
+            "as_of": statement.period_end,
+            "last_refreshed_at": checked_at,
+            "provenance_sources": provenance_sources,
+            "confidence_score": None,
+            "confidence_penalty": 0.0,
+            "confidence_flags": ["filing_parser_unsupported_form"],
+            "missing_field_flags": [],
+            "matched_accession_number": None,
+            "matched_filing_type": None,
+            "matched_period_start": None,
+            "matched_period_end": None,
+            "matched_source": None,
+            "disagreement_count": 0,
+            "comparisons": [],
+        }
+
+    statement_data = statement.data or {}
+    selected_facts = statement.selected_facts or {}
+    comparisons: list[dict[str, Any]] = []
+    confidence_flags: set[str] = set()
+    missing_field_flags: set[str] = set()
+    disagreement_count = 0
+    total_penalty = 0.0
+
+    if parser_insight is None:
+        confidence_flags.add("filing_parser_statement_missing")
+        missing_field_flags.add("filing_parser_statement_missing")
+        for metric_key in RECONCILIATION_METRICS:
+            companyfacts_value = statement_data.get(metric_key)
+            if companyfacts_value is not None:
+                missing_field_flags.add(f"{metric_key}_missing_in_filing_parser")
+            comparisons.append(
+                {
+                    "metric_key": metric_key,
+                    "status": "companyfacts_only" if companyfacts_value is not None else "unavailable",
+                    "companyfacts_value": companyfacts_value,
+                    "filing_parser_value": None,
+                    "delta": None,
+                    "relative_delta": None,
+                    "confidence_penalty": 0.0,
+                    "companyfacts_fact": selected_facts.get(metric_key),
+                    "filing_parser_fact": None,
+                }
+            )
+
+        return {
+            "status": "parser_missing",
+            "as_of": statement.period_end,
+            "last_refreshed_at": checked_at,
+            "provenance_sources": provenance_sources,
+            "confidence_score": 0.65,
+            "confidence_penalty": 0.35,
+            "confidence_flags": sorted(confidence_flags),
+            "missing_field_flags": sorted(missing_field_flags),
+            "matched_accession_number": None,
+            "matched_filing_type": None,
+            "matched_period_start": None,
+            "matched_period_end": None,
+            "matched_source": None,
+            "disagreement_count": 0,
+            "comparisons": comparisons,
+        }
+
+    parser_data = parser_insight.data or {}
+    for metric_key in RECONCILIATION_METRICS:
+        companyfacts_value = statement_data.get(metric_key)
+        parser_value = parser_data.get(metric_key)
+        metric_penalty = 0.0
+        delta: int | float | None = None
+        relative_delta: float | None = None
+
+        if companyfacts_value is None and parser_value is None:
+            status = "unavailable"
+            missing_field_flags.add(f"{metric_key}_missing_in_both_sources")
+        elif companyfacts_value is None:
+            status = "parser_only"
+            metric_penalty = 0.12
+            confidence_flags.add(f"{metric_key}_missing_in_companyfacts")
+            missing_field_flags.add(f"{metric_key}_missing_in_companyfacts")
+        elif parser_value is None:
+            status = "companyfacts_only"
+            metric_penalty = 0.12
+            confidence_flags.add(f"{metric_key}_missing_in_filing_parser")
+            missing_field_flags.add(f"{metric_key}_missing_in_filing_parser")
+        else:
+            delta = _metric_delta(companyfacts_value, parser_value)
+            relative_delta = _absolute_relative_change(companyfacts_value, parser_value)
+            if _reconciliation_values_match(companyfacts_value, parser_value):
+                status = "match"
+            else:
+                status = "disagreement"
+                disagreement_count += 1
+                metric_penalty = _reconciliation_penalty(relative_delta)
+                confidence_flags.add(f"{metric_key}_reconciliation_disagreement")
+
+        total_penalty += metric_penalty
+        comparisons.append(
+            {
+                "metric_key": metric_key,
+                "status": status,
+                "companyfacts_value": companyfacts_value,
+                "filing_parser_value": parser_value,
+                "delta": delta,
+                "relative_delta": relative_delta,
+                "confidence_penalty": round(metric_penalty, 4) if metric_penalty else 0.0,
+                "companyfacts_fact": selected_facts.get(metric_key),
+                "filing_parser_fact": _parser_fact_metadata(parser_insight, parser_value),
+            }
+        )
+
+    confidence_penalty = round(min(total_penalty, 1.0), 4)
+    confidence_score = round(max(0.0, 1.0 - confidence_penalty), 4)
+    status = "matched" if disagreement_count == 0 and not confidence_flags else "disagreement"
+    return {
+        "status": status,
+        "as_of": statement.period_end,
+        "last_refreshed_at": checked_at,
+        "provenance_sources": provenance_sources,
+        "confidence_score": confidence_score,
+        "confidence_penalty": confidence_penalty,
+        "confidence_flags": sorted(confidence_flags),
+        "missing_field_flags": sorted(missing_field_flags),
+        "matched_accession_number": parser_insight.accession_number,
+        "matched_filing_type": parser_insight.filing_type,
+        "matched_period_start": parser_insight.period_start,
+        "matched_period_end": parser_insight.period_end,
+        "matched_source": parser_insight.source,
+        "disagreement_count": disagreement_count,
+        "comparisons": comparisons,
+    }
+
+
+def _parser_fact_metadata(
+    parser_insight: ParsedFilingInsight,
+    value: Any,
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {
+        "accession_number": parser_insight.accession_number,
+        "form": parser_insight.filing_type,
+        "taxonomy": None,
+        "tag": None,
+        "unit": None,
+        "source": parser_insight.source,
+        "filed_at": None,
+        "period_start": parser_insight.period_start,
+        "period_end": parser_insight.period_end,
+        "value": value,
+    }
+
+
+def _absolute_relative_change(left_value: Any, right_value: Any) -> float | None:
+    if not isinstance(left_value, (int, float)) or not isinstance(right_value, (int, float)):
+        return None
+    baseline = abs(float(left_value))
+    if baseline == 0:
+        return 0.0 if float(right_value) == 0 else 1.0
+    return round(abs(float(right_value) - float(left_value)) / baseline, 4)
+
+
+def _reconciliation_values_match(left_value: Any, right_value: Any) -> bool:
+    if not isinstance(left_value, (int, float)) or not isinstance(right_value, (int, float)):
+        return False
+    if left_value == right_value:
+        return True
+    absolute_delta = abs(float(right_value) - float(left_value))
+    if absolute_delta <= 1.0:
+        return True
+    relative_delta = _absolute_relative_change(left_value, right_value)
+    return relative_delta is not None and relative_delta <= 0.02
+
+
+def _reconciliation_penalty(relative_delta: float | None) -> float:
+    if relative_delta is None:
+        return 0.08
+    if relative_delta >= 0.15:
+        return 0.3
+    if relative_delta >= 0.07:
+        return 0.2
+    if relative_delta >= 0.03:
+        return 0.12
+    return 0.05
 
 
 def _upsert_insider_trades(
@@ -3374,6 +3688,8 @@ def _upsert_statements(
             "filing_type": statement.filing_type,
             "statement_type": CANONICAL_STATEMENT_TYPE,
             "data": statement.data,
+            "selected_facts": _json_ready(statement.selected_facts),
+            "reconciliation": _json_ready(statement.reconciliation),
             "source": statement.source,
             "last_updated": checked_at,
             "filing_acceptance_at": statement.filing_acceptance_at,
@@ -3386,12 +3702,16 @@ def _upsert_statements(
     statement = insert(FinancialStatement).values(payload)
     data_changed = or_(
         FinancialStatement.data.is_distinct_from(statement.excluded.data),
+        FinancialStatement.selected_facts.is_distinct_from(statement.excluded.selected_facts),
+        FinancialStatement.reconciliation.is_distinct_from(statement.excluded.reconciliation),
         FinancialStatement.filing_type.is_distinct_from(statement.excluded.filing_type),
     )
     statement = statement.on_conflict_do_update(
         constraint="uq_financial_statements_company_period_type_source",
         set_={
             "data": statement.excluded.data,
+            "selected_facts": statement.excluded.selected_facts,
+            "reconciliation": statement.excluded.reconciliation,
             "last_updated": case(
                 (data_changed, statement.excluded.last_updated),
                 else_=FinancialStatement.last_updated,
@@ -3423,6 +3743,8 @@ def _upsert_filing_parser_statements(
             "filing_type": item.filing_type,
             "statement_type": FILING_PARSER_STATEMENT_TYPE,
             "data": item.data,
+            "selected_facts": {},
+            "reconciliation": {},
             "source": item.source,
             "last_updated": checked_at,
             "fetch_timestamp": checked_at,
@@ -3440,6 +3762,8 @@ def _upsert_filing_parser_statements(
         constraint="uq_financial_statements_company_period_type_source",
         set_={
             "data": statement.excluded.data,
+            "selected_facts": statement.excluded.selected_facts,
+            "reconciliation": statement.excluded.reconciliation,
             "last_updated": case(
                 (data_changed, statement.excluded.last_updated),
                 else_=FinancialStatement.last_updated,
@@ -3525,14 +3849,14 @@ def _build_financial_restatement_payloads(
                     "is_amendment": is_amendment,
                     "detection_kind": "amended_filing" if is_amendment else "companyfacts_revision",
                     "changed_metric_keys": changed_metric_keys,
-                    "companyfacts_changes": companyfacts_changes,
-                    "normalized_data_changes": normalized_changes,
-                    "confidence_impact": _build_restatement_confidence_impact(
+                    "companyfacts_changes": _json_ready(companyfacts_changes),
+                    "normalized_data_changes": _json_ready(normalized_changes),
+                    "confidence_impact": _json_ready(_build_restatement_confidence_impact(
                         changed_metric_keys=changed_metric_keys,
                         normalized_changes=normalized_changes,
                         companyfacts_changes=companyfacts_changes,
                         is_amendment=is_amendment,
-                    ),
+                    )),
                     "last_updated": checked_at,
                     "last_checked": checked_at,
                 }
@@ -3653,13 +3977,14 @@ def _normalized_statement_effective_at(statement: NormalizedStatement) -> dateti
     return datetime.combine(statement.period_end, datetime.max.time(), tzinfo=timezone.utc)
 
 
-def _candidate_fact_metadata(candidate: FactCandidate) -> dict[str, Any]:
+def _candidate_fact_metadata(candidate: FactCandidate, *, source: str | None = None) -> dict[str, Any]:
     return {
         "accession_number": candidate.accession_number,
         "form": candidate.form,
         "taxonomy": candidate.taxonomy,
         "tag": candidate.tag,
         "unit": candidate.unit,
+        "source": source,
         "filed_at": candidate.filed_at,
         "period_start": candidate.period_start,
         "period_end": candidate.period_end,
@@ -4127,7 +4452,7 @@ def _parse_table_number(value: str) -> int | float | None:
 def _iter_fact_observations(metric: str, fact_payload: dict[str, Any]) -> list[dict[str, Any]]:
     if metric == "eps":
         return _iter_ratio_observations(fact_payload)
-    if metric in {"shares_outstanding", "weighted_average_diluted_shares"}:
+    if metric in {"shares_outstanding", "weighted_average_diluted_shares", "shares_issued", "shares_repurchased"}:
         return _iter_share_observations(fact_payload)
     return _iter_monetary_observations(fact_payload)
 
@@ -4538,6 +4863,21 @@ def _json_number(value: Any) -> int | float:
         return int(value) if value.is_integer() else value
     coerced = float(value)
     return int(coerced) if coerced.is_integer() else coerced
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, datetime):
+        normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return normalized.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_ready(item) for item in value]
+    return value
 
 
 def _normalize_identifier(value: str) -> str:

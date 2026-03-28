@@ -1,6 +1,7 @@
 from app.models.beneficial_ownership_party import BeneficialOwnershipParty
 from app.models.beneficial_ownership_report import BeneficialOwnershipReport
 from app.models.capital_markets_event import CapitalMarketsEvent
+from app.models.capital_structure_snapshot import CapitalStructureSnapshot
 from app.models.company import Company
 from app.models.company_macro_snapshot import CompanyMacroSnapshot
 from app.models.dataset_refresh_state import DatasetRefreshState
@@ -27,6 +28,7 @@ __all__ = [
     "BeneficialOwnershipParty",
     "BeneficialOwnershipReport",
     "CapitalMarketsEvent",
+    "CapitalStructureSnapshot",
     "Company",
     "CompanyMacroSnapshot",
     "DatasetRefreshState",

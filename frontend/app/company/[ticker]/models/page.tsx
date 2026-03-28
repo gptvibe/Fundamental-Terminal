@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
 
+import { CapitalStructureIntelligencePanel } from "@/components/company/capital-structure-intelligence-panel";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -405,6 +406,17 @@ export default function CompanyModelsPage() {
           lastRefreshedAt={data?.last_refreshed_at}
           sourceMix={data?.source_mix}
           confidenceFlags={data?.confidence_flags}
+        />
+      </Panel>
+
+      <Panel
+        title="Capital Structure Intelligence"
+        subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
+        className="models-page-span-full"
+      >
+        <CapitalStructureIntelligencePanel
+          ticker={ticker}
+          reloadKey={data?.last_refreshed_at ?? financialData?.last_refreshed_at ?? activeJobId}
         />
       </Panel>
 

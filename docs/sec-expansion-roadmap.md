@@ -21,7 +21,7 @@ Execution checklist:
 
 ---
 
-## Shipped As Of 2026-03-22
+## Shipped As Of 2026-03-28
 
 The following phases are fully complete. Their build details have been removed from this document. See `docs/sec-expansion-checklist.md` for the task-level record.
 
@@ -37,6 +37,7 @@ The following phases are fully complete. Their build details have been removed f
 | 8 | Unified activity feed and alerts — activity-feed and alerts routes, sec-feed page, Form 144 in feed | ✓ Shipped |
 | 9 | Valuation workbench depth — trust-aware DCF, Treasury risk-free input, reverse DCF, ROIC, capital allocation, peers/watchlist decision metrics | ✓ Shipped |
 | 10 | Market Context 2.0 + Residual Income Valuation — official-source macro providers (HQM, BLS, BEA), DB-first enriched macro snapshot, residual income model v1.0.0, DCF v2.2.0 sector risk premiums, MacroStrip component | ✓ Shipped |
+| 11 | Capital structure intelligence pack — persisted debt maturity ladders, lease schedules, debt roll-forwards, payout mix, SBC, and net dilution bridges surfaced on financials/models | ✓ Shipped |
 
 ### Core backend entry points
 
@@ -54,6 +55,7 @@ The following phases are fully complete. Their build details have been removed f
 
 ```
 GET  /api/companies/{ticker}/financials
+GET  /api/companies/{ticker}/capital-structure
 GET  /api/companies/{ticker}/filing-insights
 GET  /api/companies/{ticker}/insider-trades
 GET  /api/companies/{ticker}/form-144-filings
@@ -75,7 +77,7 @@ GET  /api/companies/{ticker}/activity-overview
 ### Shipped frontend pages
 
 - `/company/[ticker]` — overview with unified activity feed, priority alerts, and financial visuals
-- `/company/[ticker]/financials` — financial statements, charts, and segment breakdown
+- `/company/[ticker]/financials` — financial statements, charts, segment breakdown, and capital structure intelligence
 - `/company/[ticker]/peers` — decision comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile
 - `/company/[ticker]/filings` — filing timeline, filing-event classification, and parser insights
 - `/company/[ticker]/insiders` — Form 4 analytics, signal quality, role breakdown, and Form 144 planned sales
@@ -85,7 +87,7 @@ GET  /api/companies/{ticker}/activity-overview
 - `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
 - `/company/[ticker]/events` — 8-K events classified by item code with category chart
 - `/company/[ticker]/sec-feed` — unified SEC activity timeline and prioritized alerts
-- `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
+- `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, capital structure intelligence, and assumption provenance
 - `/company/[ticker]/stakes` — redirects to `/company/[ticker]/ownership-changes`
 
 ### Shipped personal workflow

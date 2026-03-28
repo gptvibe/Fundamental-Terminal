@@ -82,6 +82,233 @@ def test_financials_route_includes_registry_backed_provenance(monkeypatch):
     assert "commercial_fallback_present" in payload["confidence_flags"]
 
 
+def test_financials_route_exposes_reconciliation_metadata(monkeypatch):
+    statement = _financial_statement()
+    statement.reconciliation = {
+        "status": "disagreement",
+        "as_of": date(2025, 12, 31),
+        "last_refreshed_at": datetime(2026, 3, 22, tzinfo=timezone.utc),
+        "provenance_sources": ["sec_companyfacts", "sec_edgar"],
+        "confidence_score": 0.88,
+        "confidence_penalty": 0.12,
+        "confidence_flags": ["revenue_reconciliation_disagreement"],
+        "missing_field_flags": [],
+        "matched_accession_number": "0000320193-26-000010",
+        "matched_filing_type": "10-K",
+        "matched_period_start": date(2025, 1, 1),
+        "matched_period_end": date(2025, 12, 31),
+        "matched_source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/form10k.htm",
+        "disagreement_count": 1,
+        "comparisons": [
+            {
+                "metric_key": "revenue",
+                "status": "disagreement",
+                "companyfacts_value": 391_000_000_000,
+                "filing_parser_value": 389_000_000_000,
+                "delta": -2_000_000_000,
+                "relative_delta": 0.0051,
+                "confidence_penalty": 0.05,
+                "companyfacts_fact": {
+                    "accession_number": "0000320193-26-000010",
+                    "form": "10-K",
+                    "taxonomy": "us-gaap",
+                    "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+                    "unit": "USD",
+                    "source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+                    "filed_at": date(2026, 2, 1),
+                    "period_start": date(2025, 1, 1),
+                    "period_end": date(2025, 12, 31),
+                    "value": 391_000_000_000,
+                },
+                "filing_parser_fact": {
+                    "accession_number": "0000320193-26-000010",
+                    "form": "10-K",
+                    "taxonomy": None,
+                    "tag": None,
+                    "unit": None,
+                    "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/form10k.htm",
+                    "filed_at": None,
+                    "period_start": date(2025, 1, 1),
+                    "period_end": date(2025, 12, 31),
+                    "value": 389_000_000_000,
+                },
+            }
+        ],
+    }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [statement])
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/financials")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["financials"][0]["reconciliation"]["matched_accession_number"] == "0000320193-26-000010"
+    assert payload["financials"][0]["reconciliation"]["comparisons"][0]["companyfacts_fact"]["tag"] == "RevenueFromContractWithCustomerExcludingAssessedTax"
+    assert payload["financials"][0]["reconciliation"]["comparisons"][0]["companyfacts_fact"]["period_end"] == "2025-12-31"
+    assert payload["diagnostics"]["reconciliation_disagreement_count"] == 1
+    assert payload["diagnostics"]["reconciliation_penalty"] == 0.12
+    assert {entry["source_id"] for entry in payload["provenance"]} == {"sec_companyfacts", "sec_edgar", "yahoo_finance"}
+
+
+def test_financials_route_exposes_segment_analysis_metadata(monkeypatch):
+    latest = _financial_statement()
+    latest.data["segment_breakdown"] = [
+        {"segment_id": "cloud", "segment_name": "Cloud", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 520.0, "share_of_revenue": 0.52, "operating_income": 170.0, "assets": None},
+        {"segment_id": "devices", "segment_name": "Devices", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 300.0, "share_of_revenue": 0.30, "operating_income": 45.0, "assets": None},
+        {"segment_id": "services", "segment_name": "Services", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 180.0, "share_of_revenue": 0.18, "operating_income": 45.0, "assets": None},
+        {"segment_id": "us", "segment_name": "United States", "axis_key": "StatementGeographicalAxis", "axis_label": "Geographic Segments", "kind": "geographic", "revenue": 610.0, "share_of_revenue": 0.61, "operating_income": None, "assets": None},
+        {"segment_id": "emea", "segment_name": "EMEA", "axis_key": "StatementGeographicalAxis", "axis_label": "Geographic Segments", "kind": "geographic", "revenue": 210.0, "share_of_revenue": 0.21, "operating_income": None, "assets": None},
+        {"segment_id": "apac", "segment_name": "APAC", "axis_key": "StatementGeographicalAxis", "axis_label": "Geographic Segments", "kind": "geographic", "revenue": 180.0, "share_of_revenue": 0.18, "operating_income": None, "assets": None},
+    ]
+    latest.data["revenue"] = 1000.0
+    latest.data["operating_income"] = 260.0
+
+    previous = _financial_statement()
+    previous.period_start = date(2024, 1, 1)
+    previous.period_end = date(2024, 12, 31)
+    previous.last_updated = datetime(2025, 3, 21, tzinfo=timezone.utc)
+    previous.last_checked = datetime(2025, 3, 22, tzinfo=timezone.utc)
+    previous.data = {
+        "revenue": 900.0,
+        "operating_income": 220.0,
+        "segment_breakdown": [
+            {"segment_id": "cloud", "segment_name": "Cloud", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 410.0, "share_of_revenue": 0.4556, "operating_income": 125.0, "assets": None},
+            {"segment_id": "devices", "segment_name": "Devices", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 340.0, "share_of_revenue": 0.3778, "operating_income": 55.0, "assets": None},
+            {"segment_id": "services", "segment_name": "Services", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 150.0, "share_of_revenue": 0.1667, "operating_income": 40.0, "assets": None},
+            {"segment_id": "us", "segment_name": "United States", "axis_key": "StatementGeographicalAxis", "axis_label": "Geographic Segments", "kind": "geographic", "revenue": 520.0, "share_of_revenue": 0.5778, "operating_income": None, "assets": None},
+            {"segment_id": "emea", "segment_name": "EMEA", "axis_key": "StatementGeographicalAxis", "axis_label": "Geographic Segments", "kind": "geographic", "revenue": 190.0, "share_of_revenue": 0.2111, "operating_income": None, "assets": None},
+            {"segment_id": "apac", "segment_name": "APAC", "axis_key": "StatementGeographicalAxis", "axis_label": "Geographic Segments", "kind": "geographic", "revenue": 190.0, "share_of_revenue": 0.2111, "operating_income": None, "assets": None},
+        ],
+    }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [latest, previous])
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/financials")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["segment_analysis"]["business"]["as_of"] == "2025-12-31"
+    assert payload["segment_analysis"]["business"]["top_mix_movers"][0]["segment_name"] == "Devices"
+    assert payload["segment_analysis"]["business"]["top_margin_contributors"][0]["segment_name"] == "Cloud"
+    assert payload["segment_analysis"]["geographic"]["concentration"]["top_segment_name"] == "United States"
+    assert "sec_companyfacts" in payload["segment_analysis"]["business"]["provenance_sources"]
+    assert any(item["code"] == "geographic_revenue_only" for item in payload["segment_analysis"]["geographic"]["unusual_disclosures"])
+
+
+def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch):
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(
+        main_module,
+        "get_company_capital_structure_snapshots",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000320193-26-000010",
+                filing_type="10-K",
+                statement_type="canonical_xbrl",
+                period_start=date(2025, 1, 1),
+                period_end=date(2025, 12, 31),
+                source="https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+                filing_acceptance_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+                last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
+                last_checked=datetime(2026, 3, 22, tzinfo=timezone.utc),
+                data={
+                    "summary": {
+                        "total_debt": 110_000_000_000,
+                        "interest_expense": 4_500_000_000,
+                        "gross_shareholder_payout": 96_000_000_000,
+                    },
+                    "debt_maturity_ladder": {
+                        "buckets": [{"bucket_key": "debt_maturity_due_next_twelve_months", "label": "Next 12 months", "amount": 8_000_000_000}],
+                        "meta": {
+                            "as_of": "2025-12-31",
+                            "last_refreshed_at": "2026-03-22T00:00:00Z",
+                            "provenance_sources": ["sec_companyfacts", "ft_capital_structure_intelligence"],
+                            "confidence_score": 0.5,
+                            "confidence_flags": ["debt_maturity_ladder_partial"],
+                        },
+                    },
+                    "lease_obligations": {"buckets": [], "meta": {"as_of": "2025-12-31", "provenance_sources": [], "confidence_score": 0.0, "confidence_flags": ["lease_obligations_missing"]}},
+                    "debt_rollforward": {
+                        "opening_total_debt": 100_000_000_000,
+                        "ending_total_debt": 110_000_000_000,
+                        "debt_issued": 15_000_000_000,
+                        "debt_repaid": 5_000_000_000,
+                        "net_debt_change": 10_000_000_000,
+                        "unexplained_change": 0,
+                        "meta": {"as_of": "2025-12-31", "provenance_sources": ["sec_companyfacts"], "confidence_score": 1.0, "confidence_flags": []},
+                    },
+                    "interest_burden": {
+                        "interest_expense": 4_500_000_000,
+                        "average_total_debt": 105_000_000_000,
+                        "interest_to_average_debt": 0.0429,
+                        "interest_coverage_proxy": 20.0,
+                        "meta": {"as_of": "2025-12-31", "provenance_sources": ["sec_companyfacts"], "confidence_score": 1.0, "confidence_flags": []},
+                    },
+                    "capital_returns": {
+                        "dividends": 15_000_000_000,
+                        "share_repurchases": 81_000_000_000,
+                        "stock_based_compensation": 12_000_000_000,
+                        "gross_shareholder_payout": 96_000_000_000,
+                        "net_shareholder_payout": 84_000_000_000,
+                        "payout_mix": {"dividends_share": 0.156, "repurchases_share": 0.844, "sbc_offset_share": 0.111},
+                        "meta": {"as_of": "2025-12-31", "provenance_sources": ["sec_companyfacts"], "confidence_score": 1.0, "confidence_flags": []},
+                    },
+                    "net_dilution_bridge": {
+                        "opening_shares": 15_600_000_000,
+                        "shares_issued": 80_000_000,
+                        "shares_repurchased": 500_000_000,
+                        "ending_shares": 15_180_000_000,
+                        "net_share_change": -420_000_000,
+                        "net_dilution_ratio": -0.0269,
+                        "meta": {"as_of": "2025-12-31", "provenance_sources": ["sec_companyfacts"], "confidence_score": 1.0, "confidence_flags": []},
+                    },
+                },
+                provenance={"formula_version": "capital_structure_v1", "official_source_id": "sec_companyfacts"},
+                quality_flags=["debt_maturity_ladder_partial", "lease_obligations_missing"],
+                confidence_score=0.75,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_capital_structure_last_checked",
+        lambda *_args, **_kwargs: datetime(2026, 3, 22, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_capital_structure",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/capital-structure")
+
+    assert response.status_code == 200
+    payload = response.json()
+    _assert_provenance_envelope(payload, {"ft_capital_structure_intelligence", "sec_companyfacts"})
+    assert payload["latest"]["summary"]["total_debt"] == 110000000000
+    assert payload["source_mix"]["official_only"] is True
+    assert "lease_obligations_missing" in payload["confidence_flags"]
+
+
 def test_models_route_includes_registry_backed_provenance(monkeypatch):
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])

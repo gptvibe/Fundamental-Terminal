@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from app.api.schemas.financials import (
+    CompanyCapitalStructureResponse,
     CompanyChangesSinceLastFilingResponse,
     CompanyDerivedMetricsResponse,
     CompanyDerivedMetricsSummaryResponse,
@@ -23,6 +24,12 @@ def build_router(main_module: Any) -> APIRouter:
         main_module.company_financials,
         methods=["GET"],
         response_model=CompanyFinancialsResponse,
+    )
+    router.add_api_route(
+        "/api/companies/{ticker}/capital-structure",
+        main_module.company_capital_structure,
+        methods=["GET"],
+        response_model=CompanyCapitalStructureResponse,
     )
     router.add_api_route(
         "/api/companies/{ticker}/filing-insights",

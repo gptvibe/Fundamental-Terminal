@@ -1,0 +1,435 @@
+{
+  "cik": "0000123456",
+  "accession_number": "0000123456-26-000020",
+  "filing": {
+    "form": "10-K",
+    "filing_date": "2026-02-20",
+    "report_date": "2025-12-31",
+    "primary_document": "annual.htm"
+  },
+  "companyfacts": {
+    "facts": {
+      "us-gaap": {
+        "Revenues": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 200
+              }
+            ]
+          }
+        },
+        "InterestExpense": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 4
+              }
+            ]
+          }
+        },
+        "LongTermDebtCurrent": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 30
+              }
+            ]
+          }
+        },
+        "LongTermDebt": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 70
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiability": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 18
+              }
+            ]
+          }
+        },
+        "NetCashProvidedByUsedInOperatingActivities": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 60
+              }
+            ]
+          }
+        },
+        "OperatingIncomeLoss": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 80
+              }
+            ]
+          }
+        },
+        "PaymentsOfDividends": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": -5
+              }
+            ]
+          }
+        },
+        "PaymentsForRepurchaseOfCommonStock": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": -12
+              }
+            ]
+          }
+        },
+        "ShareBasedCompensation": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 6
+              }
+            ]
+          }
+        },
+        "CommonStockSharesOutstanding": {
+          "units": {
+            "shares": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 100
+              }
+            ]
+          }
+        },
+        "WeightedAverageNumberOfDilutedSharesOutstanding": {
+          "units": {
+            "shares": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 104
+              }
+            ]
+          }
+        },
+        "CommonStockSharesIssued": {
+          "units": {
+            "shares": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 5
+              }
+            ]
+          }
+        },
+        "CommonStockSharesRepurchased": {
+          "units": {
+            "shares": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 2
+              }
+            ]
+          }
+        },
+        "ProceedsFromIssuanceOfLongTermDebt": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 20
+              }
+            ]
+          }
+        },
+        "RepaymentsOfLongTermDebt": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "start": "2025-01-01",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": -8
+              }
+            ]
+          }
+        },
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 10
+              }
+            ]
+          }
+        },
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 11
+              }
+            ]
+          }
+        },
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 12
+              }
+            ]
+          }
+        },
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 13
+              }
+            ]
+          }
+        },
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 14
+              }
+            ]
+          }
+        },
+        "LongTermDebtMaturitiesRepaymentsOfPrincipalThereafter": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 20
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiabilityPaymentsDueNextTwelveMonths": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 3
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiabilityPaymentsDueYearTwo": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 3
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiabilityPaymentsDueYearThree": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 4
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiabilityPaymentsDueYearFour": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 4
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiabilityPaymentsDueYearFive": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 5
+              }
+            ]
+          }
+        },
+        "OperatingLeaseLiabilityPaymentsDueThereafter": {
+          "units": {
+            "USD": [
+              {
+                "accn": "0000123456-26-000020",
+                "form": "10-K",
+                "end": "2025-12-31",
+                "filed": "2026-02-20",
+                "val": 6
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expected": {
+    "canonical_data": {
+      "current_debt": 30,
+      "long_term_debt": 70,
+      "interest_expense": 4,
+      "lease_liabilities": 18,
+      "debt_issuance": 20,
+      "debt_repayment": 8,
+      "debt_changes": 12,
+      "shares_issued": 5,
+      "shares_repurchased": 2,
+      "debt_maturity_due_next_twelve_months": 10,
+      "debt_maturity_due_thereafter": 20,
+      "lease_due_next_twelve_months": 3,
+      "lease_due_thereafter": 6
+    },
+    "snapshot": {
+      "summary": {
+        "total_debt": 100,
+        "lease_liabilities": 18,
+        "interest_expense": 4,
+        "debt_due_next_twelve_months": 10,
+        "lease_due_next_twelve_months": 3,
+        "gross_shareholder_payout": 17,
+        "net_shareholder_payout": 11
+      },
+      "debt_rollforward": {
+        "debt_issued": 20,
+        "debt_repaid": 8,
+        "net_debt_change": 12
+      },
+      "capital_returns": {
+        "dividends": 5,
+        "share_repurchases": 12,
+        "stock_based_compensation": 6
+      },
+      "net_dilution_bridge": {
+        "shares_issued": 5,
+        "shares_repurchased": 2,
+        "ending_shares": 100
+      }
+    }
+  }
+}

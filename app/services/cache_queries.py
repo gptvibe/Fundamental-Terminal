@@ -11,6 +11,7 @@ from app.config import settings
 from app.models import (
     BeneficialOwnershipReport,
     CapitalMarketsEvent,
+    CapitalStructureSnapshot,
     Company,
     DerivedMetricPoint,
     DatasetRefreshState,
@@ -650,6 +651,37 @@ def get_company_capital_markets_events(
         .limit(limit)
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_capital_structure_snapshots(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 12,
+) -> list[CapitalStructureSnapshot]:
+    statement = (
+        select(CapitalStructureSnapshot)
+        .where(CapitalStructureSnapshot.company_id == company_id)
+        .order_by(
+            CapitalStructureSnapshot.period_end.desc(),
+            CapitalStructureSnapshot.last_updated.desc(),
+            CapitalStructureSnapshot.id.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_capital_structure_last_checked(session: Session, company_id: int) -> datetime | None:
+    last_checked, cache_state = cache_state_for_dataset(session, company_id, "capital_structure")
+    if cache_state != "missing":
+        return last_checked
+
+    statement = select(func.max(CapitalStructureSnapshot.last_checked)).where(CapitalStructureSnapshot.company_id == company_id)
+    scanned = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if scanned is not None:
+        mark_dataset_checked(session, company_id, "capital_structure", checked_at=scanned, success=True)
+    return scanned
 
 
 def get_company_capital_markets_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:

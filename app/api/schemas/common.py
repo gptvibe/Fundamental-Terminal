@@ -23,6 +23,8 @@ class DataQualityDiagnosticsPayload(BaseModel):
     stale_flags: list[str] = Field(default_factory=list)
     parser_confidence: Number = None
     missing_field_flags: list[str] = Field(default_factory=list)
+    reconciliation_penalty: Number = None
+    reconciliation_disagreement_count: int = 0
 
 
 class SourceMixPayload(BaseModel):
