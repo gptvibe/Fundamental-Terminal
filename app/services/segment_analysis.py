@@ -1,16 +1,35 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
-from app.api.schemas.financials import FinancialPayload, FinancialSegmentPayload
 from app.source_registry import infer_source_id
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 SEGMENT_KINDS: tuple[Literal["business", "geographic"], ...] = ("business", "geographic")
 
 
-def build_segment_analysis(financials: Sequence[FinancialPayload]) -> dict[str, Any] | None:
+class FinancialSegmentRecord(Protocol):
+    segment_id: str
+    segment_name: str
+    axis_label: str | None
+    kind: Literal["business", "geographic", "other"]
+    revenue: Any
+    share_of_revenue: Any
+    operating_income: Any
+
+
+class FinancialStatementRecord(Protocol):
+    filing_type: str
+    period_end: Any
+    source: str | None
+    last_checked: Any
+    revenue: Any
+    operating_income: Any
+    segment_breakdown: Sequence[FinancialSegmentRecord]
+
+
+def build_segment_analysis(financials: Sequence[FinancialStatementRecord]) -> dict[str, Any] | None:
     output = {kind: _build_segment_lens(financials, kind) for kind in SEGMENT_KINDS}
     if not any(output.values()):
         return None
@@ -18,7 +37,7 @@ def build_segment_analysis(financials: Sequence[FinancialPayload]) -> dict[str, 
 
 
 def _build_segment_lens(
-    financials: Sequence[FinancialPayload],
+    financials: Sequence[FinancialStatementRecord],
     kind: Literal["business", "geographic"],
 ) -> dict[str, Any] | None:
     statements = _statements_for_kind(financials, kind)
@@ -147,9 +166,9 @@ def _build_segment_lens(
 
 
 def _statements_for_kind(
-    financials: Sequence[FinancialPayload],
+    financials: Sequence[FinancialStatementRecord],
     kind: Literal["business", "geographic"],
-) -> list[FinancialPayload]:
+) -> list[FinancialStatementRecord]:
     annual = [statement for statement in financials if statement.filing_type in ANNUAL_FORMS and _segments_for_kind(statement, kind)]
     if annual:
         return annual
@@ -157,9 +176,9 @@ def _statements_for_kind(
 
 
 def _segments_for_kind(
-    statement: FinancialPayload | None,
+    statement: FinancialStatementRecord | None,
     kind: Literal["business", "geographic"],
-) -> list[FinancialSegmentPayload]:
+) -> list[FinancialSegmentRecord]:
     if statement is None:
         return []
     return [
@@ -169,7 +188,7 @@ def _segments_for_kind(
     ]
 
 
-def _statement_total_revenue(statement: FinancialPayload | None, segments: Sequence[FinancialSegmentPayload]) -> float | None:
+def _statement_total_revenue(statement: FinancialStatementRecord | None, segments: Sequence[FinancialSegmentRecord]) -> float | None:
     if statement is None:
         return None
     if (statement.revenue or 0) > 0:
@@ -181,7 +200,7 @@ def _statement_total_revenue(statement: FinancialPayload | None, segments: Seque
     return sum(numeric)
 
 
-def _statement_total_operating_income(statement: FinancialPayload | None, segments: Sequence[FinancialSegmentPayload]) -> float | None:
+def _statement_total_operating_income(statement: FinancialStatementRecord | None, segments: Sequence[FinancialSegmentRecord]) -> float | None:
     if statement is not None and _to_float(statement.operating_income) not in (None, 0):
         return _to_float(statement.operating_income)
     numeric = [_to_float(segment.operating_income) for segment in segments if _to_float(segment.operating_income) not in (None, 0)]
@@ -191,7 +210,7 @@ def _statement_total_operating_income(statement: FinancialPayload | None, segmen
 
 
 def _build_concentration(
-    segments: Sequence[FinancialSegmentPayload],
+    segments: Sequence[FinancialSegmentRecord],
     total_revenue: float | None,
 ) -> dict[str, Any]:
     ranked = []
@@ -218,9 +237,9 @@ def _build_concentration(
 def _build_disclosures(
     *,
     kind: Literal["business", "geographic"],
-    latest: FinancialPayload,
-    previous: FinancialPayload | None,
-    latest_segments: Sequence[FinancialSegmentPayload],
+    latest: FinancialStatementRecord,
+    previous: FinancialStatementRecord | None,
+    latest_segments: Sequence[FinancialSegmentRecord],
     rows: Sequence[dict[str, Any]],
     new_segments: Sequence[str],
     removed_segments: Sequence[str],
@@ -335,8 +354,8 @@ def _build_disclosures(
 def _confidence_score(
     *,
     kind: Literal["business", "geographic"],
-    latest_segments: Sequence[FinancialSegmentPayload],
-    previous: FinancialPayload | None,
+    latest_segments: Sequence[FinancialSegmentRecord],
+    previous: FinancialStatementRecord | None,
     disclosures: Sequence[dict[str, Any]],
 ) -> float:
     score = 1.0
@@ -378,7 +397,7 @@ def _build_summary(
     return f"Latest {kind} disclosure is led by {lead_names}."
 
 
-def _provenance_sources(*statements: FinancialPayload | None) -> list[str]:
+def _provenance_sources(*statements: FinancialStatementRecord | None) -> list[str]:
     output: list[str] = []
     for statement in statements:
         if statement is None:
@@ -391,14 +410,14 @@ def _provenance_sources(*statements: FinancialPayload | None) -> list[str]:
     return output
 
 
-def _segment_revenue(segment: FinancialSegmentPayload | None) -> float | None:
+def _segment_revenue(segment: FinancialSegmentRecord | None) -> float | None:
     if segment is None:
         return None
     return _to_float(segment.revenue)
 
 
 def _segment_share(
-    segment: FinancialSegmentPayload | None,
+    segment: FinancialSegmentRecord | None,
     total_revenue: float | None,
     *,
     default_zero: bool = False,
@@ -414,7 +433,7 @@ def _segment_share(
     return share
 
 
-def _segment_margin(segment: FinancialSegmentPayload | None) -> float | None:
+def _segment_margin(segment: FinancialSegmentRecord | None) -> float | None:
     if segment is None:
         return None
     return _safe_div(_to_float(segment.operating_income), _segment_revenue(segment))
