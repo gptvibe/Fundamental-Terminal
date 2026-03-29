@@ -470,7 +470,7 @@ function normalizeStatus(status: string): string {
 }
 
 function readTreasuryStatus(context: CompanyMarketContextResponse): string {
-  const treasury = context.provenance_details.treasury;
+  const treasury = context.provenance_details?.treasury;
   if (!treasury || typeof treasury !== "object") {
     return "unknown";
   }

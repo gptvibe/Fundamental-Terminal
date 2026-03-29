@@ -911,7 +911,7 @@ export interface CompanyMarketContextResponse extends ProvenanceEnvelope {
   slope_2s10s: MarketSlopePayload;
   slope_3m10y: MarketSlopePayload;
   fred_series: MarketFredSeriesPayload[];
-  provenance_details: Record<string, unknown>;
+  provenance_details?: Record<string, unknown> | null;
   fetched_at: string;
   refresh: RefreshState;
   // v2 grouped sections

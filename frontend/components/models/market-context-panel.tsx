@@ -196,7 +196,7 @@ function normalizeStatus(status: string): string {
 }
 
 function isFredEnabled(context: CompanyMarketContextResponse): boolean {
-  const fred = context.provenance_details.fred;
+  const fred = context.provenance_details?.fred;
   if (!fred || typeof fred !== "object") {
     return false;
   }

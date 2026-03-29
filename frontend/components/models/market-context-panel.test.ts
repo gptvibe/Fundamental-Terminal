@@ -138,4 +138,42 @@ describe("MarketContextPanel", () => {
     expect(screen.getByText("Cyclical Demand")).toBeTruthy();
     expect(screen.getAllByText("Manufacturing New Orders (M3)")).toHaveLength(2);
   });
+
+  it("treats missing provenance details as FRED unavailable", () => {
+    render(
+      React.createElement(MarketContextPanel, {
+        context: {
+          company: null,
+          status: "partial",
+          curve_points: [
+            { tenor: "rrp", rate: 0.048, observation_date: "2026-03-21" },
+            { tenor: "3m", rate: 0.045, observation_date: "2026-03-21" },
+            { tenor: "10y", rate: 0.0425, observation_date: "2026-03-21" },
+            { tenor: "30y", rate: 0.0461, observation_date: "2026-03-21" },
+          ],
+          slope_2s10s: { label: "2s10s", value: 0.0025, short_tenor: "2y", long_tenor: "10y", observation_date: "2026-03-21" },
+          slope_3m10y: { label: "3m10y", value: -0.0025, short_tenor: "3m", long_tenor: "10y", observation_date: "2026-03-21" },
+          fred_series: [],
+          provenance: [],
+          as_of: "2026-03-21",
+          last_refreshed_at: "2026-03-22T00:00:00Z",
+          source_mix: {
+            source_ids: ["us_treasury_daily_par_yield_curve"],
+            source_tiers: ["official_treasury_or_fed"],
+            primary_source_ids: ["us_treasury_daily_par_yield_curve"],
+            fallback_source_ids: [],
+            official_only: true,
+          },
+          confidence_flags: [],
+          fetched_at: "2026-03-22T00:00:00Z",
+          refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+          cyclical_demand: [],
+          cyclical_costs: [],
+          relevant_indicators: [],
+        },
+      })
+    );
+
+    expect(screen.getByText("FRED: Not configured")).toBeTruthy();
+  });
 });

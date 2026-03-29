@@ -132,4 +132,14 @@ describe("EconomicDashboard", () => {
     expect(html).toContain("Manufacturing New Orders (M3)");
     expect(html).toContain("Cyclical Costs &amp; Labor");
   });
+
+  it("falls back when provenance details are missing", () => {
+    const context = makeContext();
+    delete context.provenance_details;
+
+    const html = renderToStaticMarkup(React.createElement(EconomicDashboard, { context }));
+
+    expect(html).toContain("Treasury unknown");
+    expect(html).toContain("FRED Live");
+  });
 });
