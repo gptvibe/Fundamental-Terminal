@@ -10,6 +10,7 @@ import {
   getCompanyFilingInsights,
   getCompanyFilings,
   getCompanyMarketContext,
+  getLatestModelEvaluation,
   getCompanyModels,
   getCompanyPeers,
   getWatchlistSummary,
@@ -33,6 +34,7 @@ describe("api route stability", () => {
     await getCompanyFilings("MSFT");
     await getCompanyFilingInsights("NVDA");
     await getCompanyMarketContext("AMD");
+    await getLatestModelEvaluation();
     await getCompanyCapitalStructure("AAPL");
     await getCompanyPeers("AAPL", ["MSFT", "NVDA"]);
 
@@ -58,11 +60,16 @@ describe("api route stability", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
-      "/backend/api/companies/AAPL/capital-structure",
+      "/backend/api/model-evaluations/latest",
       expect.objectContaining({ cache: "force-cache" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
+      "/backend/api/companies/AAPL/capital-structure",
+      expect.objectContaining({ cache: "force-cache" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
       "/backend/api/companies/AAPL/peers?peers=MSFT%2CNVDA",
       expect.objectContaining({ cache: "force-cache" })
     );

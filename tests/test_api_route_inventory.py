@@ -30,6 +30,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/ownership/{ticker}"),
         ("POST", "/api/companies/{ticker}/refresh"),
         ("GET", "/api/companies/{ticker}/models"),
+        ("GET", "/api/model-evaluations/latest"),
         ("GET", "/api/companies/{ticker}/market-context"),
         ("GET", "/api/companies/{ticker}/sector-context"),
         ("GET", "/api/market-context"),

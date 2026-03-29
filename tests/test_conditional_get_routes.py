@@ -47,6 +47,7 @@ def test_search_route_supports_conditional_get(monkeypatch):
 def test_financials_route_supports_conditional_get(monkeypatch):
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
     monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
@@ -72,6 +73,46 @@ def test_models_route_supports_conditional_get(monkeypatch):
 
     client = TestClient(app)
     _assert_304_on_second_request(client, "/api/companies/AAPL/models")
+
+
+def test_model_evaluation_route_supports_conditional_get(monkeypatch):
+    completed_at = datetime.now(timezone.utc)
+    payload = {
+        "id": 7,
+        "suite_key": "historical_fixture_v1",
+        "candidate_label": "fixture_baseline_v1",
+        "baseline_label": "fixture_baseline_v1",
+        "status": "completed",
+        "completed_at": completed_at,
+        "configuration": {"horizon_days": 420},
+        "summary": {"provenance_mode": "synthetic_fixture", "latest_as_of": "2025-02-15"},
+        "models": [
+            {
+                "model_name": "dcf",
+                "sample_count": 8,
+                "calibration": 0.75,
+                "stability": 0.08,
+                "mean_absolute_error": 0.11,
+                "root_mean_square_error": 0.13,
+                "mean_signed_error": 0.02,
+                "status": "ok",
+                "delta": {
+                    "calibration": 0,
+                    "stability": 0,
+                    "mean_absolute_error": 0,
+                    "root_mean_square_error": 0,
+                    "mean_signed_error": 0,
+                    "sample_count": 0,
+                },
+            }
+        ],
+        "deltas_present": False,
+    }
+    monkeypatch.setattr(main_module, "get_latest_model_evaluation_run", lambda *_args, **_kwargs: SimpleNamespace(created_at=completed_at, completed_at=completed_at))
+    monkeypatch.setattr(main_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: payload)
+
+    client = TestClient(app)
+    _assert_304_on_second_request(client, "/api/model-evaluations/latest")
 
 
 def test_peers_route_supports_conditional_get(monkeypatch):

@@ -14,7 +14,7 @@ vi.mock("recharts", () => ({
 }));
 
 describe("InvestmentSummaryPanel", () => {
-  it("uses fair value per share vs latest price and shows net debt separately", () => {
+  it("uses valuation ranges vs latest price and shows net debt separately", () => {
     render(
       React.createElement(InvestmentSummaryPanel, {
         ticker: "ACME",
@@ -25,9 +25,21 @@ describe("InvestmentSummaryPanel", () => {
             created_at: "2026-03-22T00:00:00Z",
             input_periods: {},
             result: {
-              model_status: "ok",
+              model_status: "supported",
               fair_value_per_share: 120,
               net_debt: 50000000,
+            },
+          },
+          {
+            model_name: "residual_income",
+            model_version: "1.0.0",
+            created_at: "2026-03-22T00:00:00Z",
+            input_periods: {},
+            result: {
+              model_status: "supported",
+              intrinsic_value: {
+                intrinsic_value_per_share: 110,
+              },
             },
           },
           {
@@ -60,11 +72,13 @@ describe("InvestmentSummaryPanel", () => {
       })
     );
 
-    expect(screen.getByText("DCF Fair Value / Share")).toBeTruthy();
+    expect(screen.getByText("Valuation Range / Share")).toBeTruthy();
+    expect(screen.getByText("Valuation Midpoint")).toBeTruthy();
     expect(screen.getByText("Latest Price")).toBeTruthy();
-    expect(screen.getByText("Fair Value Gap")).toBeTruthy();
+    expect(screen.getByText("Gap vs Midpoint")).toBeTruthy();
     expect(screen.getByText("Net Debt")).toBeTruthy();
-    expect(screen.getByText("20.00%")).toBeTruthy();
+    expect(screen.getByText("15.00%")).toBeTruthy();
+    expect(screen.getByText("$110.00 - $120.00")).toBeTruthy();
   });
 
   it("surfaces unsupported valuation state explicitly", () => {
@@ -87,7 +101,8 @@ describe("InvestmentSummaryPanel", () => {
       })
     );
 
-    expect(screen.getByText("DCF state unsupported")).toBeTruthy();
+    expect(screen.getByText("Valuation state unsupported")).toBeTruthy();
     expect(screen.getByText(/unsupported for this company classification/i)).toBeTruthy();
   });
 });
+

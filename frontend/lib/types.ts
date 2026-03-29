@@ -829,7 +829,7 @@ export interface ModelPayload {
   result: Record<string, unknown>;
 }
 
-export type ModelStatus = "ok" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown";
+export type ModelStatus = "supported" | "partial" | "proxy" | "insufficient_data" | "unsupported";
 
 export interface ValuationApplicabilityMatch {
   field: string;
@@ -1433,11 +1433,49 @@ export interface AlertPayload {
   href: string | null;
 }
 
+export interface ModelEvaluationMetricDeltaPayload {
+  calibration: number | null;
+  stability: number | null;
+  mean_absolute_error: number | null;
+  root_mean_square_error: number | null;
+  mean_signed_error: number | null;
+  sample_count: number | null;
+}
+
+export interface ModelEvaluationMetricPayload {
+  model_name: string;
+  sample_count: number;
+  calibration: number | null;
+  stability: number | null;
+  mean_absolute_error: number | null;
+  root_mean_square_error: number | null;
+  mean_signed_error: number | null;
+  status: string;
+  delta: ModelEvaluationMetricDeltaPayload;
+}
+
+export interface ModelEvaluationRunPayload {
+  id: number | null;
+  suite_key: string;
+  candidate_label: string;
+  baseline_label: string | null;
+  status: string;
+  completed_at: string | null;
+  configuration: Record<string, unknown>;
+  summary: Record<string, unknown>;
+  models: ModelEvaluationMetricPayload[];
+  deltas_present: boolean;
+}
+
 export interface AlertsSummaryPayload {
   total: number;
   high: number;
   medium: number;
   low: number;
+}
+
+export interface ModelEvaluationResponse extends ProvenanceEnvelope {
+  run: ModelEvaluationRunPayload | null;
 }
 
 export interface CompanyAlertsResponse {

@@ -1,0 +1,56 @@
+{
+  "candidate_label": "fixture_baseline_v1",
+  "configuration": {
+    "bundle_count": 2,
+    "earnings_horizon_days": 30,
+    "horizon_days": 420
+  },
+  "metrics": {
+    "dcf": {
+      "calibration": 0.833333,
+      "mean_absolute_error": 0.348712,
+      "mean_signed_error": 0.2299,
+      "root_mean_square_error": 0.427732,
+      "sample_count": 6,
+      "stability": 0.219525,
+      "status": "ok"
+    },
+    "earnings": {
+      "calibration": 0.0,
+      "mean_absolute_error": 0.124167,
+      "mean_signed_error": 0.124167,
+      "root_mean_square_error": 0.128873,
+      "sample_count": 12,
+      "stability": 0.012,
+      "status": "ok"
+    },
+    "residual_income": {
+      "calibration": 0.0,
+      "mean_absolute_error": 1.148051,
+      "mean_signed_error": -1.148051,
+      "root_mean_square_error": 1.148225,
+      "sample_count": 6,
+      "stability": 0.005706,
+      "status": "ok"
+    },
+    "reverse_dcf": {
+      "calibration": 1.0,
+      "mean_absolute_error": 0.464733,
+      "mean_signed_error": 0.464733,
+      "root_mean_square_error": 0.464758,
+      "sample_count": 6,
+      "stability": 0.0,
+      "status": "ok"
+    },
+    "roic": {
+      "calibration": 1.0,
+      "mean_absolute_error": 0.001759,
+      "mean_signed_error": 0.001759,
+      "root_mean_square_error": 0.001836,
+      "sample_count": 6,
+      "stability": 0.001595,
+      "status": "ok"
+    }
+  },
+  "suite_key": "historical_fixture_v1"
+}

@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CompanyModelsPage from "@/app/company/[ticker]/models/page";
-import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels } from "@/lib/api";
+import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 
 vi.mock("next/navigation", () => ({
@@ -48,10 +48,16 @@ vi.mock("@/components/models/market-context-panel", () => ({
   MarketContextPanel: () => React.createElement("div", null, "market-context-panel"),
 }));
 
+vi.mock("@/components/models/sector-context-panel", () => ({
+  SectorContextPanel: () => React.createElement("div", null, "sector-context-panel"),
+}));
+
 vi.mock("@/lib/api", () => ({
   getCompanyModels: vi.fn(),
   getCompanyFinancials: vi.fn(),
   getCompanyMarketContext: vi.fn(),
+  getCompanySectorContext: vi.fn(),
+  getLatestModelEvaluation: vi.fn(),
   refreshCompany: vi.fn(),
 }));
 
@@ -204,6 +210,81 @@ describe("CompanyModelsPage", () => {
       sector_exposure: [],
       hqm_snapshot: null,
     });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      matched_plugin_ids: [],
+      plugins: [],
+      fetched_at: "2026-03-22T00:00:00Z",
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({
+      run: {
+        id: 12,
+        suite_key: "historical_fixture_v1",
+        candidate_label: "fixture_baseline_v1",
+        baseline_label: "fixture_baseline_v1",
+        status: "completed",
+        completed_at: "2026-03-22T00:00:00Z",
+        configuration: { horizon_days: 420, earnings_horizon_days: 30 },
+        summary: { company_count: 2, snapshot_count: 8, model_count: 5, provenance_mode: "synthetic_fixture", latest_as_of: "2025-02-15" },
+        models: [
+          {
+            model_name: "dcf",
+            sample_count: 8,
+            calibration: 0.75,
+            stability: 0.08,
+            mean_absolute_error: 0.11,
+            root_mean_square_error: 0.13,
+            mean_signed_error: 0.02,
+            status: "supported",
+            delta: {
+              calibration: 0,
+              stability: 0,
+              mean_absolute_error: 0,
+              root_mean_square_error: 0,
+              mean_signed_error: 0,
+              sample_count: 0,
+            },
+          },
+        ],
+        deltas_present: false,
+      },
+      provenance: [
+        {
+          source_id: "ft_model_evaluation_fixture",
+          source_tier: "manual_override",
+          display_label: "Fundamental Terminal Evaluation Fixture",
+          url: "https://github.com/gptvibe/Fundamental-Terminal",
+          default_freshness_ttl_seconds: 0,
+          disclosure_note: "Synthetic historical fixture suite used only for deterministic model-evaluation regression gating.",
+          role: "derived",
+          as_of: "2025-02-15",
+          last_refreshed_at: "2026-03-22T00:00:00Z",
+        },
+      ],
+      as_of: "2025-02-15",
+      last_refreshed_at: "2026-03-22T00:00:00Z",
+      source_mix: {
+        source_ids: ["ft_model_evaluation_fixture"],
+        source_tiers: ["manual_override"],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: false,
+      },
+      confidence_flags: ["synthetic_fixture_suite"],
+    });
 
     render(React.createElement(CompanyModelsPage));
 
@@ -212,9 +293,11 @@ describe("CompanyModelsPage", () => {
     });
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
+    expect(screen.getByText("Model Evaluation Harness")).toBeTruthy();
     expect(screen.getByText("Macro Demand & Cost Context")).toBeTruthy();
     expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
     expect(screen.getByText("market-context-panel")).toBeTruthy();
+    expect(screen.getByText(/Suite historical_fixture_v1/i)).toBeTruthy();
     expect(screen.getByText("Fundamental Terminal Model Engine")).toBeTruthy();
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
     expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
@@ -334,6 +417,39 @@ describe("CompanyModelsPage", () => {
       relevant_indicators: [],
       sector_exposure: [],
       hqm_snapshot: null,
+    });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      matched_plugin_ids: [],
+      plugins: [],
+      fetched_at: "2026-03-22T00:00:00Z",
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({
+      run: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: false,
+      },
+      confidence_flags: [],
     });
 
     render(React.createElement(CompanyModelsPage));

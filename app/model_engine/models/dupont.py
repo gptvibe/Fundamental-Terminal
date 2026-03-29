@@ -13,6 +13,7 @@ from app.model_engine.utils import (
     latest_statement,
     previous_comparable_statement,
     safe_divide,
+    status_explanation,
     statement_value,
 )
 
@@ -36,12 +37,15 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             basis, metrics = _compute_ttm(dataset)
 
     if metrics is None:
-        return {"status": "insufficient_data", "reason": "Need annual filing or four comparable periods for DuPont"}
+        return {"status": "insufficient_data", "model_status": "insufficient_data", "explanation": status_explanation("insufficient_data"), "reason": "Need annual filing or four comparable periods for DuPont"}
 
     net_profit_margin, asset_turnover, equity_multiplier, average_assets, average_equity, current = metrics
+    status = "supported" if all(value is not None for value in (net_profit_margin, asset_turnover, equity_multiplier)) else "partial"
 
     return {
-        "status": "ok" if all(value is not None for value in (net_profit_margin, asset_turnover, equity_multiplier)) else "partial",
+        "status": status,
+        "model_status": status,
+        "explanation": status_explanation(status),
         "period_end": current.period_end.isoformat(),
         "filing_type": current.filing_type,
         "basis": basis,

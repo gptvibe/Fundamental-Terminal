@@ -222,6 +222,22 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Cached model outputs derived from official filings, Treasury/Fed rates, and labeled price fallbacks.",
     ),
+    "ft_model_evaluation_harness": SourceDefinition(
+        source_id="ft_model_evaluation_harness",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Model Evaluation Harness",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Historical-snapshot backtests computed from cached fundamentals, labeled price history, and persisted model metrics.",
+    ),
+    "ft_model_evaluation_fixture": SourceDefinition(
+        source_id="ft_model_evaluation_fixture",
+        tier="manual_override",
+        display_label="Fundamental Terminal Evaluation Fixture",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=0,
+        disclosure_note="Synthetic historical fixture suite used only for deterministic model-evaluation regression gating.",
+    ),
     "ft_peer_comparison": SourceDefinition(
         source_id="ft_peer_comparison",
         tier="derived_from_official",

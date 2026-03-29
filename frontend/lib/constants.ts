@@ -19,7 +19,7 @@ export const MODEL_GUIDE: ModelGuideEntry[] = [
   {
     key: "dcf",
     label: "DCF",
-    locationSummary: "Investment Summary, DCF Scenario Analysis, and Model Analytics"
+    locationSummary: "Investment Summary, Valuation Scenario Ranges, and Model Analytics"
   },
   {
     key: "dupont",
@@ -44,7 +44,12 @@ export const MODEL_GUIDE: ModelGuideEntry[] = [
   {
     key: "reverse_dcf",
     label: "Reverse DCF",
-    locationSummary: "Valuation Workbench and Model Analytics"
+    locationSummary: "Valuation Scenario Ranges and Model Analytics"
+  },
+  {
+    key: "residual_income",
+    label: "Residual Income",
+    locationSummary: "Investment Summary, Valuation Scenario Ranges, and Model Analytics"
   },
   {
     key: "roic",

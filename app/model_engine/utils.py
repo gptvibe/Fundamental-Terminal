@@ -6,6 +6,12 @@ from typing import Any
 
 from app.model_engine.types import CompanyDataset, FinancialPoint
 
+MODEL_STATUS_SUPPORTED = "supported"
+MODEL_STATUS_PARTIAL = "partial"
+MODEL_STATUS_PROXY = "proxy"
+MODEL_STATUS_INSUFFICIENT_DATA = "insufficient_data"
+MODEL_STATUS_UNSUPPORTED = "unsupported"
+
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 UNSUPPORTED_FINANCIAL_KEYWORDS = (
     "bank",
@@ -139,12 +145,12 @@ def status_from_data_quality(
     can_compute_directional: bool,
 ) -> str:
     if not can_compute_directional:
-        return "insufficient_data"
+        return MODEL_STATUS_INSUFFICIENT_DATA
     if proxy_used:
-        return "proxy"
+        return MODEL_STATUS_PROXY
     if len(missing_fields) >= 2:
-        return "partial"
-    return "ok"
+        return MODEL_STATUS_PARTIAL
+    return MODEL_STATUS_SUPPORTED
 
 
 def trust_summary(*, missing_fields: list[str], proxy_used: bool) -> str:
@@ -158,15 +164,15 @@ def trust_summary(*, missing_fields: list[str], proxy_used: bool) -> str:
 
 
 def status_explanation(status: str) -> str:
-    if status == "unsupported":
+    if status == MODEL_STATUS_UNSUPPORTED:
         return "This model is not applicable to this company's sector/industry profile."
-    if status == "partial":
+    if status == MODEL_STATUS_PARTIAL:
         return "This model used incomplete financial inputs; results are directional only."
-    if status == "proxy":
+    if status == MODEL_STATUS_PROXY:
         return "This model used approximation logic where direct inputs were unavailable."
-    if status == "insufficient_data":
+    if status == MODEL_STATUS_INSUFFICIENT_DATA:
         return "Required base inputs were not sufficient to produce a directional output."
-    return "View discount rate, terminal assumptions, and data provenance used in this result."
+    return "This model is supported by the available issuer inputs and sector profile."
 
 
 def valuation_applicability(dataset: CompanyDataset) -> dict[str, Any]:

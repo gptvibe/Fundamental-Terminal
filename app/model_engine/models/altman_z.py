@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.model_engine.types import CompanyDataset
-from app.model_engine.utils import book_equity, json_number, latest_annual_statement, latest_statement, safe_divide, statement_value
+from app.model_engine.utils import book_equity, json_number, latest_annual_statement, latest_statement, safe_divide, statement_value, status_explanation
 
 MODEL_NAME = "altman_z"
 MODEL_VERSION = "1.2.0"
@@ -18,7 +18,7 @@ FACTOR_WEIGHTS = {
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     current = latest_annual_statement(dataset) or latest_statement(dataset)
     if current is None:
-        return {"status": "insufficient_data", "reason": "No financial statements available"}
+        return {"status": "insufficient_data", "model_status": "insufficient_data", "explanation": status_explanation("insufficient_data"), "reason": "No financial statements available"}
 
     total_assets = statement_value(current, "total_assets")
     total_liabilities = statement_value(current, "total_liabilities")
@@ -50,8 +50,11 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             total_weight = sum(FACTOR_WEIGHTS.values())
             approximate_score = weighted_sum * (total_weight / present_weight)
 
+    status = "supported" if approximate_score is not None and len(available_factors) == len(factors) else "partial" if approximate_score is not None else "insufficient_data"
     return {
-        "status": "ok" if approximate_score is not None and len(available_factors) == len(factors) else "partial" if approximate_score is not None else "insufficient_data",
+        "status": status,
+        "model_status": status,
+        "explanation": status_explanation(status),
         "period_end": current.period_end.isoformat(),
         "filing_type": current.filing_type,
         "z_score_approximate": json_number(approximate_score),

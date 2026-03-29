@@ -41,6 +41,8 @@ jobs:
           tests/test_sec_edgar_refresh_orchestrator.py
           tests/test_fetch_trigger_dedupe.py
           tests/test_api_route_inventory.py
+          tests/test_model_evaluation_harness.py
+          tests/test_hot_endpoint_contracts.py
 
   frontend-route-compatibility:
     name: Frontend Route Compatibility
@@ -63,4 +65,52 @@ jobs:
 
       - name: Run frontend route stability tests
         working-directory: frontend
-        run: npm run test -- lib/api.routes.test.ts
+        run: npm run test -- lib/api.routes.test.ts app/company/[ticker]/models/page.test.ts
+
+  model-evaluation-gate:
+    name: Model Evaluation Gate
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/fundamental_terminal
+      SEC_USER_AGENT: FundamentalTerminalCI/1.0 (ci@example.com)
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fundamental_terminal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fundamental_terminal"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Apply database migrations
+        run: alembic upgrade head
+
+      - name: Run model evaluation gate
+        run: >-
+          python scripts/run_model_evaluation.py
+          --fixture historical_fixture_v1
+          --baseline-file scripts/model_evaluation_baseline.json
+          --fail-on-delta
+          --persist

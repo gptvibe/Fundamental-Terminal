@@ -18,6 +18,7 @@ from app.models.insider_trade import InsiderTrade
 from app.models.institutional_fund import InstitutionalFund
 from app.models.institutional_holding import InstitutionalHolding
 from app.models.market_context_snapshot import MarketContextSnapshot
+from app.models.model_evaluation_run import ModelEvaluationRun
 from app.models.model_run import ModelRun
 from app.models.official_data_observation import OfficialDataObservation
 from app.models.official_data_series import OfficialDataSeries
@@ -46,6 +47,7 @@ __all__ = [
     "InstitutionalFund",
     "InstitutionalHolding",
     "MarketContextSnapshot",
+    "ModelEvaluationRun",
     "ModelRun",
     "OfficialDataObservation",
     "OfficialDataSeries",

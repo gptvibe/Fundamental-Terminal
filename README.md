@@ -22,6 +22,8 @@ Captured from the local app with `INTC` as the demo company.
 
 ![Valuation models for INTC](docs/screenshots/company-models.png)
 
+The valuation workspace now emphasizes base, bear, and bull scenario ranges with editable sensitivities, overlap between per-share valuation methods, and assumption traceability back to SEC filings and official rate inputs.
+
 ### Mobile Company View
 
 ![Mobile company view for INTC](docs/screenshots/mobile-company.png)
@@ -34,6 +36,7 @@ Captured from the local app with `INTC` as the demo company.
 - See [docs/backend-architecture-boundaries.md](docs/backend-architecture-boundaries.md) for router, schema, `app.main`, and service-layer ownership rules.
 - See [docs/data-provenance.md](docs/data-provenance.md) for upstream source policy and diagnostics semantics.
 - See [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md) for performance, freshness, and benchmark notes.
+- See [docs/model-evaluation-harness.md](docs/model-evaluation-harness.md) for historical backtesting, persisted evaluation runs, and CI gate rules.
 
 ## Canonical metrics
 
@@ -140,6 +143,7 @@ API composition notes:
 - Routers stay registration-only; refresh orchestration and dataset jobs live under `app/services/`, with `app.main` acting as the compatibility bridge.
 - Run `python scripts/check_architecture_boundaries.py` to verify routers and services still respect the documented import boundaries.
 - Pull requests and pushes to `main` also run `.github/workflows/ci.yml`, which checks the import boundaries and the targeted backend/frontend compatibility tests.
+- The same CI workflow also runs a deterministic historical model-evaluation gate against `scripts/model_evaluation_baseline.json`; intentional model changes should update that baseline in the same change.
 
 ## Run the Next.js frontend
 
@@ -160,6 +164,7 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 - `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
 - `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
 - `/company/[ticker]/models` now also includes a company-relevant official macro demand-and-cost panel built from Census M3/retail, BEA, and BLS data
+- Model payloads now normalize `model_status` to `supported`, `partial`, `proxy`, `insufficient_data`, or `unsupported`, and each response includes `confidence_score`, `confidence_reasons`, `fields_used`, `proxy_usage`, `stale_inputs`, `sector_suitability`, and `misleading_reasons`.
 - `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel, executive pay table, and pay trend chart
 - `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
 - `/company/[ticker]/ownership` — institutional holdings analytics and manager activity trends
@@ -186,6 +191,12 @@ Frontend data-loading/performance strategy:
 - Refresh queue and mutation endpoints remain uncached.
 - Company route loading/error boundaries provide lightweight transitions while preserving deep-linkable routes.
 - Heavy tables use row virtualization and chart-heavy sections are loaded as deferred client islands.
+
+Model evaluation harness:
+
+- `scripts/run_model_evaluation.py` backtests DCF, reverse DCF, residual income, ROIC, and earnings signals using historical snapshots only.
+- Completed runs can be stored in PostgreSQL via `model_evaluation_runs` and surfaced through `/api/model-evaluations/latest`.
+- The models workspace now includes the latest persisted evaluation summary with provenance, `as_of`, `last_refreshed_at`, and confidence metadata.
 
 Reliability and diagnostics additions:
 

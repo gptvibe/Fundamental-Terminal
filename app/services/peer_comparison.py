@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
+from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
 from app.models import Company, FinancialStatement, ModelRun, PriceHistory
 from app.services.cache_queries import (
     CompanyCacheSnapshot,
@@ -296,8 +297,8 @@ def _build_peer_row(
     roic_result = _model_result(models.get("roic"))
     capital_allocation_result = _model_result(models.get("capital_allocation"))
 
-    dcf_status = str(dcf_result.get("model_status") or dcf_result.get("status") or "unknown")
-    reverse_dcf_status = str(reverse_dcf_result.get("model_status") or reverse_dcf_result.get("status") or "unknown")
+    dcf_status = normalize_model_status(str(dcf_result.get("model_status") or dcf_result.get("status") or ""))
+    reverse_dcf_status = normalize_model_status(str(reverse_dcf_result.get("model_status") or reverse_dcf_result.get("status") or ""))
 
     latest_price_value = latest_price.close if latest_price is not None else None
     eps = _as_float(current_data.get("eps"))
@@ -553,10 +554,10 @@ def _model_result(model_run: ModelRun | dict[str, Any] | None) -> dict[str, Any]
         return {}
     if isinstance(model_run, dict):
         result = model_run.get("result")
-        return result if isinstance(result, dict) else {}
+        return standardize_model_result(str(model_run.get("model_name") or ""), result if isinstance(result, dict) else {})
     if not isinstance(model_run.result, dict):
         return {}
-    return model_run.result
+    return standardize_model_result(model_run.model_name, model_run.result)
 
 
 def _mapping(value: Any) -> dict[str, Any]:

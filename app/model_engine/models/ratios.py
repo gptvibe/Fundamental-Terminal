@@ -10,6 +10,7 @@ from app.model_engine.utils import (
     previous_comparable_statement,
     safe_divide,
     statement_value,
+    status_from_data_quality,
     status_explanation,
 )
 
@@ -20,7 +21,7 @@ MODEL_VERSION = "1.1.0"
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     current = latest_statement(dataset)
     if current is None:
-        return {"status": "insufficient_data", "reason": "No financial statements available"}
+        return {"status": "insufficient_data", "model_status": "insufficient_data", "explanation": status_explanation("insufficient_data"), "reason": "No financial statements available"}
 
     previous = previous_comparable_statement(dataset, current)
     current_equity = book_equity(current)
@@ -62,8 +63,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "payout_ratio": safe_divide(abs(float(statement_value(current, "dividends"))) if statement_value(current, "dividends") is not None else None, statement_value(current, "net_income")),
     }
 
-    missing_count = sum(1 for value in ratios.values() if value is None)
-    status = "ok" if missing_count == 0 else "partial"
+    missing_fields = sorted(key for key, value in ratios.items() if value is None)
+    status = status_from_data_quality(missing_fields=missing_fields, proxy_used=False, can_compute_directional=bool(ratios))
 
     return {
         "status": status,
@@ -73,4 +74,5 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "filing_type": current.filing_type,
         "previous_period_end": previous.period_end.isoformat() if previous else None,
         "values": {key: json_number(value) for key, value in ratios.items()},
+        "missing_required_fields_last_3y": missing_fields,
     }

@@ -21,18 +21,28 @@ from app.model_engine.models.residual_income import (
     MODEL_VERSION as RESIDUAL_INCOME_VERSION,
     compute as compute_residual_income,
 )
+from app.model_engine.output_normalization import standardize_model_result
 from app.model_engine.types import ModelDefinition
 
+
+def _wrapped_compute(name: str, compute):
+    def _run(dataset):
+        computed = compute(dataset)
+        raw = computed if isinstance(computed, dict) else {}
+        return standardize_model_result(name, raw, dataset=dataset)
+
+    return _run
+
 MODEL_REGISTRY: dict[str, ModelDefinition] = {
-    DCF_NAME: ModelDefinition(name=DCF_NAME, version=DCF_VERSION, compute=compute_dcf),
-    DUPONT_NAME: ModelDefinition(name=DUPONT_NAME, version=DUPONT_VERSION, compute=compute_dupont),
-    PIOTROSKI_NAME: ModelDefinition(name=PIOTROSKI_NAME, version=PIOTROSKI_VERSION, compute=compute_piotroski),
-    ALTMAN_Z_NAME: ModelDefinition(name=ALTMAN_Z_NAME, version=ALTMAN_Z_VERSION, compute=compute_altman_z),
-    RATIOS_NAME: ModelDefinition(name=RATIOS_NAME, version=RATIOS_VERSION, compute=compute_ratios),
-    REVERSE_DCF_NAME: ModelDefinition(name=REVERSE_DCF_NAME, version=REVERSE_DCF_VERSION, compute=compute_reverse_dcf),
-    ROIC_NAME: ModelDefinition(name=ROIC_NAME, version=ROIC_VERSION, compute=compute_roic),
-    CAPITAL_ALLOCATION_NAME: ModelDefinition(name=CAPITAL_ALLOCATION_NAME, version=CAPITAL_ALLOCATION_VERSION, compute=compute_capital_allocation),
-    RESIDUAL_INCOME_NAME: ModelDefinition(name=RESIDUAL_INCOME_NAME, version=RESIDUAL_INCOME_VERSION, compute=compute_residual_income),
+    DCF_NAME: ModelDefinition(name=DCF_NAME, version=DCF_VERSION, compute=_wrapped_compute(DCF_NAME, compute_dcf)),
+    DUPONT_NAME: ModelDefinition(name=DUPONT_NAME, version=DUPONT_VERSION, compute=_wrapped_compute(DUPONT_NAME, compute_dupont)),
+    PIOTROSKI_NAME: ModelDefinition(name=PIOTROSKI_NAME, version=PIOTROSKI_VERSION, compute=_wrapped_compute(PIOTROSKI_NAME, compute_piotroski)),
+    ALTMAN_Z_NAME: ModelDefinition(name=ALTMAN_Z_NAME, version=ALTMAN_Z_VERSION, compute=_wrapped_compute(ALTMAN_Z_NAME, compute_altman_z)),
+    RATIOS_NAME: ModelDefinition(name=RATIOS_NAME, version=RATIOS_VERSION, compute=_wrapped_compute(RATIOS_NAME, compute_ratios)),
+    REVERSE_DCF_NAME: ModelDefinition(name=REVERSE_DCF_NAME, version=REVERSE_DCF_VERSION, compute=_wrapped_compute(REVERSE_DCF_NAME, compute_reverse_dcf)),
+    ROIC_NAME: ModelDefinition(name=ROIC_NAME, version=ROIC_VERSION, compute=_wrapped_compute(ROIC_NAME, compute_roic)),
+    CAPITAL_ALLOCATION_NAME: ModelDefinition(name=CAPITAL_ALLOCATION_NAME, version=CAPITAL_ALLOCATION_VERSION, compute=_wrapped_compute(CAPITAL_ALLOCATION_NAME, compute_capital_allocation)),
+    RESIDUAL_INCOME_NAME: ModelDefinition(name=RESIDUAL_INCOME_NAME, version=RESIDUAL_INCOME_VERSION, compute=_wrapped_compute(RESIDUAL_INCOME_NAME, compute_residual_income)),
 }
 
 CORE_MODEL_NAMES = [RATIOS_NAME, RESIDUAL_INCOME_NAME]

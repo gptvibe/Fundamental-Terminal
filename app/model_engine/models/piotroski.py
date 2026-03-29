@@ -8,6 +8,7 @@ from app.model_engine.utils import (
     latest_annual_statement,
     previous_comparable_statement,
     safe_divide,
+    status_explanation,
     statement_value,
 )
 
@@ -18,7 +19,7 @@ MODEL_VERSION = "1.3.0"
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     current = latest_annual_statement(dataset)
     if current is None:
-        return {"status": "insufficient_data", "reason": "Annual financial statements unavailable"}
+        return {"status": "insufficient_data", "model_status": "insufficient_data", "explanation": status_explanation("insufficient_data"), "reason": "Annual financial statements unavailable"}
 
     previous = previous_comparable_statement(dataset, current)
     prior = previous_comparable_statement(dataset, previous) if previous else None
@@ -71,8 +72,11 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     available_criteria = len(available)
     normalized_score = float(score) if available_criteria == 9 else None
 
+    status = "supported" if available_criteria == 9 else "partial"
     return {
-        "status": "ok" if available_criteria == 9 else "partial",
+        "status": status,
+        "model_status": status,
+        "explanation": status_explanation(status),
         "period_end": current.period_end.isoformat(),
         "score": score,
         "score_max": 9,

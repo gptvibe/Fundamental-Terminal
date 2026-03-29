@@ -26,4 +26,4 @@ def test_model_benchmark_returns_latency_summary_and_status() -> None:
     for result in payload["results"]:
         assert result["latency_ms"]["min"] >= 0
         assert result["latency_ms"]["p50"] >= 0
-        assert result["model_status"] in {"ok", "partial", "proxy", "insufficient_data", "unsupported", "unknown"}
+        assert result["model_status"] in {"supported", "partial", "proxy", "insufficient_data", "unsupported"}

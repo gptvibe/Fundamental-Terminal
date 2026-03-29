@@ -138,6 +138,58 @@ def test_financials_route_includes_registry_backed_provenance(monkeypatch):
     assert "commercial_fallback_present" in payload["confidence_flags"]
 
 
+def test_model_evaluation_route_includes_registry_backed_provenance(monkeypatch):
+    serialized = {
+        "id": 7,
+        "suite_key": "cache_suite",
+        "candidate_label": "candidate",
+        "baseline_label": "baseline",
+        "status": "completed",
+        "completed_at": datetime(2026, 3, 29, tzinfo=timezone.utc),
+        "configuration": {"horizon_days": 420, "earnings_horizon_days": 30},
+        "summary": {
+            "company_count": 2,
+            "snapshot_count": 8,
+            "model_count": 5,
+            "provenance_mode": "historical_cache",
+            "latest_as_of": "2025-02-15",
+            "latest_future_as_of": "2026-01-31",
+        },
+        "models": [
+            {
+                "model_name": "dcf",
+                "sample_count": 8,
+                "calibration": 0.75,
+                "stability": 0.08,
+                "mean_absolute_error": 0.11,
+                "root_mean_square_error": 0.13,
+                "mean_signed_error": 0.02,
+                "status": "ok",
+                "delta": {
+                    "calibration": 0,
+                    "stability": 0,
+                    "mean_absolute_error": 0,
+                    "root_mean_square_error": 0,
+                    "mean_signed_error": 0,
+                    "sample_count": 0,
+                },
+            }
+        ],
+        "deltas_present": False,
+    }
+    monkeypatch.setattr(main_module, "get_latest_model_evaluation_run", lambda *_args, **_kwargs: SimpleNamespace(created_at=datetime(2026, 3, 29, tzinfo=timezone.utc), completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc)))
+    monkeypatch.setattr(main_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: serialized)
+
+    with _client() as client:
+        response = client.get("/api/model-evaluations/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    _assert_provenance_envelope(payload, {"ft_model_evaluation_harness", "sec_companyfacts", "yahoo_finance"}, require_as_of=True)
+    assert payload["run"]["suite_key"] == "cache_suite"
+    assert payload["run"]["models"][0]["model_name"] == "dcf"
+
+
 def test_financials_route_exposes_reconciliation_metadata(monkeypatch):
     statement = _financial_statement()
     statement.reconciliation = {

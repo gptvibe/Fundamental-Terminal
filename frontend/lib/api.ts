@@ -26,6 +26,7 @@ import {
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyInstitutionalHoldingsSummaryResponse,
+  ModelEvaluationResponse,
   CompanyModelsResponse,
   CompanyMarketContextResponse,
   CompanySectorContextResponse,
@@ -60,6 +61,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/model-evaluations\/latest(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 240_000 } },
   { pattern: /^\/companies\/[^/]+\/peers(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/sector-context(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/metrics(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
@@ -546,6 +548,15 @@ export function getCompanyModels(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`);
+}
+
+export function getLatestModelEvaluation(suiteKey?: string | null): Promise<ModelEvaluationResponse> {
+  const params = new URLSearchParams();
+  if (suiteKey) {
+    params.set("suite_key", suiteKey);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/model-evaluations/latest${suffix}`);
 }
 
 export function getCompanyMarketContext(ticker: string): Promise<CompanyMarketContextResponse> {

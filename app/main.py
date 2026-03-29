@@ -26,6 +26,7 @@ from app.api.schemas import *
 from app.config import settings
 from app.db import get_db_session
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
+from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
 from app.model_engine.models import dupont as dupont_model
 from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
 from app.source_registry import SourceTier, SourceUsage, build_provenance_entries, build_source_mix, infer_source_id
@@ -93,6 +94,7 @@ from app.services.market_context import (
     get_market_context_snapshot,
     get_market_context_v2,
 )
+from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.sector_context import get_company_sector_context
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
@@ -1398,10 +1400,11 @@ def company_models(
                 model_names=requested_models or None,
                 created_at=datetime.now(timezone.utc),
             )
+        company_context = _model_company_context(snapshot.company)
         status_counts: dict[str, int] = {}
         for model_run in models:
-            result = _model_result_payload(model_run)
-            model_status = str(result.get("model_status") or result.get("status") or "unknown")
+            result = _model_result_payload(model_run, company_context=company_context)
+            model_status = str(result.get("model_status") or result.get("status") or "insufficient_data")
             status_counts[model_status] = status_counts.get(model_status, 0) + 1
         logging.getLogger(__name__).info(
             "TELEMETRY model_view ticker=%s models=%s status_counts=%s",
@@ -1409,7 +1412,7 @@ def company_models(
             ",".join(requested_models) if requested_models else "all",
             status_counts,
         )
-        serialized_models = [_serialize_model_payload(model_run) for model_run in models]
+        serialized_models = [_serialize_model_payload(model_run, company_context=company_context) for model_run in models]
         diagnostics = _diagnostics_for_models(serialized_models, refresh)
         payload = CompanyModelsResponse(
             company=_serialize_company(snapshot),
@@ -1439,6 +1442,76 @@ def company_models(
     finally:
         if token is not None:
             dupont_model.reset_mode_override(token)
+
+
+def latest_model_evaluation(
+    request: Request,
+    http_response: Response,
+    suite_key: str | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> ModelEvaluationResponse:
+    run = get_latest_model_evaluation_run(session, suite_key=suite_key)
+    if run is None:
+        payload = ModelEvaluationResponse(run=None, **_empty_provenance_contract("model_evaluation_missing"))
+        return payload
+
+    serialized_run = serialize_model_evaluation_run(run)
+    summary = serialized_run.get("summary") if isinstance(serialized_run.get("summary"), dict) else {}
+    provenance_mode = str(summary.get("provenance_mode") or "historical_cache")
+    as_of_value = summary.get("latest_as_of")
+    last_refreshed_at = run.completed_at or run.created_at
+
+    if provenance_mode == "synthetic_fixture":
+        usages = [
+            SourceUsage(
+                source_id="ft_model_evaluation_fixture",
+                role="derived",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            )
+        ]
+        confidence_flags = ["synthetic_fixture_suite"]
+    else:
+        usages = [
+            SourceUsage(
+                source_id="ft_model_evaluation_harness",
+                role="derived",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="sec_companyfacts",
+                role="primary",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="yahoo_finance",
+                role="fallback",
+                as_of=summary.get("latest_future_as_of") or as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+        ]
+        confidence_flags = []
+
+    payload = ModelEvaluationResponse(
+        run=ModelEvaluationRunPayload.model_validate(serialized_run),
+        **_build_provenance_contract(
+            usages,
+            as_of=as_of_value,
+            last_refreshed_at=last_refreshed_at,
+            confidence_flags=confidence_flags,
+        ),
+    )
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        payload,
+        last_modified=last_refreshed_at,
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return payload
 
 
 @app.get("/api/companies/{ticker}/market-context", response_model=CompanyMarketContextResponse)
@@ -3402,11 +3475,14 @@ def _model_missing_field_flags(model: ModelPayload) -> list[str]:
 
 def _model_confidence_score(model: ModelPayload) -> float | None:
     result = model.result if isinstance(model.result, dict) else {}
-    status_value = str(result.get("model_status") or result.get("status") or "unknown").lower()
-    if status_value == "ok":
-        return 1.0
+    explicit_score = result.get("confidence_score")
+    if isinstance(explicit_score, (int, float)):
+        return float(explicit_score)
+    status_value = normalize_model_status(str(result.get("model_status") or result.get("status") or ""))
+    if status_value == "supported":
+        return 0.9
     if status_value == "partial":
-        return 0.75
+        return 0.65
     if status_value == "proxy":
         return 0.5
     if status_value == "insufficient_data":
@@ -3430,10 +3506,10 @@ def _diagnostics_for_models(
     if not models:
         return _build_data_quality_diagnostics(stale_flags=_stale_flags_from_refresh(refresh))
     statuses = [
-        str((model.result or {}).get("model_status") if isinstance(model.result, dict) else "unknown").lower()
+        normalize_model_status(str((model.result or {}).get("model_status") if isinstance(model.result, dict) else ""))
         for model in models
     ]
-    coverage_ratio = sum(1 for status_value in statuses if status_value in {"ok", "partial", "proxy"}) / len(models)
+    coverage_ratio = sum(1 for status_value in statuses if status_value in {"supported", "partial", "proxy"}) / len(models)
     fallback_ratio = sum(1 for status_value in statuses if status_value == "proxy") / len(models)
     missing_flags = sorted({flag for model in models for flag in _model_missing_field_flags(model)})
     confidence = _mean_ratio([_model_confidence_score(model) for model in models])
@@ -4663,11 +4739,37 @@ def _build_institutional_holdings_summary(rows: list[InstitutionalHoldingPayload
     )
 
 
-def _model_result_payload(model_run: ModelRun | dict[str, Any]) -> dict[str, Any]:
+def _model_company_context(company: Company | None) -> dict[str, Any] | None:
+    if company is None:
+        return None
+    return {
+        "sector": getattr(company, "sector", None),
+        "market_sector": getattr(company, "market_sector", None),
+        "market_industry": getattr(company, "market_industry", None),
+    }
+
+
+def _model_result_payload(
+    model_run: ModelRun | dict[str, Any],
+    company_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    input_periods = model_run.get("input_periods") if isinstance(model_run, dict) else model_run.input_periods
     if isinstance(model_run, dict):
         result = model_run.get("result")
-        return result if isinstance(result, dict) else {}
-    return model_run.result if isinstance(model_run.result, dict) else {}
+        raw_result = result if isinstance(result, dict) else {}
+        return standardize_model_result(
+            _model_name(model_run),
+            raw_result,
+            input_payload=input_periods if isinstance(input_periods, dict) else None,
+            company_context=company_context,
+        )
+    raw_result = model_run.result if isinstance(model_run.result, dict) else {}
+    return standardize_model_result(
+        _model_name(model_run),
+        raw_result,
+        input_payload=input_periods if isinstance(input_periods, dict) else None,
+        company_context=company_context,
+    )
 
 
 def _model_name(model_run: ModelRun | dict[str, Any]) -> str:
@@ -4683,7 +4785,10 @@ def _model_created_at(model_run: ModelRun | dict[str, Any]) -> datetime | None:
     return model_run.created_at
 
 
-def _serialize_model_payload(model_run: ModelRun | dict[str, Any]) -> ModelPayload:
+def _serialize_model_payload(
+    model_run: ModelRun | dict[str, Any],
+    company_context: dict[str, Any] | None = None,
+) -> ModelPayload:
     if isinstance(model_run, dict):
         model_name = _model_name(model_run)
         model_version = str(model_run.get("model_version") or "")
@@ -4699,7 +4804,10 @@ def _serialize_model_payload(model_run: ModelRun | dict[str, Any]) -> ModelPaylo
             model_version=model_version,
             created_at=created_at,
             input_periods=input_periods,
-            result=_sanitize_model_result_for_strict_official_mode(model_name, _model_result_payload(model_run)),
+            result=_sanitize_model_result_for_strict_official_mode(
+                model_name,
+                _model_result_payload(model_run, company_context=company_context),
+            ),
         )
 
     return ModelPayload(
@@ -4710,7 +4818,7 @@ def _serialize_model_payload(model_run: ModelRun | dict[str, Any]) -> ModelPaylo
         input_periods=model_run.input_periods,
         result=_sanitize_model_result_for_strict_official_mode(
             model_run.model_name,
-            model_run.result if isinstance(model_run.result, dict) else {},
+            _model_result_payload(model_run, company_context=company_context),
         ),
     )
 
@@ -6088,8 +6196,8 @@ def _build_watchlist_summary_item(
     )
     ratios_values = ratios_result.get("values") if isinstance(ratios_result.get("values"), dict) else {}
     fair_value_per_share = _coerce_number(dcf_result.get("fair_value_per_share"), None)
-    dcf_status = str(dcf_result.get("model_status") or dcf_result.get("status") or "unknown")
-    reverse_status = str(reverse_result.get("model_status") or reverse_result.get("status") or "unknown")
+    dcf_status = normalize_model_status(str(dcf_result.get("model_status") or dcf_result.get("status") or ""))
+    reverse_status = normalize_model_status(str(reverse_result.get("model_status") or reverse_result.get("status") or ""))
     fair_value_gap = None
     if dcf_status != "unsupported":
         fair_value_gap = (

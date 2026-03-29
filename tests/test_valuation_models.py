@@ -7,6 +7,7 @@ import app.model_engine.models.capital_allocation as capital_allocation_model
 import app.model_engine.models.dcf as dcf_model
 import app.model_engine.models.reverse_dcf as reverse_dcf_model
 import app.model_engine.models.roic as roic_model
+from app.model_engine.registry import MODEL_REGISTRY
 from app.model_engine.types import CompanyDataset, FinancialPoint, MarketSnapshot
 
 
@@ -139,7 +140,7 @@ def test_dcf_normal_partial_and_insufficient(monkeypatch):
     monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
     ok_result = dcf_model.compute(_dataset(_base_points()))
-    assert ok_result["model_status"] == "ok"
+    assert ok_result["model_status"] == "supported"
     assert ok_result["fair_value_per_share"] is not None
 
     partial_points = _base_points()
@@ -164,13 +165,13 @@ def test_reverse_dcf_status_variants(monkeypatch):
 
     normal_points = _base_points()
     normal_result = reverse_dcf_model.compute(_dataset(normal_points, price=85))
-    assert normal_result["model_status"] in {"ok", "partial"}
+    assert normal_result["model_status"] in {"supported", "partial"}
 
     partial_points = _base_points()
     partial_points[1].data["free_cash_flow"] = None
     partial_points[2].data["free_cash_flow"] = None
     partial_result = reverse_dcf_model.compute(_dataset(partial_points, price=80))
-    assert partial_result["model_status"] in {"ok", "partial", "proxy"}
+    assert partial_result["model_status"] in {"supported", "partial", "proxy"}
 
     insufficient_points = _base_points()
     insufficient_points[0].data["revenue"] = None
@@ -198,7 +199,7 @@ def test_roic_status_variants(monkeypatch):
     monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
 
     normal_result = roic_model.compute(_dataset(_base_points()))
-    assert normal_result["model_status"] in {"ok", "partial"}
+    assert normal_result["model_status"] in {"supported", "partial"}
 
     partial_points = _base_points()
     partial_points[0].data["stockholders_equity"] = None
@@ -219,7 +220,7 @@ def test_roic_status_variants(monkeypatch):
 
 def test_capital_allocation_status_variants():
     normal_result = capital_allocation_model.compute(_dataset(_base_points()))
-    assert normal_result["model_status"] in {"ok", "partial", "proxy"}
+    assert normal_result["model_status"] in {"supported", "partial", "proxy"}
 
     partial_points = _base_points()
     partial_points[0].data["dividends"] = None
@@ -237,3 +238,18 @@ def test_capital_allocation_status_variants():
     ]
     insufficient_result = capital_allocation_model.compute(_dataset(insufficient_points))
     assert insufficient_result["model_status"] == "insufficient_data"
+
+
+def test_registry_wrapper_adds_standardized_model_metadata(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    result = MODEL_REGISTRY["dcf"].compute(_dataset(_base_points()))
+
+    assert result["model_status"] == "supported"
+    assert result["confidence_score"] is not None
+    assert result["confidence_reasons"]
+    assert "free_cash_flow" in result["fields_used"]
+    assert result["proxy_usage"]["used"] is False
+    assert result["stale_inputs"] == []
+    assert result["sector_suitability"]["status"] == "supported"
+    assert result["misleading_reasons"]

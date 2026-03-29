@@ -162,3 +162,17 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "trace_id: string;" in frontend_types
     assert "ticker: string;" in frontend_types
     assert "kind: string;" in frontend_types
+    assert "interface ModelEvaluationResponse" in frontend_types
+
+
+def test_model_evaluation_endpoint_openapi_contract_includes_provenance_fields() -> None:
+    client = TestClient(app)
+    schema = client.get("/openapi.json").json()
+
+    provenance_fields = {"provenance", "as_of", "last_refreshed_at", "source_mix", "confidence_flags"}
+    response_ref = schema["paths"]["/api/model-evaluations/latest"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+    response_name = response_ref.rsplit("/", 1)[-1]
+    response_schema = schema["components"]["schemas"][response_name]
+    response_fields = set(response_schema.get("properties", {}).keys())
+
+    assert {"run", *provenance_fields}.issubset(response_fields)

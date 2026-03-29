@@ -29,7 +29,7 @@ import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { ModelPayload } from "@/lib/types";
 
-const MODEL_ORDER = ["dcf", "reverse_dcf", "roic", "capital_allocation", "dupont", "piotroski", "altman_z", "ratios"];
+const MODEL_ORDER = ["dcf", "reverse_dcf", "residual_income", "roic", "capital_allocation", "dupont", "piotroski", "altman_z", "ratios"];
 export function ModelDashboard({ models }: { models: ModelPayload[] }) {
   const sortedModels = [...models].sort((left, right) => {
     const leftIndex = MODEL_ORDER.indexOf(left.model_name);
@@ -51,7 +51,7 @@ export function ModelDashboard({ models }: { models: ModelPayload[] }) {
 }
 
 function ModelSection({ model }: { model: ModelPayload }) {
-  const status = String(model.result.model_status ?? model.result.status ?? "ok");
+  const status = String(model.result.model_status ?? model.result.status ?? "supported");
   const explanation = String(model.result.explanation ?? "View discount rate, terminal assumptions, and data provenance used in this result.");
   return (
     <section
@@ -80,7 +80,7 @@ function ModelSection({ model }: { model: ModelPayload }) {
           </span>
         </div>
       </div>
-      {status !== "ok" ? <div className="text-muted">{explanation}</div> : null}
+      {status !== "supported" ? <div className="text-muted">{explanation}</div> : null}
       {renderModelContent(model)}
     </section>
   );
@@ -92,6 +92,8 @@ function renderModelContent(model: ModelPayload) {
       return <DcfModelView model={model} />;
     case "reverse_dcf":
       return <ReverseDcfModelView model={model} />;
+    case "residual_income":
+      return <ResidualIncomeModelView model={model} />;
     case "roic":
       return <RoicModelView model={model} />;
     case "capital_allocation":
@@ -257,6 +259,73 @@ function ReverseDcfModelView({ model }: { model: ModelPayload }) {
           </BarChart>
         </ResponsiveContainer>
       </ChartShell>
+
+      <AssumptionProvenanceTable provenance={asRecord(result.assumption_provenance)} />
+    </div>
+  );
+}
+
+function ResidualIncomeModelView({ model }: { model: ModelPayload }) {
+  const result = asRecord(model.result);
+  if (isUnavailableStatus(result)) {
+    return <StateMessage result={result} />;
+  }
+
+  const inputs = asRecord(result.inputs);
+  const intrinsic = asRecord(result.intrinsic_value);
+  const projections = asArray(result.projections).map((item) => ({
+    year: String(item.year ?? "—"),
+    bookEquity: formatCompactNumber(asNumber(item.book_equity)),
+    roe: formatPercent(asNumber(item.roe)),
+    residualIncome: formatCompactNumber(asNumber(item.residual_income)),
+    pvResidualIncome: formatCompactNumber(asNumber(item.pv_residual_income)),
+  }));
+
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <MetricStrip
+        metrics={[
+          { label: "Intrinsic Value / Share", value: formatCompactNumber(asNumber(intrinsic.intrinsic_value_per_share)) },
+          { label: "Book Equity / Share", value: formatCompactNumber(asNumber(intrinsic.book_equity_per_share)) },
+          { label: "PV Residual Income / Share", value: formatCompactNumber(asNumber(intrinsic.pv_residual_income_per_share)) },
+          { label: "Terminal Value / Share", value: formatCompactNumber(asNumber(intrinsic.terminal_value_per_share)) },
+          { label: "Upside vs Price", value: formatPercent(asNumber(intrinsic.upside_vs_price)) },
+          { label: "Cost of Equity", value: formatPercent(asNumber(inputs.cost_of_equity)) },
+          { label: "Average ROE", value: formatPercent(asNumber(inputs.avg_roe_5y)) },
+          { label: "Trust Summary", value: String(result.trust_summary ?? "—") },
+        ]}
+      />
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 0.85fr) minmax(420px, 1.15fr)", gap: 14 }}>
+        <CompactTable
+          title="Residual Income Inputs"
+          columns={[
+            { key: "metric", label: "Metric" },
+            { key: "value", label: "Value", align: "right" },
+          ]}
+          rows={[
+            { metric: "Book Equity", value: formatCompactNumber(asNumber(inputs.book_equity)) },
+            { metric: "Net Income", value: formatCompactNumber(asNumber(inputs.net_income)) },
+            { metric: "ROE", value: formatPercent(asNumber(inputs.roe)) },
+            { metric: "Average ROE (5Y)", value: formatPercent(asNumber(inputs.avg_roe_5y)) },
+            { metric: "Cost of Equity", value: formatPercent(asNumber(inputs.cost_of_equity)) },
+            { metric: "Terminal Growth", value: formatPercent(asNumber(inputs.terminal_growth_rate)) },
+            { metric: "Payout Ratio", value: formatPercent(asNumber(inputs.payout_ratio_assumed)) },
+            { metric: "Primary For Sector", value: result.primary_for_sector ? "Yes" : "No" },
+          ]}
+        />
+        <CompactTable
+          title="Projection Table"
+          columns={[
+            { key: "year", label: "Year" },
+            { key: "bookEquity", label: "Book Equity", align: "right" },
+            { key: "roe", label: "ROE", align: "right" },
+            { key: "residualIncome", label: "Residual Income", align: "right" },
+            { key: "pvResidualIncome", label: "PV RI", align: "right" },
+          ]}
+          rows={projections}
+        />
+      </div>
 
       <AssumptionProvenanceTable provenance={asRecord(result.assumption_provenance)} />
     </div>
@@ -627,11 +696,11 @@ function StatusBadge({ status }: { status: string }) {
   if (status === "unsupported") {
     return <span className="pill">Unsupported</span>;
   }
-  return <span className="pill">OK</span>;
+  return <span className="pill">Supported</span>;
 }
 
 function isUnavailableStatus(result: Record<string, unknown>): boolean {
-  const status = String(result.model_status ?? result.status ?? "ok");
+  const status = String(result.model_status ?? result.status ?? "supported");
   return status === "insufficient_data" || status === "unsupported";
 }
 

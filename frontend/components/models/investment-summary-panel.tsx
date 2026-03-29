@@ -42,9 +42,10 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
         </div>
       ) : null}
       <div className="investment-summary-cards">
-        <SummaryCard label="DCF Fair Value / Share" value={formatCurrency(summary.fairValuePerShare)} accent="cyan" detail={summary.fairValueBasis} />
+        <SummaryCard label="Valuation Range / Share" value={formatCurrencyRange(summary.valuationRange)} accent="cyan" detail={summary.valuationRangeBasis} />
+        <SummaryCard label="Valuation Midpoint" value={formatCurrency(summary.valuationMidpoint)} accent="cyan" detail={summary.primaryValuationLabel} />
         <SummaryCard label="Latest Price" value={formatCurrency(summary.latestPrice)} accent="gold" detail={summary.priceDateLabel} />
-        <SummaryCard label="Fair Value Gap" value={formatPercent(summary.marginOfSafety)} accent={summary.marginOfSafety != null && summary.marginOfSafety >= 0 ? "green" : "red"} detail={summary.marginBand} />
+        <SummaryCard label="Gap vs Midpoint" value={formatPercent(summary.marginOfSafety)} accent={summary.marginOfSafety != null && summary.marginOfSafety >= 0 ? "green" : "red"} detail={summary.marginBand} />
         <SummaryCard label="Net Debt" value={formatCurrency(summary.netDebt)} accent="red" detail={summary.netDebtLabel} />
       </div>
 
@@ -65,7 +66,8 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
 
       <div className="investment-summary-inputs">
         <span className="pill">{ticker} summary</span>
-        <span className="pill">DCF state {summary.valuationStateLabel}</span>
+        <span className="pill">Valuation state {summary.valuationStateLabel}</span>
+        <span className="pill">Primary anchor {summary.primaryValuationLabel}</span>
         <span className="pill">Piotroski {summary.piotroskiDisplay}</span>
         <span className="pill">Altman Proxy {formatSigned(summary.altmanZScore)}</span>
         <span className="pill">Revenue Growth {formatPercent(summary.revenueGrowth)}</span>
@@ -132,6 +134,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
 
   const byName = Object.fromEntries(models.map((model) => [model.model_name, model])) as Record<string, ModelPayload | undefined>;
   const dcf = asRecord(byName.dcf?.result);
+  const residualIncome = asRecord(byName.residual_income?.result);
   const ratios = asRecord(byName.ratios?.result);
   const ratioValues = asRecord(ratios.values);
   const dupont = asRecord(byName.dupont?.result);
@@ -140,11 +143,30 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
   const piotroskiState = resolvePiotroskiScoreState(piotroski);
 
   const valuationState = normalizeModelState(dcf.model_status ?? dcf.status);
+  const residualState = normalizeModelState(residualIncome.model_status ?? residualIncome.status);
   const fairValuePerShare = safeNumber(dcf.fair_value_per_share);
+  const residualIntrinsicValue = safeNumber(asRecord(residualIncome.intrinsic_value).intrinsic_value_per_share);
+  const valuationAnchors = [
+    fairValuePerShare !== null ? { label: "DCF", value: fairValuePerShare, state: valuationState } : null,
+    residualIntrinsicValue !== null ? { label: "Residual income", value: residualIntrinsicValue, state: residualState } : null,
+  ].filter((entry): entry is { label: string; value: number; state: ReturnType<typeof normalizeModelState> } => entry !== null);
+  const valuationRange = valuationAnchors.length
+    ? ([Math.min(...valuationAnchors.map((anchor) => anchor.value)), Math.max(...valuationAnchors.map((anchor) => anchor.value))] as const)
+    : null;
+  const valuationMidpoint = valuationAnchors.length
+    ? valuationAnchors.reduce((sum, anchor) => sum + anchor.value, 0) / valuationAnchors.length
+    : null;
+  const primaryValuation = residualIncome.primary_for_sector && residualIntrinsicValue !== null
+    ? { label: "Residual income", state: residualState }
+    : fairValuePerShare !== null
+      ? { label: "DCF", state: valuationState }
+      : residualIntrinsicValue !== null
+        ? { label: "Residual income", state: residualState }
+        : { label: "None", state: valuationState !== "unknown" ? valuationState : residualState };
   const netDebt = safeNumber(dcf.net_debt);
   const currentPrice = latestPrice?.close ?? null;
   const marginOfSafety =
-    fairValuePerShare !== null && currentPrice !== null && currentPrice > 0 ? (fairValuePerShare - currentPrice) / currentPrice : null;
+    valuationMidpoint !== null && currentPrice !== null && currentPrice > 0 ? (valuationMidpoint - currentPrice) / currentPrice : null;
 
   const piotroskiScore = piotroskiState.score;
   const piotroskiDisplay = formatResolvedPiotroskiDisplay(piotroskiState);
@@ -177,10 +199,14 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
 
   return {
     fairValuePerShare,
+    residualIntrinsicValue,
+    valuationRange,
+    valuationMidpoint,
     latestPrice: currentPrice,
     netDebt,
-    valuationState,
-    valuationStateLabel: formatModelState(valuationState),
+    valuationState: primaryValuation.state,
+    valuationStateLabel: formatModelState(primaryValuation.state),
+    primaryValuationLabel: primaryValuation.label,
     marginOfSafety,
     valuationRating,
     financialStrengthRating,
@@ -192,7 +218,14 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
     revenueGrowth,
     netMargin,
     debtToEquity,
-    fairValueBasis: fairValuePerShare !== null ? "Derived from cached DCF equity value per share." : "Awaiting DCF fair value per share",
+    valuationRangeBasis:
+      valuationRange !== null && valuationAnchors.length > 1
+        ? "Range built from cached DCF and residual income anchors."
+        : fairValuePerShare !== null
+          ? "Single-anchor range from cached DCF equity value per share."
+          : residualIntrinsicValue !== null
+            ? "Single-anchor range from cached residual income intrinsic value per share."
+            : "Awaiting cached valuation anchors",
     priceDateLabel: latestPrice?.date ? `Latest close ${new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(latestPrice.date))}` : "Awaiting cached market price",
     netDebtLabel: netDebt === null ? "Net debt unavailable" : "From latest cached DCF run",
     marginBand: valuationBandLabel(marginOfSafety),
@@ -222,7 +255,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
     notes: [
       {
         title: "Valuation View",
-        copy: buildValuationSummary(marginOfSafety, fairValuePerShare, currentPrice, valuationState)
+        copy: buildValuationSummary(marginOfSafety, valuationMidpoint, currentPrice, primaryValuation.state, primaryValuation.label)
       },
       {
         title: "Financial Strength",
@@ -242,39 +275,40 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
 
 function buildValuationSummary(
   marginOfSafety: number | null,
-  fairValuePerShare: number | null,
+  valuationMidpoint: number | null,
   latestPrice: number | null,
-  valuationState: string
+  valuationState: string,
+  primaryValuationLabel: string
 ) {
   if (valuationState === "unsupported") {
-    return "DCF valuation is unsupported for this company classification, so fair-value gap is intentionally withheld.";
+    return `${primaryValuationLabel} valuation is unsupported for this company classification, so the valuation gap is intentionally withheld.`;
   }
   if (valuationState === "insufficient_data") {
-    return "DCF valuation is currently insufficient due to missing core inputs; refresh or new filings are required before a fair-value call.";
+    return `${primaryValuationLabel} valuation is currently insufficient due to missing core inputs; refresh or new filings are required before a range call.`;
   }
-  if (marginOfSafety === null || fairValuePerShare === null || latestPrice === null) {
-    return "DCF fair value per share or latest price is incomplete, so the valuation signal remains provisional until both are cached.";
+  if (marginOfSafety === null || valuationMidpoint === null || latestPrice === null) {
+    return "Valuation midpoint or latest price is incomplete, so the range signal remains provisional until both are cached.";
   }
   if (marginOfSafety >= 0.25) {
-    return "DCF fair value per share sits materially above the latest cached price, suggesting a healthy valuation cushion.";
+    return "The valuation midpoint sits materially above the latest cached price, suggesting a healthy cushion across the active valuation anchors.";
   }
   if (marginOfSafety >= 0.08) {
-    return "Latest price screens modestly below DCF fair value per share, suggesting some upside but not a deep discount.";
+    return "Latest price screens modestly below the valuation midpoint, suggesting upside without a deep-discount setup.";
   }
   if (marginOfSafety >= -0.08) {
-    return "Latest price sits roughly in line with DCF fair value per share, so valuation looks balanced rather than obviously cheap.";
+    return "Latest price sits roughly in line with the valuation midpoint, so the range reads balanced rather than obviously cheap.";
   }
-  return "Latest price sits above DCF fair value per share, which points to a thinner safety cushion and a richer valuation setup.";
+  return "Latest price sits above the valuation midpoint, which points to a thinner safety cushion and a richer valuation setup.";
 }
 
-function normalizeModelState(value: unknown): "ok" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown" {
-  if (value === "ok" || value === "partial" || value === "proxy" || value === "insufficient_data" || value === "unsupported") {
+function normalizeModelState(value: unknown): "supported" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown" {
+  if (value === "supported" || value === "partial" || value === "proxy" || value === "insufficient_data" || value === "unsupported") {
     return value;
   }
   return "unknown";
 }
 
-function formatModelState(state: "ok" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown"): string {
+function formatModelState(state: "supported" | "partial" | "proxy" | "insufficient_data" | "unsupported" | "unknown"): string {
   if (state === "insufficient_data") {
     return "insufficient_data";
   }
@@ -523,6 +557,13 @@ function formatCurrency(value: number | null): string {
     return "—";
   }
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value);
+}
+
+function formatCurrencyRange(value: readonly [number, number] | null): string {
+  if (value === null) {
+    return "—";
+  }
+  return `${formatCurrency(value[0])} - ${formatCurrency(value[1])}`;
 }
 
 function formatScore(value: number | null): string {

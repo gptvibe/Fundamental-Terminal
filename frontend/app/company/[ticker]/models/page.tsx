@@ -10,6 +10,7 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { MarketContextPanel } from "@/components/models/market-context-panel";
+import { ModelEvaluationPanel } from "@/components/models/model-evaluation-panel";
 import { SectorContextPanel } from "@/components/models/sector-context-panel";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
@@ -19,17 +20,18 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
-import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, refreshCompany } from "@/lib/api";
+import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelPayload } from "@/lib/types";
+import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
   marketContextData: CompanyMarketContextResponse;
   sectorContextData: CompanySectorContextResponse;
+  evaluationData: ModelEvaluationResponse;
   activeJobId: string | null;
 }
 
@@ -43,8 +45,8 @@ const FinancialHealthScore = dynamic(
   () => import("@/components/models/financial-health-score").then((module) => module.FinancialHealthScore),
   { ssr: false }
 );
-const DcfScenarioAnalysis = dynamic(
-  () => import("@/components/models/dcf-scenario-analysis").then((module) => module.DcfScenarioAnalysis),
+const ValuationScenarioWorkbench = dynamic(
+  () => import("@/components/models/valuation-scenario-workbench").then((module) => module.ValuationScenarioWorkbench),
   { ssr: false }
 );
 const ModelDashboard = dynamic(
@@ -65,6 +67,7 @@ export default function CompanyModelsPage() {
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
   const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
   const [sectorContextData, setSectorContextData] = useState<CompanySectorContextResponse | null>(null);
+  const [evaluationData, setEvaluationData] = useState<ModelEvaluationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -75,7 +78,6 @@ export default function CompanyModelsPage() {
   const { consoleEntries, connectionState, lastEvent } = useJobStream(activeJobId);
   const models = useMemo(() => data?.models ?? [], [data?.models]);
   const hasModels = models.length > 0;
-  const dcfModel = useMemo(() => models.find((model) => model.model_name === "dcf") ?? null, [models]);
   const strictOfficialMode = Boolean(data?.company?.strict_official_mode ?? financialData?.company?.strict_official_mode);
 
   useEffect(() => {
@@ -92,6 +94,7 @@ export default function CompanyModelsPage() {
           setFinancialData(workspaceData.financialData);
           setMarketContextData(workspaceData.marketContextData);
           setSectorContextData(workspaceData.sectorContextData);
+          setEvaluationData(workspaceData.evaluationData);
           setActiveJobId(workspaceData.activeJobId);
         }
       } catch (nextError) {
@@ -134,6 +137,7 @@ export default function CompanyModelsPage() {
         setFinancialData(workspaceData.financialData);
         setMarketContextData(workspaceData.marketContextData);
         setSectorContextData(workspaceData.sectorContextData);
+        setEvaluationData(workspaceData.evaluationData);
         setActiveJobId(workspaceData.activeJobId);
       })
       .catch((nextError) => {
@@ -172,6 +176,7 @@ export default function CompanyModelsPage() {
         setFinancialData(workspaceData.financialData);
         setMarketContextData(workspaceData.marketContextData);
         setSectorContextData(workspaceData.sectorContextData);
+        setEvaluationData(workspaceData.evaluationData);
         setActiveJobId(workspaceData.activeJobId);
 
         if (workspaceData.activeJobId !== activeJobId) {
@@ -408,7 +413,7 @@ export default function CompanyModelsPage() {
             </div>
           ) : null}
 
-          <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, DCF Scenario Analysis, and Model Analytics for the full model output.</div>
+            <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, Valuation Scenario Ranges, and Model Analytics for the full model output.</div>
       </CompanyResearchHeader>
 
       <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" className="models-page-span-full">
@@ -419,6 +424,14 @@ export default function CompanyModelsPage() {
           sourceMix={data?.source_mix}
           confidenceFlags={data?.confidence_flags}
         />
+      </Panel>
+
+      <Panel
+        title="Model Evaluation Harness"
+        subtitle="Latest persisted backtest run for calibration, stability, and error drift across the valuation stack"
+        className="models-page-span-full"
+      >
+        <ModelEvaluationPanel evaluation={evaluationData} />
       </Panel>
 
       <Panel
@@ -448,11 +461,11 @@ export default function CompanyModelsPage() {
         />
       </Panel>
 
-      <Panel title="DCF Scenario Analysis" subtitle={loading ? "Loading DCF inputs..." : strictOfficialMode ? "Interactive intrinsic value range with market-price comparisons disabled in strict mode" : "Interactive bear, base, and bull valuation range"} className="models-page-span-full">
-        <DeferredClientSection placeholder={<div className="text-muted">Loading DCF scenario analysis...</div>}>
-          <DcfScenarioAnalysis
+      <Panel title="Valuation Scenario Ranges" subtitle={loading ? "Loading valuation scenario inputs..." : strictOfficialMode ? "Interactive DCF and residual-income ranges with price-linked reverse DCF withheld in strict mode" : "Editable bear, base, and bull ranges across DCF, reverse DCF, and residual income"} className="models-page-span-full">
+        <DeferredClientSection placeholder={<div className="text-muted">Loading valuation scenario ranges...</div>}>
+          <ValuationScenarioWorkbench
             ticker={ticker}
-            dcfModel={dcfModel}
+            models={models}
             financials={financialData?.financials ?? []}
             priceHistory={financialData?.price_history ?? []}
             strictOfficialMode={strictOfficialMode}
@@ -504,11 +517,12 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData, marketContextData, sectorContextData] = await Promise.all([
+  const [modelData, financialData, marketContextData, sectorContextData, evaluationData] = await Promise.all([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
     getCompanyMarketContext(ticker),
     getCompanySectorContext(ticker),
+    getLatestModelEvaluation(),
   ]);
 
   return {
@@ -516,6 +530,7 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     financialData,
     marketContextData,
     sectorContextData,
+    evaluationData,
     activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id
   };
 }
