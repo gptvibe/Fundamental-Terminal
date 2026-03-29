@@ -461,6 +461,7 @@ describe("CompanyModelsPage", () => {
     expect(getCompanyMarketContext).toHaveBeenCalledWith("ACME");
 
     expect(screen.getByText(/Strict official mode disables commercial equity price inputs/i)).toBeTruthy();
-    expect(screen.getAllByText("SEC SIC mapping").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Price Layer");
+    expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Disabled");
   });
 });

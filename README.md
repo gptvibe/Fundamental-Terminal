@@ -1,32 +1,46 @@
 # Fundamental Terminal
 
-Fundamental Terminal is a pull-first Dockerized SEC-first fundamental terminal. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js research UI for searching by ticker or company name.
+Fundamental Terminal is a pull-first Dockerized SEC-first research terminal. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js workspace for search, company research, valuation, earnings, ownership, and browser-local watchlists.
 
 Banks and bank holding companies also support an official regulated-financial path built from FDIC quarterly BankFind financials and optional Federal Reserve FR Y-9C imports, while preserving the same public financials and metrics routes.
 
 The macro context layer also supports official cyclical demand and cost modules from the U.S. Census Bureau, BEA, and BLS, with company-specific relevance filtering so only materially related indicators are emphasized per issuer.
 
+The frontend is organized as a unified company workspace with grouped core views and research feeds, background-first refresh actions, printable research views, and a browser-local watchlist and notes layer.
+
 ## Screenshots
 
-Captured from the local app with `INTC` as the demo company.
+Captured from the current local app. The launcher example uses `AAPL`, while company workspace screenshots use `INTC`.
 
-### Home Search
+### Research Launcher
 
-![Home search with autocomplete](docs/screenshots/home-search.png)
+![Home research launcher with compact command bar](docs/screenshots/home-search.png)
+
+The home launcher now combines search, live refresh status, and direct handoff into either the company workspace or valuation models from a single search.
 
 ### Company Overview
 
-![Company overview for INTC](docs/screenshots/company-overview.png)
+![Company overview workspace for INTC](docs/screenshots/company-overview.png)
+
+The overview workspace keeps grouped core views and research feeds under one header, pairs price-versus-operating performance with side-rail actions, and surfaces local-save state without leaving the page.
 
 ### Valuation Models
 
-![Valuation models for INTC](docs/screenshots/company-models.png)
+![Valuation models workspace for INTC](docs/screenshots/company-models.png)
 
-The valuation workspace now emphasizes base, bear, and bull scenario ranges with editable sensitivities, overlap between per-share valuation methods, and assumption traceability back to SEC filings and official rate inputs.
+The models workspace now focuses on valuation conclusion, confidence, and scenario context, with background-first refresh controls, export support, and supporting model diagnostics.
+
+### Watchlist Workspace
+
+![Browser-local watchlist workspace](docs/screenshots/watchlist.png)
+
+The watchlist workspace rolls saved companies, alert severity, freshness, valuation gaps, and note coverage into one browser-local triage surface.
 
 ### Mobile Company View
 
-![Mobile company view for INTC](docs/screenshots/mobile-company.png)
+![Mobile company workspace for INTC](docs/screenshots/mobile-company.png)
+
+The mobile layout swaps the desktop tab rail for a compact section picker and stacked next-step actions so the company workspace stays usable on phones.
 
 ## Roadmap
 
@@ -156,10 +170,12 @@ npm run dev
 
 The frontend proxies backend requests through `/backend/*` and exposes:
 
-- `/` for search, autocomplete, and trending tickers
-- `/company/[ticker]` — company overview with unified activity feed, priority alerts, and quick peer comparison
+- `/` for the research launcher, SEC-backed resolution, and direct company/model handoff
+- `/watchlist` — browser-local watchlist workspace for saved companies, note coverage, freshness, and triage filters
+- `/company/[ticker]` — company overview workspace with grouped core views, research feeds, priority alerts, and quick peer context
 - `/company/[ticker]/financials` — dedicated financial workspace with statements, derived metrics, provenance/quality diagnostics, and a bank-specific regulated-financial view for banks and bank holding companies
 - `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
+- `/company/[ticker]/earnings` — earnings workspace with release trends, guidance and capital-return signals, and linked filing context
 - `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
 - `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
 - `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
@@ -175,13 +191,13 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 
 Personal workspace behavior:
 
-- Watchlist saves and private notes are stored in browser-local `LocalUserData` only (no account and no backend persistence).
+- The `/watchlist` route, watchlist saves, and private notes are stored in browser-local `LocalUserData` only (no account and no backend persistence).
 - Users can export/import this local data as JSON from the saved-companies panel and clear all local saves.
 - Import is merge-by-default (with an explicit replace option), and clear-all requires confirmation.
 
-Search accepts either a ticker or a company name and shows an autocomplete dropdown with SEC-backed matches. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
+Search accepts a ticker, company name, or CIK and shows SEC-backed resolution and autocomplete feedback. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
 
-On phones, the `/company/[ticker]` view hides the large top chrome to preserve space for charts and tables.
+On phones, the `/company/[ticker]` view uses a compact section picker, stacked next-step actions, and hides the large top chrome to preserve space for charts and tables.
 
 Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id}/events` and is rendered in the company console panels.
 
