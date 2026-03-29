@@ -1,16 +1,59 @@
 # Fundamental Terminal
 
-Fundamental Terminal is a pull-first Dockerized SEC-first research terminal. It ingests SEC EDGAR submissions and XBRL company facts, normalizes them into a canonical financial schema, stores them in PostgreSQL, and serves a Next.js workspace for search, company research, valuation, earnings, ownership, and browser-local watchlists.
+**Official-source-first U.S. equity research for investors.**  
+Fundamental Terminal turns SEC filings and other public datasets into a fast, visual research workflow for understanding businesses, tracking what changed, evaluating quality, and making better investment decisions.
 
-Banks and bank holding companies also support an official regulated-financial path built from FDIC quarterly BankFind financials and optional Federal Reserve FR Y-9C imports, while preserving the same public financials and metrics routes.
+Instead of burying investors in raw filings or scattered dashboards, Fundamental Terminal organizes official data into a coherent company workspace: financials, valuation, ownership, capital structure, governance, filing events, and monitoring — with transparent provenance and point-in-time support built in.
 
-The macro context layer also supports official cyclical demand and cost modules from the U.S. Census Bureau, BEA, and BLS, with company-specific relevance filtering so only materially related indicators are emphasized per issuer.
+This project is built around a simple idea: **free public data should be easier to use well.**  
+SEC filings, regulatory disclosures, and official macro/sector data already contain a huge amount of investable information. Fundamental Terminal exists to make that information easier to search, compare, visualize, and trust.
 
-The frontend is organized as a unified company workspace with grouped core views and research feeds, background-first refresh actions, printable research views, and a browser-local watchlist and notes layer.
+## Why Fundamental Terminal
+
+- **SEC-native research workflow** — built around filings, XBRL facts, and regulatory disclosures rather than vendor black boxes
+- **Official-source-first data policy** — fundamentals and analytics come from official public sources whenever possible
+- **Visual investor workflows** — not just raw tables, but research surfaces for financial quality, valuation, ownership, governance, and capital structure
+- **Point-in-time aware** — supports historical “as known then” research without lookahead leakage
+- **Transparent provenance** — visible source, freshness, fallback, and confidence diagnostics
+- **Free and open** — designed to make public data easier to digest, not hide it behind a paywall
+
+## What it covers
+
+Fundamental Terminal is focused on **U.S. public equities**, with deep support for SEC-based company research and selective official data layers that add decision-making context.
+
+Current coverage includes:
+
+- **Company research** — overview, financials, derived metrics, peers, valuation models, filings, events, governance, ownership, insider activity, and capital markets
+- **Regulated financial institutions** — official bank and bank holding company paths using FDIC financials and optional Federal Reserve FR Y-9C data
+- **Official macro and sector context** — selected company-relevant inputs from sources such as Census, BEA, BLS, EIA, and other official datasets
+- **Monitoring and workflow tools** — activity feeds, alerts, saved companies, notes, and point-in-time research mode
+
+## Source policy
+
+Fundamental Terminal is **official-source-first**.
+
+- **Fundamentals, filing analytics, ownership, governance, and core research views** are built from official public sources such as the SEC and other regulators/agencies.
+- **Fallback market context** may be used only where official sources do not provide practical coverage, and it is labeled clearly in the product.
+- **Strict official mode** removes those fallbacks entirely.
+
+The goal is not to pretend every useful data point comes from the government. The goal is to make source quality explicit, keep the core research stack grounded in official evidence, and use fallbacks only where necessary.
+
+## Product philosophy
+
+Fundamental Terminal is not trying to be a generic “everything terminal.”
+
+It is designed to be a **research workstation for investors**:
+- understand the business
+- see what changed
+- assess quality and capital allocation
+- evaluate dilution, financing, and governance risk
+- compare, value, and monitor
+
+The product should feel less like “many useful pages” and more like **one coherent investor workflow built on public evidence**.
 
 ## Screenshots
 
-Captured from the current local app. The launcher example uses `AAPL`, while company workspace screenshots use `INTC`.
+Captured from the local app using demo company data.
 
 ### Research Launcher
 
