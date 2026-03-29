@@ -7,12 +7,12 @@ import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick }
 import type { FilingEventPayload } from "@/lib/types";
 
 const CATEGORY_COLORS: Record<string, string> = {
-  Earnings: "#00E5FF",
+  Earnings: "var(--accent)",
   Accounting: "#F97316",
-  Leadership: "#FFD700",
-  Deal: "#FF6B6B",
-  Financing: "#7CFFCB",
-  "Capital Markets": "#00FF41",
+  Leadership: "var(--warning)",
+  Deal: "var(--negative)",
+  Financing: "var(--positive)",
+  "Capital Markets": "var(--positive)",
   "General Update": "#94A3B8",
   Other: "#C084FC"
 };
@@ -38,7 +38,7 @@ export function FilingEventCategoryChart({ events }: { events: FilingEventPayloa
           <XAxis dataKey="category" stroke={CHART_AXIS_COLOR} tick={chartTick(11)} interval={0} angle={-14} textAnchor="end" height={62} />
           <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} allowDecimals={false} width={48} />
           <Tooltip {...RECHARTS_TOOLTIP_PROPS} />
-          <Bar dataKey="count" name="Events" radius={[6, 6, 0, 0]}>
+          <Bar dataKey="count" name="Events" radius={[2, 2, 0, 0]}>
             {data.map((entry) => (
               <Cell key={entry.category} fill={CATEGORY_COLORS[entry.category] ?? CATEGORY_COLORS.Other} />
             ))}

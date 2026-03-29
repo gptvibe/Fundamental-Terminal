@@ -61,7 +61,7 @@ export function FinancialHistoryLineChart({
               tickFormatter={(value) => formatValue(value)}
             />
             <Tooltip
-              cursor={{ stroke: "rgba(0,229,255,0.25)", strokeWidth: 1 }}
+              cursor={{ stroke: "var(--accent)", strokeWidth: 1 }}
               formatter={(value) => formatValue(value)}
               labelFormatter={(value) => `FY ${value}`}
             />

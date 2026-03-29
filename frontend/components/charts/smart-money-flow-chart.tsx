@@ -89,23 +89,23 @@ export function SmartMoneyFlowChart({ holdings, loading = false, error = null, r
               )}
             />
             <Legend wrapperStyle={chartLegendStyle()} />
-            <Bar dataKey="institutionalBuyValue" name="Institutional Buying" stackId="smart-money-flow" fill="#00FF41" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="institutionalSellValue" name="Institutional Selling" stackId="smart-money-flow" fill="#FF6B6B" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="institutionalBuyValue" name="Institutional Buying" stackId="smart-money-flow" fill="var(--positive)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="institutionalSellValue" name="Institutional Selling" stackId="smart-money-flow" fill="var(--negative)" radius={[4, 4, 0, 0]} />
             <Line
               type="monotone"
               dataKey="netSmartMoneyFlow"
               name="Net Smart Money Flow"
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               strokeWidth={2.4}
               dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00E5FF" }}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
             />
             <Brush
               dataKey="quarterLabel"
               height={24}
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               travellerWidth={10}
-              fill="rgba(0,229,255,0.08)"
+              fill="var(--accent)"
               tickFormatter={(value) => String(value)}
             />
           </ComposedChart>
@@ -140,10 +140,10 @@ function SmartMoneyFlowTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label ?? point.quarterLabel}</div>
-      <TooltipRow label="Institutional Buying" value={formatCurrencyCompact(point.institutionalBuyValue)} color="#00FF41" />
-      <TooltipRow label="Institutional Selling" value={formatCurrencyCompact(point.institutionalSellValue)} color="#FF6B6B" />
-      <TooltipRow label="Net Flow" value={formatSignedCurrencyCompact(point.netSmartMoneyFlow)} color="#00E5FF" />
-      <TooltipRow label="Funds Buying" value={formatInteger(point.fundsBuying)} color="#FFD700" />
+      <TooltipRow label="Institutional Buying" value={formatCurrencyCompact(point.institutionalBuyValue)} color="var(--positive)" />
+      <TooltipRow label="Institutional Selling" value={formatCurrencyCompact(point.institutionalSellValue)} color="var(--negative)" />
+      <TooltipRow label="Net Flow" value={formatSignedCurrencyCompact(point.netSmartMoneyFlow)} color="var(--accent)" />
+      <TooltipRow label="Funds Buying" value={formatInteger(point.fundsBuying)} color="var(--warning)" />
       <TooltipRow label="Funds Selling" value={formatInteger(point.fundsSelling)} color="#F97316" />
       <TooltipRow label="Total Value Traded" value={formatCurrencyCompact(point.totalValueTraded)} color="#94A3B8" />
       <TooltipRow label="Quarter End" value={formatDate(point.quarterDate)} color="#CBD5E1" />

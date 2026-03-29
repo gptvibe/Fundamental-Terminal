@@ -108,7 +108,7 @@ export default function CompanyOverviewPage() {
   }, [ticker, reloadKey]);
 
   const topAlerts = useMemo(() => (activityData?.alerts ?? []).slice(0, 3), [activityData?.alerts]);
-  const latestEntries = useMemo(() => (activityData?.entries ?? []).slice(0, 8), [activityData?.entries]);
+  const latestEntries = useMemo(() => (activityData?.entries ?? []).slice(0, 4), [activityData?.entries]);
 
   return (
     <CompanyWorkspaceShell
@@ -136,74 +136,8 @@ export default function CompanyOverviewPage() {
           consoleEntries={consoleEntries}
           connectionState={connectionState}
         >
-          <Panel title="Risk & Red Flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals">
+          <Panel title="Risk & Red Flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals" variant="subtle">
             <RiskRedFlagPanel financials={financials} />
-          </Panel>
-
-          <Panel title="Live Activity & Alerts" subtitle="Latest SEC activity including events, ownership changes, insider trades, Form 144 planned sales, and prioritized alerts">
-            {activityError ? (
-              <div className="text-muted">{activityError}</div>
-            ) : activityLoading ? (
-              <div className="text-muted">Loading activity feed...</div>
-            ) : (
-              <div style={{ display: "grid", gap: 16 }}>
-                <SourceFreshnessSummary
-                  provenance={activityData?.provenance}
-                  asOf={activityData?.as_of}
-                  lastRefreshedAt={activityData?.last_refreshed_at}
-                  sourceMix={activityData?.source_mix}
-                  confidenceFlags={activityData?.confidence_flags}
-                />
-
-                <CompanyMetricGrid
-                  items={[
-                    { label: "Feed Entries", value: (activityData?.entries.length ?? 0).toLocaleString() },
-                    { label: "High Alerts", value: (activityData?.summary.high ?? 0).toLocaleString() },
-                    { label: "Medium Alerts", value: (activityData?.summary.medium ?? 0).toLocaleString() },
-                    { label: "Total Alerts", value: (activityData?.summary.total ?? 0).toLocaleString() }
-                  ]}
-                />
-
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ fontWeight: 600, color: "var(--text)" }}>Top Alerts</div>
-                  {topAlerts.length ? topAlerts.map((alert) => (
-                    <AlertOrEntryCard
-                      key={alert.id}
-                      href={alert.href}
-                      borderColor={alert.level === "high" ? "rgba(255, 83, 83, 0.5)" : undefined}
-                      topLeft={
-                        <>
-                          <span className="pill">{alert.level}</span>
-                          <span className="pill">{alert.source}</span>
-                        </>
-                      }
-                      topRight={formatDate(alert.date)}
-                      title={alert.title}
-                      detail={alert.detail}
-                    />
-                  )) : <div className="text-muted">No alerts triggered from current cached SEC activity.</div>}
-                </div>
-
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ fontWeight: 600, color: "var(--text)" }}>Latest Timeline Entries</div>
-                  {latestEntries.length ? latestEntries.map((entry) => (
-                    <AlertOrEntryCard
-                      key={entry.id}
-                      href={entry.href}
-                      topLeft={
-                        <>
-                          <span className="pill">{formatFeedEntryType(entry.type)}</span>
-                          <span className="pill">{entry.badge}</span>
-                        </>
-                      }
-                      topRight={formatDate(entry.date)}
-                      title={entry.title}
-                      detail={entry.detail}
-                    />
-                  )) : <div className="text-muted">No activity entries available yet.</div>}
-                </div>
-              </div>
-            )}
           </Panel>
         </CompanyUtilityRail>
       }
@@ -211,29 +145,27 @@ export default function CompanyOverviewPage() {
     >
       <CompanyResearchHeader
         ticker={ticker}
-        title="Overview"
-        companyName={company?.name ?? ticker}
+        title={company?.name ?? ticker}
+        companyName={`${ticker}${company?.sector ? ` · ${company.sector}` : " · Company workspace"}`}
         sector={company?.sector}
         cacheState={company?.cache_state ?? null}
-        description="SEC-first company workspace with persisted fundamentals, market context, and research panels kept current through background refreshes."
+        description="Primary company identity, key fundamentals, and price-versus-operating performance in a single high-trust research surface."
         aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "CIK", value: company?.cik ?? null },
-          { label: "Sector", value: company?.sector ?? null },
           { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null }
         ]}
         ribbonItems={[
           { label: "Financials", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" },
           { label: "Prices", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" },
-          { label: "Sources", value: "SEC EDGAR/XBRL + Yahoo Finance", tone: "gold" },
           { label: "Refresh", value: refreshState?.job_id ? "Queued" : "Background-first", tone: refreshState?.job_id ? "cyan" : "green" }
         ]}
         summaries={[
           { label: "Revenue", value: formatCompactNumber(latestFinancial?.revenue), accent: "cyan" },
-          { label: "EPS", value: latestFinancial?.eps == null ? "?" : latestFinancial.eps.toFixed(2), accent: "gold" },
-          { label: "Net Income", value: formatCompactNumber(latestFinancial?.net_income), accent: "green" },
-          { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: "green" }
+          { label: "EPS", value: latestFinancial?.eps == null ? "?" : latestFinancial.eps.toFixed(2), accent: latestFinancial?.eps != null && latestFinancial.eps < 0 ? "red" : "cyan" },
+          { label: "Net Income", value: formatCompactNumber(latestFinancial?.net_income), accent: latestFinancial?.net_income != null && latestFinancial.net_income < 0 ? "red" : "cyan" },
+          { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: latestFinancial?.free_cash_flow != null && latestFinancial.free_cash_flow < 0 ? "red" : "cyan" }
         ]}
         className="financial-hero"
       >
@@ -244,44 +176,127 @@ export default function CompanyOverviewPage() {
         />
       </CompanyResearchHeader>
 
-      <PriceFundamentalsModule priceData={priceHistory} fundamentalsData={fundamentalsTrendData} />
+      <div className="company-overview-stage models-page-span-full">
+        <PriceFundamentalsModule
+          priceData={priceHistory}
+          fundamentalsData={fundamentalsTrendData}
+          title="Price and Operating Momentum"
+          subtitle="Start with price action, revenue growth, EPS trend, and cash generation before moving into secondary modules."
+        />
+      </div>
 
-      <Panel
-        title="Visualization Lab"
-        subtitle="Unified SEC-first chart system with consistent controls, event annotations, provenance badges, and CSV export"
-      >
-        <CompanyVisualizationLab ticker={ticker} financials={financials} reloadKey={reloadKey} />
-      </Panel>
+      <div className="company-overview-secondary-grid models-page-span-full">
+        <Panel
+          title="Visualization Lab"
+          subtitle="Unified SEC-first chart system with consistent controls, event annotations, provenance badges, and CSV export"
+          variant="subtle"
+        >
+          <CompanyVisualizationLab ticker={ticker} financials={financials} reloadKey={reloadKey} />
+        </Panel>
 
-      <Panel title="Cash Flow Bridge" subtitle="How operating cash flow turns into free cash flow and capital allocation uses">
-        <CashFlowWaterfallChart financials={financials} />
-      </Panel>
+        <Panel title="Cash Flow Bridge" subtitle="How operating cash flow turns into free cash flow and capital allocation uses" variant="subtle">
+          <CashFlowWaterfallChart financials={financials} />
+        </Panel>
 
-      <Panel title="Liquidity & Capital" subtitle="Current assets, current liabilities, current ratio, and retained earnings trend">
-        <LiquidityCapitalChart financials={financials} />
-      </Panel>
+        <Panel title="Liquidity & Capital" subtitle="Current assets, current liabilities, current ratio, and retained earnings trend" variant="subtle">
+          <LiquidityCapitalChart financials={financials} />
+        </Panel>
 
-      <Panel title="Share Dilution" subtitle="Shares outstanding history and year-over-year dilution rate from SEC filings">
-        <ShareDilutionTrackerChart financials={financials} />
-      </Panel>
+        <Panel title="Share Dilution" subtitle="Shares outstanding history and year-over-year dilution rate from SEC filings" variant="subtle">
+          <ShareDilutionTrackerChart financials={financials} />
+        </Panel>
 
-      <Panel title="Segments & Geography" subtitle="Mix shifts, concentration, margin contribution, and chart views from cached SEC disclosures">
-        <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
-      </Panel>
+        <Panel title="Segments & Geography" subtitle="Mix shifts, concentration, margin contribution, and chart views from cached SEC disclosures" variant="subtle">
+          <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
+        </Panel>
 
-      <Panel title="Changes Since Last Filing" subtitle="Latest filing versus the prior comparable filing, including amended prior values">
-        <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} />
-      </Panel>
+        <Panel title="Changes Since Last Filing" subtitle="Latest filing versus the prior comparable filing, including amended prior values" variant="subtle">
+          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} />
+        </Panel>
 
-      <Panel title="Derived Metrics Explorer" subtitle="Persisted SEC-derived metrics with provenance and quality flags">
-        <MetricsExplorerPanel ticker={ticker} reloadKey={reloadKey} />
-      </Panel>
+        <Panel title="Derived Metrics Explorer" subtitle="Persisted SEC-derived metrics with provenance and quality flags" variant="subtle">
+          <MetricsExplorerPanel ticker={ticker} reloadKey={reloadKey} />
+        </Panel>
 
-      <Panel title="10-Year Financial History" subtitle="SEC EDGAR companyfacts (FY)">
-        <FinancialHistorySection cik={company?.cik ?? null} />
-      </Panel>
+        <Panel title="10-Year Financial History" subtitle="SEC EDGAR companyfacts (FY)" variant="subtle">
+          <FinancialHistorySection cik={company?.cik ?? null} />
+        </Panel>
+      </div>
 
       <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
+
+      <Panel
+        title="Research Pulse"
+        subtitle="Latest filing activity, alert counts, and freshness cues to orient the read before deeper module work."
+        className="company-overview-pulse"
+        variant="subtle"
+      >
+        {activityError ? (
+          <div className="text-muted">{activityError}</div>
+        ) : activityLoading ? (
+          <div className="text-muted">Loading activity feed...</div>
+        ) : (
+          <div className="company-pulse-stack">
+            <SourceFreshnessSummary
+              provenance={activityData?.provenance}
+              asOf={activityData?.as_of}
+              lastRefreshedAt={activityData?.last_refreshed_at}
+              sourceMix={activityData?.source_mix}
+              confidenceFlags={activityData?.confidence_flags}
+            />
+
+            <CompanyMetricGrid
+              items={[
+                { label: "Feed Entries", value: (activityData?.entries.length ?? 0).toLocaleString() },
+                { label: "High Alerts", value: (activityData?.summary.high ?? 0).toLocaleString() },
+                { label: "Medium Alerts", value: (activityData?.summary.medium ?? 0).toLocaleString() },
+                { label: "Total Alerts", value: (activityData?.summary.total ?? 0).toLocaleString() }
+              ]}
+            />
+
+            <div className="company-pulse-columns">
+              <div className="company-pulse-list">
+                <div className="company-pulse-heading">Top Alerts</div>
+                {topAlerts.length ? topAlerts.map((alert) => (
+                  <AlertOrEntryCard
+                    key={alert.id}
+                    href={alert.href}
+                    danger={alert.level === "high"}
+                    topLeft={
+                      <>
+                        <span className="pill">{alert.level}</span>
+                        <span className="pill">{alert.source}</span>
+                      </>
+                    }
+                    topRight={formatDate(alert.date)}
+                    title={alert.title}
+                    detail={alert.detail}
+                  />
+                )) : <div className="text-muted">No alerts triggered from current cached SEC activity.</div>}
+              </div>
+
+              <div className="company-pulse-list">
+                <div className="company-pulse-heading">Latest Timeline</div>
+                {latestEntries.length ? latestEntries.map((entry) => (
+                  <AlertOrEntryCard
+                    key={entry.id}
+                    href={entry.href}
+                    topLeft={
+                      <>
+                        <span className="pill">{formatFeedEntryType(entry.type)}</span>
+                        <span className="pill">{entry.badge}</span>
+                      </>
+                    }
+                    topRight={formatDate(entry.date)}
+                    title={entry.title}
+                    detail={entry.detail}
+                  />
+                )) : <div className="text-muted">No activity entries available yet.</div>}
+              </div>
+            </div>
+          </div>
+        )}
+      </Panel>
     </CompanyWorkspaceShell>
   );
 }
@@ -307,23 +322,23 @@ function AlertOrEntryCard({
   topRight,
   title,
   detail,
-  borderColor,
+  danger = false,
 }: {
   href: string | null;
   topLeft: ReactNode;
   topRight: string;
   title: string;
   detail: string;
-  borderColor?: string;
+  danger?: boolean;
 }) {
   const content = (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{topLeft}</div>
+      <div className="company-pulse-card-top">
+        <div className="company-pulse-card-pills">{topLeft}</div>
         <div className="text-muted">{topRight}</div>
       </div>
-      <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{title}</div>
-      <div className="text-muted" style={{ fontSize: 13 }}>{detail}</div>
+      <div className="company-pulse-card-title">{title}</div>
+      <div className="company-pulse-card-detail">{detail}</div>
     </>
   );
 
@@ -333,8 +348,8 @@ function AlertOrEntryCard({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="filing-link-card"
-        style={{ display: "grid", gap: 8, textDecoration: "none", borderColor }}
+        className={`filing-link-card company-pulse-card${danger ? " is-danger" : ""}`}
+        style={{ display: "grid", gap: 8, textDecoration: "none" }}
       >
         {content}
       </a>
@@ -342,7 +357,7 @@ function AlertOrEntryCard({
   }
 
   return (
-    <div className="filing-link-card" style={{ display: "grid", gap: 8, borderColor }}>
+    <div className={`filing-link-card company-pulse-card${danger ? " is-danger" : ""}`} style={{ display: "grid", gap: 8 }}>
       {content}
     </div>
   );

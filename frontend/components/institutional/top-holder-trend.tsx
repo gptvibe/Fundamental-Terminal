@@ -16,7 +16,7 @@ import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTI
 import { formatDate } from "@/lib/format";
 import type { InstitutionalHoldingPayload } from "@/lib/types";
 
-const SERIES_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#7CFFCB"];
+const SERIES_COLORS = ["var(--positive)", "var(--accent)", "var(--warning)", "var(--negative)", "var(--positive)"];
 
 export function TopHolderTrend({ holdings }: { holdings: InstitutionalHoldingPayload[] }) {
   const { data, series } = useMemo(() => buildTopHolderSeries(holdings), [holdings]);

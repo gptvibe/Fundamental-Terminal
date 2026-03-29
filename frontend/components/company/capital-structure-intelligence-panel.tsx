@@ -83,8 +83,8 @@ export function CapitalStructureIntelligencePanel({
   }, [activeJobId, lastEvent?.status, loadCapitalStructure]);
 
   const latest = payload?.latest ?? null;
-  const history = payload?.history ?? [];
-  const trendRows = useMemo(() => [...history].slice(0, 5), [history]);
+  const history = payload?.history;
+  const trendRows = useMemo(() => (history ? history.slice(0, 5) : []), [history]);
 
   if (loading) {
     return <div className="text-muted">Loading capital structure intelligence...</div>;

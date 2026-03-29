@@ -27,6 +27,7 @@ export function AppChrome({ children }: AppChromeProps) {
   const mobileInputRef = useRef<HTMLInputElement>(null);
   const searchFormRef = useRef<HTMLFormElement>(null);
   const mobileSearchRef = useRef<HTMLDivElement>(null);
+  const topbarRef = useRef<HTMLElement>(null);
   const [searchText, setSearchText] = useState(deriveTicker(pathname));
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [autocompleteResults, setAutocompleteResults] = useState<CompanyPayload[]>([]);
@@ -87,6 +88,17 @@ export function AppChrome({ children }: AppChromeProps) {
     document.documentElement.dataset.theme = theme;
     window.localStorage.setItem("ft-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    const el = topbarRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const h = Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.target.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--command-height", `${h}px`);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     function showToast(event: Event) {
@@ -266,7 +278,7 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
       ) : null}
 
-      <header className={`app-topbar${isHomeRoute ? " is-home-route" : ""}`}>
+      <header ref={topbarRef} className={`app-topbar${isHomeRoute ? " is-home-route" : ""}`}>
         <button onClick={() => router.push("/")} className="app-brand" aria-label="Go to home">
           <span className="app-brand-mark" aria-hidden="true">
             <AppLogo className="app-brand-logo" />
@@ -287,65 +299,72 @@ export function AppChrome({ children }: AppChromeProps) {
               <span className="app-workspace-pill-label">Workspace</span>
               <span className="app-workspace-pill-value">{workspace.label}</span>
             </div>
-          ) : null}
-
-          <form
-            ref={searchFormRef}
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submitSearch();
-            }}
-            className={`app-topbar-search${invalidMessage ? " is-invalid" : ""}`}
-          >
-            <div className="app-topbar-search-copy">
-              <span className="app-topbar-search-label">
-                {isHomeRoute ? "$TICKER, company, or CIK" : "$TICKER or company"}
-                <span className="app-keycap">/</span>
-                to focus
-              </span>
-              <input
-                ref={desktopInputRef}
-                value={searchText}
-                onChange={(event) => {
-                  setSearchText(event.target.value);
-                  setAutocompleteOpen(true);
-                  setInvalidMessage(null);
-                }}
-                onFocus={() => {
-                  if (trimmedSearchText) {
-                    setAutocompleteOpen(true);
-                  }
-                }}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="AAPL or Apple"
-                className={`app-topbar-search-input${invalidMessage ? " is-invalid" : ""}`}
-                aria-label="Search company or ticker"
-                role="combobox"
-                aria-autocomplete="list"
-                aria-haspopup="listbox"
-                aria-expanded={showAutocomplete}
-                aria-controls="app-topbar-autocomplete"
-                aria-activedescendant={activeOptionId}
-                aria-invalid={Boolean(invalidMessage)}
-              />
-
-              {showAutocomplete ? (
-                <CompanyAutocompleteMenu
-                  id="app-topbar-autocomplete"
-                  results={autocompleteResults}
-                  loading={autocompleteLoading}
-                  activeIndex={activeSuggestionIndex}
-                  onHover={setActiveSuggestionIndex}
-                  onSelect={selectSuggestion}
-                />
-              ) : null}
-
-              {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
+          ) : (
+            <div className="app-home-intro" aria-label="Home workspace summary">
+              <span className="app-home-intro-label">Institutional Research Terminal</span>
+              <span className="app-home-intro-copy">Search launches from home. Company routes keep a compact cross-route command.</span>
             </div>
-            <button type="submit" className="app-topbar-search-submit">
-              Open
-            </button>
-          </form>
+          )}
+
+          {!isHomeRoute ? (
+            <form
+              ref={searchFormRef}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitSearch();
+              }}
+              className={`app-topbar-search${invalidMessage ? " is-invalid" : ""}`}
+            >
+              <div className="app-topbar-search-copy">
+                <span className="app-topbar-search-label">
+                  $TICKER or company
+                  <span className="app-keycap">/</span>
+                  to focus
+                </span>
+                <input
+                  ref={desktopInputRef}
+                  value={searchText}
+                  onChange={(event) => {
+                    setSearchText(event.target.value);
+                    setAutocompleteOpen(true);
+                    setInvalidMessage(null);
+                  }}
+                  onFocus={() => {
+                    if (trimmedSearchText) {
+                      setAutocompleteOpen(true);
+                    }
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="AAPL or Apple"
+                  className={`app-topbar-search-input${invalidMessage ? " is-invalid" : ""}`}
+                  aria-label="Search company or ticker"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-haspopup="listbox"
+                  aria-expanded={showAutocomplete}
+                  aria-controls="app-topbar-autocomplete"
+                  aria-activedescendant={activeOptionId}
+                  aria-invalid={Boolean(invalidMessage)}
+                />
+
+                {showAutocomplete ? (
+                  <CompanyAutocompleteMenu
+                    id="app-topbar-autocomplete"
+                    results={autocompleteResults}
+                    loading={autocompleteLoading}
+                    activeIndex={activeSuggestionIndex}
+                    onHover={setActiveSuggestionIndex}
+                    onSelect={selectSuggestion}
+                  />
+                ) : null}
+
+                {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
+              </div>
+              <button type="submit" className="app-topbar-search-submit">
+                Open
+              </button>
+            </form>
+          ) : null}
         </div>
 
         <div className={`app-topbar-tools${isHomeRoute ? " is-home-route" : ""}`}>
@@ -354,7 +373,7 @@ export function AppChrome({ children }: AppChromeProps) {
             <span className="app-device-shortcut-count">{savedCompanyCount}</span>
           </button>
 
-          <span className="app-tools-label">Appearance</span>
+          <span className="app-tools-label">Theme</span>
 
           <div className="app-theme-switcher" role="group" aria-label="Color theme">
             <button
@@ -490,6 +509,10 @@ function deriveWorkspace(pathname: string | null): { label: string; ticker: stri
   }
 
   const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] === "watchlist") {
+    return { label: "Watchlist", ticker: null };
+  }
+
   if (parts[0] !== "company" || !parts[1]) {
     return { label: "Workspace", ticker: null };
   }
@@ -508,6 +531,22 @@ function deriveWorkspace(pathname: string | null): { label: string; ticker: stri
       return { label: "Insiders", ticker };
     case "models":
       return { label: "Models", ticker };
+    case "peers":
+      return { label: "Peers", ticker };
+    case "earnings":
+      return { label: "Earnings", ticker };
+    case "filings":
+      return { label: "Filings", ticker };
+    case "events":
+      return { label: "Events", ticker };
+    case "governance":
+      return { label: "Governance", ticker };
+    case "ownership-changes":
+      return { label: "Stake Changes", ticker };
+    case "capital-markets":
+      return { label: "Capital Markets", ticker };
+    case "sec-feed":
+      return { label: "SEC Feed", ticker };
     default:
       return { label: "Workspace", ticker };
   }

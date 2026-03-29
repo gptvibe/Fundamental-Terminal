@@ -19,8 +19,8 @@ import type { FinancialPayload } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const QUARTERLY_FORMS = new Set(["10-Q", "6-K"]);
-const POSITIVE_COLOR = "#00FF41";
-const NEGATIVE_COLOR = "#FF6B6B";
+const POSITIVE_COLOR = "var(--positive)";
+const NEGATIVE_COLOR = "var(--negative)";
 const TOTAL_COLOR = POSITIVE_COLOR;
 type PeriodView = "annual" | "quarterly";
 
@@ -120,7 +120,7 @@ export function CashFlowWaterfallChart({ financials }: { financials: FinancialPa
             <ReferenceLine y={0} stroke="var(--panel-border)" />
             <Tooltip content={<WaterfallTooltip />} />
             <Bar dataKey="base" stackId="waterfall" fill="transparent" stroke="transparent" />
-            <Bar dataKey="span" stackId="waterfall" radius={[8, 8, 0, 0]}>
+            <Bar dataKey="span" stackId="waterfall" radius={[2, 2, 0, 0]}>
               {chartData.map((entry) => (
                 <Cell key={entry.label} fill={entry.fill} />
               ))}

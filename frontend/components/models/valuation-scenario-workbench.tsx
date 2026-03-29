@@ -7,10 +7,10 @@ import type { FinancialPayload, ModelPayload, PriceHistoryPoint } from "@/lib/ty
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const CASE_COLORS = {
-  bear: "#FF6B6B",
-  base: "#00E5FF",
-  bull: "#00FF41",
-  overlap: "#FFD700",
+  bear: "var(--negative)",
+  base: "var(--accent)",
+  bull: "var(--positive)",
+  overlap: "var(--warning)",
 } as const;
 const RESIDUAL_LONG_RUN_ROE = 0.1;
 const PROJECTION_YEARS = 5;
@@ -388,7 +388,7 @@ function renderDcfWorkbench({
             <SliderControl label="Discount Rate" value={controls.discountRate} min={0.05} max={0.18} step={0.0025} accent={CASE_COLORS.bear} onChange={(value) => onControlsChange((current) => ({ ...current, discountRate: value, terminalGrowth: Math.min(current.terminalGrowth, value - 0.01) }))} />
             <SliderControl label="Terminal Growth" value={controls.terminalGrowth} min={0} max={Math.min(0.06, Math.max(controls.discountRate - 0.01, 0))} step={0.0025} accent={CASE_COLORS.overlap} onChange={(value) => onControlsChange((current) => ({ ...current, terminalGrowth: Math.min(value, current.discountRate - 0.01) }))} />
             <SliderControl label="Operating Margin" value={controls.operatingMargin} min={0.05} max={0.5} step={0.005} accent={CASE_COLORS.bull} onChange={(value) => onControlsChange((current) => ({ ...current, operatingMargin: value }))} />
-            <SliderControl label="Capex % of Revenue" value={controls.capexPercent} min={0.01} max={0.15} step={0.0025} accent="#A855F7" onChange={(value) => onControlsChange((current) => ({ ...current, capexPercent: value }))} />
+            <SliderControl label="Capex % of Revenue" value={controls.capexPercent} min={0.01} max={0.15} step={0.0025} accent="#a78bfa" onChange={(value) => onControlsChange((current) => ({ ...current, capexPercent: value }))} />
           </div>
           <TraceabilityTable rows={defaults.traceability} />
         </>

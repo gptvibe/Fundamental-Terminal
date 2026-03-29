@@ -45,9 +45,9 @@ export function InsiderRoleActivityChart({ trades }: { trades: InsiderTradePaylo
           <XAxis dataKey="role" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
           <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} />
           <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
-          <Bar dataKey="buys" name="Buy Value" fill="#00FF41" radius={[6, 6, 0, 0]} />
-          <Bar dataKey="sells" name="Sell Value" fill="#FF6B6B" radius={[6, 6, 0, 0]} />
-          <Line type="monotone" dataKey="net" name="Net Value" stroke="#00E5FF" strokeWidth={2.4} dot={false} />
+          <Bar dataKey="buys" name="Buy Value" fill="var(--positive)" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="sells" name="Sell Value" fill="var(--negative)" radius={[2, 2, 0, 0]} />
+          <Line type="monotone" dataKey="net" name="Net Value" stroke="var(--accent)" strokeWidth={2.4} dot={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

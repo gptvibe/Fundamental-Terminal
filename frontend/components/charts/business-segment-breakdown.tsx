@@ -26,7 +26,7 @@ import type {
 } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
-const SEGMENT_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7", "#7CFFCB", "#64D2FF"];
+const SEGMENT_COLORS = ["var(--positive)", "var(--accent)", "var(--warning)", "var(--negative)", "#A855F7", "var(--positive)", "#64D2FF"];
 
 type SegmentKind = "business" | "geographic";
 
@@ -199,7 +199,7 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
               growth: null,
               operatingIncome: null,
               assets: null,
-              color: "rgba(255,255,255,0.18)"
+              color: "var(--text-muted)"
             } satisfies SegmentPoint
           ]
         : [])
@@ -263,7 +263,7 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
               type="button"
               className={`chart-chip ${selectedSegmentId === segment.id ? "chart-chip-active" : ""}`}
               onClick={() => toggleSegment(segment.id)}
-              style={{ borderColor: `${segment.color}55`, color: selectedSegmentId === segment.id ? "#0c0c0c" : segment.color }}
+              style={{ borderColor: `${segment.color}55`, color: selectedSegmentId === segment.id ? "var(--bg)" : segment.color }}
             >
               {segment.name}
             </button>
@@ -355,9 +355,9 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
                 tickFormatter={(value) => formatPercent(Number(value))}
               />
               <Tooltip content={<SegmentTooltip />} />
-              <Bar dataKey="growth" radius={[8, 8, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
+              <Bar dataKey="growth" radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
                 {growthChartData.map((segment) => (
-                  <Cell key={segment.id} fill={segment.growth != null && segment.growth < 0 ? "#FF6B6B" : segment.color} />
+                  <Cell key={segment.id} fill={segment.growth != null && segment.growth < 0 ? "var(--negative)" : segment.color} />
                 ))}
               </Bar>
             </BarChart>
@@ -390,12 +390,12 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
                   tickFormatter={(value) => formatPercent(Number(value))}
                 />
                 <Tooltip content={<SegmentTooltip />} />
-                <Bar dataKey="operatingMargin" name="Op. Margin" radius={[8, 8, 0, 0]}
+                <Bar dataKey="operatingMargin" name="Op. Margin" radius={[2, 2, 0, 0]}
                   onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
                   {marginChartData.map((segment) => (
                     <Cell
                       key={segment.id}
-                      fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "#FF6B6B" : segment.color}
+                      fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "var(--negative)" : segment.color}
                     />
                   ))}
                 </Bar>
@@ -438,26 +438,26 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
           <div style={{ display: "grid", gap: 8 }}>
             <div className="segment-section-title" style={{ fontSize: 15 }}>Top Mix Movers</div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+              <table className="company-data-table" style={{ minWidth: 620 }}>
                 <thead>
-                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
-                    <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Share Delta</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Revenue Delta</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Status</th>
+                  <tr>
+                    <th align="left">Segment</th>
+                    <th align="right">Share Delta</th>
+                    <th align="right">Revenue Delta</th>
+                    <th align="right">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lens.top_mix_movers.map((row) => (
                     <tr key={`${row.segment_id}:${row.status}`}>
-                      <td style={{ padding: "10px 10px" }}>{row.segment_name}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right", color: (row.share_delta ?? 0) >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                      <td>{row.segment_name}</td>
+                      <td style={{ textAlign: "right", color: (row.share_delta ?? 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
                         {formatSignedPoints(row.share_delta)}
                       </td>
-                      <td style={{ padding: "10px 10px", textAlign: "right", color: (row.revenue_delta ?? 0) >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                      <td style={{ textAlign: "right", color: (row.revenue_delta ?? 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
                         {formatSignedCompactNumber(row.revenue_delta)}
                       </td>
-                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{titleCase(row.status)}</td>
+                      <td style={{ textAlign: "right" }}>{titleCase(row.status)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -470,22 +470,22 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
           <div style={{ display: "grid", gap: 8 }}>
             <div className="segment-section-title" style={{ fontSize: 15 }}>Margin Contribution</div>
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+              <table className="company-data-table" style={{ minWidth: 620 }}>
                 <thead>
-                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
-                    <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Op. Income Share</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Op. Margin</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Margin Delta</th>
+                  <tr>
+                    <th align="left">Segment</th>
+                    <th align="right">Op. Income Share</th>
+                    <th align="right">Op. Margin</th>
+                    <th align="right">Margin Delta</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lens.top_margin_contributors.map((row) => (
                     <tr key={`${row.segment_id}:margin`}>
-                      <td style={{ padding: "10px 10px" }}>{row.segment_name}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.share_of_operating_income)}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.operating_margin)}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right", color: (row.operating_margin_delta ?? 0) >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                      <td>{row.segment_name}</td>
+                      <td style={{ textAlign: "right" }}>{formatPercent(row.share_of_operating_income)}</td>
+                      <td style={{ textAlign: "right" }}>{formatPercent(row.operating_margin)}</td>
+                      <td style={{ textAlign: "right", color: (row.operating_margin_delta ?? 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
                         {formatSignedPoints(row.operating_margin_delta)}
                       </td>
                     </tr>
@@ -513,22 +513,22 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 12, background: "rgba(255,255,255,0.02)", display: "grid", gap: 4 }}>
+    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 6, padding: 12, background: "var(--panel)", display: "grid", gap: 4 }}>
       <div className="text-muted" style={{ fontSize: 12 }}>{label}</div>
-      <div style={{ fontWeight: 700, wordBreak: "break-word" }}>{value}</div>
+      <div style={{ fontWeight: 700, wordBreak: "break-word", color: "var(--surface-strong-text)" }}>{value}</div>
     </div>
   );
 }
 
 function DisclosureCard({ disclosure }: { disclosure: SegmentDisclosurePayload }) {
   const palette = disclosure.severity === "high"
-    ? { border: "rgba(255,107,107,0.35)", background: "rgba(255,107,107,0.08)", text: "#FFB3B3" }
+    ? { border: "color-mix(in srgb, var(--negative) 40%, var(--panel-border))", background: "color-mix(in srgb, var(--negative) 10%, var(--panel))", text: "var(--negative)" }
     : disclosure.severity === "medium"
-      ? { border: "rgba(255,215,0,0.28)", background: "rgba(255,215,0,0.07)", text: "#FFE07A" }
-      : { border: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.03)", text: "#D6E2EA" };
+      ? { border: "color-mix(in srgb, var(--warning) 40%, var(--panel-border))", background: "color-mix(in srgb, var(--warning) 10%, var(--panel))", text: "var(--warning)" }
+      : { border: "var(--panel-border)", background: "var(--panel)", text: "var(--text-muted)" };
 
   return (
-    <div style={{ border: `1px solid ${palette.border}`, background: palette.background, borderRadius: 12, padding: 12, display: "grid", gap: 6 }}>
+    <div style={{ border: `1px solid ${palette.border}`, background: palette.background, borderRadius: 6, padding: 12, display: "grid", gap: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
         <div style={{ fontWeight: 700 }}>{disclosure.label}</div>
         <span style={{ color: palette.text, fontSize: 12, fontWeight: 700 }}>{titleCase(disclosure.severity)}</span>
@@ -583,15 +583,15 @@ function SegmentTreemapNode(
         ry={12}
         fill={segmentPoint.color}
         opacity={active ? 0.96 : 0.38}
-        stroke={focused ? "#FFD700" : "var(--panel-border)"}
+        stroke={focused ? "var(--warning)" : "var(--panel-border)"}
         strokeWidth={focused ? 2.2 : 1}
       />
       {width > 88 && height > 56 ? (
         <>
-          <text x={x + 10} y={y + 20} fill="#0c0c0c" fontSize={12} fontWeight={700}>
+          <text x={x + 10} y={y + 20} fill="var(--bg)" fontSize={12} fontWeight={700}>
             {trimLabel(segmentPoint.name, width > 120 ? 18 : 12)}
           </text>
-          <text x={x + 10} y={y + 38} fill="rgba(12,12,12,0.78)" fontSize={11}>
+          <text x={x + 10} y={y + 38} fill="var(--bg)" fontSize={11} opacity={0.78}>
             {formatCompactNumber(segmentPoint.revenue)}
           </text>
         </>

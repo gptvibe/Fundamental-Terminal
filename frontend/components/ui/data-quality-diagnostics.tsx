@@ -49,9 +49,9 @@ export function DataQualityDiagnostics({
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, background: "rgba(255,255,255,0.02)" }}>
+    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 12, background: "var(--panel)" }}>
       <div className="text-muted" style={{ fontSize: 12, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700 }}>{value}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color: "var(--surface-strong-text)" }}>{value}</div>
     </div>
   );
 }
@@ -66,12 +66,12 @@ function FlagRow({ label, flags, emptyLabel }: { label: string; flags: string[];
             <span
               key={`${label}-${flag}`}
               style={{
-                border: "1px solid rgba(255,215,0,0.25)",
+                border: "1px solid color-mix(in srgb, var(--warning) 35%, var(--panel-border))",
                 borderRadius: 999,
                 padding: "4px 10px",
                 fontSize: 12,
-                color: "#FFD700",
-                background: "rgba(255,215,0,0.08)"
+                color: "var(--surface-strong-text)",
+                background: "color-mix(in srgb, var(--warning) 14%, var(--panel))"
               }}
             >
               {flag}
@@ -122,7 +122,7 @@ function ReconciliationSection({ reconciliation }: { reconciliation: FinancialRe
 
 function ComparisonCard({ comparison }: { comparison: FinancialReconciliationPayload["comparisons"][number] }) {
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 12, background: "rgba(255,255,255,0.02)", display: "grid", gap: 10 }}>
+    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 12, background: "var(--panel)", display: "grid", gap: 10 }}>
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div style={{ display: "grid", gap: 4 }}>
           <div className="text-muted" style={{ fontSize: 12 }}>{titleCase(comparison.metric_key)}</div>
@@ -151,11 +151,11 @@ function ComparisonCard({ comparison }: { comparison: FinancialReconciliationPay
 
 function LineageCard({ label, fact }: { label: string; fact: FinancialFactReferencePayload | null }) {
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,0.015)", display: "grid", gap: 6 }}>
+    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 10, background: "var(--panel)", display: "grid", gap: 6 }}>
       <div className="text-muted" style={{ fontSize: 12 }}>{label}</div>
       {fact ? (
         <>
-          <div style={{ fontWeight: 700 }}>{formatFactLabel(fact)}</div>
+          <div style={{ fontWeight: 700, color: "var(--surface-strong-text)" }}>{formatFactLabel(fact)}</div>
           <div className="text-muted" style={{ fontSize: 12 }}>{formatPeriodRange(fact.period_start, fact.period_end)}</div>
           <div className="text-muted" style={{ fontSize: 12 }}>{fact.accession_number || fact.source || "No accession metadata"}</div>
         </>
@@ -168,19 +168,19 @@ function LineageCard({ label, fact }: { label: string; fact: FinancialFactRefere
 
 function MetaCard({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: 10, background: "rgba(255,255,255,0.015)", display: "grid", gap: 4 }}>
+    <div style={{ border: "1px solid var(--panel-border)", borderRadius: 8, padding: 10, background: "var(--panel)", display: "grid", gap: 4 }}>
       <div className="text-muted" style={{ fontSize: 12 }}>{label}</div>
-      <div style={{ fontWeight: 700, wordBreak: "break-word" }}>{value}</div>
+      <div style={{ fontWeight: 700, wordBreak: "break-word", color: "var(--surface-strong-text)" }}>{value}</div>
     </div>
   );
 }
 
 function StatusChip({ status }: { status: FinancialReconciliationPayload["status"] }) {
   const palette = {
-    matched: { border: "rgba(64, 196, 99, 0.35)", text: "#8FF0B2", background: "rgba(64, 196, 99, 0.12)" },
-    disagreement: { border: "rgba(255, 166, 0, 0.35)", text: "#FFD280", background: "rgba(255, 166, 0, 0.12)" },
-    parser_missing: { border: "rgba(255, 215, 0, 0.28)", text: "#FFD700", background: "rgba(255, 215, 0, 0.08)" },
-    unsupported_form: { border: "rgba(255,255,255,0.16)", text: "#D4D4D4", background: "rgba(255,255,255,0.06)" }
+    matched: { border: "color-mix(in srgb, var(--positive) 35%, var(--panel-border))", text: "var(--positive)", background: "color-mix(in srgb, var(--positive) 12%, var(--panel))" },
+    disagreement: { border: "color-mix(in srgb, var(--warning) 35%, var(--panel-border))", text: "var(--warning)", background: "color-mix(in srgb, var(--warning) 12%, var(--panel))" },
+    parser_missing: { border: "color-mix(in srgb, var(--warning) 35%, var(--panel-border))", text: "var(--surface-strong-text)", background: "color-mix(in srgb, var(--warning) 14%, var(--panel))" },
+    unsupported_form: { border: "var(--panel-border)", text: "var(--text-muted)", background: "var(--panel)" }
   }[status];
 
   return (

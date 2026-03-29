@@ -41,12 +41,39 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
           Strict official mode disables commercial equity price inputs. Latest price, fair value gap, and market-price comparison notes remain unavailable unless an official closing-price source is enabled.
         </div>
       ) : null}
-      <div className="investment-summary-cards">
-        <SummaryCard label="Valuation Range / Share" value={formatCurrencyRange(summary.valuationRange)} accent="cyan" detail={summary.valuationRangeBasis} />
-        <SummaryCard label="Valuation Midpoint" value={formatCurrency(summary.valuationMidpoint)} accent="cyan" detail={summary.primaryValuationLabel} />
-        <SummaryCard label="Latest Price" value={formatCurrency(summary.latestPrice)} accent="gold" detail={summary.priceDateLabel} />
-        <SummaryCard label="Gap vs Midpoint" value={formatPercent(summary.marginOfSafety)} accent={summary.marginOfSafety != null && summary.marginOfSafety >= 0 ? "green" : "red"} detail={summary.marginBand} />
-        <SummaryCard label="Net Debt" value={formatCurrency(summary.netDebt)} accent="red" detail={summary.netDebtLabel} />
+      <div className="investment-summary-lead">
+        <div className="investment-summary-lead-copy">
+          <div className="metric-label">Valuation conclusion</div>
+          <div className="investment-summary-lead-title">{summary.valuationLabel}</div>
+          <div className="investment-summary-lead-text">{summary.notes[0]?.copy}</div>
+        </div>
+        <div className="investment-summary-stat-grid">
+          <div className="investment-summary-stat">
+            <div className="investment-summary-stat-label">Valuation range / share</div>
+            <div className="investment-summary-stat-value">{formatCurrencyRange(summary.valuationRange)}</div>
+            <div className="investment-summary-stat-detail">{summary.valuationRangeBasis}</div>
+          </div>
+          <div className="investment-summary-stat">
+            <div className="investment-summary-stat-label">Valuation midpoint</div>
+            <div className="investment-summary-stat-value">{formatCurrency(summary.valuationMidpoint)}</div>
+            <div className="investment-summary-stat-detail">Primary anchor {summary.primaryValuationLabel}</div>
+          </div>
+          <div className="investment-summary-stat">
+            <div className="investment-summary-stat-label">Latest price</div>
+            <div className="investment-summary-stat-value">{formatCurrency(summary.latestPrice)}</div>
+            <div className="investment-summary-stat-detail">{summary.priceDateLabel}</div>
+          </div>
+          <div className="investment-summary-stat">
+            <div className="investment-summary-stat-label">Gap vs midpoint</div>
+            <div className="investment-summary-stat-value">{formatPercent(summary.marginOfSafety)}</div>
+            <div className="investment-summary-stat-detail">{summary.marginBand}</div>
+          </div>
+          <div className="investment-summary-stat is-quiet">
+            <div className="investment-summary-stat-label">Net debt</div>
+            <div className="investment-summary-stat-value">{formatCurrency(summary.netDebt)}</div>
+            <div className="investment-summary-stat-detail">{summary.netDebtLabel}</div>
+          </div>
+        </div>
       </div>
 
       <div className="investment-summary-gauges">
@@ -99,26 +126,6 @@ function GaugeCard({ label, score, detail }: { label: string; score: number; det
         </div>
       </div>
       <div className="investment-gauge-detail">{detail}</div>
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  accent,
-  detail
-}: {
-  label: string;
-  value: string;
-  accent: "green" | "cyan" | "gold" | "red";
-  detail: string;
-}) {
-  return (
-    <div className={`investment-summary-card accent-${accent}`}>
-      <div className="investment-summary-card-label">{label}</div>
-      <div className="investment-summary-card-value">{value}</div>
-      <div className="investment-summary-card-detail">{detail}</div>
     </div>
   );
 }
@@ -537,12 +544,12 @@ function clamp(value: number, min: number, max: number): number {
 
 function gaugeColor(score: number): string {
   if (score < 4) {
-    return "#FF6B6B";
+    return "var(--negative)";
   }
   if (score < 7) {
-    return "#FFD700";
+    return "var(--warning)";
   }
-  return "#00FF41";
+  return "var(--positive)";
 }
 
 function formatSigned(value: number | null): string {

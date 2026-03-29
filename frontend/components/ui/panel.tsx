@@ -2,20 +2,21 @@ import type { ReactNode } from "react";
 import { clsx } from "clsx";
 
 interface PanelProps {
-  title: string;
-  subtitle?: string;
+  title: ReactNode;
+  subtitle?: ReactNode;
   aside?: ReactNode;
   children: ReactNode;
   className?: string;
+  variant?: "default" | "subtle" | "hero" | "ghost";
 }
 
-export function Panel({ title, subtitle, aside, children, className }: PanelProps) {
+export function Panel({ title, subtitle, aside, children, className, variant = "default" }: PanelProps) {
   return (
-    <section className={clsx("panel", className)}>
+    <section className={clsx("panel", `panel-${variant}`, className)}>
       <div className="panel-header">
         <div>
           <h2 className="panel-title">{title}</h2>
-          {subtitle ? <div className="text-muted" style={{ marginTop: 6, fontSize: 13 }}>{subtitle}</div> : null}
+          {subtitle ? <p className="panel-subtitle">{subtitle}</p> : null}
         </div>
         {aside}
       </div>

@@ -87,16 +87,16 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
               )}
             />
             <ReferenceLine y={0} stroke="var(--panel-border)" />
-            <Bar dataKey="buys" name="Insider Buys" stackId="insider-activity" fill="#00FF41" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="sells" name="Insider Sells" stackId="insider-activity" fill="#FF6B6B" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="buys" name="Insider Buys" stackId="insider-activity" fill="var(--positive)" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="sells" name="Insider Sells" stackId="insider-activity" fill="var(--negative)" radius={[4, 4, 0, 0]} />
             <Line
               type="monotone"
               dataKey="net"
               name="Net Insider Activity"
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               strokeWidth={2.4}
               dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00E5FF" }}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -126,10 +126,10 @@ function InsiderTrendTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label ?? "Month"}</div>
-      <TooltipRow label="Insider Buys" value={formatCurrencyCompact(point.buys)} color="#00FF41" />
-      <TooltipRow label="Insider Sells" value={formatCurrencyCompact(Math.abs(point.sells))} color="#FF6B6B" />
-      <TooltipRow label="Net Activity" value={formatSignedCurrencyCompact(point.net)} color="#00E5FF" />
-      <TooltipRow label="Unique Insiders" value={formatInteger(point.insiderCount)} color="#FFD700" />
+      <TooltipRow label="Insider Buys" value={formatCurrencyCompact(point.buys)} color="var(--positive)" />
+      <TooltipRow label="Insider Sells" value={formatCurrencyCompact(Math.abs(point.sells))} color="var(--negative)" />
+      <TooltipRow label="Net Activity" value={formatSignedCurrencyCompact(point.net)} color="var(--accent)" />
+      <TooltipRow label="Unique Insiders" value={formatInteger(point.insiderCount)} color="var(--warning)" />
       <TooltipRow label="Total Shares" value={formatShareCompact(point.totalShares)} color="#94A3B8" />
     </div>
   );

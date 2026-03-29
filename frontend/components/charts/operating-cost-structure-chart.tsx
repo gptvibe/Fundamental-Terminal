@@ -100,10 +100,10 @@ export function OperatingCostStructureChart({ financials }: { financials: Financ
             <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} width={82} />
             <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
             <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-            <Line type="monotone" dataKey="sga" name="SG&A" stroke="#00E5FF" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="researchAndDevelopment" name="R&D" stroke="#FFD700" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="stockBasedCompensation" name="Stock-Based Comp" stroke="#7CFFCB" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="interestExpense" name="Interest Expense" stroke="#FF6B6B" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="sga" name="SG&A" stroke="var(--accent)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="researchAndDevelopment" name="R&D" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="stockBasedCompensation" name="Stock-Based Comp" stroke="var(--positive)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="interestExpense" name="Interest Expense" stroke="var(--negative)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
             <Line type="monotone" dataKey="incomeTaxExpense" name="Income Tax Expense" stroke="#A855F7" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>

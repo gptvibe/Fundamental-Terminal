@@ -17,7 +17,7 @@ export function ModelCard({ model }: { model: ModelPayload }) {
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
         <div>
-          <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#00E5FF" }}>
+          <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)" }}>
             {titleCase(model.model_name)}
           </div>
           <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-muted)" }}>

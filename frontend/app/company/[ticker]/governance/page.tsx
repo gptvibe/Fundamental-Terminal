@@ -220,17 +220,17 @@ export default function CompanyGovernancePage() {
                 <div key={outcome.proposal_number} style={{ display: "grid", gap: 6 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13, fontWeight: 600, color: "var(--text)" }}>
                     <span>Prop {outcome.proposal_number}{outcome.title ? `: ${outcome.title}` : ""}</span>
-                    {forPct != null && <span style={{ color: "#00FF41", fontSize: 12 }}>{forPct.toFixed(1)}% For</span>}
+                    {forPct != null && <span style={{ color: "var(--positive)", fontSize: 12 }}>{forPct.toFixed(1)}% For</span>}
                   </div>
                   {total > 0 ? (
                     <div style={{ height: 8, borderRadius: 4, background: "var(--border)", overflow: "hidden", display: "flex" }}>
-                      {forPct != null && <div style={{ width: `${forPct}%`, background: "#00FF41", height: "100%" }} />}
-                      {againstPct != null && <div style={{ width: `${againstPct}%`, background: "#FF6B6B", height: "100%" }} />}
+                      {forPct != null && <div style={{ width: `${forPct}%`, background: "var(--positive)", height: "100%" }} />}
+                      {againstPct != null && <div style={{ width: `${againstPct}%`, background: "var(--negative)", height: "100%" }} />}
                     </div>
                   ) : null}
                   <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--text-muted)" }}>
-                    {outcome.for_votes != null && <span style={{ color: "#00FF41" }}>For {outcome.for_votes.toLocaleString()}</span>}
-                    {outcome.against_votes != null && <span style={{ color: "#FF6B6B" }}>Against {outcome.against_votes.toLocaleString()}</span>}
+                    {outcome.for_votes != null && <span style={{ color: "var(--positive)" }}>For {outcome.for_votes.toLocaleString()}</span>}
+                    {outcome.against_votes != null && <span style={{ color: "var(--negative)" }}>Against {outcome.against_votes.toLocaleString()}</span>}
                     {outcome.abstain_votes != null && <span>Abstain {outcome.abstain_votes.toLocaleString()}</span>}
                     {outcome.broker_non_votes != null && <span>Broker Non-Votes {outcome.broker_non_votes.toLocaleString()}</span>}
                   </div>
@@ -314,7 +314,7 @@ export default function CompanyGovernancePage() {
                 {...RECHARTS_TOOLTIP_PROPS}
                 formatter={(value: number) => [`$${Math.round(value).toLocaleString()}`, "Peak Total"]}
               />
-              <Bar dataKey="total" fill="#00FF41" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="total" fill="var(--positive)" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Panel>

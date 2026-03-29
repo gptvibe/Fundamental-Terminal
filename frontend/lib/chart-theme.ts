@@ -17,33 +17,42 @@ export const RECHARTS_TOOLTIP_PROPS = {
   contentStyle: {
     background: "var(--tooltip-bg)",
     border: "1px solid var(--tooltip-border)",
-    borderRadius: 12,
+    borderRadius: 6,
     color: "var(--tooltip-text)",
-    boxShadow: "var(--tooltip-shadow)"
+    boxShadow: "var(--tooltip-shadow)",
+    padding: "6px 10px",
+    fontSize: 12
   } as CSSProperties,
   labelStyle: {
     color: "var(--tooltip-text)",
-    fontWeight: 600
+    fontWeight: 600,
+    fontFamily: "var(--mono)",
+    letterSpacing: "0.02em",
+    fontSize: 12
   } as CSSProperties,
   itemStyle: {
-    color: "var(--tooltip-text)"
+    color: "var(--tooltip-text)",
+    fontSize: 11
   } as CSSProperties,
   wrapperStyle: {
     outline: "none"
   } as CSSProperties
 } as const;
 
-export function chartTick(fontSize = 12): { fill: string; fontSize: number } {
+export function chartTick(fontSize = 10): { fill: string; fontSize: number; fontFamily: string } {
   return {
     fill: CHART_AXIS_COLOR,
-    fontSize
+    fontSize,
+    fontFamily: "var(--mono)"
   };
 }
 
-export function chartLegendStyle(fontSize = 12): CSSProperties {
+export function chartLegendStyle(fontSize = 11): CSSProperties {
   return {
     color: CHART_LEGEND_COLOR,
-    fontSize
+    fontSize,
+    fontFamily: "var(--mono)",
+    letterSpacing: "0.02em"
   };
 }
 

@@ -129,9 +129,9 @@ export function MarginTrendChart({ financials }: { financials: FinancialPayload[
               formatter={(value: number) => `${value.toFixed(1)}%`}
             />
             <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-            <Line type="monotone" dataKey="grossMargin" name="Gross Margin" stroke="#00FF41" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="operatingMargin" name="Operating Margin" stroke="#00E5FF" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="netMargin" name="Net Margin" stroke="#FFD700" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="grossMargin" name="Gross Margin" stroke="var(--positive)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="operatingMargin" name="Operating Margin" stroke="var(--accent)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+            <Line type="monotone" dataKey="netMargin" name="Net Margin" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
             <Line type="monotone" dataKey="fcfMargin" name="FCF Margin" stroke="#A855F7" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>

@@ -34,8 +34,8 @@ export function CapitalMarketsSignalChart({ financials, events }: { financials: 
             formatter={(value: number, name: string) => (name === "Financing Events" ? String(value) : formatCompactNumber(value))}
           />
           <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-          <Bar yAxisId="events" dataKey="financingEvents" name="Financing Events" fill="rgba(255,215,0,0.55)" radius={[6, 6, 0, 0]} />
-          <Line yAxisId="debt" type="monotone" dataKey="debtChanges" name="Debt Changes" stroke="#00E5FF" strokeWidth={2.4} dot={{ r: 3, fill: "#00E5FF" }} connectNulls isAnimationActive={false} />
+          <Bar yAxisId="events" dataKey="financingEvents" name="Financing Events" fill="var(--warning)" radius={[2, 2, 0, 0]} />
+          <Line yAxisId="debt" type="monotone" dataKey="debtChanges" name="Debt Changes" stroke="var(--accent)" strokeWidth={2.4} dot={{ r: 3, fill: "var(--accent)" }} connectNulls isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

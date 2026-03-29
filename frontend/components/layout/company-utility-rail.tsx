@@ -3,10 +3,10 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 
-import { CompanyDevicePanel } from "@/components/personal/company-device-panel";
-import { StatusConsole } from "@/components/console/status-console";
 import { Panel } from "@/components/ui/panel";
 import { StatusPill } from "@/components/ui/status-pill";
+import { CompanyDevicePanel } from "@/components/personal/company-device-panel";
+import { StatusConsole } from "@/components/console/status-console";
 import type { ConsoleEntry, RefreshState } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
@@ -39,114 +39,80 @@ export function CompanyUtilityRail({
   refreshState,
   refreshing,
   onRefresh,
-  actionTitle = "Quick Actions",
-  actionSubtitle = "Choose what to do next for this company.",
   primaryActionLabel,
   primaryActionDescription,
   secondaryActionHref,
   secondaryActionLabel,
   secondaryActionDescription,
-  statusLines = [],
+  statusLines,
   consoleEntries,
   connectionState,
-  actionTone = "green",
-  children
+  children,
 }: CompanyUtilityRailProps) {
   const effectiveState =
     refreshState ?? {
       triggered: false,
       reason: "none" as const,
       ticker,
-      job_id: null
+      job_id: null,
     };
-  const actionStyle =
-    actionTone === "gold"
-      ? { borderColor: "rgba(255,215,0,0.35)", color: "#FFD700" }
-      : { borderColor: "rgba(0,255,65,0.35)", color: "#00FF41" };
   const refreshInProgress =
     refreshing ||
-    (Boolean(effectiveState.triggered && effectiveState.job_id) && connectionState !== "idle" && connectionState !== "error");
-
-  // Find the latest console entry message if refreshing
-  let dynamicStatusMsg: string | null = null;
-  if (refreshInProgress && consoleEntries.length > 0) {
-    // Show the last non-empty message
-    const lastMsg = [...consoleEntries].reverse().find(e => e.message && e.status === "running");
-    if (lastMsg) {
-      dynamicStatusMsg = lastMsg.message;
-    }
-  }
-
-  const refreshButtonLabel = refreshing
-    ? "Starting refresh..."
-    : refreshInProgress
-      ? dynamicStatusMsg || "Refresh in progress"
-      : primaryActionLabel;
-
-  function handleExport() {
-    window.print();
-  }
+    (Boolean(effectiveState.triggered && effectiveState.job_id) &&
+      connectionState !== "idle" &&
+      connectionState !== "error");
 
   return (
     <div className="company-utility-stack">
-      <Panel title={actionTitle} subtitle={actionSubtitle}>
-        <div className="utility-action-bar" aria-label="Workspace actions">
-          <button
-            onClick={() => void onRefresh()}
-            className="ticker-button utility-action-button"
-            style={actionStyle}
-            disabled={refreshInProgress}
-            aria-disabled={refreshInProgress}
-          >
-            {refreshInProgress ? <span className="utility-action-spinner" aria-hidden="true" /> : null}
-            <span>{refreshButtonLabel}</span>
-          </button>
-          <button type="button" className="ticker-button utility-action-button" onClick={handleExport}>
-            Export View
-          </button>
-          {secondaryActionHref && secondaryActionLabel ? (
-            <Link href={secondaryActionHref} className="ticker-button utility-action-button utility-action-link-button">
-              {secondaryActionLabel}
-            </Link>
-          ) : null}
-        </div>
-
-        <div className="utility-action-list">
+      <Panel title="Actions" variant="subtle">
+        <div className="utility-action-bar">
           <div className="utility-action-item">
-            <div className="utility-action-label">Refresh</div>
-            {primaryActionDescription ? <div className="utility-action-description">{primaryActionDescription}</div> : null}
+            <StatusPill state={effectiveState} />
+            <button
+              onClick={() => void onRefresh()}
+              disabled={refreshInProgress}
+              className="ticker-button utility-action-button"
+            >
+              {refreshInProgress ? (
+                <span className="utility-action-spinner" aria-hidden="true" />
+              ) : null}
+              {refreshInProgress ? "Refreshing…" : primaryActionLabel}
+            </button>
+            {primaryActionDescription ? (
+              <span className="utility-action-description">{primaryActionDescription}</span>
+            ) : null}
           </div>
-          {secondaryActionHref && secondaryActionLabel ? (
+          {secondaryActionHref ? (
             <div className="utility-action-item">
-              <div className="utility-action-label">Navigate</div>
-              {secondaryActionDescription ? <div className="utility-action-description">{secondaryActionDescription}</div> : null}
+              <Link
+                href={secondaryActionHref}
+                className="ticker-button utility-action-button utility-action-link-button"
+              >
+                {secondaryActionLabel ?? "Navigate"}
+              </Link>
+              {secondaryActionDescription ? (
+                <span className="utility-action-description">{secondaryActionDescription}</span>
+              ) : null}
             </div>
           ) : null}
-          <div className="utility-action-item">
-            <div className="utility-action-label">Export</div>
-            <div className="utility-action-description">Print or save this research view as a PDF without leaving the workspace.</div>
-          </div>
         </div>
       </Panel>
 
-      <Panel title="Saved On This Device" subtitle="Keep your own watchlist and private notes without creating an account.">
-        <CompanyDevicePanel ticker={ticker} companyName={companyName} sector={sector} />
-      </Panel>
+      {statusLines?.length ? (
+        <Panel title="Data Status" variant="subtle">
+          <div className="utility-status-stack">
+            {statusLines.map((line, index) => (
+              <div key={index} className="utility-status-line">{line}</div>
+            ))}
+          </div>
+        </Panel>
+      ) : null}
+
+      <CompanyDevicePanel ticker={ticker} companyName={companyName} sector={sector} />
 
       {children}
 
-      <Panel title="Data Status" subtitle="See what is available and whether this workspace is up to date.">
-        <div className="utility-status-stack">
-          <StatusPill state={effectiveState} />
-          {statusLines.map((line) => (
-            <div key={line} className="sparkline-note">
-              {line}
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title="Live Updates" subtitle="Follow progress while company data refreshes in the background.">
+      <Panel title="Console" variant="subtle">
         <StatusConsole entries={consoleEntries} connectionState={connectionState} />
       </Panel>
     </div>

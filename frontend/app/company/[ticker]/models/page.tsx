@@ -212,7 +212,7 @@ export default function CompanyModelsPage() {
   const columns = useMemo<ColDef<ModelPayload>[]>(
     () => [
       { field: "model_name", headerName: "Model", minWidth: 150, valueFormatter: ({ value }) => titleCase(String(value ?? "")) },
-      { field: "model_version", headerName: "Version", maxWidth: 120, cellStyle: { color: "#FFD700", fontWeight: 700 } },
+      { field: "model_version", headerName: "Version", maxWidth: 120, cellStyle: { color: "var(--warning)", fontWeight: 700 } },
       {
         field: "created_at",
         headerName: "Computed",
@@ -306,6 +306,90 @@ export default function CompanyModelsPage() {
       }
       mainClassName="models-page-grid"
     >
+      <CompanyResearchHeader
+        ticker={ticker}
+        title={data?.company?.name ?? financialData?.company?.name ?? ticker}
+        companyName={`${ticker} · Valuation and model workspace`}
+        sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
+        cacheState={data?.company?.cache_state ?? financialData?.company?.cache_state ?? null}
+        description={
+          strictOfficialMode
+            ? "Valuation conclusion, confidence, and scenario context from SEC-aligned cached model outputs, with price-dependent workflows withheld in strict mode."
+            : "Valuation conclusion, confidence, and scenario context from SEC fundamentals and cached market inputs, refreshed in the background as inputs age."
+        }
+        aside={data ? <StatusPill state={data.refresh} /> : undefined}
+        facts={[
+          { label: "Ticker", value: ticker },
+          { label: "Models", value: `${modelSummary.cachedCount}/${MODEL_NAMES.length}` },
+          { label: "Last Computed", value: modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data" },
+          { label: "DuPont Basis", value: modelSummary.dupontBasis ?? dupontMode.toUpperCase() }
+        ]}
+        ribbonItems={[
+          { label: "Inputs", value: "SEC EDGAR/XBRL", tone: "green" },
+          { label: strictOfficialMode ? "Price Layer" : "Prices", value: strictOfficialMode ? "Disabled" : "Cached market data", tone: strictOfficialMode ? "gold" : "cyan" },
+          { label: "Refresh", value: activeJobId ? "Model update running" : "Background-first", tone: activeJobId ? "cyan" : "green" }
+        ]}
+        summaries={[
+          { label: "DCF EV", value: formatCompactNumber(modelSummary.dcfEnterpriseValue), accent: modelSummary.dcfEnterpriseValue != null && modelSummary.dcfEnterpriseValue < 0 ? "red" : "cyan" },
+          { label: "Piotroski", value: modelSummary.piotroskiLabel, accent: "cyan" },
+          { label: "DuPont ROE", value: formatPercent(modelSummary.dupontRoe), accent: modelSummary.dupontRoe != null && modelSummary.dupontRoe < 0 ? "red" : "cyan" },
+          { label: "Altman Proxy", value: formatSigned(modelSummary.altmanZ), accent: modelSummary.altmanZ != null && modelSummary.altmanZ < 0 ? "red" : "cyan" }
+        ]}
+        className="model-hero models-page-hero models-page-span-full"
+      >
+        {!strictOfficialMode ? (
+          <CommercialFallbackNotice
+            provenance={data?.provenance}
+            sourceMix={data?.source_mix}
+            subject="Price-sensitive valuation outputs on this surface"
+          />
+        ) : null}
+        {strictOfficialMode ? (
+          <div className="text-muted" style={{ marginBottom: 12 }}>
+            Strict official mode disables commercial equity price inputs. Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured.
+          </div>
+        ) : null}
+        <div className="dupont-mode-bar">
+          <div className="dupont-mode-select-col">
+            <div className="metric-label">DuPont Basis</div>
+            <select
+              className="dupont-mode-select"
+              value={dupontMode}
+              onChange={(event) => setDupontMode(event.target.value as DupontMode)}
+            >
+              <option value="auto">Auto (Annual if available)</option>
+              <option value="annual">Annual filing only</option>
+              <option value="ttm">Rolling TTM (4 comparable filings)</option>
+            </select>
+          </div>
+          <button className="dupont-info-button" type="button" onClick={() => setShowModeInfo(true)}>
+            DuPont basis explainer
+          </button>
+        </div>
+
+        {showModeInfo ? (
+          <div className="dupont-info-pop">
+            <div className="dupont-info-header">
+              <div>
+                <div className="metric-label">How DuPont basis works</div>
+                <div className="dupont-info-sub">Choose how ROE components are scaled.</div>
+              </div>
+              <button className="dupont-info-close" type="button" aria-label="Close" onClick={() => setShowModeInfo(false)}>
+                ×
+              </button>
+            </div>
+            <ul className="dupont-info-list">
+              <li><strong>Auto</strong> – Uses the latest annual filing when present; otherwise builds TTM from the last four comparable filings.</li>
+              <li><strong>Annual</strong> – Always use the latest annual filing (10-K/20-F/40-F); ROE reflects that single year.</li>
+              <li><strong>TTM</strong> – Always use rolling four comparable filings (typically 10-Qs) to smooth seasonality.</li>
+            </ul>
+            <div className="dupont-info-footnote">Changing the basis recalculates and caches a separate DuPont run for this company.</div>
+          </div>
+        ) : null}
+
+        <div className="sparkline-note">Start with Investment Summary for the conclusion view, then use Financial Health Score, scenario ranges, and model analytics for detail.</div>
+      </CompanyResearchHeader>
+
       <Panel
         title="Investment Summary"
         subtitle={
@@ -315,7 +399,8 @@ export default function CompanyModelsPage() {
               ? "Quick valuation snapshot based on SEC filings, with market-price comparisons disabled in strict mode"
               : "Quick valuation snapshot based on company results and market prices"
         }
-        className="models-page-span-full"
+        className="models-page-span-full models-summary-panel"
+        variant="hero"
       >
         <InvestmentSummaryPanel
           ticker={ticker}
@@ -326,107 +411,24 @@ export default function CompanyModelsPage() {
         />
       </Panel>
 
-      <Panel title="Financial Health Score" subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"} className="models-page-span-full">
-        <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
-      </Panel>
+      <div className="models-scan-grid models-page-span-full">
+        <Panel title="Financial Health Score" subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"} variant="subtle">
+          <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
+        </Panel>
 
-      <CompanyResearchHeader
-        ticker={ticker}
-        title="Valuation Models"
-        companyName={data?.company?.name ?? financialData?.company?.name ?? ticker}
-        sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
-        cacheState={data?.company?.cache_state ?? financialData?.company?.cache_state ?? null}
-        description={
-          strictOfficialMode
-            ? "Cached model outputs stay aligned with SEC fundamentals and official macro rates, while commercial price-dependent valuation features are withheld."
-            : "Cached model outputs stay aligned with SEC fundamentals and cached price inputs, with refreshes queued in the background when inputs are stale."
-        }
-        aside={data ? <StatusPill state={data.refresh} /> : undefined}
-        facts={[
-          { label: "Ticker", value: ticker },
-          { label: "Available Models", value: `${modelSummary.cachedCount}/${MODEL_NAMES.length}` },
-          { label: "Last Computed", value: modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data" },
-          { label: "DuPont Basis", value: modelSummary.dupontBasis ?? dupontMode.toUpperCase() }
-        ]}
-        ribbonItems={[
-          { label: "Financial Inputs", value: "SEC EDGAR/XBRL", tone: "green" },
-          { label: strictOfficialMode ? "Market Classification" : "Price Inputs", value: strictOfficialMode ? "SEC SIC mapping" : "Yahoo Finance", tone: strictOfficialMode ? "green" : "cyan" },
-          { label: "Financials Checked", value: financialData?.company?.last_checked_financials ? formatDate(financialData.company.last_checked_financials) : "Pending", tone: "green" },
-          { label: "Refresh", value: activeJobId ? "Model update running" : "Background-first", tone: activeJobId ? "gold" : "cyan" }
-        ]}
-        summaries={[
-          { label: "Last Updated", value: modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data", accent: "cyan" },
-          { label: "DCF EV", value: formatCompactNumber(modelSummary.dcfEnterpriseValue), accent: "green" },
-          { label: "DuPont ROE", value: formatPercent(modelSummary.dupontRoe), accent: "gold" },
-          { label: "Piotroski", value: modelSummary.piotroskiLabel, accent: "green" },
-          { label: "Altman Proxy", value: formatSigned(modelSummary.altmanZ), accent: "cyan" }
-        ]}
-        className="model-hero models-page-hero models-page-span-full"
-      >
-          {!strictOfficialMode ? (
-            <CommercialFallbackNotice
-              provenance={data?.provenance}
-              sourceMix={data?.source_mix}
-              subject="Price-sensitive valuation outputs on this surface"
-            />
-          ) : null}
-          {strictOfficialMode ? (
-            <div className="text-muted" style={{ marginBottom: 12 }}>
-              Strict official mode disables commercial equity price inputs. Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured.
-            </div>
-          ) : null}
-          <div className="dupont-mode-bar">
-            <div className="dupont-mode-select-col">
-              <div className="metric-label">DuPont Basis</div>
-              <select
-                className="dupont-mode-select"
-                value={dupontMode}
-                onChange={(event) => setDupontMode(event.target.value as DupontMode)}
-              >
-                <option value="auto">Auto (Annual if available)</option>
-                <option value="annual">Annual filing only</option>
-                <option value="ttm">Rolling TTM (4 comparable filings)</option>
-              </select>
-            </div>
-            <button className="dupont-info-button" type="button" onClick={() => setShowModeInfo(true)}>
-              DuPont basis explainer
-            </button>
-          </div>
-
-          {showModeInfo ? (
-            <div className="dupont-info-pop">
-              <div className="dupont-info-header">
-                <div>
-                  <div className="metric-label">How DuPont basis works</div>
-                  <div className="dupont-info-sub">Choose how ROE components are scaled.</div>
-                </div>
-                <button className="dupont-info-close" type="button" aria-label="Close" onClick={() => setShowModeInfo(false)}>
-                  ×
-                </button>
-              </div>
-              <ul className="dupont-info-list">
-                <li><strong>Auto</strong> – Uses the latest annual filing when present; otherwise builds TTM from the last four comparable filings.</li>
-                <li><strong>Annual</strong> – Always use the latest annual filing (10-K/20-F/40-F); ROE reflects that single year.</li>
-                <li><strong>TTM</strong> – Always use rolling four comparable filings (typically 10-Qs) to smooth seasonality.</li>
-              </ul>
-              <div className="dupont-info-footnote">Changing the basis recalculates and caches a separate DuPont run for this company.</div>
-            </div>
-          ) : null}
-
-            <div className="sparkline-note">Start with Investment Summary for the headline view, then use Financial Health Score, Valuation Scenario Ranges, and Model Analytics for the full model output.</div>
-      </CompanyResearchHeader>
-
-      <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" className="models-page-span-full">
-        <SourceFreshnessSummary
-          provenance={data?.provenance}
-          asOf={data?.as_of}
-          lastRefreshedAt={data?.last_refreshed_at}
-          sourceMix={data?.source_mix}
-          confidenceFlags={data?.confidence_flags}
-        />
-      </Panel>
+        <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" variant="subtle">
+          <SourceFreshnessSummary
+            provenance={data?.provenance}
+            asOf={data?.as_of}
+            lastRefreshedAt={data?.last_refreshed_at}
+            sourceMix={data?.source_mix}
+            confidenceFlags={data?.confidence_flags}
+          />
+        </Panel>
+      </div>
 
       <Panel
+        variant="subtle"
         title="Model Evaluation Harness"
         subtitle="Latest persisted backtest run for calibration, stability, and error drift across the valuation stack"
         className="models-page-span-full"
@@ -435,6 +437,7 @@ export default function CompanyModelsPage() {
       </Panel>
 
       <Panel
+        variant="subtle"
         title="Macro Demand & Cost Context"
         subtitle="Company-relevant official Census, BEA, and BLS indicators for cyclical demand, cost pressure, and labor tightness"
         className="models-page-span-full"
@@ -443,6 +446,7 @@ export default function CompanyModelsPage() {
       </Panel>
 
       <Panel
+        variant="subtle"
         title="Sector Exposure Context"
         subtitle="Official sector plug-ins for power, housing, airlines, air cargo, and agricultural supply-demand exposures"
         className="models-page-span-full"
@@ -451,6 +455,7 @@ export default function CompanyModelsPage() {
       </Panel>
 
       <Panel
+        variant="subtle"
         title="Capital Structure Intelligence"
         subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
         className="models-page-span-full"
@@ -461,7 +466,7 @@ export default function CompanyModelsPage() {
         />
       </Panel>
 
-      <Panel title="Valuation Scenario Ranges" subtitle={loading ? "Loading valuation scenario inputs..." : strictOfficialMode ? "Interactive DCF and residual-income ranges with price-linked reverse DCF withheld in strict mode" : "Editable bear, base, and bull ranges across DCF, reverse DCF, and residual income"} className="models-page-span-full">
+      <Panel title="Valuation Scenario Ranges" subtitle={loading ? "Loading valuation scenario inputs..." : strictOfficialMode ? "Interactive DCF and residual-income ranges with price-linked reverse DCF withheld in strict mode" : "Editable bear, base, and bull ranges across DCF, reverse DCF, and residual income"} className="models-page-span-full" variant="subtle">
         <DeferredClientSection placeholder={<div className="text-muted">Loading valuation scenario ranges...</div>}>
           <ValuationScenarioWorkbench
             ticker={ticker}
@@ -473,7 +478,7 @@ export default function CompanyModelsPage() {
         </DeferredClientSection>
       </Panel>
 
-      <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, the Altman proxy, and ratios"} className="models-page-span-full">
+      <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, the Altman proxy, and ratios"} className="models-page-span-full" variant="subtle">
         {hasModels ? (
           <DeferredClientSection placeholder={<div className="text-muted">Loading model analytics...</div>}>
             <ModelDashboard models={models} />
@@ -503,7 +508,7 @@ export default function CompanyModelsPage() {
                 For a new or out-of-date company, results may take a moment while data refreshes and the models finish running.
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                <button onClick={() => void queueRefresh()} className="ticker-button" style={{ borderColor: "rgba(0,255,65,0.35)", color: "#00FF41" }}>
+                <button onClick={() => void queueRefresh()} className="ticker-button" style={{ borderColor: "var(--positive)", color: "var(--positive)" }}>
                   {refreshing ? "Refreshing..." : "Refresh Model Data"}
                 </button>
                 <span className="pill">{activeJobId ? "Update in progress" : loading ? "Preparing model data" : "Waiting for first update"}</span>

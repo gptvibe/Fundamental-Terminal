@@ -19,12 +19,12 @@ type MetricConfig = {
 };
 
 const METRICS: MetricConfig[] = [
-  { key: "revenue", label: "Revenue", color: "#00E5FF", format: formatCompactNumber },
-  { key: "net_income", label: "Net Income", color: "#00FF41", format: formatCompactNumber },
+  { key: "revenue", label: "Revenue", color: "var(--accent)", format: formatCompactNumber },
+  { key: "net_income", label: "Net Income", color: "var(--positive)", format: formatCompactNumber },
   {
     key: "eps",
     label: "EPS (Diluted)",
-    color: "#FFD700",
+    color: "var(--warning)",
     format: (value) => (value == null ? "—" : value.toFixed(2))
   },
   { key: "operating_cash_flow", label: "Operating Cash Flow", color: "#8B5CF6", format: formatCompactNumber }

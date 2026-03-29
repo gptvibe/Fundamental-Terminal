@@ -27,8 +27,8 @@ export function BeneficialOwnershipFormChart({ filings }: { filings: BeneficialO
           <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
           <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} allowDecimals={false} width={48} />
           <Tooltip {...RECHARTS_TOOLTIP_PROPS} />
-          <Bar dataKey="initial" name="Initial filings" fill="#00E5FF" radius={[6, 6, 0, 0]} />
-          <Bar dataKey="amendments" name="Amendments" fill="#FFD700" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="initial" name="Initial filings" fill="var(--accent)" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="amendments" name="Amendments" fill="var(--warning)" radius={[2, 2, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

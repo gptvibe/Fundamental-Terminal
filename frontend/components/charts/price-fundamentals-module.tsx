@@ -160,8 +160,8 @@ export function PriceFundamentalsModule({
                 <ComposedChart data={priceChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id={`${gradientId}-price-fill`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#00E5FF" stopOpacity={0.32} />
-                      <stop offset="100%" stopColor="#00E5FF" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.32} />
+                      <stop offset="100%" stopColor="var(--accent)" stopOpacity={0.02} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -182,7 +182,7 @@ export function PriceFundamentalsModule({
                   />
                   <YAxis yAxisId="volume" hide domain={[0, (max: number) => Math.max(max * 1.25, 1)]} />
                   <Tooltip
-                    cursor={{ stroke: "rgba(255,255,255,0.15)", strokeWidth: 1 }}
+                    cursor={{ stroke: "var(--panel-border)", strokeWidth: 1 }}
                     content={({ active, payload, label }) => (
                       <PriceTooltip active={active} label={label} payload={payload as TooltipEntry[] | undefined} />
                     )}
@@ -198,20 +198,20 @@ export function PriceFundamentalsModule({
                     yAxisId="price"
                     type="monotone"
                     dataKey="close"
-                    stroke="#00E5FF"
+                    stroke="var(--accent)"
                     strokeWidth={2.4}
                     fill={`url(#${gradientId}-price-fill)`}
                     isAnimationActive
                     animationDuration={450}
                     dot={false}
-                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00E5FF" }}
+                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
                   />
                   {toggles.ma50 ? (
                     <Line
                       yAxisId="price"
                       type="monotone"
                       dataKey="ma50"
-                      stroke="#FFD700"
+                      stroke="var(--warning)"
                       strokeWidth={1.75}
                       dot={false}
                       isAnimationActive
@@ -223,7 +223,7 @@ export function PriceFundamentalsModule({
                       yAxisId="price"
                       type="monotone"
                       dataKey="ma200"
-                      stroke="#00FF41"
+                      stroke="var(--positive)"
                       strokeWidth={1.75}
                       dot={false}
                       isAnimationActive
@@ -248,8 +248,8 @@ export function PriceFundamentalsModule({
                 <ComposedChart data={fundamentalsChartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id={`${gradientId}-fcf-fill`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#00FF41" stopOpacity={0.28} />
-                      <stop offset="100%" stopColor="#00FF41" stopOpacity={0.03} />
+                      <stop offset="0%" stopColor="var(--positive)" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="var(--positive)" stopOpacity={0.03} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -274,7 +274,7 @@ export function PriceFundamentalsModule({
                     tickFormatter={(value) => formatCompactNumber(Number(value))}
                   />
                   <Tooltip
-                    cursor={{ stroke: "rgba(255,255,255,0.15)", strokeWidth: 1 }}
+                    cursor={{ stroke: "var(--panel-border)", strokeWidth: 1 }}
                     content={({ active, payload, label }) => (
                       <FundamentalsTooltip active={active} label={label} payload={payload as TooltipEntry[] | undefined} />
                     )}
@@ -283,35 +283,35 @@ export function PriceFundamentalsModule({
                     yAxisId="cash"
                     type="monotone"
                     dataKey="freeCashFlow"
-                    stroke="#00FF41"
+                    stroke="var(--positive)"
                     strokeWidth={2}
                     fill={`url(#${gradientId}-fcf-fill)`}
                     dot={false}
                     isAnimationActive
                     animationDuration={450}
-                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00FF41" }}
+                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--positive)" }}
                   />
                   <Line
                     yAxisId="growth"
                     type="monotone"
                     dataKey="revenueGrowth"
-                    stroke="#00E5FF"
+                    stroke="var(--accent)"
                     strokeWidth={2}
                     dot={false}
                     isAnimationActive
                     animationDuration={450}
-                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00E5FF" }}
+                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
                   />
                   <Line
                     yAxisId="growth"
                     type="monotone"
                     dataKey="epsGrowth"
-                    stroke="#FFD700"
+                    stroke="var(--warning)"
                     strokeWidth={2}
                     dot={false}
                     isAnimationActive
                     animationDuration={450}
-                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#FFD700" }}
+                      activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--warning)" }}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -379,9 +379,9 @@ function PriceTooltip({ active, payload, label }: { active?: boolean; payload?: 
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{typeof label === "string" ? formatDate(label) : String(label ?? "")}</div>
-      <TooltipRow label="Close" value={formatCurrency(close)} color="#00E5FF" />
-      <TooltipRow label="50D MA" value={formatCurrency(ma50)} color="#FFD700" />
-      <TooltipRow label="200D MA" value={formatCurrency(ma200)} color="#00FF41" />
+      <TooltipRow label="Close" value={formatCurrency(close)} color="var(--accent)" />
+      <TooltipRow label="50D MA" value={formatCurrency(ma50)} color="var(--warning)" />
+      <TooltipRow label="200D MA" value={formatCurrency(ma200)} color="var(--positive)" />
       <TooltipRow label="Volume" value={formatCompactNumber(volume)} color="#8B949E" />
     </div>
   );
@@ -407,9 +407,9 @@ function FundamentalsTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{typeof label === "string" ? formatDate(label) : String(label ?? "")}</div>
-      <TooltipRow label="Revenue Growth" value={formatPercent(revenueGrowth)} color="#00E5FF" />
-      <TooltipRow label="EPS Growth" value={formatPercent(epsGrowth)} color="#FFD700" />
-      <TooltipRow label="Free Cash Flow" value={formatCompactNumber(freeCashFlow)} color="#00FF41" />
+      <TooltipRow label="Revenue Growth" value={formatPercent(revenueGrowth)} color="var(--accent)" />
+      <TooltipRow label="EPS Growth" value={formatPercent(epsGrowth)} color="var(--warning)" />
+      <TooltipRow label="Free Cash Flow" value={formatCompactNumber(freeCashFlow)} color="var(--positive)" />
     </div>
   );
 }
@@ -433,7 +433,7 @@ function buildPriceChartData(priceData: PriceHistoryPoint[]): PriceChartDatum[] 
   return priceData.map((point, index) => {
     const previousClose = index > 0 ? priceData[index - 1]?.close ?? null : null;
     const volumeFill =
-      point.close !== null && previousClose !== null && point.close < previousClose ? "rgba(255,77,109,0.38)" : "rgba(0,255,65,0.28)";
+      point.close !== null && previousClose !== null && point.close < previousClose ? "rgba(255,77,109,0.38)" : "var(--positive)";
 
     return {
       date: point.date,

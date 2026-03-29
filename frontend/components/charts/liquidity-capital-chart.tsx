@@ -91,23 +91,23 @@ export function LiquidityCapitalChart({ financials }: { financials: FinancialPay
                     return formatCompactNumber(value);
                   }}
                 />
-                <Bar yAxisId="values" dataKey="currentAssets" name="Current Assets" fill="#00E5FF" radius={[6, 6, 0, 0]} />
+                <Bar yAxisId="values" dataKey="currentAssets" name="Current Assets" fill="var(--accent)" radius={[2, 2, 0, 0]} />
                 <Bar
                   yAxisId="values"
                   dataKey="currentLiabilities"
                   name="Current Liabilities"
-                  fill="#FFD700"
-                  radius={[6, 6, 0, 0]}
+                  fill="var(--warning)"
+                  radius={[2, 2, 0, 0]}
                 />
                 <Line
                   yAxisId="ratio"
                   type="monotone"
                   dataKey="currentRatio"
                   name="Current Ratio"
-                  stroke="#00FF41"
+                  stroke="var(--positive)"
                   strokeWidth={2.4}
-                  dot={{ r: 3, fill: "#00FF41" }}
-                  activeDot={{ r: 5, fill: "#00FF41", stroke: "var(--panel)", strokeWidth: 2 }}
+                  dot={{ r: 3, fill: "var(--positive)" }}
+                  activeDot={{ r: 5, fill: "var(--positive)", stroke: "var(--panel)", strokeWidth: 2 }}
                   connectNulls
                   isAnimationActive={false}
                 />

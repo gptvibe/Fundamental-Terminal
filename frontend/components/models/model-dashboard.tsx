@@ -66,7 +66,7 @@ function ModelSection({ model }: { model: ModelPayload }) {
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#00E5FF" }}>
+          <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--accent)" }}>
             {titleCase(model.model_name)}
           </div>
           <div style={{ marginTop: 6, fontSize: 13, color: "var(--text-muted)" }}>
@@ -167,9 +167,9 @@ function DcfModelView({ model }: { model: ModelPayload }) {
               }}
             />
             <Legend wrapperStyle={chartLegendStyle()} />
-            <Line type="monotone" dataKey="historicalFcf" name="Historical FCF" stroke="#00E5FF" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
-            <Line type="monotone" dataKey="projectedFcf" name="Projected FCF" stroke="#00FF41" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
-            <Line type="monotone" dataKey="presentValue" name="Discounted PV" stroke="#FFD700" strokeWidth={2} dot={false} connectNulls={false} />
+            <Line type="monotone" dataKey="historicalFcf" name="Historical FCF" stroke="var(--accent)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
+            <Line type="monotone" dataKey="projectedFcf" name="Projected FCF" stroke="var(--positive)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
+            <Line type="monotone" dataKey="presentValue" name="Discounted PV" stroke="var(--warning)" strokeWidth={2} dot={false} connectNulls={false} />
           </LineChart>
         </ResponsiveContainer>
       </ChartShell>
@@ -362,9 +362,9 @@ function RoicModelView({ model }: { model: ModelPayload }) {
             <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(v) => formatPercent(Number(v))} />
             <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? formatPercent(value) : value} />
             <Legend wrapperStyle={chartLegendStyle()} />
-            <Line dataKey="roic" name="ROIC" stroke="#00FF41" strokeWidth={2} dot={{ r: 2 }} />
-            <Line dataKey="reinvestment" name="Reinvestment" stroke="#00E5FF" strokeWidth={2} dot={{ r: 2 }} />
-            <Line dataKey="spread" name="Spread" stroke="#FFD700" strokeWidth={2} dot={{ r: 2 }} />
+            <Line dataKey="roic" name="ROIC" stroke="var(--positive)" strokeWidth={2} dot={{ r: 2 }} />
+            <Line dataKey="reinvestment" name="Reinvestment" stroke="var(--accent)" strokeWidth={2} dot={{ r: 2 }} />
+            <Line dataKey="spread" name="Spread" stroke="var(--warning)" strokeWidth={2} dot={{ r: 2 }} />
           </LineChart>
         </ResponsiveContainer>
       </ChartShell>
@@ -403,9 +403,9 @@ function CapitalAllocationModelView({ model }: { model: ModelPayload }) {
             <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(v) => formatCompactNumber(Number(v))} />
             <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? formatCompactNumber(value) : value} />
             <Legend wrapperStyle={chartLegendStyle()} />
-            <Bar dataKey="dividends" stackId="cap" name="Dividends" fill="#00FF41" />
-            <Bar dataKey="buybacks" stackId="cap" name="Buybacks" fill="#00E5FF" />
-            <Bar dataKey="sbc" stackId="cap" name="SBC" fill="#FF6B6B" />
+            <Bar dataKey="dividends" stackId="cap" name="Dividends" fill="var(--positive)" />
+            <Bar dataKey="buybacks" stackId="cap" name="Buybacks" fill="var(--accent)" />
+            <Bar dataKey="sbc" stackId="cap" name="SBC" fill="var(--negative)" />
           </BarChart>
         </ResponsiveContainer>
       </ChartShell>
@@ -509,7 +509,7 @@ function PiotroskiModelView({ model }: { model: ModelPayload }) {
             />
             <Bar dataKey="value" radius={[6, 6, 0, 0]}>
               {criteria.map((entry) => (
-                <Cell key={entry.label} fill={entry.value === 1 ? "#00FF41" : entry.value === 0 ? "#ff4d6d" : "#8b949e"} />
+                <Cell key={entry.label} fill={entry.value === 1 ? "var(--positive)" : entry.value === 0 ? "#ff4d6d" : "#8b949e"} />
               ))}
             </Bar>
           </BarChart>

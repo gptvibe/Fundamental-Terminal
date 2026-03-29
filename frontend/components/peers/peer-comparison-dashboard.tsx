@@ -267,17 +267,17 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                   <Legend wrapperStyle={chartLegendStyle()} />
                   <Bar dataKey="fairValueGap" name="Fair Value Gap" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
-                      <Cell key={`${entry.ticker}-fvg`} fill={entry.is_focus ? "#00FF41" : "rgba(0,255,65,0.55)"} />
+                      <Cell key={`${entry.ticker}-fvg`} fill={entry.is_focus ? "var(--positive)" : "var(--positive)"} />
                     ))}
                   </Bar>
                   <Bar dataKey="roic" name="ROIC" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
-                      <Cell key={`${entry.ticker}-roic`} fill={entry.is_focus ? "#00E5FF" : "rgba(0,229,255,0.55)"} />
+                      <Cell key={`${entry.ticker}-roic`} fill={entry.is_focus ? "var(--accent)" : "var(--accent)"} />
                     ))}
                   </Bar>
                   <Bar dataKey="shareholderYield" name="Shareholder Yield" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
-                      <Cell key={`${entry.ticker}-sy`} fill={entry.is_focus ? "#FFD700" : "rgba(255,215,0,0.55)"} />
+                      <Cell key={`${entry.ticker}-sy`} fill={entry.is_focus ? "var(--warning)" : "var(--warning)"} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -307,9 +307,9 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                             <Line
                               type="monotone"
                               dataKey="value"
-                              stroke={tickerColorMap[peer.ticker] ?? "#00FF41"}
+                              stroke={tickerColorMap[peer.ticker] ?? "var(--positive)"}
                               strokeWidth={2.2}
-                              dot={{ r: 2.6, fill: tickerColorMap[peer.ticker] ?? "#00FF41", strokeWidth: 0 }}
+                              dot={{ r: 2.6, fill: tickerColorMap[peer.ticker] ?? "var(--positive)", strokeWidth: 0 }}
                               activeDot={{ r: 4 }}
                             />
                           </LineChart>
@@ -475,7 +475,7 @@ function RadarTooltip({ active, payload }: { active?: boolean; payload?: Tooltip
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{String(payload[0]?.payload?.metric ?? "Metric")}</div>
       {payload.map((entry) => (
-        <TooltipRow key={entry.name} label={String(entry.name ?? entry.dataKey ?? "Value")} value={`${Math.round(Number(entry.value ?? 0))}/100`} color={entry.color ?? "#00FF41"} />
+        <TooltipRow key={entry.name} label={String(entry.name ?? entry.dataKey ?? "Value")} value={`${Math.round(Number(entry.value ?? 0))}/100`} color={entry.color ?? "var(--positive)"} />
       ))}
     </div>
   );
@@ -490,7 +490,7 @@ function BarTooltip({ active, payload, label }: { active?: boolean; payload?: To
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label}</div>
       {payload.map((entry) => (
-        <TooltipRow key={entry.dataKey} label={String(entry.name ?? entry.dataKey ?? "Metric")} value={formatMultiple(asFiniteNumber(entry.value))} color={entry.color ?? "#00FF41"} />
+        <TooltipRow key={entry.dataKey} label={String(entry.name ?? entry.dataKey ?? "Metric")} value={formatMultiple(asFiniteNumber(entry.value))} color={entry.color ?? "var(--positive)"} />
       ))}
     </div>
   );
@@ -508,9 +508,9 @@ function RevenueTooltip({ active, payload, label, ticker }: { active?: boolean; 
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{ticker} · {label}</div>
-      <TooltipRow label="Revenue Growth" value={growth === null ? "—" : `${growth.toFixed(2)}%`} color="#00E5FF" />
-      <TooltipRow label="Revenue" value={formatCompactNumber(revenue)} color="#00FF41" />
-      <TooltipRow label="Period End" value={typeof point.fullDate === "string" ? formatDate(point.fullDate) : "—"} color="#FFD700" />
+      <TooltipRow label="Revenue Growth" value={growth === null ? "—" : `${growth.toFixed(2)}%`} color="var(--accent)" />
+      <TooltipRow label="Revenue" value={formatCompactNumber(revenue)} color="var(--positive)" />
+      <TooltipRow label="Period End" value={typeof point.fullDate === "string" ? formatDate(point.fullDate) : "—"} color="var(--warning)" />
     </div>
   );
 }

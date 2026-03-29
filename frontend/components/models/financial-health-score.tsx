@@ -247,12 +247,12 @@ function clamp(value: number, min: number, max: number): number {
 
 function gaugeColor(score: number): string {
   if (score < 4) {
-    return "#FF6B6B";
+    return "var(--negative)";
   }
   if (score < 7) {
-    return "#FFD700";
+    return "var(--warning)";
   }
-  return "#00FF41";
+  return "var(--positive)";
 }
 
 function scoreBandLabel(score: number): string {

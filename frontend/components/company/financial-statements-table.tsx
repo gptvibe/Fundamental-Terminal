@@ -220,7 +220,7 @@ function MetricSparklineTooltip({
         {label ? ` - ${label}` : ""}
       </div>
       <TooltipRow label={valueLabel} value={formatValue(value)} color={color} />
-      <TooltipRow label="Period End" value={periodEnd} color="#FFD700" />
+      <TooltipRow label="Period End" value={periodEnd} color="var(--warning)" />
     </div>
   );
 }
@@ -416,11 +416,11 @@ function directionCopy(direction: TrendDirection): string {
 function trendColor(direction: TrendDirection): string {
   switch (direction) {
     case "up":
-      return "#00FF41";
+      return "var(--positive)";
     case "down":
-      return "#FF6B6B";
+      return "var(--negative)";
     default:
-      return "#FFD700";
+      return "var(--warning)";
   }
 }
 

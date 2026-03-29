@@ -2,7 +2,7 @@
 
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { clsx } from "clsx";
 
 interface CompanySubnavProps {
@@ -27,7 +27,15 @@ const tabs: Array<{ key: string; label: string; suffix: string; exact?: boolean;
 
 export function CompanySubnav({ ticker }: CompanySubnavProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const baseHref = `/company/${encodeURIComponent(ticker)}`;
+  const tabLinks = tabs.map((tab) => ({
+    ...tab,
+    href: `${baseHref}${tab.suffix}`
+  }));
+  const activeTab =
+    tabLinks.find((tab) => (tab.exact ? pathname === tab.href : pathname === tab.href || pathname?.startsWith(`${tab.href}/`))) ??
+    tabLinks[0];
 
   function focusAt(currentTarget: HTMLAnchorElement, targetIndex: number) {
     const links = Array.from(currentTarget.closest("nav")?.querySelectorAll<HTMLAnchorElement>("a.company-subnav-link") ?? []);
@@ -71,23 +79,44 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
         <span className="company-subnav-kicker">{ticker}</span>
         <span className="company-subnav-copy">Company workspace</span>
       </div>
+      <div className="company-subnav-mobile-picker">
+        <label className="company-subnav-select-label" htmlFor="company-subnav-select">
+          Section
+        </label>
+        <select
+          id="company-subnav-select"
+          className="company-subnav-select"
+          value={activeTab.key}
+          onChange={(event) => {
+            const nextTab = tabLinks.find((tab) => tab.key === event.target.value);
+            if (nextTab) {
+              router.push(nextTab.href);
+            }
+          }}
+        >
+          {tabLinks.map((tab) => (
+            <option key={tab.key} value={tab.key}>
+              {tab.group === "core" ? "Core" : "Research"} · {tab.label}
+            </option>
+          ))}
+        </select>
+      </div>
       <nav className="company-subnav-track" aria-label="Company workspace sections">
         {(["core", "research"] as const).map((group) => (
           <div key={group} className="company-subnav-group">
             <span className="company-subnav-group-label">{group === "core" ? "Core views" : "Research feeds"}</span>
             <div className="company-subnav-links">
-              {tabs.map((tab, index) => {
+              {tabLinks.map((tab) => {
                 if (tab.group !== group) {
                   return null;
                 }
 
-                const href = `${baseHref}${tab.suffix}`;
-                const isActive = tab.exact ? pathname === href : pathname === href || pathname?.startsWith(`${href}/`);
+                const isActive = tab.exact ? pathname === tab.href : pathname === tab.href || pathname?.startsWith(`${tab.href}/`);
 
                 return (
                   <Link
                     key={tab.key}
-                    href={href}
+                    href={tab.href}
                     className={clsx("company-subnav-link", isActive && "is-active")}
                     aria-current={isActive ? "page" : undefined}
                     onKeyDown={handleKeyDown}

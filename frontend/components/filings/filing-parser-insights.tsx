@@ -139,9 +139,9 @@ export function FilingParserInsights({
                   <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} />
                   <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
                   <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-                  <Line type="monotone" dataKey="revenue" stroke="#00E5FF" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="operatingIncome" stroke="#7CFFCB" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="netIncome" stroke="#FFD700" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="operatingIncome" stroke="var(--positive)" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="netIncome" stroke="var(--warning)" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (

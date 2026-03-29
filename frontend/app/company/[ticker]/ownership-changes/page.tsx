@@ -260,7 +260,7 @@ export default function CompanyOwnershipChangesPage() {
                         {...RECHARTS_TOOLTIP_PROPS}
                         formatter={(value: number, name: string) => [value.toLocaleString(), name === "amendments" ? "Amendments" : "Initial filings"]}
                       />
-                      <Bar dataKey="initials" name="Initial filings" stackId="filings" fill="#00E5FF" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="initials" name="Initial filings" stackId="filings" fill="var(--accent)" radius={[4, 4, 0, 0]} />
                       <Bar dataKey="amendments" name="Amendments" stackId="filings" fill="#FFB020" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>

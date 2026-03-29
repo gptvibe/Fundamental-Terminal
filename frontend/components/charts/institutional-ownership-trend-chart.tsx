@@ -84,7 +84,7 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
               tickFormatter={(value) => formatPercent(Number(value))}
             />
             <Tooltip
-              cursor={{ stroke: "rgba(0,229,255,0.28)", strokeWidth: 1 }}
+              cursor={{ stroke: "var(--accent)", strokeWidth: 1 }}
               content={({ active, payload, label }) => (
                 <InstitutionalOwnershipTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
               )}
@@ -95,39 +95,39 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
               type="monotone"
               dataKey="totalSharesHeld"
               name="Tracked Institutional Shares"
-              stroke="#00FF41"
+              stroke="var(--positive)"
               strokeWidth={2.6}
               dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00FF41" }}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--positive)" }}
             />
             <Line
               yAxisId="shares"
               type="monotone"
               dataKey="top10SharesHeld"
               name="Top 10 Funds Combined"
-              stroke="#FFD700"
+              stroke="var(--warning)"
               strokeWidth={2.2}
               strokeDasharray="7 4"
               dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#FFD700" }}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--warning)" }}
             />
             <Line
               yAxisId="percent"
               type="monotone"
               dataKey="trackedOwnershipPercent"
               name="Tracked Ownership %"
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               strokeWidth={2.2}
               dot={false}
               connectNulls
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "#00E5FF" }}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
             />
             <Brush
               dataKey="quarterLabel"
               height={24}
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               travellerWidth={10}
-              fill="rgba(0,229,255,0.08)"
+              fill="var(--accent)"
               tickFormatter={(value) => String(value)}
             />
           </LineChart>
@@ -162,9 +162,9 @@ function InstitutionalOwnershipTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label ?? point.quarterLabel}</div>
-      <TooltipRow label="Tracked Shares" value={formatShareCompact(point.totalSharesHeld)} color="#00FF41" />
-      <TooltipRow label="Top 10 Combined" value={formatShareCompact(point.top10SharesHeld)} color="#FFD700" />
-      <TooltipRow label="Tracked Ownership" value={point.trackedOwnershipPercent == null ? "—" : formatPercent(point.trackedOwnershipPercent)} color="#00E5FF" />
+      <TooltipRow label="Tracked Shares" value={formatShareCompact(point.totalSharesHeld)} color="var(--positive)" />
+      <TooltipRow label="Top 10 Combined" value={formatShareCompact(point.top10SharesHeld)} color="var(--warning)" />
+      <TooltipRow label="Tracked Ownership" value={point.trackedOwnershipPercent == null ? "—" : formatPercent(point.trackedOwnershipPercent)} color="var(--accent)" />
       <TooltipRow label="Funds Reporting" value={formatInteger(point.fundCount)} color="#94A3B8" />
       <TooltipRow label="Quarter End" value={formatDate(point.quarterDate)} color="#CBD5E1" />
     </div>

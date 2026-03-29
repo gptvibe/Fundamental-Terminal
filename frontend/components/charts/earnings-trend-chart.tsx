@@ -76,13 +76,13 @@ export function EarningsTrendChart({ earnings = [], points, sourceLabel }: Earni
             />
             <Tooltip content={<EarningsTooltip />} {...RECHARTS_TOOLTIP_PROPS} />
             <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-            <Bar yAxisId="revenue" dataKey="revenue" name="Reported Revenue" fill="#00FF41" radius={[8, 8, 0, 0]} isAnimationActive={false} />
+            <Bar yAxisId="revenue" dataKey="revenue" name="Reported Revenue" fill="var(--positive)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
             <Line
               yAxisId="eps"
               type="monotone"
               dataKey="dilutedEps"
               name="Diluted EPS"
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               strokeWidth={2.4}
               dot={{ r: 3 }}
               activeDot={{ r: 5 }}
@@ -130,9 +130,9 @@ function EarningsTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label}</div>
-      <TooltipRow label="Reported Revenue" value={formatCompactNumber(row.revenue)} color="#00FF41" />
-      <TooltipRow label="Diluted EPS" value={formatEps(row.dilutedEps)} color="#00E5FF" />
-      <TooltipRow label="Filing Date" value={formatDate(row.filingDate)} color="#FFD700" />
+      <TooltipRow label="Reported Revenue" value={formatCompactNumber(row.revenue)} color="var(--positive)" />
+      <TooltipRow label="Diluted EPS" value={formatEps(row.dilutedEps)} color="var(--accent)" />
+      <TooltipRow label="Filing Date" value={formatDate(row.filingDate)} color="var(--warning)" />
       <TooltipRow label="Source State" value={row.parseState.replace(/_/g, " ")} color="#8b949e" />
     </div>
   );

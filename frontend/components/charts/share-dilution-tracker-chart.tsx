@@ -55,16 +55,16 @@ export function ShareDilutionTrackerChart({ financials }: { financials: Financia
             }}
           />
           <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-          <Bar yAxisId="shares" dataKey="shares" name="Shares Outstanding" fill="rgba(0,229,255,0.45)" radius={[6, 6, 0, 0]} />
+          <Bar yAxisId="shares" dataKey="shares" name="Shares Outstanding" fill="var(--accent)" radius={[2, 2, 0, 0]} />
           <Line
             yAxisId="dilution"
             type="monotone"
             dataKey="dilutionRate"
             name="Dilution Rate"
-            stroke="#FFD700"
+            stroke="var(--warning)"
             strokeWidth={2.4}
-            dot={{ r: 3, fill: "#FFD700" }}
-            activeDot={{ r: 5, fill: "#FFD700", stroke: "var(--panel)", strokeWidth: 2 }}
+            dot={{ r: 3, fill: "var(--warning)" }}
+            activeDot={{ r: 5, fill: "var(--warning)", stroke: "var(--panel)", strokeWidth: 2 }}
             connectNulls
             isAnimationActive={false}
           />

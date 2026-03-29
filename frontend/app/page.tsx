@@ -21,7 +21,7 @@ const MACRO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 export default function HomePage() {
   const router = useRouter();
   const homeSearchFormRef = useRef<HTMLFormElement>(null);
-  const [query, setQuery] = useState("AAPL");
+  const [query, setQuery] = useState("");
   const [data, setData] = useState<CompanySearchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -245,127 +245,124 @@ export default function HomePage() {
     <div className="home-shell home-shell-dashboard">
       <h1 className="sr-only">Fundamental Terminal Home</h1>
       <Panel
-        title="Economic Dashboard"
-        subtitle="Professional macro framing with Treasury curve structure, inflation, labor, and credit conditions before company-level research."
-        className="home-macro-panel"
-        aside={<span className="pill">Live cached macro snapshot</span>}
+        title="Research Launcher"
+        className="home-hero"
+        variant="hero"
       >
-        {macroError ? <div className="text-muted">{macroError}</div> : <EconomicDashboard context={macroContext} />}
+        <div className="home-hero-grid">
+          <form
+            ref={homeSearchFormRef}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void openSearch();
+            }}
+            className="home-search-form"
+          >
+            <div className="home-command-copy">
+              <span className="home-command-kicker">Research command</span>
+              <div className="home-command-title">Search a company</div>
+              <div className="home-command-text">
+                Enter a ticker, company name, or CIK to open the workspace or jump into valuation models.
+              </div>
+            </div>
+
+            <label className="home-search-label">
+              <span className="home-search-kicker">Ticker, Company, or CIK</span>
+              <div className="home-search-field">
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setAutocompleteOpen(true);
+                    setInvalidMessage(null);
+                  }}
+                  onFocus={() => {
+                    if (trimmedSearchText) {
+                      setAutocompleteOpen(true);
+                    }
+                  }}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="AAPL, Apple, or CIK: 0000320193"
+                  className={`home-search-input${invalidMessage ? " is-invalid" : ""}`}
+                  aria-label="Search by ticker, company, or CIK"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-haspopup="listbox"
+                  aria-expanded={showAutocomplete}
+                  aria-controls="home-search-autocomplete"
+                  aria-activedescendant={activeOptionId}
+                  aria-invalid={Boolean(invalidMessage)}
+                />
+
+                {showAutocomplete ? (
+                  <CompanyAutocompleteMenu
+                    id="home-search-autocomplete"
+                    results={autocompleteResults}
+                    loading={loading}
+                    activeIndex={activeSuggestionIndex}
+                    onHover={setActiveSuggestionIndex}
+                    onSelect={(result) => selectSuggestion(result)}
+                  />
+                ) : null}
+              </div>
+            </label>
+
+            <div className="home-hero-note home-search-note">
+              Ticker, company name, or CIK. Resolution validated against SEC before routing.
+            </div>
+
+            {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
+
+            {error ? (
+              <div className="pill" style={{ borderColor: "color-mix(in srgb, var(--danger) 35%, transparent)", color: "var(--danger)" }}>
+                {error}
+              </div>
+            ) : null}
+
+            <div className="home-search-actions">
+              <button type="submit" className="ticker-button home-action-primary">
+                Open Company Workspace
+              </button>
+              <button type="button" className="ticker-button home-action-secondary" onClick={() => void openSearch("models")}>
+                Open Valuation Models
+              </button>
+            </div>
+          </form>
+
+          <div className="home-hero-side">
+            {data ? <StatusPill state={data.refresh} /> : <span className="pill">Ready</span>}
+
+            <div className="home-status-preview">
+              <div className="home-status-preview-header">
+                <span className="metric-label">Preview</span>
+                <span className="home-status-preview-ticker">{displayTicker}</span>
+              </div>
+              <div className="home-status-preview-name">
+                {bestMatch ? bestMatch.name : loading ? "Checking" : "Awaiting match"}
+              </div>
+              <div className="home-status-preview-meta">{bestMatch?.sector ? bestMatch.sector : ""}</div>
+              <div className="pill">{refreshLabel}</div>
+            </div>
+          </div>
+        </div>
+
       </Panel>
 
       <div className="home-dashboard-lower">
         <Panel
-          title="Company Launcher"
-          subtitle="Search by ticker, company, or CIK, then jump into Workspace or Models after macro framing is complete."
-          className="home-launcher-panel"
+          title="Market Context"
+          subtitle="Macro conditions and economic indicators."
+          className="home-macro-panel"
+          variant="subtle"
         >
-          <div className="home-hero-grid">
-            <form
-              ref={homeSearchFormRef}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void openSearch();
-              }}
-              className="home-search-form"
-            >
-              <label className="home-search-label">
-                <span className="home-search-kicker">Ticker, Company, or CIK</span>
-                <div className="home-search-field">
-                  <input
-                    value={query}
-                    onChange={(event) => {
-                      setQuery(event.target.value);
-                      setAutocompleteOpen(true);
-                      setInvalidMessage(null);
-                    }}
-                    onFocus={() => {
-                      if (trimmedSearchText) {
-                        setAutocompleteOpen(true);
-                      }
-                    }}
-                    onKeyDown={handleSearchKeyDown}
-                    placeholder="AAPL, Apple, or CIK: 0000320193"
-                    className={`home-search-input${invalidMessage ? " is-invalid" : ""}`}
-                    aria-label="Search by ticker, company, or CIK"
-                    role="combobox"
-                    aria-autocomplete="list"
-                    aria-haspopup="listbox"
-                    aria-expanded={showAutocomplete}
-                    aria-controls="home-search-autocomplete"
-                    aria-activedescendant={activeOptionId}
-                    aria-invalid={Boolean(invalidMessage)}
-                  />
-
-                  {showAutocomplete ? (
-                    <CompanyAutocompleteMenu
-                      id="home-search-autocomplete"
-                      results={autocompleteResults}
-                      loading={loading}
-                      activeIndex={activeSuggestionIndex}
-                      onHover={setActiveSuggestionIndex}
-                      onSelect={(result) => selectSuggestion(result)}
-                    />
-                  ) : null}
-                </div>
-              </label>
-
-              <div className="home-hero-note home-search-note">
-                Use ticker, company, or CIK. If SEC resolution fails, the input turns red.
-              </div>
-
-              {invalidMessage ? <div className="company-search-feedback is-invalid">{invalidMessage}</div> : null}
-
-              {error ? (
-                <div className="pill" style={{ borderColor: "rgba(255, 77, 109, 0.35)", color: "var(--danger)" }}>
-                  {error}
-                </div>
-              ) : null}
-
-              <div className="home-search-actions">
-                <button type="submit" className="ticker-button home-action-primary">
-                  Open Company Workspace
-                </button>
-                <button type="button" className="ticker-button home-action-secondary" onClick={() => void openSearch("models")}>
-                  Open Valuation Models
-                </button>
-              </div>
-            </form>
-
-            <div className="home-hero-side">
-              {data ? <StatusPill state={data.refresh} /> : <span className="pill">Ready for company lookup</span>}
-
-              <div className="home-status-preview">
-                <div className="home-status-preview-header">
-                  <span className="metric-label">Lookup Preview</span>
-                  <span className="home-status-preview-ticker">{displayTicker}</span>
-                </div>
-                <div className="home-status-preview-name">
-                  {bestMatch ? bestMatch.name : loading ? "Checking local matches" : "Awaiting a resolved company"}
-                </div>
-                <div className="home-status-preview-meta">
-                  {bestMatch?.sector ? bestMatch.sector : "Sector will appear after match"}
-                </div>
-                <div className="pill">{refreshLabel}</div>
-              </div>
-
-              <div className="home-value-grid">
-                <div className="home-value-card">
-                  <div className="grid-empty-kicker">SEC-first validation</div>
-                  <div className="grid-empty-copy">Search resolution checks local cache state before deeper pages trigger refresh jobs.</div>
-                </div>
-                <div className="home-value-card">
-                  <div className="grid-empty-kicker">Fast handoff</div>
-                  <div className="grid-empty-copy">Go straight from macro framing into the company workspace or model deck with one search.</div>
-                </div>
-              </div>
-            </div>
-          </div>
+          {macroError ? <div className="text-muted">{macroError}</div> : <EconomicDashboard context={macroContext} />}
         </Panel>
 
         <Panel
-          title="Live Updates"
-          subtitle={recentJob ? `Latest refresh: ${recentJob.ticker}` : "Monitor SEC fetches and model jobs for active refreshes."}
+          title="Live Refresh Stream"
+          subtitle={recentJob ? `Latest: ${recentJob.ticker}` : "Monitor background SEC fetches and model jobs."}
           className="home-launcher-panel"
+          variant="subtle"
         >
           <StatusConsole entries={consoleEntries} connectionState={connectionState} />
         </Panel>

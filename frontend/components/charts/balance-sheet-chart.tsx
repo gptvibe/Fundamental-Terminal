@@ -24,8 +24,8 @@ export function BalanceSheetChart({ financials }: { financials: FinancialPayload
           <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} />
           <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
           <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-          <Bar dataKey="assets" fill="#00E5FF" radius={[6, 6, 0, 0]} />
-          <Bar dataKey="liabilities" fill="#FFD700" radius={[6, 6, 0, 0]} />
+          <Bar dataKey="assets" fill="var(--accent)" radius={[2, 2, 0, 0]} />
+          <Bar dataKey="liabilities" fill="var(--warning)" radius={[2, 2, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

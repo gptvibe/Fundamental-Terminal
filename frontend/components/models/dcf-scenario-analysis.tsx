@@ -21,9 +21,9 @@ import type { FinancialPayload, ModelPayload, PriceHistoryPoint } from "@/lib/ty
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const CASE_COLORS = {
-  bear: "#FF6B6B",
-  base: "#00E5FF",
-  bull: "#00FF41"
+  bear: "var(--negative)",
+  base: "var(--accent)",
+  bull: "var(--positive)"
 } as const;
 
 type ScenarioControls = {
@@ -189,7 +189,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
               min={-0.05}
               max={0.25}
               step={0.005}
-              accent="#00E5FF"
+              accent="var(--accent)"
               onChange={(value) => setControls((current) => ({ ...current, revenueGrowth: value }))}
             />
             <SliderControl
@@ -198,7 +198,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
               min={0.05}
               max={0.18}
               step={0.0025}
-              accent="#FF6B6B"
+              accent="var(--negative)"
               onChange={(value) =>
                 setControls((current) => ({
                   ...current,
@@ -213,7 +213,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
               min={0}
               max={Math.min(0.06, Math.max(controls.discountRate - 0.01, 0))}
               step={0.0025}
-              accent="#FFD700"
+              accent="var(--warning)"
               onChange={(value) => setControls((current) => ({ ...current, terminalGrowth: Math.min(value, current.discountRate - 0.01) }))}
             />
             <SliderControl
@@ -222,7 +222,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
               min={0.05}
               max={0.5}
               step={0.005}
-              accent="#00FF41"
+              accent="var(--positive)"
               onChange={(value) => setControls((current) => ({ ...current, operatingMargin: value }))}
             />
             <SliderControl
@@ -231,7 +231,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
               min={0.01}
               max={0.15}
               step={0.0025}
-              accent="#A855F7"
+              accent="#a78bfa"
               onChange={(value) => setControls((current) => ({ ...current, capexPercent: value }))}
             />
           </div>
@@ -256,10 +256,10 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
                   <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatAxisCurrency} width={64} />
                   <Tooltip content={<FanTooltip />} />
                   <Area type="monotone" dataKey="lower" stackId="fan" stroke="transparent" fill="transparent" />
-                  <Area type="monotone" dataKey="range" stackId="fan" stroke="transparent" fill="rgba(0,229,255,0.18)" />
-                  <Area type="monotone" dataKey="base" stroke={CASE_COLORS.base} fill="rgba(0,229,255,0.08)" strokeWidth={2.6} />
-                  <Area type="monotone" dataKey="bull" stroke={CASE_COLORS.bull} fill="rgba(0,255,65,0.04)" strokeWidth={2} />
-                  <Area type="monotone" dataKey="bear" stroke={CASE_COLORS.bear} fill="rgba(255,107,107,0.04)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="range" stackId="fan" stroke="transparent" fill="var(--accent)" />
+                  <Area type="monotone" dataKey="base" stroke={CASE_COLORS.base} fill="var(--accent)" strokeWidth={2.6} />
+                  <Area type="monotone" dataKey="bull" stroke={CASE_COLORS.bull} fill="var(--positive)" strokeWidth={2} />
+                  <Area type="monotone" dataKey="bear" stroke={CASE_COLORS.bear} fill="var(--negative)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -275,7 +275,7 @@ export function DcfScenarioAnalysis({ ticker, dcfModel, financials, priceHistory
                   <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
                   <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatAxisCurrency} width={64} />
                   {latestPrice !== null ? (
-                    <ReferenceLine y={latestPrice} stroke="#FFD700" strokeDasharray="6 6" label={{ value: `Price ${formatCurrency(latestPrice)}`, fill: "#FFD700", position: "insideTopRight" }} />
+                    <ReferenceLine y={latestPrice} stroke="var(--warning)" strokeDasharray="6 6" label={{ value: `Price ${formatCurrency(latestPrice)}`, fill: "var(--warning)", position: "insideTopRight" }} />
                   ) : null}
                   <Tooltip content={<ValueTooltip currentPrice={latestPrice} />} />
                   <Bar dataKey="value" radius={[10, 10, 0, 0]}>
@@ -392,8 +392,8 @@ function ValueTooltip({
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label ?? payload[0]?.payload?.label ?? "Scenario"}</div>
       <TooltipRow label="Intrinsic Value" value={formatCurrency(intrinsicValue)} color={CASE_COLORS.base} />
-      <TooltipRow label="Current Price" value={formatCurrency(currentPrice)} color="#FFD700" />
-      <TooltipRow label="Upside / Downside" value={formatPercent(upside)} color="#00FF41" />
+      <TooltipRow label="Current Price" value={formatCurrency(currentPrice)} color="var(--warning)" />
+      <TooltipRow label="Upside / Downside" value={formatPercent(upside)} color="var(--positive)" />
     </div>
   );
 }

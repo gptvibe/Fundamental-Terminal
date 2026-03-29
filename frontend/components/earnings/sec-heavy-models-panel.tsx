@@ -8,7 +8,7 @@ import { formatCompactNumber, formatPercent } from "@/lib/format";
 import type { EarningsModelPointPayload } from "@/lib/types";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 
-const SEGMENT_COLORS = ["#00FF41", "#00E5FF", "#FFD700", "#FF6B6B", "#A855F7", "#7CFFCB", "#64D2FF"];
+const SEGMENT_COLORS = ["var(--positive)", "var(--accent)", "var(--warning)", "var(--negative)", "#a78bfa", "var(--positive)", "var(--accent)"];
 
 type SecModelPoint = {
   key: string;
@@ -96,8 +96,8 @@ export function SecHeavyModelsPanel({
                     return [String(value), "Value"];
                   }}
                 />
-                <ReferenceLine y={50} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 4" />
-                <Line dataKey="qualityScore" stroke="#00FF41" strokeWidth={2.6} dot={{ r: 3 }} isAnimationActive={false} />
+                <ReferenceLine y={50} stroke="var(--panel-border)" strokeDasharray="4 4" />
+                <Line dataKey="qualityScore" stroke="var(--positive)" strokeWidth={2.6} dot={{ r: 3 }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -129,10 +129,10 @@ export function SecHeavyModelsPanel({
                     return [String(value), "Value"];
                   }}
                 />
-                <ReferenceLine y={0} stroke="rgba(255,255,255,0.28)" />
+                <ReferenceLine y={0} stroke="var(--panel-border)" />
                 <Bar dataKey="epsDelta" radius={[8, 8, 0, 0]} isAnimationActive={false}>
                   {secModelWindow.map((entry) => (
-                    <Cell key={entry.key} fill={entry.epsDelta >= 0 ? "#00E5FF" : "#FF6B6B"} />
+                    <Cell key={entry.key} fill={entry.epsDelta >= 0 ? "var(--accent)" : "var(--negative)"} />
                   ))}
                 </Bar>
               </BarChart>
@@ -179,10 +179,10 @@ export function SecHeavyModelsPanel({
                       ];
                     }}
                   />
-                  <ReferenceLine x={0} stroke="rgba(255,255,255,0.28)" />
+                  <ReferenceLine x={0} stroke="var(--panel-border)" />
                   <Bar dataKey="shareDelta" radius={[0, 8, 8, 0]} isAnimationActive={false}>
                     {segmentContributionRows.map((row) => (
-                      <Cell key={row.segmentId} fill={row.shareDelta >= 0 ? row.color : "#FF6B6B"} />
+                      <Cell key={row.segmentId} fill={row.shareDelta >= 0 ? row.color : "var(--negative)"} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -190,26 +190,26 @@ export function SecHeavyModelsPanel({
             </div>
 
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 620 }}>
+              <table className="company-data-table" style={{ minWidth: 620 }}>
                 <thead>
-                  <tr className="text-muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.08 }}>
-                    <th align="left" style={{ padding: "8px 10px" }}>Segment</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Latest Revenue</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Share of Revenue</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Share Delta</th>
-                    <th align="right" style={{ padding: "8px 10px" }}>Revenue Delta</th>
+                  <tr>
+                    <th align="left">Segment</th>
+                    <th align="right">Latest Revenue</th>
+                    <th align="right">Share of Revenue</th>
+                    <th align="right">Share Delta</th>
+                    <th align="right">Revenue Delta</th>
                   </tr>
                 </thead>
                 <tbody>
                   {segmentContributionRows.map((row) => (
                     <tr key={row.segmentId}>
-                      <td style={{ padding: "10px 10px" }}>{row.segmentName}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatCompactNumber(row.revenue)}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right" }}>{formatPercent(row.share)}</td>
-                      <td style={{ padding: "10px 10px", textAlign: "right", color: row.shareDelta >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                      <td>{row.segmentName}</td>
+                      <td style={{ textAlign: "right" }}>{formatCompactNumber(row.revenue)}</td>
+                      <td style={{ textAlign: "right" }}>{formatPercent(row.share)}</td>
+                      <td style={{ textAlign: "right", color: row.shareDelta >= 0 ? "var(--positive)" : "var(--negative)" }}>
                         {formatSignedPercent(row.shareDelta)}
                       </td>
-                      <td style={{ padding: "10px 10px", textAlign: "right", color: row.revenueDelta != null && row.revenueDelta >= 0 ? "#7CFFCB" : "#FF9E9E" }}>
+                      <td style={{ textAlign: "right", color: row.revenueDelta != null && row.revenueDelta >= 0 ? "var(--positive)" : "var(--negative)" }}>
                         {formatSignedCompactNumber(row.revenueDelta)}
                       </td>
                     </tr>

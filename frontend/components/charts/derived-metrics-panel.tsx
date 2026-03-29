@@ -296,7 +296,7 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
               type="monotone"
               dataKey="value"
               name={selectedOption.label}
-              stroke="#00E5FF"
+              stroke="var(--accent)"
               strokeWidth={2.2}
               dot={false}
               connectNulls

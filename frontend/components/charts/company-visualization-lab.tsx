@@ -76,11 +76,11 @@ const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const QUARTERLY_FORMS = new Set(["10-Q", "6-K"]);
 
 const METRICS: MetricDefinition[] = [
-  { key: "revenue", label: "Revenue", color: "#00E5FF", getAbsolute: (s) => s.revenue },
-  { key: "grossProfit", label: "Gross Profit", color: "#00FF41", getAbsolute: (s) => s.gross_profit },
-  { key: "operatingIncome", label: "Operating Income", color: "#FFD700", getAbsolute: (s) => s.operating_income },
-  { key: "netIncome", label: "Net Income", color: "#FF6B6B", getAbsolute: (s) => s.net_income },
-  { key: "freeCashFlow", label: "Free Cash Flow", color: "#7CFFCB", getAbsolute: (s) => s.free_cash_flow },
+  { key: "revenue", label: "Revenue", color: "var(--accent)", getAbsolute: (s) => s.revenue },
+  { key: "grossProfit", label: "Gross Profit", color: "var(--positive)", getAbsolute: (s) => s.gross_profit },
+  { key: "operatingIncome", label: "Operating Income", color: "var(--warning)", getAbsolute: (s) => s.operating_income },
+  { key: "netIncome", label: "Net Income", color: "var(--negative)", getAbsolute: (s) => s.net_income },
+  { key: "freeCashFlow", label: "Free Cash Flow", color: "var(--positive)", getAbsolute: (s) => s.free_cash_flow },
   { key: "stockBasedComp", label: "Stock-Based Comp", color: "#A855F7", getAbsolute: (s) => s.stock_based_compensation },
   { key: "shares", label: "Shares Outstanding", color: "#64D2FF", getAbsolute: (s) => s.shares_outstanding },
 ];
@@ -106,10 +106,10 @@ const RANGE_OPTIONS: ControlOption[] = [
 ];
 
 const ANNOTATION_COLOR: Record<AnnotationKind, string> = {
-  earnings: "#FFD700",
-  event: "#00E5FF",
-  capital: "#FF6B6B",
-  insider: "#00FF41",
+  earnings: "var(--warning)",
+  event: "var(--accent)",
+  capital: "var(--negative)",
+  insider: "var(--positive)",
   ownership: "#A855F7",
 };
 
@@ -515,9 +515,9 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={74} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatPercent(value)} labelFormatter={(value) => formatDate(String(value))} />
                 <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-                <Area type="monotone" dataKey="grossMargin" name="Gross" stroke="#00FF41" fill="rgba(0,255,65,0.18)" stackId="1" connectNulls />
-                <Area type="monotone" dataKey="operatingMargin" name="Operating" stroke="#00E5FF" fill="rgba(0,229,255,0.18)" stackId="1" connectNulls />
-                <Area type="monotone" dataKey="netMargin" name="Net" stroke="#FFD700" fill="rgba(255,215,0,0.2)" stackId="1" connectNulls />
+                <Area type="monotone" dataKey="grossMargin" name="Gross" stroke="var(--positive)" fill="var(--positive)" stackId="1" connectNulls />
+                <Area type="monotone" dataKey="operatingMargin" name="Operating" stroke="var(--accent)" fill="var(--accent)" stackId="1" connectNulls />
+                <Area type="monotone" dataKey="netMargin" name="Net" stroke="var(--warning)" fill="var(--warning)" stackId="1" connectNulls />
                 <Area type="monotone" dataKey="fcfMargin" name="FCF" stroke="#A855F7" fill="rgba(168,85,247,0.18)" stackId="1" connectNulls />
               </AreaChart>
             </ResponsiveContainer>
@@ -548,8 +548,8 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} width={74} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} formatter={(value: number) => Number(value).toFixed(2)} />
                 <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-                <Line type="monotone" dataKey="cashConversion" name="Cash Conversion" stroke="#00E5FF" strokeWidth={2.3} dot={false} connectNulls />
-                <Bar dataKey="accrualRatio" name="Accrual Ratio" fill="rgba(255,107,107,0.55)" radius={[6, 6, 0, 0]} />
+                <Line type="monotone" dataKey="cashConversion" name="Cash Conversion" stroke="var(--accent)" strokeWidth={2.3} dot={false} connectNulls />
+                <Bar dataKey="accrualRatio" name="Accrual Ratio" fill="var(--negative)" radius={[2, 2, 0, 0]} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -582,9 +582,9 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <YAxis yAxisId="right" orientation="right" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={68} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} />
                 <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-                <Bar yAxisId="left" dataKey="shares" name="Shares" fill="rgba(100,210,255,0.55)" radius={[6, 6, 0, 0]} />
+                <Bar yAxisId="left" dataKey="shares" name="Shares" fill="var(--accent)" radius={[2, 2, 0, 0]} />
                 <Line yAxisId="left" type="monotone" dataKey="stockBasedComp" name="SBC" stroke="#A855F7" strokeWidth={2.2} dot={false} connectNulls />
-                <Line yAxisId="right" type="monotone" dataKey="dilution" name="Dilution" stroke="#FFD700" strokeWidth={2.2} dot={false} connectNulls />
+                <Line yAxisId="right" type="monotone" dataKey="dilution" name="Dilution" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -615,10 +615,10 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <YAxis yAxisId="yield" orientation="right" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={68} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} />
                 <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-                <Bar yAxisId="alloc" dataKey="buybacks" name="Buybacks" fill="rgba(0,229,255,0.5)" radius={[6, 6, 0, 0]} />
-                <Bar yAxisId="alloc" dataKey="dividends" name="Dividends" fill="rgba(0,255,65,0.45)" radius={[6, 6, 0, 0]} />
-                <Line yAxisId="alloc" type="monotone" dataKey="debtChanges" name="Debt Changes" stroke="#FF6B6B" strokeWidth={2.2} dot={false} connectNulls />
-                <Line yAxisId="yield" type="monotone" dataKey="shareholderYield" name="Shareholder Yield" stroke="#FFD700" strokeWidth={2.2} dot={false} connectNulls />
+                <Bar yAxisId="alloc" dataKey="buybacks" name="Buybacks" fill="var(--accent)" radius={[2, 2, 0, 0]} />
+                <Bar yAxisId="alloc" dataKey="dividends" name="Dividends" fill="var(--positive)" radius={[2, 2, 0, 0]} />
+                <Line yAxisId="alloc" type="monotone" dataKey="debtChanges" name="Debt Changes" stroke="var(--negative)" strokeWidth={2.2} dot={false} connectNulls />
+                <Line yAxisId="yield" type="monotone" dataKey="shareholderYield" name="Shareholder Yield" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -669,7 +669,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                   <XAxis dataKey="periodEnd" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatDate(String(value))} />
                   <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={74} />
                   <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} formatter={(value: number) => formatPercent(value)} />
-                  <Line type="monotone" dataKey="concentration" name="Concentration (HHI)" stroke="#FF6B6B" strokeWidth={2.2} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="concentration" name="Concentration (HHI)" stroke="var(--negative)" strokeWidth={2.2} dot={false} connectNulls />
                 </ComposedChart>
               </ResponsiveContainer>
             ) : (
@@ -727,7 +727,7 @@ function SegmentStackChart({ rows, emptyMessage }: { rows: SegmentMixRow[]; empt
     return <ChartStateBlock title="Segment Mix" subtitle="No segment history" detail={emptyMessage} />;
   }
 
-  const palette = ["#00E5FF", "#00FF41", "#FFD700", "#FF6B6B", "#A855F7", "#64D2FF"];
+  const palette = ["var(--accent)", "var(--positive)", "var(--warning)", "var(--negative)", "#A855F7", "#64D2FF"];
 
   return (
     <div className="viz-chart-canvas compact">
@@ -778,8 +778,8 @@ function FilingHeatmap({ rows }: { rows: FilingHeatmapRow[] }) {
             key={row.quarter}
             className="viz-heatmap-cell"
             style={{
-              background: `linear-gradient(160deg, rgba(0,229,255,${0.12 + intensity * 0.45}), rgba(0,255,65,${0.08 + intensity * 0.32}))`,
-              borderColor: `rgba(255,255,255,${0.08 + intensity * 0.2})`,
+              background: `color-mix(in srgb, var(--accent) ${Math.round(12 + intensity * 45)}%, var(--panel))`,
+              borderColor: `var(--panel-border)`,
             }}
           >
             <div className="viz-heatmap-quarter">{row.quarter}</div>

@@ -153,6 +153,17 @@ export default function WatchlistPage() {
     }
     return sortRows(rows.filter((item) => !item.hasNote), sortBy);
   }, [filter, rows, sortBy]);
+  const summaryCounts = useMemo(
+    () => ({
+      tracked: watchlistTickers.length,
+      attention: rows.filter((item) => item.alert_summary.high > 0 || item.alert_summary.medium > 0).length,
+      stale: rows.filter((item) => item.isStale).length,
+      undervalued: rows.filter((item) => (item.fair_value_gap ?? -1) > 0).length
+    }),
+    [rows, watchlistTickers.length]
+  );
+  const noteCoverageCount = useMemo(() => rows.filter((item) => item.hasNote).length, [rows]);
+  const highPriorityCount = useMemo(() => rows.filter((item) => item.alert_summary.high > 0).length, [rows]);
 
   async function handleRefresh(ticker: string) {
     try {
@@ -175,36 +186,83 @@ export default function WatchlistPage() {
     <div className="watchlist-page-grid">
       <Panel
         title="Watchlist Workspace"
-        subtitle="Browser-local saved companies with alert triage, latest activity, note previews, and quick actions."
+        subtitle="Dense browser-local triage surface for saved companies, current alerts, valuation gaps, and direct next actions."
+        variant="subtle"
       >
-        <div className="watchlist-toolbar">
-          <div className="saved-companies-summary">
-            <span className="pill">{watchlistTickers.length} tracked</span>
-            <span className="pill">{rows.filter((item) => item.alert_summary.high > 0 || item.alert_summary.medium > 0).length} need attention</span>
-            <span className="pill">{rows.filter((item) => item.isStale).length} stale</span>
-            <span className="pill">{rows.filter((item) => (item.fair_value_gap ?? -1) > 0).length} undervalued</span>
-          </div>
-          <div className="watchlist-filter-row">
-            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as WatchlistSort)} aria-label="Sort watchlist">
-              <option value="attention">Sort: Attention</option>
-              <option value="undervaluation">Sort: Undervaluation</option>
-              <option value="quality">Sort: Quality</option>
-              <option value="capital-return">Sort: Capital return</option>
-              <option value="balance-risk">Sort: Balance-sheet risk</option>
-            </select>
-          </div>
-          <div className="watchlist-filter-row" role="tablist" aria-label="Watchlist filters">
-            {FILTERS.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                className={`ticker-button${filter === item.key ? " is-active" : ""}`}
-                onClick={() => setFilter(item.key)}
-                aria-pressed={filter === item.key}
-              >
-                {item.label}
+        <div className="watchlist-intro">
+          <div className="watchlist-intro-copy">
+            <div className="watchlist-intro-kicker">Cross-company triage</div>
+            <div className="watchlist-intro-title">Review saved names in one pass.</div>
+            <div className="watchlist-intro-text">
+              Prioritize freshness, active alerts, valuation gaps, quality signals, and note coverage without leaving the page.
+            </div>
+            <div className="watchlist-intro-actions">
+              <button type="button" className="ticker-button" onClick={() => router.push("/")}>
+                Open Launcher
               </button>
-            ))}
+              {filter !== "all" ? (
+                <button type="button" className="ticker-button" onClick={() => setFilter("all")}>
+                  Reset Filter
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="watchlist-summary-strip">
+            <div className="watchlist-summary-metric">
+              <span className="watchlist-summary-label">Tracked</span>
+              <span className="watchlist-summary-value">{summaryCounts.tracked}</span>
+              <span className="watchlist-summary-detail">{noteCoverageCount} names carry an active local note.</span>
+            </div>
+            <div className="watchlist-summary-metric">
+              <span className="watchlist-summary-label">Attention</span>
+              <span className="watchlist-summary-value">{summaryCounts.attention}</span>
+              <span className="watchlist-summary-detail">{highPriorityCount} have at least one high-severity alert.</span>
+            </div>
+            <div className="watchlist-summary-metric">
+              <span className="watchlist-summary-label">Stale</span>
+              <span className="watchlist-summary-value">{summaryCounts.stale}</span>
+              <span className="watchlist-summary-detail">Refresh candidates based on cache age or missing data.</span>
+            </div>
+            <div className="watchlist-summary-metric">
+              <span className="watchlist-summary-label">Undervalued</span>
+              <span className="watchlist-summary-value">{summaryCounts.undervalued}</span>
+              <span className="watchlist-summary-detail">Positive fair-value gap from cached model outputs.</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="watchlist-toolbar">
+          <div className="watchlist-controls-row">
+            <div className="watchlist-sort-shell">
+              <div className="watchlist-toolbar-label">Sort focus</div>
+              <select className="watchlist-sort-select" value={sortBy} onChange={(event) => setSortBy(event.target.value as WatchlistSort)} aria-label="Sort watchlist">
+                <option value="attention">Sort: Attention</option>
+                <option value="undervaluation">Sort: Undervaluation</option>
+                <option value="quality">Sort: Quality</option>
+                <option value="capital-return">Sort: Capital return</option>
+                <option value="balance-risk">Sort: Balance-sheet risk</option>
+              </select>
+            </div>
+            <div className="watchlist-filter-row" role="tablist" aria-label="Watchlist filters">
+              {FILTERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={`ticker-button${filter === item.key ? " is-active" : ""}`}
+                  onClick={() => setFilter(item.key)}
+                  aria-pressed={filter === item.key}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="watchlist-toolbar-meta">
+            <span className="watchlist-toolbar-chip">In view {filteredRows.length}</span>
+            <span className="watchlist-toolbar-chip">Notes {noteCoverageCount}/{summaryCounts.tracked || 0}</span>
+            <span className="watchlist-toolbar-chip">Filter {FILTERS.find((item) => item.key === filter)?.label ?? "All"}</span>
+            {hasPendingRefresh ? <span className="watchlist-toolbar-chip is-live">Background refresh running</span> : null}
           </div>
         </div>
 
@@ -215,92 +273,131 @@ export default function WatchlistPage() {
             <div className="grid-empty-kicker">Watchlist</div>
             <div className="grid-empty-title">No companies saved yet</div>
             <div className="grid-empty-copy">Open any company page and use Save to My Watchlist to start your browser-local multi-company workspace.</div>
+            <div className="watchlist-empty-actions">
+              <button type="button" className="ticker-button" onClick={() => router.push("/")}>
+                Open Research Launcher
+              </button>
+            </div>
           </div>
         ) : loading ? (
           <div className="text-muted">Loading watchlist summary...</div>
         ) : filteredRows.length ? (
-          <div className="watchlist-card-grid">
-            {filteredRows.map((item) => (
-              <article key={item.ticker} className="saved-company-card watchlist-company-card">
-                <div className="saved-company-card-header">
-                  <div className="saved-company-card-headline">
-                    <div className="saved-company-card-ticker">{item.ticker}</div>
-                    <div className="saved-company-card-name">{item.name ?? "Unknown company"}</div>
-                  </div>
-                  <div className="saved-company-card-pills">
-                    {item.sector ? <span className="pill">{item.sector}</span> : null}
-                    <span className="pill">{item.isStale ? "Stale" : "Fresh"}</span>
-                    <span className="pill">CIK {item.cik ?? "Unknown"}</span>
-                  </div>
-                </div>
-
-                <div className={`saved-company-card-note${item.hasNote ? " has-note" : ""}`}>
-                  {item.notePreview ?? "No local note. Add a note from the company workspace to keep your thesis visible here."}
-                </div>
-
-                <div className="saved-company-card-meta">
-                  <span>Last checked {item.last_checked ? formatDate(item.last_checked) : "Pending"}</span>
-                  <span>{getRefreshCopy(item.isStale, item.refresh.reason)}</span>
-                </div>
-
-                <div className="watchlist-alert-row" aria-label={`Alert summary for ${item.ticker}`}>
-                  <span className="pill">High {item.alert_summary.high}</span>
-                  <span className="pill">Medium {item.alert_summary.medium}</span>
-                  <span className="pill">Low {item.alert_summary.low}</span>
-                  <span className="pill">Total {item.alert_summary.total}</span>
-                </div>
-
-                <div className="watchlist-latest-stack">
-                  <div className="watchlist-latest-item">
-                    <strong>Latest alert:</strong> {item.latest_alert?.title ?? "No current alert"}
-                  </div>
-                  <div className="watchlist-latest-item">
-                    <strong>Latest activity:</strong>{" "}
-                    {item.latest_activity
-                      ? `${item.latest_activity.title}${item.latest_activity.date ? ` (${formatDate(item.latest_activity.date)})` : ""}`
-                      : "No recent activity"}
-                  </div>
-                  <div className="watchlist-latest-item">
-                    <strong>Coverage:</strong> {item.coverage.financial_periods.toLocaleString()} financial periods · {item.coverage.price_points.toLocaleString()} price points
-                  </div>
-                  <div className="watchlist-latest-item">
-                    <strong>Valuation gap:</strong> {formatValuationMetric(item.fair_value_gap, item.fair_value_gap_status)} · <strong>ROIC:</strong> {formatPercent(item.roic)}
-                  </div>
-                  <div className="watchlist-latest-item">
-                    <strong>Shareholder yield:</strong> {formatPercent(item.shareholder_yield)} · <strong>Implied growth:</strong> {formatValuationMetric(item.implied_growth, item.implied_growth_status)}
-                  </div>
-                  <div className="watchlist-latest-item">
-                    <strong>Balance-sheet risk:</strong> {formatSigned(item.balance_sheet_risk)} net debt / FCF
-                  </div>
-                  <div className="watchlist-latest-item">
-                    <strong>Market context:</strong> {formatMarketContextStatus(item.market_context_status)}
-                  </div>
-                </div>
-
-                <div className="saved-company-card-actions watchlist-action-row">
-                  <button type="button" className="ticker-button" onClick={() => router.push(`/company/${encodeURIComponent(item.ticker)}`)}>
-                    Open Workspace
-                  </button>
-                  <button type="button" className="ticker-button" onClick={() => router.push(`/company/${encodeURIComponent(item.ticker)}/models`)}>
-                    Models
-                  </button>
-                  <button
-                    type="button"
-                    className="ticker-button"
-                    onClick={() => void handleRefresh(item.ticker)}
-                    disabled={refreshingTicker === item.ticker}
-                  >
-                    {refreshingTicker === item.ticker ? "Refreshing..." : "Refresh"}
-                  </button>
-                </div>
-              </article>
-            ))}
+          <div className="watchlist-table-shell">
+            <table className="watchlist-table">
+              <thead>
+                <tr>
+                  <th scope="col">Company</th>
+                  <th scope="col">Signals</th>
+                  <th scope="col">Valuation</th>
+                  <th scope="col">Quality</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRows.map((item) => (
+                  <tr key={item.ticker} className={item.isStale ? "is-stale" : undefined}>
+                    <td data-label="Company">
+                      <button type="button" className="watchlist-company-link" onClick={() => router.push(`/company/${encodeURIComponent(item.ticker)}`)}>
+                        <span className="watchlist-table-ticker">{item.ticker}</span>
+                        <span className="watchlist-table-name">{item.name ?? "Unknown company"}</span>
+                      </button>
+                      <div className="watchlist-table-meta">
+                        {item.sector ? <span className="pill">{item.sector}</span> : null}
+                        <span className="pill">{item.isStale ? "Stale" : "Fresh"}</span>
+                        <span className="pill">CIK {item.cik ?? "Unknown"}</span>
+                      </div>
+                      <div className={`watchlist-table-note${item.hasNote ? " has-note" : ""}`}>
+                        {item.notePreview ?? "No local note yet. Add one from the company workspace to keep the thesis visible here."}
+                      </div>
+                    </td>
+                    <td data-label="Signals">
+                      <div className="watchlist-cell-stack">
+                        <div className="watchlist-alert-row" aria-label={`Alert summary for ${item.ticker}`}>
+                          <span className="pill">H {item.alert_summary.high}</span>
+                          <span className="pill">M {item.alert_summary.medium}</span>
+                          <span className="pill">L {item.alert_summary.low}</span>
+                          <span className="pill">T {item.alert_summary.total}</span>
+                        </div>
+                        <div className="watchlist-cell-note">{item.latest_alert?.title ?? "No current alert"}</div>
+                        <div className="watchlist-cell-detail">
+                          {item.latest_activity
+                            ? `${item.latest_activity.title}${item.latest_activity.date ? ` · ${formatDate(item.latest_activity.date)}` : ""}`
+                            : "No recent activity"}
+                        </div>
+                      </div>
+                    </td>
+                    <td data-label="Valuation" className="watchlist-number-cell">
+                      <div className="watchlist-cell-stack">
+                        <div className="watchlist-metric-line">
+                          <span>Gap</span>
+                          <strong>{formatValuationMetric(item.fair_value_gap, item.fair_value_gap_status)}</strong>
+                        </div>
+                        <div className="watchlist-metric-line">
+                          <span>Implied growth</span>
+                          <strong>{formatValuationMetric(item.implied_growth, item.implied_growth_status)}</strong>
+                        </div>
+                        <div className="watchlist-cell-detail">
+                          Coverage {item.coverage.financial_periods.toLocaleString()} periods · {item.coverage.price_points.toLocaleString()} price points
+                        </div>
+                      </div>
+                    </td>
+                    <td data-label="Quality" className="watchlist-number-cell">
+                      <div className="watchlist-cell-stack">
+                        <div className="watchlist-metric-line">
+                          <span>ROIC</span>
+                          <strong>{formatPercent(item.roic)}</strong>
+                        </div>
+                        <div className="watchlist-metric-line">
+                          <span>Shareholder yield</span>
+                          <strong>{formatPercent(item.shareholder_yield)}</strong>
+                        </div>
+                        <div className="watchlist-metric-line">
+                          <span>Balance risk</span>
+                          <strong>{formatSigned(item.balance_sheet_risk)}</strong>
+                        </div>
+                      </div>
+                    </td>
+                    <td data-label="Status">
+                      <div className="watchlist-cell-stack">
+                        <div className="watchlist-cell-note">Last checked {item.last_checked ? formatDate(item.last_checked) : "Pending"}</div>
+                        <div className="watchlist-cell-detail">{getRefreshCopy(item.isStale, item.refresh.reason)}</div>
+                        <div className="watchlist-cell-detail">{formatMarketContextStatus(item.market_context_status)}</div>
+                      </div>
+                    </td>
+                    <td data-label="Actions">
+                      <div className="watchlist-table-actions">
+                        <button type="button" className="ticker-button" onClick={() => router.push(`/company/${encodeURIComponent(item.ticker)}`)}>
+                          Workspace
+                        </button>
+                        <button type="button" className="ticker-button" onClick={() => router.push(`/company/${encodeURIComponent(item.ticker)}/models`)}>
+                          Models
+                        </button>
+                        <button
+                          type="button"
+                          className="ticker-button"
+                          onClick={() => void handleRefresh(item.ticker)}
+                          disabled={refreshingTicker === item.ticker}
+                        >
+                          {refreshingTicker === item.ticker ? "Refreshing..." : "Refresh"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="grid-empty-state watchlist-empty-state">
             <div className="grid-empty-kicker">Filtered view</div>
             <div className="grid-empty-title">No companies in this filter</div>
             <div className="grid-empty-copy">Try another filter to view additional watchlist companies.</div>
+            <div className="watchlist-empty-actions">
+              <button type="button" className="ticker-button" onClick={() => setFilter("all")}>
+                Show All Companies
+              </button>
+            </div>
           </div>
         )}
       </Panel>
