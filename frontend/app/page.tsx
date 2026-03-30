@@ -14,6 +14,13 @@ import { getGlobalMarketContext, getWatchlistSummary, resolveCompanyIdentifier, 
 import { showAppToast } from "@/lib/app-toast";
 import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
 import { formatDate, formatPercent, titleCase } from "@/lib/format";
+import {
+  readRecentCompanies,
+  recordRecentCompany,
+  subscribeRecentCompanies,
+  type RecentCompany,
+  type RecentCompanySnapshot,
+} from "@/lib/recent-companies";
 import type {
   CompanyMarketContextResponse,
   CompanyPayload,
@@ -25,23 +32,7 @@ import type {
 } from "@/lib/types";
 
 const MACRO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const RECENT_HOME_COMPANIES_STORAGE_KEY = "ft-home-recent-companies";
-const MAX_RECENT_HOME_COMPANIES = 6;
 const MAX_WATCHLIST_SUMMARY_TICKERS = 8;
-
-interface CompanyNavigationSnapshot {
-  ticker: string;
-  name?: string | null;
-  sector?: string | null;
-  market_sector?: string | null;
-}
-
-interface RecentHomeCompany {
-  ticker: string;
-  name: string | null;
-  sector: string | null;
-  openedAt: string;
-}
 
 type HomeChangeTone = "attention-high" | "attention-medium" | "live" | "success" | "error";
 
@@ -75,7 +66,7 @@ export default function HomePage() {
   const [recentJob, setRecentJob] = useState<StoredActiveJob | null>(null);
   const [macroContext, setMacroContext] = useState<CompanyMarketContextResponse | null>(null);
   const [macroError, setMacroError] = useState<string | null>(null);
-  const [recentLaunches, setRecentLaunches] = useState<RecentHomeCompany[]>([]);
+  const [recentLaunches, setRecentLaunches] = useState<RecentCompany[]>([]);
   const [watchlistSummary, setWatchlistSummary] = useState<WatchlistSummaryItemPayload[]>([]);
   const [watchlistSummaryLoading, setWatchlistSummaryLoading] = useState(false);
   const [watchlistSummaryError, setWatchlistSummaryError] = useState<string | null>(null);
@@ -105,23 +96,20 @@ export default function HomePage() {
 
   useEffect(() => {
     setRecentJob(readStoredActiveJob());
-    setRecentLaunches(readRecentHomeCompanies());
+    setRecentLaunches(readRecentCompanies());
 
     function syncRecentJob() {
       setRecentJob(readStoredActiveJob());
     }
 
-    function syncRecentLaunches(event: StorageEvent) {
-      if (!event.key || event.key === RECENT_HOME_COMPANIES_STORAGE_KEY) {
-        setRecentLaunches(readRecentHomeCompanies());
-      }
-    }
+    const unsubscribeRecentCompanies = subscribeRecentCompanies(() => {
+      setRecentLaunches(readRecentCompanies());
+    });
 
     window.addEventListener(ACTIVE_JOB_EVENT, syncRecentJob as EventListener);
-    window.addEventListener("storage", syncRecentLaunches);
     return () => {
       window.removeEventListener(ACTIVE_JOB_EVENT, syncRecentJob as EventListener);
-      window.removeEventListener("storage", syncRecentLaunches);
+      unsubscribeRecentCompanies();
     };
   }, []);
 
@@ -221,7 +209,7 @@ export default function HomePage() {
   }, [watchlistTickers]);
 
   const goToTicker = useCallback(
-    (ticker: string, destination: "company" | "models" = "company", snapshot?: CompanyNavigationSnapshot | null) => {
+    (ticker: string, destination: "company" | "models" = "company", snapshot?: RecentCompanySnapshot | null) => {
       const normalizedTicker = ticker.trim().toUpperCase();
       if (!normalizedTicker) {
         return;
@@ -233,7 +221,7 @@ export default function HomePage() {
         sector: snapshot?.sector ?? snapshot?.market_sector ?? null,
       };
 
-      setRecentLaunches(recordRecentHomeCompany(recentSnapshot));
+      setRecentLaunches(recordRecentCompany(recentSnapshot));
       if (recentSnapshot.name || recentSnapshot.sector) {
         syncMetadata(recentSnapshot);
       }
@@ -508,7 +496,7 @@ export default function HomePage() {
       <div className="home-terminal-grid">
         <Panel
           title="Recent Companies"
-          subtitle="Names launched most recently from the research entry surface."
+          subtitle="Names opened most recently across company workspaces."
           className="home-terminal-panel"
           variant="subtle"
         >
@@ -535,7 +523,7 @@ export default function HomePage() {
               ))}
             </div>
           ) : (
-            <div className="home-utility-empty">Recent launches will appear here after you open a company workspace from Home.</div>
+            <div className="home-utility-empty">Recent launches will appear here after you open a company workspace.</div>
           )}
         </Panel>
 
@@ -685,91 +673,6 @@ function getRefreshLabel(refresh: RefreshState | null | undefined, loading: bool
   }
 }
 
-function sanitizeRecentCompanyText(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
-
-function normalizeRecentHomeCompany(value: Partial<RecentHomeCompany> & { ticker?: string | null }): RecentHomeCompany | null {
-  const ticker = sanitizeRecentCompanyText(value.ticker)?.toUpperCase() ?? null;
-  if (!ticker) {
-    return null;
-  }
-
-  return {
-    ticker,
-    name: sanitizeRecentCompanyText(value.name),
-    sector: sanitizeRecentCompanyText(value.sector),
-    openedAt: sanitizeRecentCompanyText(value.openedAt) ?? new Date(0).toISOString(),
-  };
-}
-
-function readRecentHomeCompanies(): RecentHomeCompany[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  const rawValue = window.localStorage.getItem(RECENT_HOME_COMPANIES_STORAGE_KEY);
-  if (!rawValue) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(rawValue);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    const seen = new Set<string>();
-    return parsed
-      .map((item) => normalizeRecentHomeCompany(item as Partial<RecentHomeCompany>))
-      .filter((item): item is RecentHomeCompany => Boolean(item))
-      .filter((item) => {
-        if (seen.has(item.ticker)) {
-          return false;
-        }
-        seen.add(item.ticker);
-        return true;
-      })
-      .sort((left, right) => toTimestamp(right.openedAt) - toTimestamp(left.openedAt))
-      .slice(0, MAX_RECENT_HOME_COMPANIES);
-  } catch {
-    window.localStorage.removeItem(RECENT_HOME_COMPANIES_STORAGE_KEY);
-    return [];
-  }
-}
-
-function writeRecentHomeCompanies(companies: RecentHomeCompany[]) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem(RECENT_HOME_COMPANIES_STORAGE_KEY, JSON.stringify(companies));
-}
-
-function recordRecentHomeCompany(snapshot: CompanyNavigationSnapshot): RecentHomeCompany[] {
-  const normalizedTicker = sanitizeRecentCompanyText(snapshot.ticker)?.toUpperCase() ?? null;
-  if (!normalizedTicker) {
-    return readRecentHomeCompanies();
-  }
-
-  const current = readRecentHomeCompanies();
-  const existing = current.find((item) => item.ticker === normalizedTicker) ?? null;
-  const nextEntry: RecentHomeCompany = {
-    ticker: normalizedTicker,
-    name: sanitizeRecentCompanyText(snapshot.name) ?? existing?.name ?? null,
-    sector: sanitizeRecentCompanyText(snapshot.sector ?? snapshot.market_sector) ?? existing?.sector ?? null,
-    openedAt: new Date().toISOString(),
-  };
-  const nextCompanies = [nextEntry, ...current.filter((item) => item.ticker !== normalizedTicker)].slice(0, MAX_RECENT_HOME_COMPANIES);
-  writeRecentHomeCompanies(nextCompanies);
-  return nextCompanies;
-}
-
 function buildRecentChangeFeed(summaryItems: WatchlistSummaryItemPayload[], consoleEntries: ConsoleEntry[]): HomeChangeItem[] {
   const watchlistChanges = summaryItems.flatMap((item) => {
     const changes: HomeChangeItem[] = [];
@@ -805,11 +708,11 @@ function buildRecentChangeFeed(summaryItems: WatchlistSummaryItemPayload[], cons
 
   const streamChanges = consoleEntries.map((entry) => ({
     id: `console-${entry.id}`,
-    ticker: sanitizeRecentCompanyText(entry.ticker)?.toUpperCase() ?? null,
+    ticker: entry.ticker?.trim().toUpperCase() || null,
     name: null,
     label: entry.level === "error" ? "Pipeline issue" : entry.status === "completed" ? "Refresh complete" : titleCase(entry.stage),
     title: entry.message,
-    detail: [sanitizeRecentCompanyText(entry.ticker)?.toUpperCase() ?? null, entry.kind ? titleCase(entry.kind) : null, entry.trace_id ? `#${entry.trace_id.slice(0, 8)}` : null]
+    detail: [entry.ticker?.trim().toUpperCase() || null, entry.kind ? titleCase(entry.kind) : null, entry.trace_id ? `#${entry.trace_id.slice(0, 8)}` : null]
       .filter(Boolean)
       .join(" · ") || "Background refresh",
     date: entry.timestamp,

@@ -78,6 +78,156 @@ const diagnostics = {
   reconciliation_disagreement_count: 0,
 } as const;
 
+const globalMarketContext = {
+  provenance: [],
+  as_of: "2026-05-08",
+  last_refreshed_at: "2026-05-08T00:00:00Z",
+  source_mix: {
+    source_ids: ["treasury", "fred"],
+    source_tiers: ["official_treasury_or_fed", "official_statistical"],
+    primary_source_ids: ["treasury", "fred"],
+    fallback_source_ids: [],
+    official_only: true,
+  },
+  confidence_flags: [],
+  company: null,
+  status: "ready",
+  curve_points: [
+    { tenor: "10y", rate: 0.043, observation_date: "2026-05-08" },
+    { tenor: "2y", rate: 0.04, observation_date: "2026-05-08" },
+    { tenor: "3m", rate: 0.047, observation_date: "2026-05-08" },
+  ],
+  slope_2s10s: {
+    label: "2s10s",
+    value: 0.003,
+    short_tenor: "2y",
+    long_tenor: "10y",
+    observation_date: "2026-05-08",
+  },
+  slope_3m10y: {
+    label: "3m10y",
+    value: -0.004,
+    short_tenor: "3m",
+    long_tenor: "10y",
+    observation_date: "2026-05-08",
+  },
+  fred_series: [
+    {
+      series_id: "BAA10Y",
+      label: "BAA spread",
+      category: "credit",
+      units: "ratio",
+      value: 0.021,
+      observation_date: "2026-05-08",
+      state: "fresh",
+    },
+    {
+      series_id: "UNRATE",
+      label: "Unemployment",
+      category: "labor",
+      units: "ratio",
+      value: 0.041,
+      observation_date: "2026-05-08",
+      state: "fresh",
+    },
+  ],
+  provenance_details: null,
+  fetched_at: "2026-05-08T00:00:00Z",
+  refresh,
+} as const;
+
+const watchlistSummaryCompanies = [
+  {
+    ticker: "MSFT",
+    name: "Microsoft",
+    sector: "Technology",
+    cik: "0000789019",
+    last_checked: "2026-05-08T00:00:00Z",
+    refresh,
+    alert_summary: { high: 1, medium: 0, low: 0, total: 1 },
+    latest_alert: {
+      id: "alert-msft-1",
+      level: "high",
+      title: "Late filer notice",
+      source: "filings",
+      date: "2026-05-08",
+      href: null,
+    },
+    latest_activity: {
+      id: "activity-msft-1",
+      type: "filing",
+      badge: "8-K",
+      title: "8-K filed",
+      date: "2026-05-07",
+      href: null,
+    },
+    coverage: { financial_periods: 8, price_points: 250 },
+    fair_value_gap: 0.08,
+    roic: 0.21,
+    shareholder_yield: 0.025,
+    implied_growth: 0.09,
+    valuation_band_percentile: 0.58,
+    balance_sheet_risk: 1.8,
+  },
+  {
+    ticker: "NVDA",
+    name: "NVIDIA",
+    sector: "Technology",
+    cik: "0001045810",
+    last_checked: "2026-05-08T00:00:00Z",
+    refresh,
+    alert_summary: { high: 0, medium: 1, low: 0, total: 1 },
+    latest_alert: {
+      id: "alert-nvda-1",
+      level: "medium",
+      title: "Valuation stretched",
+      source: "models",
+      date: "2026-05-08",
+      href: null,
+    },
+    latest_activity: {
+      id: "activity-nvda-1",
+      type: "event",
+      badge: "Update",
+      title: "Guidance commentary updated",
+      date: "2026-05-06",
+      href: null,
+    },
+    coverage: { financial_periods: 8, price_points: 250 },
+    fair_value_gap: -0.06,
+    roic: 0.28,
+    shareholder_yield: 0.01,
+    implied_growth: 0.12,
+    valuation_band_percentile: 0.81,
+    balance_sheet_risk: 1.2,
+  },
+] as const;
+
+const homeLocalUserData = {
+  watchlist: [
+    { ticker: "MSFT", name: "Microsoft", sector: "Technology", savedAt: "2026-05-01T00:00:00.000Z" },
+    { ticker: "NVDA", name: "NVIDIA", sector: "Technology", savedAt: "2026-05-02T00:00:00.000Z" },
+  ],
+  notes: {
+    MSFT: {
+      ticker: "MSFT",
+      name: "Microsoft",
+      sector: "Technology",
+      note: "Track Azure bookings and capital return mix.",
+      updatedAt: "2026-05-08T00:00:00.000Z",
+    },
+  },
+} as const;
+
+const homeRecentCompanies = [
+  {
+    ticker: "AAPL",
+    name: "Apple Inc.",
+    sector: "Technology",
+    openedAt: "2026-05-07T10:00:00.000Z",
+  },
+] as const;
+
 const financials = [
   {
     filing_type: "10-K",
@@ -380,6 +530,19 @@ async function installCompanyWorkspaceMocks(page: Page) {
     const path = url.pathname;
     const peersParam = url.searchParams.get("peers");
     const selectedPeers = peersParam ? peersParam.split(",").filter(Boolean) : ["MSFT"];
+
+    if (path.endsWith("/market-context")) {
+      return json(route, globalMarketContext);
+    }
+
+    if (path.endsWith("/watchlist/summary")) {
+      const body = route.request().postDataJSON() as { tickers?: string[] } | null;
+      const requestedTickers = (body?.tickers ?? []).map((item) => item.trim().toUpperCase());
+      return json(route, {
+        tickers: requestedTickers,
+        companies: watchlistSummaryCompanies.filter((item) => requestedTickers.includes(item.ticker)),
+      });
+    }
 
     if (path.endsWith(`/companies/${ticker}/financials`)) {
       return json(route, {
@@ -958,6 +1121,43 @@ async function installCompanyWorkspaceMocks(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await installCompanyWorkspaceMocks(page);
+});
+
+test("home research-entry smoke", async ({ page }) => {
+  await page.addInitScript(
+    ({ localUserData, recentCompanies }) => {
+      window.localStorage.setItem("ft-local-user-data", JSON.stringify(localUserData));
+      window.localStorage.setItem("ft-home-recent-companies", JSON.stringify(recentCompanies));
+      window.sessionStorage.clear();
+    },
+    { localUserData: homeLocalUserData, recentCompanies: homeRecentCompanies }
+  );
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Start with a company, then move into evidence." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Companies" })).toBeVisible();
+  await expect(page.getByText("Apple Inc.")).toBeVisible();
+  await expect(page.getByText("Saved & Watchlist")).toBeVisible();
+  await expect(page.getByText("Track Azure bookings and capital return mix.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent Changes" })).toBeVisible();
+  await expect(page.getByText("Late filer notice").first()).toBeVisible();
+  await expect(page.getByText("Curve still looks restrictive")).toBeVisible();
+});
+
+test("home reflects recent company visits from company routes", async ({ page }) => {
+  await page.goto(`/company/${ticker.toLowerCase()}`);
+  await expect(page.getByRole("heading", { name: "Acme Corporation", exact: true })).toBeVisible();
+
+  await page.waitForFunction(() => {
+    const recentCompanies = JSON.parse(window.localStorage.getItem("ft-home-recent-companies") ?? "[]");
+    return Array.isArray(recentCompanies) && recentCompanies.some((item) => item?.ticker === "ACME");
+  });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "Recent Companies" })).toBeVisible();
+  await expect(page.getByText("Acme Corporation")).toBeVisible();
 });
 
 test("research brief smoke", async ({ page }) => {

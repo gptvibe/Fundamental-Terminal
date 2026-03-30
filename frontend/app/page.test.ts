@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import HomePage from "@/app/page";
+import { RECENT_COMPANIES_STORAGE_KEY } from "@/lib/recent-companies";
 
 const push = vi.fn();
 const mockUseLocalUserData = vi.fn();
@@ -95,7 +96,7 @@ afterEach(() => {
 describe("HomePage", () => {
   it("renders the search-first terminal with recent, saved, change, and macro context", async () => {
     window.localStorage.setItem(
-      "ft-home-recent-companies",
+      RECENT_COMPANIES_STORAGE_KEY,
       JSON.stringify([
         {
           ticker: "AAPL",
@@ -229,7 +230,7 @@ describe("HomePage", () => {
       expect(push).toHaveBeenCalledWith("/company/MSFT");
     });
 
-    const recentCompanies = JSON.parse(window.localStorage.getItem("ft-home-recent-companies") ?? "[]");
+    const recentCompanies = JSON.parse(window.localStorage.getItem(RECENT_COMPANIES_STORAGE_KEY) ?? "[]");
     expect(recentCompanies[0]).toMatchObject({ ticker: "MSFT", name: "Microsoft Corp." });
     expect(syncMetadata).toHaveBeenCalledWith({ ticker: "MSFT", name: "Microsoft Corp.", sector: "Technology" });
   });

@@ -11,6 +11,7 @@ import {
   invalidateApiReadCacheForTicker,
   refreshCompany,
 } from "@/lib/api";
+import { recordRecentCompany } from "@/lib/recent-companies";
 import type {
   CompanyFinancialsResponse,
   CompanyInsiderTradesResponse,
@@ -290,6 +291,18 @@ export function useCompanyWorkspace(
         institutionalData?.company?.last_checked_institutional ?? baseCompany.last_checked_institutional,
     };
   }, [data?.company, insiderData?.company, institutionalData?.company]);
+
+  useEffect(() => {
+    if (!mergedCompany?.ticker) {
+      return;
+    }
+
+    recordRecentCompany({
+      ticker: mergedCompany.ticker,
+      name: mergedCompany.name,
+      sector: mergedCompany.sector ?? mergedCompany.market_sector ?? null,
+    });
+  }, [mergedCompany?.market_sector, mergedCompany?.name, mergedCompany?.sector, mergedCompany?.ticker]);
 
   return {
     data,
