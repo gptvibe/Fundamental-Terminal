@@ -20,17 +20,18 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
-import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
+import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
+import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
   marketContextData: CompanyMarketContextResponse;
   sectorContextData: CompanySectorContextResponse;
+  capitalStructureData: CompanyCapitalStructureResponse;
   evaluationData: ModelEvaluationResponse;
   activeJobId: string | null;
 }
@@ -67,6 +68,7 @@ export default function CompanyModelsPage() {
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
   const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
   const [sectorContextData, setSectorContextData] = useState<CompanySectorContextResponse | null>(null);
+  const [capitalStructureData, setCapitalStructureData] = useState<CompanyCapitalStructureResponse | null>(null);
   const [evaluationData, setEvaluationData] = useState<ModelEvaluationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +81,9 @@ export default function CompanyModelsPage() {
   const models = useMemo(() => data?.models ?? [], [data?.models]);
   const hasModels = models.length > 0;
   const strictOfficialMode = Boolean(data?.company?.strict_official_mode ?? financialData?.company?.strict_official_mode);
+  const showMarketContext = hasMeaningfulMarketContext(marketContextData);
+  const showSectorContext = Boolean((sectorContextData?.plugins ?? []).length);
+  const showCapitalStructure = Boolean(capitalStructureData?.latest);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +99,7 @@ export default function CompanyModelsPage() {
           setFinancialData(workspaceData.financialData);
           setMarketContextData(workspaceData.marketContextData);
           setSectorContextData(workspaceData.sectorContextData);
+          setCapitalStructureData(workspaceData.capitalStructureData);
           setEvaluationData(workspaceData.evaluationData);
           setActiveJobId(workspaceData.activeJobId);
         }
@@ -137,6 +143,7 @@ export default function CompanyModelsPage() {
         setFinancialData(workspaceData.financialData);
         setMarketContextData(workspaceData.marketContextData);
         setSectorContextData(workspaceData.sectorContextData);
+        setCapitalStructureData(workspaceData.capitalStructureData);
         setEvaluationData(workspaceData.evaluationData);
         setActiveJobId(workspaceData.activeJobId);
       })
@@ -176,6 +183,7 @@ export default function CompanyModelsPage() {
         setFinancialData(workspaceData.financialData);
         setMarketContextData(workspaceData.marketContextData);
         setSectorContextData(workspaceData.sectorContextData);
+        setCapitalStructureData(workspaceData.capitalStructureData);
         setEvaluationData(workspaceData.evaluationData);
         setActiveJobId(workspaceData.activeJobId);
 
@@ -411,59 +419,13 @@ export default function CompanyModelsPage() {
         />
       </Panel>
 
-      <div className="models-scan-grid models-page-span-full">
-        <Panel title="Financial Health Score" subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"} variant="subtle">
-          <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
-        </Panel>
-
-        <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" variant="subtle">
-          <SourceFreshnessSummary
-            provenance={data?.provenance}
-            asOf={data?.as_of}
-            lastRefreshedAt={data?.last_refreshed_at}
-            sourceMix={data?.source_mix}
-            confidenceFlags={data?.confidence_flags}
-          />
-        </Panel>
-      </div>
-
       <Panel
-        variant="subtle"
-        title="Model Evaluation Harness"
-        subtitle="Latest persisted backtest run for calibration, stability, and error drift across the valuation stack"
+        title="Financial Health Score"
+        subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"}
         className="models-page-span-full"
-      >
-        <ModelEvaluationPanel evaluation={evaluationData} />
-      </Panel>
-
-      <Panel
         variant="subtle"
-        title="Macro Demand & Cost Context"
-        subtitle="Company-relevant official Census, BEA, and BLS indicators for cyclical demand, cost pressure, and labor tightness"
-        className="models-page-span-full"
       >
-        <MarketContextPanel context={marketContextData} />
-      </Panel>
-
-      <Panel
-        variant="subtle"
-        title="Sector Exposure Context"
-        subtitle="Official sector plug-ins for power, housing, airlines, air cargo, and agricultural supply-demand exposures"
-        className="models-page-span-full"
-      >
-        <SectorContextPanel context={sectorContextData} />
-      </Panel>
-
-      <Panel
-        variant="subtle"
-        title="Capital Structure Intelligence"
-        subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
-        className="models-page-span-full"
-      >
-        <CapitalStructureIntelligencePanel
-          ticker={ticker}
-          reloadKey={data?.last_refreshed_at ?? financialData?.last_refreshed_at ?? activeJobId}
-        />
+        <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
       </Panel>
 
       <Panel title="Valuation Scenario Ranges" subtitle={loading ? "Loading valuation scenario inputs..." : strictOfficialMode ? "Interactive DCF and residual-income ranges with price-linked reverse DCF withheld in strict mode" : "Editable bear, base, and bull ranges across DCF, reverse DCF, and residual income"} className="models-page-span-full" variant="subtle">
@@ -484,6 +446,62 @@ export default function CompanyModelsPage() {
             <ModelDashboard models={models} />
           </DeferredClientSection>
         ) : <div className="text-muted">No model results yet. Once financial data is ready, this page will fill in automatically.</div>}
+      </Panel>
+
+      <Panel
+        variant="subtle"
+        title="Model Evaluation Harness"
+        subtitle="Latest persisted backtest run for calibration, stability, and error drift across the valuation stack"
+        className="models-page-span-full"
+      >
+        <ModelEvaluationPanel evaluation={evaluationData} />
+      </Panel>
+
+      {showMarketContext ? (
+        <Panel
+          variant="subtle"
+          title="Macro Exposure Context"
+          subtitle="Official indicators selected from the company's mapped demand, cost, inventory, and rate exposures"
+          className="models-page-span-full"
+        >
+          <MarketContextPanel context={marketContextData} />
+        </Panel>
+      ) : null}
+
+      {showCapitalStructure ? (
+        <Panel
+          variant="subtle"
+          title="Capital Structure Intelligence"
+          subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
+          className="models-page-span-full"
+        >
+          <CapitalStructureIntelligencePanel
+            ticker={ticker}
+            reloadKey={data?.last_refreshed_at ?? financialData?.last_refreshed_at ?? activeJobId}
+            initialPayload={capitalStructureData}
+          />
+        </Panel>
+      ) : null}
+
+      {showSectorContext ? (
+        <Panel
+          variant="subtle"
+          title="Sector Exposure Context"
+          subtitle="Official sector plug-ins for power, housing, airlines, air cargo, and agricultural supply-demand exposures"
+          className="models-page-span-full"
+        >
+          <SectorContextPanel context={sectorContextData} />
+        </Panel>
+      ) : null}
+
+      <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" className="models-page-span-full" variant="subtle">
+        <SourceFreshnessSummary
+          provenance={data?.provenance}
+          asOf={data?.as_of}
+          lastRefreshedAt={data?.last_refreshed_at}
+          sourceMix={data?.source_mix}
+          confidenceFlags={data?.confidence_flags}
+        />
       </Panel>
 
       <details className="subtle-details models-page-span-full">
@@ -522,11 +540,12 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData, marketContextData, sectorContextData, evaluationData] = await Promise.all([
+  const [modelData, financialData, marketContextData, sectorContextData, capitalStructureData, evaluationData] = await Promise.all([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
     getCompanyMarketContext(ticker),
     getCompanySectorContext(ticker),
+    getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
     getLatestModelEvaluation(),
   ]);
 
@@ -535,9 +554,32 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     financialData,
     marketContextData,
     sectorContextData,
+    capitalStructureData,
     evaluationData,
-    activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id
+    activeJobId:
+      modelData.refresh.job_id ??
+      financialData.refresh.job_id ??
+      capitalStructureData.refresh.job_id ??
+      marketContextData.refresh.job_id ??
+      sectorContextData.refresh.job_id
   };
+}
+
+function hasMeaningfulMarketContext(context: CompanyMarketContextResponse | null): boolean {
+  if (!context) {
+    return false;
+  }
+
+  return Boolean(
+    hasRenderableMacroItems(context.relevant_indicators) ||
+      hasRenderableMacroItems(context.cyclical_demand) ||
+      hasRenderableMacroItems(context.cyclical_costs) ||
+      (context.sector_exposure ?? []).length
+  );
+}
+
+function hasRenderableMacroItems(items: Array<{ status: string; value: number | null }> | null | undefined): boolean {
+  return Boolean(items?.some((item) => item.status === "ok" && item.value != null));
 }
 
 function asNumber(value: unknown): number | null {

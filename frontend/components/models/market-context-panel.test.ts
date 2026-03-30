@@ -123,6 +123,7 @@ describe("MarketContextPanel", () => {
               status: "ok",
             },
           ],
+          sector_exposure: ["capex_cycle", "rate_sensitive"],
         },
       })
     );
@@ -134,9 +135,11 @@ describe("MarketContextPanel", () => {
     expect(screen.getByText("4M")).toBeTruthy();
     expect(screen.getByText("U.S. Treasury Daily Par Yield Curve")).toBeTruthy();
     expect(screen.getByText("market context partial")).toBeTruthy();
-    expect(screen.getByText("Relevant Cyclical Indicators")).toBeTruthy();
+    expect(screen.getByText("Why this appears")).toBeTruthy();
+    expect(screen.getByText("Capex Cycle")).toBeTruthy();
+    expect(screen.getByText("Rate Sensitive")).toBeTruthy();
     expect(screen.getByText("Cyclical Demand")).toBeTruthy();
-    expect(screen.getAllByText("Manufacturing New Orders (M3)")).toHaveLength(2);
+    expect(screen.getAllByText("Manufacturing New Orders (M3)")).toHaveLength(1);
   });
 
   it("treats missing provenance details as FRED unavailable", () => {
@@ -170,6 +173,7 @@ describe("MarketContextPanel", () => {
           cyclical_demand: [],
           cyclical_costs: [],
           relevant_indicators: [],
+          sector_exposure: [],
         },
       })
     );

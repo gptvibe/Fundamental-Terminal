@@ -156,6 +156,12 @@ describe("ValuationScenarioWorkbench", () => {
     expect(screen.getAllByText("revenue").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Revenue Growth")).toBeTruthy();
 
+    fireEvent.click(screen.getByRole("tab", { name: /^Reverse DCFSupported$/i }));
+
+    expect(screen.getByText("Implied growth range")).toBeTruthy();
+    expect(screen.getByLabelText("Free Cash Flow Margin")).toBeTruthy();
+    expect(screen.getByText("Price Anchor")).toBeTruthy();
+
     fireEvent.click(screen.getByRole("tab", { name: /^Residual IncomeSupported$/i }));
 
     expect(screen.getByText("Residual income bear / base / bull range")).toBeTruthy();

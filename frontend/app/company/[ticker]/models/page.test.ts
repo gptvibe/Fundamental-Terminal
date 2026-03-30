@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CompanyModelsPage from "@/app/company/[ticker]/models/page";
-import { getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation } from "@/lib/api";
+import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 
 vi.mock("next/navigation", () => ({
@@ -53,6 +53,7 @@ vi.mock("@/components/models/sector-context-panel", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  getCompanyCapitalStructure: vi.fn(),
   getCompanyModels: vi.fn(),
   getCompanyFinancials: vi.fn(),
   getCompanyMarketContext: vi.fn(),
@@ -229,6 +230,33 @@ describe("CompanyModelsPage", () => {
       confidence_flags: [],
       refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
     });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
+      company: null,
+      latest: null,
+      history: [],
+      last_capital_structure_check: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: ["capital_structure_missing"],
+      refresh: { triggered: false, reason: "missing", ticker: "ACME", job_id: null },
+      diagnostics: {
+        coverage_ratio: null,
+        fallback_ratio: null,
+        stale_flags: [],
+        parser_confidence: null,
+        missing_field_flags: ["capital_structure_missing"],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
+    });
     vi.mocked(getLatestModelEvaluation).mockResolvedValue({
       run: {
         id: 12,
@@ -294,14 +322,18 @@ describe("CompanyModelsPage", () => {
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
     expect(screen.getByText("Model Evaluation Harness")).toBeTruthy();
-    expect(screen.getByText("Macro Demand & Cost Context")).toBeTruthy();
-    expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
-    expect(screen.getByText("market-context-panel")).toBeTruthy();
+    expect(screen.queryByText("Macro Exposure Context")).toBeNull();
+    expect(screen.queryByText("Capital Structure Intelligence")).toBeNull();
+    expect(screen.queryByText("Sector Exposure Context")).toBeNull();
+    expect(screen.queryByText("market-context-panel")).toBeNull();
     expect(screen.getByText(/Suite historical_fixture_v1/i)).toBeTruthy();
     expect(screen.getByText("Fundamental Terminal Model Engine")).toBeTruthy();
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
     expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
     expect(screen.getByText(/Price-sensitive valuation outputs on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
+
+    const panelHeadings = Array.from(document.querySelectorAll("section > h2"), (node) => node.textContent ?? "");
+    expect(panelHeadings.indexOf("Source & Freshness")).toBeGreaterThan(panelHeadings.indexOf("Model Analytics"));
   });
 
   it("explains strict official mode when commercial price inputs are disabled", async () => {
@@ -436,6 +468,33 @@ describe("CompanyModelsPage", () => {
       },
       confidence_flags: [],
       refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
+      company: null,
+      latest: null,
+      history: [],
+      last_capital_structure_check: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: ["capital_structure_missing"],
+      refresh: { triggered: false, reason: "missing", ticker: "ACME", job_id: null },
+      diagnostics: {
+        coverage_ratio: null,
+        fallback_ratio: null,
+        stale_flags: [],
+        parser_confidence: null,
+        missing_field_flags: ["capital_structure_missing"],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
     });
     vi.mocked(getLatestModelEvaluation).mockResolvedValue({
       run: null,

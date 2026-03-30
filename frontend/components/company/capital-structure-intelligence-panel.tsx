@@ -20,17 +20,19 @@ interface CapitalStructureIntelligencePanelProps {
   ticker: string;
   reloadKey?: string | null;
   maxPeriods?: number;
+  initialPayload?: CompanyCapitalStructureResponse | null;
 }
 
 export function CapitalStructureIntelligencePanel({
   ticker,
   reloadKey,
   maxPeriods = 6,
+  initialPayload = null,
 }: CapitalStructureIntelligencePanelProps) {
-  const [payload, setPayload] = useState<CompanyCapitalStructureResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [payload, setPayload] = useState<CompanyCapitalStructureResponse | null>(initialPayload);
+  const [loading, setLoading] = useState(initialPayload === null);
   const [error, setError] = useState<string | null>(null);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(initialPayload?.refresh.job_id ?? null);
   const { lastEvent } = useJobStream(activeJobId);
 
   const loadCapitalStructure = useCallback(
@@ -55,8 +57,19 @@ export function CapitalStructureIntelligencePanel({
   );
 
   useEffect(() => {
-    void loadCapitalStructure(true);
-  }, [loadCapitalStructure, reloadKey]);
+    if (!initialPayload) {
+      return;
+    }
+
+    setPayload(initialPayload);
+    setLoading(false);
+    setError(null);
+    setActiveJobId(initialPayload.refresh.job_id);
+  }, [initialPayload]);
+
+  useEffect(() => {
+    void loadCapitalStructure(initialPayload === null);
+  }, [initialPayload, loadCapitalStructure, reloadKey]);
 
   useEffect(() => {
     if (!activeJobId || !lastEvent) {

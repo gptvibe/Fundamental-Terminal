@@ -4545,6 +4545,7 @@ select {
 
 .dcf-summary-card {
   position: relative;
+  min-width: 0;
   overflow: hidden;
   padding: 14px 16px;
   border-radius: var(--radius);
@@ -4604,6 +4605,7 @@ select {
 .valuation-trace-card,
 .valuation-diagnostics-card {
   display: grid;
+  min-width: 0;
   gap: 12px;
   padding: 14px;
   border-radius: var(--radius);
@@ -4632,7 +4634,9 @@ select {
 
 .valuation-card-subtitle {
   font-size: 0.84rem;
+  line-height: 1.5;
   color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 .valuation-tab-bar {
@@ -4666,7 +4670,7 @@ select {
 
 .valuation-workbench-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 0.82fr) minmax(0, 1.18fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap: 16px;
   align-items: start;
 }
@@ -4690,15 +4694,26 @@ select {
 
 .valuation-range-row {
   display: grid;
+  min-width: 0;
   gap: 8px;
 }
 
 .valuation-range-labels {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 12px;
   font-size: 0.84rem;
   color: var(--text-soft);
+}
+
+.valuation-range-labels span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.valuation-range-labels span:last-child {
+  text-align: right;
 }
 
 .valuation-range-track {
@@ -4797,7 +4812,20 @@ select {
   margin-top: 8px;
   font-family: var(--mono);
   font-size: 1rem;
+  line-height: 1.35;
   color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .valuation-range-labels {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .valuation-range-labels span:last-child {
+    text-align: left;
+  }
 }
 
 .health-score-shell {

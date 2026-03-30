@@ -22,6 +22,8 @@ export function MarketContextPanel({ context }: MarketContextPanelProps) {
   const relevantIndicators = (context.relevant_indicators ?? []).filter((item) => item.value != null && item.status === "ok");
   const cyclicalDemand = (context.cyclical_demand ?? []).filter((item) => item.value != null && item.status === "ok");
   const cyclicalCosts = (context.cyclical_costs ?? []).filter((item) => item.value != null && item.status === "ok");
+  const sectorExposure = (context.sector_exposure ?? []).map(formatExposureLabel);
+  const showMappedIndicators = relevantIndicators.length > 0 && !cyclicalDemand.length && !cyclicalCosts.length;
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -32,6 +34,17 @@ export function MarketContextPanel({ context }: MarketContextPanelProps) {
         sourceMix={context.source_mix}
         confidenceFlags={context.confidence_flags}
       />
+
+      {sectorExposure.length ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>Why this appears</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {sectorExposure.map((exposure) => (
+              <span key={exposure} className="pill">{exposure}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <span className="pill">Status: {normalizeStatus(context.status)}</span>
@@ -80,9 +93,9 @@ export function MarketContextPanel({ context }: MarketContextPanelProps) {
         </div>
       </div>
 
-      {relevantIndicators.length ? (
+      {showMappedIndicators ? (
         <div style={{ display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 600, color: "var(--text)" }}>Relevant Cyclical Indicators</div>
+          <div style={{ fontWeight: 600, color: "var(--text)" }}>Mapped Indicators</div>
           <div style={{ display: "grid", gap: 8 }}>
             {relevantIndicators.map((item) => (
               <div key={item.series_id} className="filing-link-card" style={{ display: "grid", gap: 6 }}>
@@ -146,6 +159,14 @@ function MetricCard({ label, value, detail }: { label: string; value: string; de
 function tenorRank(tenor: string): number {
   const index = CURVE_ORDER.indexOf(tenor.toLowerCase());
   return index === -1 ? CURVE_ORDER.length : index;
+}
+
+function formatExposureLabel(exposure: string): string {
+  return exposure
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function formatTenor(tenor: string): string {
