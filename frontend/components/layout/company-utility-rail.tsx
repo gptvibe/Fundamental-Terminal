@@ -29,6 +29,7 @@ interface CompanyUtilityRailProps {
   consoleEntries: ConsoleEntry[];
   connectionState: ConnectionState;
   actionTone?: "green" | "gold";
+  presentation?: "default" | "brief";
   children?: ReactNode;
 }
 
@@ -47,6 +48,7 @@ export function CompanyUtilityRail({
   statusLines,
   consoleEntries,
   connectionState,
+  presentation = "default",
   children,
 }: CompanyUtilityRailProps) {
   const effectiveState =
@@ -61,10 +63,23 @@ export function CompanyUtilityRail({
     (Boolean(effectiveState.triggered && effectiveState.job_id) &&
       connectionState !== "idle" &&
       connectionState !== "error");
+  const secondaryPanels = presentation === "brief"
+    ? (
+        <>
+          {children}
+          <CompanyDevicePanel ticker={ticker} companyName={companyName} sector={sector} />
+        </>
+      )
+    : (
+        <>
+          <CompanyDevicePanel ticker={ticker} companyName={companyName} sector={sector} />
+          {children}
+        </>
+      );
 
   return (
-    <div className="company-utility-stack">
-      <Panel title="Actions" variant="subtle">
+    <div className={`company-utility-stack${presentation === "brief" ? " company-utility-stack-brief" : ""}`}>
+      <Panel title={presentation === "brief" ? "Brief Actions" : "Actions"} variant="subtle">
         <div className="utility-action-bar">
           <div className="utility-action-item">
             <StatusPill state={effectiveState} />
@@ -96,9 +111,17 @@ export function CompanyUtilityRail({
             </div>
           ) : null}
         </div>
+
+        {presentation === "brief" && statusLines?.length ? (
+          <div className="utility-status-quiet" aria-label="Brief data status">
+            {statusLines.map((line, index) => (
+              <div key={index} className="utility-status-quiet-line">{line}</div>
+            ))}
+          </div>
+        ) : null}
       </Panel>
 
-      {statusLines?.length ? (
+      {presentation !== "brief" && statusLines?.length ? (
         <Panel title="Data Status" variant="subtle">
           <div className="utility-status-stack">
             {statusLines.map((line, index) => (
@@ -108,13 +131,13 @@ export function CompanyUtilityRail({
         </Panel>
       ) : null}
 
-      <CompanyDevicePanel ticker={ticker} companyName={companyName} sector={sector} />
+      {secondaryPanels}
 
-      {children}
-
-      <Panel title="Console" variant="subtle">
-        <StatusConsole entries={consoleEntries} connectionState={connectionState} />
-      </Panel>
+      {presentation !== "brief" ? (
+        <Panel title="Console" variant="subtle">
+          <StatusConsole entries={consoleEntries} connectionState={connectionState} />
+        </Panel>
+      ) : null}
     </div>
   );
 }

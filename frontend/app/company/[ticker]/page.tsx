@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
@@ -8,312 +9,1437 @@ import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
-import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
+import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
 import { Panel } from "@/components/ui/panel";
-import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyActivityOverview } from "@/lib/api";
-import { formatCompactNumber, formatDate } from "@/lib/format";
-import type { CompanyActivityOverviewResponse } from "@/lib/types";
+import {
+  getCompanyActivityOverview,
+  getCompanyBeneficialOwnershipSummary,
+  getCompanyCapitalMarketsSummary,
+  getCompanyCapitalStructure,
+  getCompanyChangesSinceLastFiling,
+  getCompanyEarningsSummary,
+  getCompanyGovernanceSummary,
+  getCompanyModels,
+  getCompanyPeers,
+} from "@/lib/api";
+import { MODEL_NAMES } from "@/lib/constants";
+import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
+import type {
+  CompanyActivityOverviewResponse,
+  CompanyBeneficialOwnershipSummaryResponse,
+  CompanyCapitalMarketsSummaryResponse,
+  CompanyCapitalStructureResponse,
+  CompanyChangesSinceLastFilingResponse,
+  CompanyEarningsSummaryResponse,
+  CompanyGovernanceSummaryResponse,
+  CompanyModelsResponse,
+  CompanyPeersResponse,
+  FinancialPayload,
+  InsiderActivitySummaryPayload,
+  InstitutionalHoldingPayload,
+  ProvenanceEntryPayload,
+  RefreshState,
+  SourceMixPayload,
+} from "@/lib/types";
 
 const PriceFundamentalsModule = dynamic(
   () => import("@/components/charts/price-fundamentals-module").then((module) => module.PriceFundamentalsModule),
-  { ssr: false }
-);
-const CashFlowWaterfallChart = dynamic(
-  () => import("@/components/charts/cash-flow-waterfall-chart").then((module) => module.CashFlowWaterfallChart),
-  { ssr: false }
-);
-const LiquidityCapitalChart = dynamic(
-  () => import("@/components/charts/liquidity-capital-chart").then((module) => module.LiquidityCapitalChart),
-  { ssr: false }
-);
-const ShareDilutionTrackerChart = dynamic(
-  () => import("@/components/charts/share-dilution-tracker-chart").then((module) => module.ShareDilutionTrackerChart),
-  { ssr: false }
+  { ssr: false, loading: () => <div className="text-muted">Loading price and fundamentals...</div> }
 );
 const BusinessSegmentBreakdown = dynamic(
   () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
-  { ssr: false }
-);
-const FinancialHistorySection = dynamic(
-  () => import("@/components/company/financial-history-section").then((module) => module.FinancialHistorySection),
-  { ssr: false }
+  { ssr: false, loading: () => <div className="text-muted">Loading segment breakdown...</div> }
 );
 const ChangesSinceLastFilingCard = dynamic(
   () => import("@/components/company/changes-since-last-filing-card").then((module) => module.ChangesSinceLastFilingCard),
   { ssr: false, loading: () => <div className="text-muted">Loading filing comparison...</div> }
 );
-const MetricsExplorerPanel = dynamic(
-  () => import("@/components/company/metrics-explorer-panel").then((module) => module.MetricsExplorerPanel),
-  { ssr: false }
+const CashFlowWaterfallChart = dynamic(
+  () => import("@/components/charts/cash-flow-waterfall-chart").then((module) => module.CashFlowWaterfallChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading cash flow bridge...</div> }
 );
-const PeerComparisonDashboard = dynamic(
-  () => import("@/components/peers/peer-comparison-dashboard").then((module) => module.PeerComparisonDashboard),
-  { ssr: false }
+const MarginTrendChart = dynamic(
+  () => import("@/components/charts/margin-trend-chart").then((module) => module.MarginTrendChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading margin trends...</div> }
 );
-const CompanyVisualizationLab = dynamic(
-  () => import("@/components/charts/company-visualization-lab").then((module) => module.CompanyVisualizationLab),
-  { ssr: false }
+const FinancialQualitySummary = dynamic(
+  () => import("@/components/company/financial-quality-summary").then((module) => module.FinancialQualitySummary),
+  { ssr: false, loading: () => <div className="text-muted">Loading quality summary...</div> }
+);
+const ShareDilutionTrackerChart = dynamic(
+  () => import("@/components/charts/share-dilution-tracker-chart").then((module) => module.ShareDilutionTrackerChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading dilution tracker...</div> }
+);
+const CapitalStructureIntelligencePanel = dynamic(
+  () => import("@/components/company/capital-structure-intelligence-panel").then((module) => module.CapitalStructureIntelligencePanel),
+  { ssr: false, loading: () => <div className="text-muted">Loading capital structure intelligence...</div> }
+);
+const InvestmentSummaryPanel = dynamic(
+  () => import("@/components/models/investment-summary-panel").then((module) => module.InvestmentSummaryPanel),
+  { ssr: false, loading: () => <div className="text-muted">Loading valuation summary...</div> }
 );
 
-export default function CompanyOverviewPage() {
+type AsyncState<T> = {
+  data: T | null;
+  error: string | null;
+  loading: boolean;
+};
+
+type ResearchBriefAsyncState = {
+  activityOverview: AsyncState<CompanyActivityOverviewResponse>;
+  changes: AsyncState<CompanyChangesSinceLastFilingResponse>;
+  earningsSummary: AsyncState<CompanyEarningsSummaryResponse>;
+  capitalStructure: AsyncState<CompanyCapitalStructureResponse>;
+  capitalMarketsSummary: AsyncState<CompanyCapitalMarketsSummaryResponse>;
+  governanceSummary: AsyncState<CompanyGovernanceSummaryResponse>;
+  ownershipSummary: AsyncState<CompanyBeneficialOwnershipSummaryResponse>;
+  models: AsyncState<CompanyModelsResponse>;
+  peers: AsyncState<CompanyPeersResponse>;
+};
+
+type ResearchBriefCue = {
+  label: string;
+  asOf?: string | null;
+  lastRefreshedAt?: string | null;
+  lastChecked?: string | null;
+  provenance?: ProvenanceEntryPayload[] | null;
+  sourceMix?: SourceMixPayload | null;
+  confidenceFlags?: string[] | null;
+};
+
+type SectionLink = {
+  href: string;
+  label: string;
+};
+
+type MonitorChecklistItem = {
+  title: string;
+  detail: string;
+};
+
+type BriefCompany = {
+  ticker?: string | null;
+  name?: string | null;
+  last_checked?: string | null;
+};
+
+const BRIEF_SECTIONS = [
+  {
+    id: "snapshot",
+    title: "Snapshot",
+    question: "What matters before I read further?",
+  },
+  {
+    id: "what-changed",
+    title: "What Changed",
+    question: "What is new since the last filing or review?",
+  },
+  {
+    id: "business-quality",
+    title: "Business Quality",
+    question: "Is the business getting stronger, weaker, or just noisier?",
+  },
+  {
+    id: "capital-risk",
+    title: "Capital & Risk",
+    question: "Is the equity claim being protected, diluted, or put at risk?",
+  },
+  {
+    id: "valuation",
+    title: "Valuation",
+    question: "How does the current price compare with peers and cached model ranges?",
+  },
+  {
+    id: "monitor",
+    title: "Monitor",
+    question: "What should I keep watching after I leave this page?",
+  },
+] as const;
+
+const INITIAL_ASYNC_STATE: ResearchBriefAsyncState = {
+  activityOverview: { data: null, error: null, loading: true },
+  changes: { data: null, error: null, loading: true },
+  earningsSummary: { data: null, error: null, loading: true },
+  capitalStructure: { data: null, error: null, loading: true },
+  capitalMarketsSummary: { data: null, error: null, loading: true },
+  governanceSummary: { data: null, error: null, loading: true },
+  ownershipSummary: { data: null, error: null, loading: true },
+  models: { data: null, error: null, loading: true },
+  peers: { data: null, error: null, loading: true },
+};
+
+export default function CompanyResearchBriefPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const {
     data,
     company,
     financials,
+    annualStatements,
     priceHistory,
     fundamentalsTrendData,
     latestFinancial,
+    insiderData,
+    insiderTrades,
+    institutionalHoldings,
+    loading,
+    error,
+    insiderError,
+    institutionalError,
     refreshing,
     refreshState,
     consoleEntries,
     connectionState,
     queueRefresh,
-    reloadKey
-  } = useCompanyWorkspace(ticker, { includeChartConsole: true });
-  const [activityData, setActivityData] = useState<CompanyActivityOverviewResponse | null>(null);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [activityError, setActivityError] = useState<string | null>(null);
+    reloadKey,
+  } = useCompanyWorkspace(ticker, {
+    includeInsiders: true,
+    includeInstitutional: true,
+    includeChartConsole: true,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
+  const briefData = useResearchBriefData(ticker, reloadKey);
+  const activeSectionId = useActiveBriefSection(BRIEF_SECTIONS.map((section) => section.id));
+  const pageCompany = company ?? data?.company ?? briefData.activityOverview.data?.company ?? briefData.models.data?.company ?? null;
+  const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
+  const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
+  const previousAnnual = annualStatements[1] ?? null;
+  const latestAlertCount = briefData.activityOverview.data?.summary.total ?? 0;
+  const topAlerts = useMemo(() => (briefData.activityOverview.data?.alerts ?? []).slice(0, 3), [briefData.activityOverview.data?.alerts]);
+  const latestEntries = useMemo(() => (briefData.activityOverview.data?.entries ?? []).slice(0, 4), [briefData.activityOverview.data?.entries]);
+  const capitalSignalRows = useMemo(
+    () =>
+      buildCapitalSignalRows({
+        capitalMarketsSummary: briefData.capitalMarketsSummary.data?.summary ?? null,
+        governanceSummary: briefData.governanceSummary.data?.summary ?? null,
+        ownershipSummary: briefData.ownershipSummary.data?.summary ?? null,
+        insiderSummary: insiderData?.summary ?? null,
+        institutionalHoldings,
+      }),
+    [
+      briefData.capitalMarketsSummary.data?.summary,
+      briefData.governanceSummary.data?.summary,
+      briefData.ownershipSummary.data?.summary,
+      insiderData?.summary,
+      institutionalHoldings,
+    ]
+  );
+  const monitorChecklist = useMemo(
+    () =>
+      buildMonitorChecklist({
+        refreshState,
+        activityOverview: briefData.activityOverview.data,
+        company: pageCompany,
+        insiderSummary: insiderData?.summary ?? null,
+        institutionalHoldings,
+      }),
+    [briefData.activityOverview.data, institutionalHoldings, insiderData?.summary, pageCompany, refreshState]
+  );
+  const snapshotLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/financials`, label: "Financials" },
+      { href: `/company/${encodeURIComponent(ticker)}/filings`, label: "Filings" },
+    ],
+    [ticker]
+  );
+  const whatChangedLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/earnings`, label: "Earnings" },
+      { href: `/company/${encodeURIComponent(ticker)}/events`, label: "Events" },
+    ],
+    [ticker]
+  );
+  const businessQualityLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/financials`, label: "Full Financials" },
+      { href: `/company/${encodeURIComponent(ticker)}/earnings`, label: "Earnings Detail" },
+    ],
+    [ticker]
+  );
+  const capitalRiskLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/capital-markets`, label: "Capital Markets" },
+      { href: `/company/${encodeURIComponent(ticker)}/governance`, label: "Governance" },
+    ],
+    [ticker]
+  );
+  const valuationLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/models`, label: "Models" },
+      { href: `/company/${encodeURIComponent(ticker)}/peers`, label: "Peers" },
+    ],
+    [ticker]
+  );
+  const monitorLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/sec-feed`, label: "SEC Feed" },
+      { href: `/company/${encodeURIComponent(ticker)}/events`, label: "Events" },
+    ],
+    [ticker]
+  );
 
-    async function loadActivity() {
-      try {
-        setActivityLoading(true);
-        setActivityError(null);
-        const overview = await getCompanyActivityOverview(ticker);
-        if (!cancelled) {
-          setActivityData(overview);
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setActivityError(nextError instanceof Error ? nextError.message : "Unable to load activity feed");
-        }
-      } finally {
-        if (!cancelled) {
-          setActivityLoading(false);
-        }
-      }
-    }
-
-    void loadActivity();
-    return () => {
-      cancelled = true;
-    };
-  }, [ticker, reloadKey]);
-
-  const topAlerts = useMemo(() => (activityData?.alerts ?? []).slice(0, 3), [activityData?.alerts]);
-  const latestEntries = useMemo(() => (activityData?.entries ?? []).slice(0, 4), [activityData?.entries]);
+  const snapshotNarrative = buildSnapshotNarrative({
+    company: pageCompany,
+    latestFinancial,
+    topSegment,
+    alertCount: latestAlertCount,
+    sourceMix: data?.source_mix,
+    provenance: data?.provenance,
+    loading,
+  });
+  const whatChangedNarrative = buildWhatChangedNarrative({
+    changes: briefData.changes.data,
+    earningsSummary: briefData.earningsSummary.data,
+    activityOverview: briefData.activityOverview.data,
+    loading: briefData.changes.loading || briefData.earningsSummary.loading || briefData.activityOverview.loading,
+  });
+  const businessQualityNarrative = buildBusinessQualityNarrative({
+    latestFinancial,
+    previousAnnual,
+    loading,
+  });
+  const capitalRiskNarrative = buildCapitalRiskNarrative({
+    capitalStructure: briefData.capitalStructure.data,
+    capitalMarketsSummary: briefData.capitalMarketsSummary.data,
+    governanceSummary: briefData.governanceSummary.data,
+    ownershipSummary: briefData.ownershipSummary.data,
+    insiderSummary: insiderData?.summary ?? null,
+    loading:
+      briefData.capitalStructure.loading ||
+      briefData.capitalMarketsSummary.loading ||
+      briefData.governanceSummary.loading ||
+      briefData.ownershipSummary.loading,
+  });
+  const valuationNarrative = buildValuationNarrative({
+    models: briefData.models.data?.models ?? [],
+    peers: briefData.peers.data?.peers ?? [],
+    priceHistory,
+    loading: briefData.models.loading || briefData.peers.loading,
+  });
+  const monitorNarrative = buildMonitorNarrative({
+    activityOverview: briefData.activityOverview.data,
+    refreshState,
+    company: pageCompany,
+    loading: briefData.activityOverview.loading,
+  });
 
   return (
     <CompanyWorkspaceShell
       rail={
         <CompanyUtilityRail
           ticker={ticker}
-          companyName={company?.name ?? null}
-          sector={company?.sector ?? null}
+          companyName={pageCompany?.name ?? null}
+          sector={pageCompany?.sector ?? pageCompany?.market_sector ?? null}
           refreshState={refreshState}
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}
           actionTitle="Next Steps"
-          actionSubtitle="Refresh the latest company data or jump into valuation models."
-          primaryActionLabel="Refresh Company Data"
-          primaryActionDescription="Updates filings, market prices, and summary panels in the background."
+          actionSubtitle="Refresh the brief in the background or jump straight into the full underwriting workspace."
+          primaryActionLabel="Refresh Brief Data"
+          primaryActionDescription="Rebuilds cached company, filing, market, and summary surfaces without turning the default brief into a live-fetch route."
           secondaryActionHref={`/company/${encodeURIComponent(ticker)}/models`}
           secondaryActionLabel="Open Valuation Models"
-          secondaryActionDescription="View DCF, health score, scenario analysis, and model outputs."
+          secondaryActionDescription="Move from the brief into full model diagnostics, scenarios, and assumption detail."
           statusLines={[
+            `Annual filings available: ${annualStatements.length.toLocaleString()}`,
             `Price history points available: ${priceHistory.length.toLocaleString()}`,
-            `Annual results available: ${fundamentalsTrendData.length.toLocaleString()}`,
-            `${financials.filter((statement) => statement.segment_breakdown.length > 0).length.toLocaleString()} filings include segment detail`,
-            `Market context: ${formatMarketContextStatus(activityData?.market_context_status)}`,
+            `Current alerts: ${latestAlertCount.toLocaleString()}`,
+            `Last checked: ${pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : "Pending"}`,
           ]}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
+          presentation="brief"
         >
           <Panel title="Risk & Red Flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals" variant="subtle">
             <RiskRedFlagPanel financials={financials} />
           </Panel>
         </CompanyUtilityRail>
       }
-      mainClassName="company-page-grid"
+      mainClassName="company-page-grid research-brief-layout"
+      railClassName="research-brief-rail"
     >
       <CompanyResearchHeader
         ticker={ticker}
-        title={company?.name ?? ticker}
-        companyName={`${ticker}${company?.sector ? ` · ${company.sector}` : " · Company workspace"}`}
-        sector={company?.sector}
-        cacheState={company?.cache_state ?? null}
-        description="Primary company identity, key fundamentals, and price-versus-operating performance in a single high-trust research surface."
-        aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
-        facts={[
-          { label: "Ticker", value: ticker },
-          { label: "CIK", value: company?.cik ?? null },
-          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null }
-        ]}
-        ribbonItems={[
-          { label: "Financials", value: company?.last_checked_financials ? formatDate(company.last_checked_financials) : "Pending", tone: "green" },
-          { label: "Prices", value: company?.last_checked_prices ? formatDate(company.last_checked_prices) : "Pending", tone: "cyan" },
-          { label: "Refresh", value: refreshState?.job_id ? "Queued" : "Background-first", tone: refreshState?.job_id ? "cyan" : "green" }
-        ]}
-        summaries={[
-          { label: "Revenue", value: formatCompactNumber(latestFinancial?.revenue), accent: "cyan" },
-          { label: "EPS", value: latestFinancial?.eps == null ? "?" : latestFinancial.eps.toFixed(2), accent: latestFinancial?.eps != null && latestFinancial.eps < 0 ? "red" : "cyan" },
-          { label: "Net Income", value: formatCompactNumber(latestFinancial?.net_income), accent: latestFinancial?.net_income != null && latestFinancial.net_income < 0 ? "red" : "cyan" },
-          { label: "Free Cash Flow", value: formatCompactNumber(latestFinancial?.free_cash_flow), accent: latestFinancial?.free_cash_flow != null && latestFinancial.free_cash_flow < 0 ? "red" : "cyan" }
-        ]}
-        className="financial-hero"
+        title={pageCompany?.name ?? ticker}
+        companyName={`${ticker} · Research Brief`}
+        sector={pageCompany?.sector ?? pageCompany?.market_sector ?? null}
+        className="research-brief-header-compact"
       >
-        <CommercialFallbackNotice
-          provenance={data?.provenance}
-          sourceMix={data?.source_mix}
-          subject="Price history and market profile data on this overview surface"
+        <ResearchBriefHeroSummary
+          summary={snapshotNarrative}
+          metrics={[
+            { label: "Revenue", value: formatCompactCurrency(latestFinancial?.revenue) },
+            { label: "Free Cash Flow", value: formatCompactCurrency(latestFinancial?.free_cash_flow) },
+            {
+              label: "Top Segment",
+              value:
+                topSegment && topSegment.share_of_revenue != null
+                  ? `${topSegment.segment_name} · ${formatPercent(topSegment.share_of_revenue)}`
+                  : topSegment?.segment_name ?? "—",
+            },
+            {
+              label: "Latest Filing",
+              value: latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : "—",
+            },
+          ]}
+          metaItems={[
+            pageCompany?.cik ? `CIK ${pageCompany.cik}` : null,
+            annualStatements.length ? `${annualStatements.length.toLocaleString()} annual filing periods cached` : null,
+            pageCompany?.last_checked ? `Updated ${formatDate(pageCompany.last_checked)}` : null,
+          ]}
+          fallbackLabels={fallbackLabels}
         />
       </CompanyResearchHeader>
 
-      <div className="company-overview-stage models-page-span-full">
-        <PriceFundamentalsModule
-          priceData={priceHistory}
-          fundamentalsData={fundamentalsTrendData}
-          title="Price and Operating Momentum"
-          subtitle="Start with price action, revenue growth, EPS trend, and cash generation before moving into secondary modules."
-        />
-      </div>
+      {error || insiderError || institutionalError ? (
+        <div className="panel workspace-error-state research-brief-partial-note">
+          <h2 className="workspace-state-title">Some brief inputs are still warming</h2>
+          <p className="text-muted workspace-state-copy">
+            The brief keeps specialist routes and cached section fallbacks visible even when one workspace payload is delayed. Refreshing the company will usually backfill the missing slice.
+          </p>
+          <div className="research-brief-partial-errors">
+            {[error, insiderError, institutionalError].filter(Boolean).map((message) => (
+              <span key={message} className="pill">
+                {message}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
-      <div className="company-overview-secondary-grid models-page-span-full">
-        <Panel
-          title="Visualization Lab"
-          subtitle="Unified SEC-first chart system with consistent controls, event annotations, provenance badges, and CSV export"
-          variant="subtle"
-        >
-          <CompanyVisualizationLab ticker={ticker} financials={financials} reloadKey={reloadKey} />
-        </Panel>
-
-        <Panel title="Cash Flow Bridge" subtitle="How operating cash flow turns into free cash flow and capital allocation uses" variant="subtle">
-          <CashFlowWaterfallChart financials={financials} />
-        </Panel>
-
-        <Panel title="Liquidity & Capital" subtitle="Current assets, current liabilities, current ratio, and retained earnings trend" variant="subtle">
-          <LiquidityCapitalChart financials={financials} />
-        </Panel>
-
-        <Panel title="Share Dilution" subtitle="Shares outstanding history and year-over-year dilution rate from SEC filings" variant="subtle">
-          <ShareDilutionTrackerChart financials={financials} />
-        </Panel>
-
-        <Panel title="Segments & Geography" subtitle="Mix shifts, concentration, margin contribution, and chart views from cached SEC disclosures" variant="subtle">
-          <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
-        </Panel>
-
-        <Panel title="Changes Since Last Filing" subtitle="Latest filing versus the prior comparable filing, including amended prior values" variant="subtle">
-          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} />
-        </Panel>
-
-        <Panel title="Derived Metrics Explorer" subtitle="Persisted SEC-derived metrics with provenance and quality flags" variant="subtle">
-          <MetricsExplorerPanel ticker={ticker} reloadKey={reloadKey} />
-        </Panel>
-
-        <Panel title="10-Year Financial History" subtitle="SEC EDGAR companyfacts (FY)" variant="subtle">
-          <FinancialHistorySection cik={company?.cik ?? null} />
-        </Panel>
-      </div>
-
-      <PeerComparisonDashboard ticker={ticker} reloadKey={reloadKey} />
-
-      <Panel
-        title="Research Pulse"
-        subtitle="Latest filing activity, alert counts, and freshness cues to orient the read before deeper module work."
-        className="company-overview-pulse"
-        variant="subtle"
+      <ResearchBriefSection
+        id="snapshot"
+        title="Snapshot"
+        question="What matters before I read further?"
+        summary={null}
+        cues={[]}
+        links={snapshotLinks}
       >
-        {activityError ? (
-          <div className="text-muted">{activityError}</div>
-        ) : activityLoading ? (
-          <div className="text-muted">Loading activity feed...</div>
-        ) : (
-          <div className="company-pulse-stack">
-            <SourceFreshnessSummary
-              provenance={activityData?.provenance}
-              asOf={activityData?.as_of}
-              lastRefreshedAt={activityData?.last_refreshed_at}
-              sourceMix={activityData?.source_mix}
-              confidenceFlags={activityData?.confidence_flags}
+        <EvidenceCard
+          title="Price vs operating momentum"
+          copy="Operating history stays SEC-first; market context remains explicitly labeled when a commercial fallback is involved."
+          className="is-wide"
+        >
+          {loading && !priceHistory.length && !fundamentalsTrendData.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Snapshot"
+              title="Loading momentum view"
+              message="Preparing the persisted price-versus-fundamentals comparison used at the top of the brief."
             />
+          ) : priceHistory.length || fundamentalsTrendData.length ? (
+            <PriceFundamentalsModule
+              priceData={priceHistory}
+              fundamentalsData={fundamentalsTrendData}
+              title="Price and operating momentum"
+              subtitle="Start with price action, revenue growth, EPS trend, and free-cash-flow direction before diving into specialist evidence."
+            />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Snapshot"
+              title="No momentum history yet"
+              message="This visual appears once cached price history or annual filing trends are available for the company."
+            />
+          )}
+        </EvidenceCard>
 
+        <EvidenceCard title="Business context" copy="The minimum operating context needed before opening specialist views.">
+          {loading && !latestFinancial ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Snapshot"
+              title="Loading company context"
+              message="Reading the latest cached filing, segment mix, and alert count for the default brief."
+            />
+          ) : latestFinancial || topSegment ? (
             <CompanyMetricGrid
               items={[
-                { label: "Feed Entries", value: (activityData?.entries.length ?? 0).toLocaleString() },
-                { label: "High Alerts", value: (activityData?.summary.high ?? 0).toLocaleString() },
-                { label: "Medium Alerts", value: (activityData?.summary.medium ?? 0).toLocaleString() },
-                { label: "Total Alerts", value: (activityData?.summary.total ?? 0).toLocaleString() }
+                { label: "Reported Revenue", value: latestFinancial ? formatCompactCurrency(latestFinancial.revenue) : null },
+                { label: "Free Cash Flow", value: latestFinancial ? formatCompactCurrency(latestFinancial.free_cash_flow) : null },
+                {
+                  label: "Top Segment",
+                  value:
+                    topSegment && topSegment.share_of_revenue != null
+                      ? `${topSegment.segment_name} · ${formatPercent(topSegment.share_of_revenue)}`
+                      : topSegment?.segment_name ?? null,
+                },
+                { label: "Current Alerts", value: latestAlertCount.toLocaleString() },
               ]}
             />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Snapshot"
+              title="No persisted filing context yet"
+              message="Queue a refresh to populate the default brief from cached company financials, segments, and activity summaries."
+            />
+          )}
+        </EvidenceCard>
 
-            <div className="company-pulse-columns">
+        <EvidenceCard
+          title="Reported segment mix"
+          copy="Segment and geography mix orient the read before deeper statement or filing work."
+          className="is-wide"
+        >
+          {loading && !financials.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Snapshot"
+              title="Loading segment disclosures"
+              message="Reading the latest persisted segment and geography disclosures from cached filings."
+            />
+          ) : financials.length ? (
+            <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Snapshot"
+              title="No reported segment breakdown yet"
+              message="This section fills in once cached filings include segment or geographic disclosure detail."
+            />
+          )}
+        </EvidenceCard>
+      </ResearchBriefSection>
+
+      <ResearchBriefSectionNav activeSectionId={activeSectionId} />
+
+      <ResearchBriefSection
+        id="what-changed"
+        title="What Changed"
+        question="What is new since the last filing or review?"
+        summary={whatChangedNarrative}
+        cues={[
+          {
+            label: "Filing comparison",
+            asOf: briefData.changes.data?.as_of,
+            lastRefreshedAt: briefData.changes.data?.last_refreshed_at,
+            provenance: briefData.changes.data?.provenance,
+            sourceMix: briefData.changes.data?.source_mix,
+            confidenceFlags: briefData.changes.data?.confidence_flags,
+          },
+          {
+            label: "Activity overview",
+            asOf: briefData.activityOverview.data?.as_of,
+            lastRefreshedAt: briefData.activityOverview.data?.last_refreshed_at,
+            provenance: briefData.activityOverview.data?.provenance,
+            sourceMix: briefData.activityOverview.data?.source_mix,
+            confidenceFlags: briefData.activityOverview.data?.confidence_flags,
+          },
+        ]}
+        links={whatChangedLinks}
+      >
+        <EvidenceCard title="Update scoreboard" copy="The shortest possible read on filing deltas, earnings capture, and alert volume.">
+          {briefData.changes.error && !briefData.changes.data && briefData.earningsSummary.error && !briefData.earningsSummary.data ? (
+            <ResearchBriefStateBlock
+              kind="error"
+              kicker="What changed"
+              title="Unable to load change summaries"
+              message={briefData.changes.error ?? briefData.earningsSummary.error ?? "Change summaries are temporarily unavailable."}
+            />
+          ) : briefData.changes.loading && !briefData.changes.data && briefData.earningsSummary.loading && !briefData.earningsSummary.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="What changed"
+              title="Loading latest deltas"
+              message="Comparing the most recent filing, recent earnings payloads, and the cached activity overview."
+            />
+          ) : briefData.changes.data || briefData.earningsSummary.data || briefData.activityOverview.data ? (
+            <CompanyMetricGrid
+              items={[
+                {
+                  label: "Metric Deltas",
+                  value: briefData.changes.data ? String(briefData.changes.data.summary.metric_delta_count) : null,
+                },
+                {
+                  label: "Risk Indicators",
+                  value: briefData.changes.data ? String(briefData.changes.data.summary.new_risk_indicator_count) : null,
+                },
+                {
+                  label: "Latest EPS",
+                  value:
+                    briefData.earningsSummary.data?.summary.latest_diluted_eps != null
+                      ? briefData.earningsSummary.data.summary.latest_diluted_eps.toFixed(2)
+                      : null,
+                },
+                {
+                  label: "High Alerts",
+                  value: briefData.activityOverview.data ? String(briefData.activityOverview.data.summary.high) : null,
+                },
+              ]}
+            />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="What changed"
+              title="No recent change summary yet"
+              message="This section fills in after the latest filing comparison, earnings summary, or activity overview is cached."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard
+          title="Latest filing comparison"
+          copy="Metric, risk, segment, and capital-structure changes from the most recent comparable filing pair."
+          className="is-wide"
+        >
+          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} />
+        </EvidenceCard>
+
+        <EvidenceCard
+          title="Recent SEC activity"
+          copy="Top alerts and the latest timeline entries keep the default brief anchored to dated evidence instead of generic commentary."
+          className="is-wide"
+        >
+          {briefData.activityOverview.error && !briefData.activityOverview.data ? (
+            <ResearchBriefStateBlock
+              kind="error"
+              kicker="What changed"
+              title="Unable to load recent activity"
+              message={briefData.activityOverview.error}
+            />
+          ) : briefData.activityOverview.loading && !briefData.activityOverview.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="What changed"
+              title="Loading recent activity"
+              message="Preparing the latest persisted alerts and SEC timeline entries for the default brief."
+            />
+          ) : topAlerts.length || latestEntries.length ? (
+            <div className="company-pulse-columns research-brief-pulse-columns">
               <div className="company-pulse-list">
-                <div className="company-pulse-heading">Top Alerts</div>
-                {topAlerts.length ? topAlerts.map((alert) => (
-                  <AlertOrEntryCard
-                    key={alert.id}
-                    href={alert.href}
-                    danger={alert.level === "high"}
-                    topLeft={
-                      <>
-                        <span className="pill">{alert.level}</span>
-                        <span className="pill">{alert.source}</span>
-                      </>
-                    }
-                    topRight={formatDate(alert.date)}
-                    title={alert.title}
-                    detail={alert.detail}
+                <div className="company-pulse-heading">Top alerts</div>
+                {topAlerts.length ? (
+                  topAlerts.map((alert) => (
+                    <AlertOrEntryCard
+                      key={alert.id}
+                      href={alert.href}
+                      danger={alert.level === "high"}
+                      topLeft={
+                        <>
+                          <span className="pill">{alert.level}</span>
+                          <span className="pill">{alert.source}</span>
+                        </>
+                      }
+                      topRight={formatDate(alert.date)}
+                      title={alert.title}
+                      detail={alert.detail}
+                    />
+                  ))
+                ) : (
+                  <ResearchBriefStateBlock
+                    kind="empty"
+                    kicker="What changed"
+                    title="No current alerts"
+                    message="No alert thresholds are currently triggered in the persisted activity overview."
+                    minHeight={180}
                   />
-                )) : <div className="text-muted">No alerts triggered from current cached SEC activity.</div>}
+                )}
               </div>
 
               <div className="company-pulse-list">
-                <div className="company-pulse-heading">Latest Timeline</div>
-                {latestEntries.length ? latestEntries.map((entry) => (
-                  <AlertOrEntryCard
-                    key={entry.id}
-                    href={entry.href}
-                    topLeft={
-                      <>
-                        <span className="pill">{formatFeedEntryType(entry.type)}</span>
-                        <span className="pill">{entry.badge}</span>
-                      </>
-                    }
-                    topRight={formatDate(entry.date)}
-                    title={entry.title}
-                    detail={entry.detail}
+                <div className="company-pulse-heading">Latest timeline</div>
+                {latestEntries.length ? (
+                  latestEntries.map((entry) => (
+                    <AlertOrEntryCard
+                      key={entry.id}
+                      href={entry.href}
+                      topLeft={
+                        <>
+                          <span className="pill">{formatFeedEntryType(entry.type)}</span>
+                          <span className="pill">{entry.badge}</span>
+                        </>
+                      }
+                      topRight={formatDate(entry.date)}
+                      title={entry.title}
+                      detail={entry.detail}
+                    />
+                  ))
+                ) : (
+                  <ResearchBriefStateBlock
+                    kind="empty"
+                    kicker="What changed"
+                    title="No recent timeline entries"
+                    message="The cached activity stream will list the latest filing, governance, ownership, and insider events here once available."
+                    minHeight={180}
                   />
-                )) : <div className="text-muted">No activity entries available yet.</div>}
+                )}
               </div>
             </div>
-          </div>
-        )}
-      </Panel>
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="What changed"
+              title="No recent activity yet"
+              message="This section fills in once the cached activity overview has alerts or dated SEC entries for the selected company."
+            />
+          )}
+        </EvidenceCard>
+      </ResearchBriefSection>
+
+      <ResearchBriefSection
+        id="business-quality"
+        title="Business Quality"
+        question="Is the business getting stronger, weaker, or just noisier?"
+        summary={businessQualityNarrative}
+        cues={[
+          {
+            label: "Financial quality inputs",
+            asOf: data?.as_of,
+            lastRefreshedAt: data?.last_refreshed_at,
+            lastChecked: pageCompany?.last_checked_financials,
+            provenance: data?.provenance,
+            sourceMix: data?.source_mix,
+            confidenceFlags: data?.confidence_flags,
+          },
+        ]}
+        links={businessQualityLinks}
+      >
+        <EvidenceCard title="Quality summary" copy="A compact read on margins, profitability, leverage, growth, and share-count direction.">
+          {error && !financials.length ? (
+            <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load quality summary" message={error} />
+          ) : loading && !financials.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Business quality"
+              title="Loading annual quality read"
+              message="Preparing the latest persisted profitability, leverage, and growth view from annual filings."
+            />
+          ) : financials.length ? (
+            <FinancialQualitySummary financials={financials} />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Business quality"
+              title="No annual quality history yet"
+              message="This summary appears after the cache includes enough annual filings to compare profitability and growth cleanly."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Margin trends" copy="Gross, operating, net, and free-cash-flow margin direction from cached filings.">
+          {error && !financials.length ? (
+            <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load margin trends" message={error} />
+          ) : loading && !financials.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Business quality"
+              title="Loading margin trends"
+              message="Building the persisted margin history used to judge whether operating quality is improving or degrading."
+            />
+          ) : financials.length ? (
+            <MarginTrendChart financials={financials} />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Business quality"
+              title="No margin history yet"
+              message="Margin trend charts appear once multiple comparable filing periods are cached for the company."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Cash flow bridge" copy="How operating cash flow turns into free cash flow and how much room capital allocation still has.">
+          {error && !financials.length ? (
+            <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load cash flow bridge" message={error} />
+          ) : loading && !financials.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Business quality"
+              title="Loading cash flow bridge"
+              message="Preparing the persisted cash flow waterfall used to separate accounting noise from cash-generation strength."
+            />
+          ) : financials.length ? (
+            <CashFlowWaterfallChart financials={financials} />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Business quality"
+              title="No cash flow bridge yet"
+              message="The bridge populates when cached filings include operating cash flow, capex, and capital allocation inputs."
+            />
+          )}
+        </EvidenceCard>
+      </ResearchBriefSection>
+
+      <ResearchBriefSection
+        id="capital-risk"
+        title="Capital & Risk"
+        question="Is the equity claim being protected, diluted, or put at risk?"
+        summary={capitalRiskNarrative}
+        cues={[
+          {
+            label: "Capital structure",
+            asOf: briefData.capitalStructure.data?.as_of,
+            lastRefreshedAt: briefData.capitalStructure.data?.last_refreshed_at,
+            provenance: briefData.capitalStructure.data?.provenance,
+            sourceMix: briefData.capitalStructure.data?.source_mix,
+            confidenceFlags: briefData.capitalStructure.data?.confidence_flags,
+          },
+          {
+            label: "Governance and stake signals",
+            lastChecked: pageCompany?.last_checked_insiders,
+          },
+        ]}
+        links={capitalRiskLinks}
+      >
+        <EvidenceCard
+          title="Capital structure intelligence"
+          copy="Debt ladders, lease schedules, payout mix, and dilution bridges pulled from persisted SEC extraction rather than route-time recomputation."
+          className="is-wide"
+        >
+          {briefData.capitalStructure.error && !briefData.capitalStructure.data ? (
+            <ResearchBriefStateBlock
+              kind="error"
+              kicker="Capital & risk"
+              title="Unable to load capital structure"
+              message={briefData.capitalStructure.error}
+            />
+          ) : briefData.capitalStructure.loading && !briefData.capitalStructure.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Capital & risk"
+              title="Loading capital structure"
+              message="Preparing the persisted debt, lease, payout, and dilution intelligence for the brief."
+            />
+          ) : briefData.capitalStructure.data?.latest ? (
+            <CapitalStructureIntelligencePanel
+              ticker={ticker}
+              reloadKey={reloadKey}
+              initialPayload={briefData.capitalStructure.data}
+            />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Capital & risk"
+              title="No capital structure snapshot yet"
+              message="This section fills in once persisted capital structure extraction is available for the selected company."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Share dilution" copy="Share-count direction keeps the equity-claim read grounded in persisted filing history.">
+          {error && !financials.length ? (
+            <ResearchBriefStateBlock kind="error" kicker="Capital & risk" title="Unable to load dilution history" message={error} />
+          ) : loading && !financials.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Capital & risk"
+              title="Loading dilution history"
+              message="Reading cached share-count history to determine whether the equity claim is being diluted or defended."
+            />
+          ) : financials.length ? (
+            <ShareDilutionTrackerChart financials={financials} />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Capital & risk"
+              title="No dilution history yet"
+              message="This chart appears once cached filings include enough share-count history to calculate dilution over time."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Control and ownership signals" copy="Governance, major-holder, insider, and institutional cues that can change the thesis even when the statements still look clean.">
+          {briefData.capitalMarketsSummary.error &&
+          !briefData.capitalMarketsSummary.data &&
+          briefData.governanceSummary.error &&
+          !briefData.governanceSummary.data &&
+          briefData.ownershipSummary.error &&
+          !briefData.ownershipSummary.data &&
+          !insiderData &&
+          !institutionalHoldings.length ? (
+            <ResearchBriefStateBlock
+              kind="error"
+              kicker="Capital & risk"
+              title="Unable to load control signals"
+              message={
+                briefData.capitalMarketsSummary.error ??
+                briefData.governanceSummary.error ??
+                briefData.ownershipSummary.error ??
+                insiderError ??
+                institutionalError ??
+                "Control and ownership signals are temporarily unavailable."
+              }
+            />
+          ) : briefData.capitalMarketsSummary.loading &&
+            !briefData.capitalMarketsSummary.data &&
+            briefData.governanceSummary.loading &&
+            !briefData.governanceSummary.data &&
+            briefData.ownershipSummary.loading &&
+            !briefData.ownershipSummary.data &&
+            !insiderData &&
+            !institutionalHoldings.length ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Capital & risk"
+              title="Loading control signals"
+              message="Bringing together persisted financing, proxy, ownership-change, insider, and institutional context."
+            />
+          ) : capitalSignalRows.length ? (
+            <div className="company-data-table-shell">
+              <table className="company-data-table company-data-table-compact">
+                <thead>
+                  <tr>
+                    <th>Signal</th>
+                    <th>Current Read</th>
+                    <th>Latest Dated Evidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {capitalSignalRows.map((row) => (
+                    <tr key={row.signal}>
+                      <td>{row.signal}</td>
+                      <td>{row.currentRead}</td>
+                      <td>{row.latestEvidence}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Capital & risk"
+              title="No control signals yet"
+              message="This table fills in after capital markets, governance, ownership-change, insider, or institutional signals are cached for the company."
+            />
+          )}
+        </EvidenceCard>
+      </ResearchBriefSection>
+
+      <ResearchBriefSection
+        id="valuation"
+        title="Valuation"
+        question="How does the current price compare with peers and cached model ranges?"
+        summary={valuationNarrative}
+        cues={[
+          {
+            label: "Valuation models",
+            asOf: briefData.models.data?.as_of,
+            lastRefreshedAt: briefData.models.data?.last_refreshed_at,
+            provenance: briefData.models.data?.provenance,
+            sourceMix: briefData.models.data?.source_mix,
+            confidenceFlags: briefData.models.data?.confidence_flags,
+          },
+          {
+            label: "Peer comparison",
+            asOf: briefData.peers.data?.as_of,
+            lastRefreshedAt: briefData.peers.data?.last_refreshed_at,
+            provenance: briefData.peers.data?.provenance,
+            sourceMix: briefData.peers.data?.source_mix,
+            confidenceFlags: briefData.peers.data?.confidence_flags,
+          },
+        ]}
+        links={valuationLinks}
+      >
+        <EvidenceCard
+          title="Valuation summary"
+          copy="Use the default brief to see the cached underwriting conclusion, then jump into the full Models workspace when you need the full assumption tree."
+          className="is-wide"
+        >
+          {briefData.models.error && !briefData.models.data ? (
+            <ResearchBriefStateBlock kind="error" kicker="Valuation" title="Unable to load valuation summary" message={briefData.models.error} />
+          ) : briefData.models.loading && !briefData.models.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Valuation"
+              title="Loading valuation summary"
+              message="Preparing the cached DCF, residual income, and diagnostic model outputs for the brief."
+            />
+          ) : briefData.models.data?.models.length ? (
+            <InvestmentSummaryPanel
+              ticker={ticker}
+              models={briefData.models.data.models}
+              financials={financials}
+              priceHistory={priceHistory}
+              strictOfficialMode={Boolean(briefData.models.data.company?.strict_official_mode ?? pageCompany?.strict_official_mode)}
+            />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Valuation"
+              title="No cached model outputs yet"
+              message="Refresh the company to backfill persisted model outputs before using the brief as a valuation read."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Peer comparison snapshot" copy="A compact relative view so the brief can answer whether current multiples look rich, cheap, or roughly in line before deeper peer work.">
+          {briefData.peers.error && !briefData.peers.data ? (
+            <ResearchBriefStateBlock kind="error" kicker="Valuation" title="Unable to load peer snapshot" message={briefData.peers.error} />
+          ) : briefData.peers.loading && !briefData.peers.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Valuation"
+              title="Loading peer snapshot"
+              message="Preparing the persisted peer universe and comparison metrics for the brief."
+            />
+          ) : briefData.peers.data?.peers.length ? (
+            <PeerComparisonSnapshot response={briefData.peers.data} />
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Valuation"
+              title="No peer snapshot yet"
+              message="Peer comparison will appear after more cached companies are available in the comparison universe."
+            />
+          )}
+        </EvidenceCard>
+      </ResearchBriefSection>
+
+      <ResearchBriefSection
+        id="monitor"
+        title="Monitor"
+        question="What should I keep watching after I leave this page?"
+        summary={monitorNarrative}
+        cues={[
+          {
+            label: "Monitoring feed",
+            asOf: briefData.activityOverview.data?.as_of,
+            lastRefreshedAt: briefData.activityOverview.data?.last_refreshed_at,
+            lastChecked: pageCompany?.last_checked,
+            provenance: briefData.activityOverview.data?.provenance,
+            sourceMix: briefData.activityOverview.data?.source_mix,
+            confidenceFlags: briefData.activityOverview.data?.confidence_flags,
+          },
+        ]}
+        links={monitorLinks}
+      >
+        <EvidenceCard title="Priority alerts" copy="The monitor starts with the highest-signal items the user is likely to revisit first.">
+          {briefData.activityOverview.error && !briefData.activityOverview.data ? (
+            <ResearchBriefStateBlock kind="error" kicker="Monitor" title="Unable to load alerts" message={briefData.activityOverview.error} />
+          ) : briefData.activityOverview.loading && !briefData.activityOverview.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Monitor"
+              title="Loading alert watchlist"
+              message="Preparing the cached alert feed that powers the brief's monitor section."
+            />
+          ) : topAlerts.length ? (
+            <div className="workspace-card-stack">
+              {topAlerts.map((alert) => (
+                <AlertOrEntryCard
+                  key={alert.id}
+                  href={alert.href}
+                  danger={alert.level === "high"}
+                  topLeft={
+                    <>
+                      <span className="pill">{alert.level}</span>
+                      <span className="pill">{alert.source}</span>
+                    </>
+                  }
+                  topRight={formatDate(alert.date)}
+                  title={alert.title}
+                  detail={alert.detail}
+                />
+              ))}
+            </div>
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Monitor"
+              title="No active alerts"
+              message="The monitor will list high-priority cached alerts here when thresholds are triggered."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Latest timeline" copy="Chronological recent activity keeps the monitor grounded in dated SEC evidence instead of a generic task list.">
+          {briefData.activityOverview.error && !briefData.activityOverview.data ? (
+            <ResearchBriefStateBlock kind="error" kicker="Monitor" title="Unable to load timeline" message={briefData.activityOverview.error} />
+          ) : briefData.activityOverview.loading && !briefData.activityOverview.data ? (
+            <ResearchBriefStateBlock
+              kind="loading"
+              kicker="Monitor"
+              title="Loading SEC timeline"
+              message="Preparing recent filing, governance, ownership, and insider events for the watchlist-style closeout."
+            />
+          ) : latestEntries.length ? (
+            <div className="workspace-card-stack">
+              {latestEntries.map((entry) => (
+                <AlertOrEntryCard
+                  key={entry.id}
+                  href={entry.href}
+                  topLeft={
+                    <>
+                      <span className="pill">{formatFeedEntryType(entry.type)}</span>
+                      <span className="pill">{entry.badge}</span>
+                    </>
+                  }
+                  topRight={formatDate(entry.date)}
+                  title={entry.title}
+                  detail={entry.detail}
+                />
+              ))}
+            </div>
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Monitor"
+              title="No timeline entries yet"
+              message="Recent filing and ownership activity will populate here once the monitoring feed has dated SEC events to show."
+            />
+          )}
+        </EvidenceCard>
+
+        <EvidenceCard title="Monitor checklist" copy="The last step in the brief is explicit: what to re-check next, and why.">
+          {monitorChecklist.length ? (
+            <div className="research-brief-checklist-grid">
+              {monitorChecklist.map((item) => (
+                <div key={item.title} className="research-brief-checklist-card">
+                  <div className="research-brief-checklist-title">{item.title}</div>
+                  <div className="research-brief-checklist-detail">{item.detail}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <ResearchBriefStateBlock
+              kind="empty"
+              kicker="Monitor"
+              title="No next-step checklist yet"
+              message="The monitor checklist appears once the brief has enough cached activity and freshness data to recommend the next review points."
+            />
+          )}
+        </EvidenceCard>
+      </ResearchBriefSection>
     </CompanyWorkspaceShell>
   );
 }
 
-function formatMarketContextStatus(status: CompanyActivityOverviewResponse["market_context_status"]): string {
-  if (!status) {
-    return "Unavailable";
-  }
-  const observed = status.observation_date ? ` (${formatDate(status.observation_date)})` : "";
-  return `${status.label}${observed}`;
+function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefAsyncState {
+  const [state, setState] = useState<ResearchBriefAsyncState>(INITIAL_ASYNC_STATE);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setState((current) => ({
+      activityOverview: { ...current.activityOverview, loading: true, error: null },
+      changes: { ...current.changes, loading: true, error: null },
+      earningsSummary: { ...current.earningsSummary, loading: true, error: null },
+      capitalStructure: { ...current.capitalStructure, loading: true, error: null },
+      capitalMarketsSummary: { ...current.capitalMarketsSummary, loading: true, error: null },
+      governanceSummary: { ...current.governanceSummary, loading: true, error: null },
+      ownershipSummary: { ...current.ownershipSummary, loading: true, error: null },
+      models: { ...current.models, loading: true, error: null },
+      peers: { ...current.peers, loading: true, error: null },
+    }));
+
+    async function load() {
+      const [
+        activityOverviewResult,
+        changesResult,
+        earningsSummaryResult,
+        capitalStructureResult,
+        capitalMarketsSummaryResult,
+        governanceSummaryResult,
+        ownershipSummaryResult,
+        modelsResult,
+        peersResult,
+      ] = await Promise.allSettled([
+        getCompanyActivityOverview(ticker),
+        getCompanyChangesSinceLastFiling(ticker),
+        getCompanyEarningsSummary(ticker),
+        getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
+        getCompanyCapitalMarketsSummary(ticker),
+        getCompanyGovernanceSummary(ticker),
+        getCompanyBeneficialOwnershipSummary(ticker),
+        getCompanyModels(ticker, MODEL_NAMES, { dupontMode: "auto" }),
+        getCompanyPeers(ticker),
+      ]);
+
+      if (cancelled) {
+        return;
+      }
+
+      setState((current) => ({
+        activityOverview: resolveAsyncState(current.activityOverview, activityOverviewResult, "Unable to load activity overview"),
+        changes: resolveAsyncState(current.changes, changesResult, "Unable to load filing comparison"),
+        earningsSummary: resolveAsyncState(current.earningsSummary, earningsSummaryResult, "Unable to load earnings summary"),
+        capitalStructure: resolveAsyncState(current.capitalStructure, capitalStructureResult, "Unable to load capital structure intelligence"),
+        capitalMarketsSummary: resolveAsyncState(current.capitalMarketsSummary, capitalMarketsSummaryResult, "Unable to load capital markets summary"),
+        governanceSummary: resolveAsyncState(current.governanceSummary, governanceSummaryResult, "Unable to load governance summary"),
+        ownershipSummary: resolveAsyncState(current.ownershipSummary, ownershipSummaryResult, "Unable to load beneficial ownership summary"),
+        models: resolveAsyncState(current.models, modelsResult, "Unable to load model summary"),
+        peers: resolveAsyncState(current.peers, peersResult, "Unable to load peer snapshot"),
+      }));
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
+  return state;
 }
 
-function formatFeedEntryType(type: string): string {
-  if (type === "form144") {
-    return "planned-sale";
+function useActiveBriefSection(sectionIds: string[]): string {
+  const [activeSectionId, setActiveSectionId] = useState(sectionIds[0] ?? "snapshot");
+
+  useEffect(() => {
+    const elements = sectionIds
+      .map((sectionId) => document.getElementById(sectionId))
+      .filter((element): element is HTMLElement => Boolean(element));
+
+    if (!elements.length) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
+
+        if (visible?.target instanceof HTMLElement) {
+          setActiveSectionId(visible.target.id);
+        }
+      },
+      {
+        rootMargin: "-28% 0px -56% 0px",
+        threshold: [0.05, 0.2, 0.45],
+      }
+    );
+
+    elements.forEach((element) => observer.observe(element));
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [sectionIds]);
+
+  return activeSectionId;
+}
+
+function ResearchBriefSection({
+  id,
+  title,
+  question,
+  summary,
+  cues,
+  links,
+  children,
+}: {
+  id: string;
+  title: string;
+  question: string;
+  summary?: string | null;
+  cues: ResearchBriefCue[];
+  links: SectionLink[];
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} data-brief-section className="research-brief-anchor">
+      <Panel title={title} subtitle={question} aside={<SectionLinks links={links} />} variant="subtle">
+        <div className="research-brief-section-stack">
+          {summary ? <p className="research-brief-section-summary">{summary}</p> : null}
+          <ResearchBriefFreshness cues={cues} />
+          <div className="research-brief-evidence-grid">{children}</div>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function ResearchBriefHeroSummary({
+  summary,
+  metrics,
+  metaItems,
+  fallbackLabels,
+}: {
+  summary: string;
+  metrics: Array<{ label: string; value: string }>;
+  metaItems: Array<string | null>;
+  fallbackLabels: string[];
+}) {
+  const visibleMetaItems = metaItems.filter((item): item is string => Boolean(item));
+
+  return (
+    <div className="research-brief-hero">
+      <p className="research-brief-hero-summary">{summary}</p>
+      <div className="research-brief-hero-metrics">
+        {metrics.map((item) => (
+          <div key={item.label} className="research-brief-hero-metric">
+            <div className="research-brief-hero-metric-label">{item.label}</div>
+            <div className="research-brief-hero-metric-value">{item.value}</div>
+          </div>
+        ))}
+      </div>
+      {visibleMetaItems.length ? (
+        <div className="research-brief-hero-meta" aria-label="Brief metadata">
+          {visibleMetaItems.map((item) => (
+            <span key={item} className="research-brief-hero-meta-item">
+              {item}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {fallbackLabels.length ? (
+        <div className="research-brief-hero-note">
+          Price history and market profile context includes a labeled commercial fallback from {fallbackLabels.join(", ")}. Core fundamentals remain sourced from official filings and public datasets.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ResearchBriefSectionNav({ activeSectionId }: { activeSectionId: string }) {
+  return (
+    <nav className="research-brief-nav" aria-label="Research brief sections">
+      {BRIEF_SECTIONS.map((section) => (
+        <a
+          key={section.id}
+          href={`#${section.id}`}
+          className={`research-brief-nav-link${activeSectionId === section.id ? " is-active" : ""}`}
+        >
+          {section.title}
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+function SectionLinks({ links }: { links: SectionLink[] }) {
+  return (
+    <div className="research-brief-section-links">
+      {links.map((link) => (
+        <Link key={link.href} href={link.href} className="research-brief-section-link">
+          {link.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function ResearchBriefFreshness({ cues }: { cues: ResearchBriefCue[] }) {
+  const visibleCues = cues.filter(
+    (cue) => cue.asOf || cue.lastRefreshedAt || cue.lastChecked || cue.provenance?.length || cue.sourceMix || cue.confidenceFlags?.length
+  );
+
+  if (!visibleCues.length) {
+    return null;
   }
-  return type;
+
+  return (
+    <div className="research-brief-freshness-grid">
+      {visibleCues.map((cue) => {
+        const sourceMixLabel = formatSourceMixLabel(cue.sourceMix, cue.provenance);
+        const fallbackLabels = resolveCommercialFallbackLabels(cue.provenance, cue.sourceMix);
+        const confidenceFlags = (cue.confidenceFlags ?? []).slice(0, 2);
+
+        return (
+          <div key={cue.label} className="research-brief-freshness-card">
+            <div className="research-brief-freshness-title-row">
+              <div className="research-brief-freshness-title">{cue.label}</div>
+              {sourceMixLabel ? <span className="pill">{sourceMixLabel}</span> : null}
+            </div>
+            <div className="research-brief-freshness-meta">
+              {cue.asOf ? <span className="pill">As of {formatDate(cue.asOf)}</span> : null}
+              {cue.lastRefreshedAt ? <span className="pill">Refreshed {formatDate(cue.lastRefreshedAt)}</span> : null}
+              {!cue.lastRefreshedAt && cue.lastChecked ? <span className="pill">Last checked {formatDate(cue.lastChecked)}</span> : null}
+              {fallbackLabels.length ? <span className="pill">Fallback {fallbackLabels.join(", ")}</span> : null}
+              {confidenceFlags.map((flag) => (
+                <span key={`${cue.label}-${flag}`} className="pill">
+                  {humanizeToken(flag)}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EvidenceCard({
+  title,
+  copy,
+  className,
+  children,
+}: {
+  title: string;
+  copy: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`research-brief-evidence-card${className ? ` ${className}` : ""}`}>
+      <div className="research-brief-evidence-head">
+        <h3 className="research-brief-evidence-title">{title}</h3>
+        <p className="research-brief-evidence-copy">{copy}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ResearchBriefStateBlock({
+  kind,
+  kicker,
+  title,
+  message,
+  minHeight = 220,
+}: {
+  kind: "loading" | "empty" | "error";
+  kicker: string;
+  title: string;
+  message: string;
+  minHeight?: number;
+}) {
+  return (
+    <div className={`research-brief-state research-brief-state-${kind}`} style={{ minHeight }}>
+      <div className="grid-empty-kicker">{kicker}</div>
+      <div className="grid-empty-title">{title}</div>
+      <div className="grid-empty-copy">{message}</div>
+    </div>
+  );
+}
+
+function PeerComparisonSnapshot({ response }: { response: CompanyPeersResponse }) {
+  const rows = response.peers.slice(0, 4);
+
+  return (
+    <div className="research-brief-table-stack">
+      <div className="company-data-table-shell">
+        <table className="company-data-table company-data-table-compact">
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th className="is-numeric">Price</th>
+              <th className="is-numeric">P/E</th>
+              <th className="is-numeric">EV / EBIT</th>
+              <th className="is-numeric">Revenue Growth</th>
+              <th className="is-numeric">ROIC</th>
+              <th className="is-numeric">Fair Value Gap</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((peer) => (
+              <tr key={peer.ticker} className={peer.is_focus ? "research-brief-table-row-focus" : undefined}>
+                <td>
+                  <div className="research-brief-peer-cell">
+                    <strong>{peer.ticker}</strong>
+                    <span className="text-muted">{peer.name}</span>
+                  </div>
+                </td>
+                <td className="is-numeric">{formatCompactCurrency(peer.latest_price)}</td>
+                <td className="is-numeric">{formatMultiple(peer.pe)}</td>
+                <td className="is-numeric">{formatMultiple(peer.ev_to_ebit)}</td>
+                <td className="is-numeric">{formatPercent(peer.revenue_growth)}</td>
+                <td className="is-numeric">{formatPercent(peer.roic)}</td>
+                <td className="is-numeric">{formatPercent(peer.fair_value_gap)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {response.notes.fair_value_gap ? <div className="text-muted workspace-note-line">{response.notes.fair_value_gap}</div> : null}
+      {response.notes.ev_to_ebit ? <div className="text-muted workspace-note-line">{response.notes.ev_to_ebit}</div> : null}
+    </div>
+  );
 }
 
 function AlertOrEntryCard({
@@ -361,4 +1487,447 @@ function AlertOrEntryCard({
       {content}
     </div>
   );
+}
+
+function resolveAsyncState<T>(
+  previous: AsyncState<T>,
+  result: PromiseSettledResult<T>,
+  fallback: string
+): AsyncState<T> {
+  if (result.status === "fulfilled") {
+    return {
+      data: result.value,
+      error: null,
+      loading: false,
+    };
+  }
+
+  return {
+    data: previous.data,
+    error: result.reason instanceof Error ? result.reason.message : fallback,
+    loading: false,
+  };
+}
+
+function buildSnapshotNarrative({
+  company,
+  latestFinancial,
+  topSegment,
+  alertCount,
+  sourceMix,
+  provenance,
+  loading,
+}: {
+  company: BriefCompany | null;
+  latestFinancial: FinancialPayload | null;
+  topSegment: FinancialPayload["segment_breakdown"][number] | null;
+  alertCount: number;
+  sourceMix: SourceMixPayload | null | undefined;
+  provenance: ProvenanceEntryPayload[] | null | undefined;
+  loading: boolean;
+}): string {
+  if (!latestFinancial) {
+    return loading
+      ? "The brief is loading the latest persisted filing, segment mix, and price context before the deeper sections render."
+      : "The default brief is waiting for persisted financials and segment disclosures before it can frame the company at a glance.";
+  }
+
+  const fallbackLabels = resolveCommercialFallbackLabels(provenance, sourceMix);
+  const topSegmentSummary =
+    topSegment && topSegment.share_of_revenue != null
+      ? `${topSegment.segment_name} contributes ${formatPercent(topSegment.share_of_revenue)} of reported revenue`
+      : topSegment?.segment_name
+        ? `${topSegment.segment_name} is the most visible reported segment`
+        : "segment concentration is still limited in the cached disclosures";
+  const fallbackSummary = fallbackLabels.length
+    ? `Price context is coming through a labeled ${fallbackLabels.join(", ")} fallback while fundamentals remain official-source-first.`
+    : "Both the operating history and its freshness cues remain anchored in the persisted SEC-first workspace.";
+
+  return `${company?.name ?? company?.ticker ?? "This company"} last reported ${formatCompactCurrency(latestFinancial.revenue)} of revenue and ${formatCompactCurrency(latestFinancial.free_cash_flow)} of free cash flow; ${topSegmentSummary}; ${alertCount.toLocaleString()} current alert${alertCount === 1 ? " is" : "s are"} already on the monitor. ${fallbackSummary}`;
+}
+
+function buildWhatChangedNarrative({
+  changes,
+  earningsSummary,
+  activityOverview,
+  loading,
+}: {
+  changes: CompanyChangesSinceLastFilingResponse | null;
+  earningsSummary: CompanyEarningsSummaryResponse | null;
+  activityOverview: CompanyActivityOverviewResponse | null;
+  loading: boolean;
+}): string {
+  if (!changes && !earningsSummary && !activityOverview) {
+    return loading
+      ? "The brief is comparing the latest filing, earnings summary, and activity feed before it answers what changed."
+      : "This section will summarize filing deltas, earnings capture, and dated SEC activity once the persisted change surfaces are available.";
+  }
+
+  const metricDeltas = changes?.summary.metric_delta_count ?? 0;
+  const capitalStructureChanges = changes?.summary.capital_structure_change_count ?? 0;
+  const latestRevenue = earningsSummary?.summary.latest_revenue;
+  const latestEps = earningsSummary?.summary.latest_diluted_eps;
+  const highAlerts = activityOverview?.summary.high ?? 0;
+
+  return `The latest comparable filing surfaced ${metricDeltas.toLocaleString()} metric delta${metricDeltas === 1 ? "" : "s"} and ${capitalStructureChanges.toLocaleString()} capital-structure change${capitalStructureChanges === 1 ? "" : "s"}; the latest earnings capture reads ${formatCompactCurrency(latestRevenue)} of revenue and ${latestEps != null ? latestEps.toFixed(2) : "—"} diluted EPS; the activity feed is currently carrying ${highAlerts.toLocaleString()} high-priority alert${highAlerts === 1 ? "" : "s"}.`;
+}
+
+function buildBusinessQualityNarrative({
+  latestFinancial,
+  previousAnnual,
+  loading,
+}: {
+  latestFinancial: FinancialPayload | null;
+  previousAnnual: FinancialPayload | null;
+  loading: boolean;
+}): string {
+  if (!latestFinancial) {
+    return loading
+      ? "The brief is loading the latest quality metrics before it judges whether the business is strengthening or deteriorating."
+      : "This section will evaluate margins, cash generation, and balance-sheet quality once persisted annual statement history is available.";
+  }
+
+  const revenueGrowth = growthRate(latestFinancial.revenue, previousAnnual?.revenue ?? null);
+  const operatingMargin = safeDivide(latestFinancial.operating_income, latestFinancial.revenue);
+  const fcfMargin = safeDivide(latestFinancial.free_cash_flow, latestFinancial.revenue);
+  const debtToAssets = safeDivide(latestFinancial.total_liabilities, latestFinancial.total_assets);
+
+  return `Revenue is ${revenueGrowth != null ? `${revenueGrowth >= 0 ? "up" : "down"} ${formatPercent(Math.abs(revenueGrowth))} year over year` : "not yet comparable year over year"}, operating margin sits at ${formatPercent(operatingMargin)}, free-cash-flow margin at ${formatPercent(fcfMargin)}, and debt-to-assets at ${formatPercent(debtToAssets)}. The goal here is to decide whether improvement is real, fragile, or mostly accounting noise.`;
+}
+
+function buildCapitalRiskNarrative({
+  capitalStructure,
+  capitalMarketsSummary,
+  governanceSummary,
+  ownershipSummary,
+  insiderSummary,
+  loading,
+}: {
+  capitalStructure: CompanyCapitalStructureResponse | null;
+  capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse | null;
+  governanceSummary: CompanyGovernanceSummaryResponse | null;
+  ownershipSummary: CompanyBeneficialOwnershipSummaryResponse | null;
+  insiderSummary: InsiderActivitySummaryPayload | null;
+  loading: boolean;
+}): string {
+  const latest = capitalStructure?.latest ?? null;
+
+  if (!latest && !capitalMarketsSummary && !governanceSummary && !ownershipSummary && !insiderSummary) {
+    return loading
+      ? "The brief is loading persisted debt, governance, ownership, and insider signals before it judges whether the equity claim is protected."
+      : "This section will summarize debt burden, dilution risk, governance coverage, and ownership pressure once the persisted control signals are available.";
+  }
+
+  const debtDue = latest?.summary.debt_due_next_twelve_months;
+  const netDilution = latest?.summary.net_dilution_ratio;
+  const proxyCount = governanceSummary?.summary.total_filings ?? 0;
+  const stakeChangeCount = ownershipSummary?.summary.total_filings ?? 0;
+  const insiderTone = insiderSummary ? titleCase(insiderSummary.sentiment) : "Pending";
+  const registrationFilings = capitalMarketsSummary?.summary.registration_filings ?? 0;
+
+  return `Near-term debt due is ${formatCompactCurrency(debtDue)}, net dilution is ${formatPercent(netDilution)}, governance coverage spans ${proxyCount.toLocaleString()} proxy filing${proxyCount === 1 ? "" : "s"}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and insider tone currently reads ${insiderTone}. Registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"} so the brief can answer whether capital allocation is supportive or leaking value.`;
+}
+
+function buildValuationNarrative({
+  models,
+  peers,
+  priceHistory,
+  loading,
+}: {
+  models: CompanyModelsResponse["models"];
+  peers: CompanyPeersResponse["peers"];
+  priceHistory: { date: string; close: number | null }[];
+  loading: boolean;
+}): string {
+  if (!models.length && !peers.length) {
+    return loading
+      ? "The brief is loading cached models and the persisted peer universe before it answers the valuation question."
+      : "This section will compare cached model ranges with peer multiples once the valuation workspace has persisted outputs for the company.";
+  }
+
+  const latestPrice = priceHistory.at(-1)?.close ?? peers.find((peer) => peer.is_focus)?.latest_price ?? null;
+  const dcfFairValue = extractModelNumber(models, "dcf", ["fair_value_per_share"]);
+  const residualValue = extractModelNumber(models, "residual_income", ["intrinsic_value", "intrinsic_value_per_share"]);
+  const anchors = [dcfFairValue, residualValue].filter((value): value is number => value != null);
+  const midpoint = anchors.length ? anchors.reduce((sum, value) => sum + value, 0) / anchors.length : null;
+  const gap = midpoint != null && latestPrice != null && latestPrice > 0 ? (midpoint - latestPrice) / latestPrice : null;
+  const focusPeer = peers.find((peer) => peer.is_focus) ?? null;
+  const otherPeers = peers.filter((peer) => !peer.is_focus);
+  const peerMedianPe = median(otherPeers.map((peer) => peer.pe));
+
+  if (gap != null && focusPeer?.pe != null && peerMedianPe != null) {
+    const direction = gap >= 0 ? "above" : "below";
+    return `Cached model anchors put intrinsic value about ${formatPercent(Math.abs(gap))} ${direction} the latest price, while ${focusPeer.ticker} trades at ${formatMultiple(focusPeer.pe)} earnings versus a ${formatMultiple(peerMedianPe)} peer median. The brief's job here is to tell you whether underwriting still points to upside before you open the full model workbench.`;
+  }
+
+  if (midpoint != null && latestPrice != null) {
+    return `The current valuation read is anchored on a cached midpoint of ${formatCompactCurrency(midpoint)} per share versus a latest price of ${formatCompactCurrency(latestPrice)}. Peer metrics are available below to pressure-test whether the market is already paying up for that quality.`;
+  }
+
+  return `Cached valuation outputs are partially available, so the brief uses the peer snapshot below to frame relative valuation while the fuller model range continues to warm.`;
+}
+
+function buildMonitorNarrative({
+  activityOverview,
+  refreshState,
+  company,
+  loading,
+}: {
+  activityOverview: CompanyActivityOverviewResponse | null;
+  refreshState: RefreshState | null;
+  company: BriefCompany | null;
+  loading: boolean;
+}): string {
+  if (!activityOverview) {
+    return loading
+      ? "The brief is loading alerts, dated activity, and freshness cues before it closes with the monitor view."
+      : "This section will tell you what to re-check next once the cached monitoring feed has alerts and dated SEC activity for the company.";
+  }
+
+  const latestEntry = activityOverview.entries[0] ?? null;
+  const refreshSummary = refreshState?.job_id ? "A refresh is already queued in the background." : "No refresh job is queued right now.";
+  const latestEntrySummary = latestEntry ? `The newest dated activity is ${latestEntry.title} on ${formatDate(latestEntry.date)}.` : "No dated SEC activity is cached yet.";
+
+  return `${activityOverview.summary.total.toLocaleString()} alert${activityOverview.summary.total === 1 ? " is" : "s are"} currently on the monitor for ${company?.ticker ?? "this company"}. ${latestEntrySummary} ${refreshSummary}`;
+}
+
+function buildCapitalSignalRows({
+  capitalMarketsSummary,
+  governanceSummary,
+  ownershipSummary,
+  insiderSummary,
+  institutionalHoldings,
+}: {
+  capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse["summary"] | null;
+  governanceSummary: CompanyGovernanceSummaryResponse["summary"] | null;
+  ownershipSummary: CompanyBeneficialOwnershipSummaryResponse["summary"] | null;
+  insiderSummary: InsiderActivitySummaryPayload | null;
+  institutionalHoldings: InstitutionalHoldingPayload[];
+}) {
+  const rows: Array<{ signal: string; currentRead: string; latestEvidence: string }> = [];
+
+  if (capitalMarketsSummary) {
+    rows.push({
+      signal: "Capital markets",
+      currentRead: `${capitalMarketsSummary.total_filings.toLocaleString()} filings · largest offering ${formatCompactCurrency(capitalMarketsSummary.max_offering_amount)}`,
+      latestEvidence: capitalMarketsSummary.latest_filing_date ? formatDate(capitalMarketsSummary.latest_filing_date) : "Pending",
+    });
+  }
+
+  if (governanceSummary) {
+    rows.push({
+      signal: "Governance",
+      currentRead: `${governanceSummary.total_filings.toLocaleString()} proxy filings · ${governanceSummary.filings_with_vote_items.toLocaleString()} with vote items`,
+      latestEvidence: governanceSummary.latest_meeting_date ? formatDate(governanceSummary.latest_meeting_date) : "Pending",
+    });
+  }
+
+  if (ownershipSummary) {
+    rows.push({
+      signal: "Stake changes",
+      currentRead: `${ownershipSummary.total_filings.toLocaleString()} filings · ${ownershipSummary.ownership_increase_events.toLocaleString()} up / ${ownershipSummary.ownership_decrease_events.toLocaleString()} down`,
+      latestEvidence: ownershipSummary.latest_event_date ? formatDate(ownershipSummary.latest_event_date) : "Pending",
+    });
+  }
+
+  if (insiderSummary) {
+    rows.push({
+      signal: "Insiders",
+      currentRead: `${titleCase(insiderSummary.sentiment)} · net ${formatCompactCurrency(insiderSummary.metrics.net_value)}`,
+      latestEvidence: `${insiderSummary.metrics.unique_insiders_buying.toLocaleString()} buyers / ${insiderSummary.metrics.unique_insiders_selling.toLocaleString()} sellers`,
+    });
+  }
+
+  if (institutionalHoldings.length) {
+    const latestReportingDate = institutionalHoldings.reduce<string | null>(
+      (latest, holding) => (!latest || holding.reporting_date > latest ? holding.reporting_date : latest),
+      null
+    );
+    const uniqueManagers = new Set(
+      institutionalHoldings
+        .map((holding) => holding.fund_manager ?? holding.fund_name)
+        .filter((value): value is string => Boolean(value))
+    ).size;
+
+    rows.push({
+      signal: "Institutional",
+      currentRead: `${uniqueManagers.toLocaleString()} managers in cached 13F history`,
+      latestEvidence: latestReportingDate ? formatDate(latestReportingDate) : "Pending",
+    });
+  }
+
+  return rows;
+}
+
+function buildMonitorChecklist({
+  refreshState,
+  activityOverview,
+  company,
+  insiderSummary,
+  institutionalHoldings,
+}: {
+  refreshState: RefreshState | null;
+  activityOverview: CompanyActivityOverviewResponse | null;
+  company: BriefCompany | null;
+  insiderSummary: InsiderActivitySummaryPayload | null;
+  institutionalHoldings: InstitutionalHoldingPayload[];
+}): MonitorChecklistItem[] {
+  const items: MonitorChecklistItem[] = [];
+
+  items.push({
+    title: "Refresh status",
+    detail: refreshState?.job_id
+      ? `Refresh job ${refreshState.job_id} is running in the background.`
+      : company?.last_checked
+        ? `No refresh queued. Last full company check ran on ${formatDate(company.last_checked)}.`
+        : "No refresh queued yet.",
+  });
+
+  if (activityOverview) {
+    items.push({
+      title: "Alert count",
+      detail: `${activityOverview.summary.high.toLocaleString()} high, ${activityOverview.summary.medium.toLocaleString()} medium, and ${activityOverview.summary.low.toLocaleString()} low alert${activityOverview.summary.total === 1 ? " is" : "s are"} currently active.`,
+    });
+
+    if (activityOverview.entries[0]) {
+      items.push({
+        title: "Latest activity",
+        detail: `${activityOverview.entries[0].title} on ${formatDate(activityOverview.entries[0].date)} should be the first thing to revisit if the thesis changes.`,
+      });
+    }
+  }
+
+  if (insiderSummary) {
+    items.push({
+      title: "Insider watch",
+      detail: `Insider tone is ${titleCase(insiderSummary.sentiment)} with net open-market value of ${formatCompactCurrency(insiderSummary.metrics.net_value)}.`,
+    });
+  }
+
+  if (institutionalHoldings.length) {
+    const latestReportingDate = institutionalHoldings.reduce<string | null>(
+      (latest, holding) => (!latest || holding.reporting_date > latest ? holding.reporting_date : latest),
+      null
+    );
+
+    items.push({
+      title: "13F watch",
+      detail: latestReportingDate
+        ? `Institutional history is current through ${formatDate(latestReportingDate)} and should be revisited after the next reporting quarter posts.`
+        : "Institutional history is cached but not yet tied to a latest reporting quarter.",
+    });
+  }
+
+  return items.slice(0, 4);
+}
+
+function extractTopSegment(latestFinancial: FinancialPayload | null) {
+  if (!latestFinancial?.segment_breakdown.length) {
+    return null;
+  }
+
+  return [...latestFinancial.segment_breakdown].sort((left, right) => {
+    const leftValue = left.share_of_revenue ?? left.revenue ?? Number.NEGATIVE_INFINITY;
+    const rightValue = right.share_of_revenue ?? right.revenue ?? Number.NEGATIVE_INFINITY;
+    return rightValue - leftValue;
+  })[0] ?? null;
+}
+
+function extractModelNumber(models: CompanyModelsResponse["models"], modelName: string, path: string[]): number | null {
+  const model = models.find((entry) => entry.model_name === modelName);
+  if (!model) {
+    return null;
+  }
+
+  let current: unknown = model.result;
+  for (const key of path) {
+    current = asRecord(current)[key];
+  }
+
+  return safeNumber(current);
+}
+
+function safeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function safeDivide(numerator: number | null | undefined, denominator: number | null | undefined): number | null {
+  if (numerator == null || denominator == null || denominator === 0) {
+    return null;
+  }
+
+  return numerator / denominator;
+}
+
+function growthRate(current: number | null | undefined, previous: number | null | undefined): number | null {
+  if (current == null || previous == null || previous === 0) {
+    return null;
+  }
+
+  return (current - previous) / Math.abs(previous);
+}
+
+function median(values: Array<number | null | undefined>): number | null {
+  const numericValues = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)).sort((left, right) => left - right);
+
+  if (!numericValues.length) {
+    return null;
+  }
+
+  const middle = Math.floor(numericValues.length / 2);
+  if (numericValues.length % 2 === 0) {
+    return (numericValues[middle - 1] + numericValues[middle]) / 2;
+  }
+
+  return numericValues[middle];
+}
+
+function formatSourceMixLabel(sourceMix: SourceMixPayload | null | undefined, provenance: ProvenanceEntryPayload[] | null | undefined): string | null {
+  const fallbackLabels = resolveCommercialFallbackLabels(provenance, sourceMix);
+
+  if (sourceMix?.official_only) {
+    return "official/public only";
+  }
+
+  if (fallbackLabels.length) {
+    return "official + labeled fallback";
+  }
+
+  if (provenance?.length) {
+    return "cached source mix";
+  }
+
+  return null;
+}
+
+function formatCompactCurrency(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return `$${formatCompactNumber(value)}`;
+}
+
+function formatMultiple(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return `${value.toFixed(1)}x`;
+}
+
+function formatFeedEntryType(type: string): string {
+  if (type === "form144") {
+    return "planned-sale";
+  }
+
+  return type;
+}
+
+function humanizeToken(value: string): string {
+  return value.replaceAll("_", " ");
 }

@@ -10,7 +10,7 @@ interface CompanySubnavProps {
 }
 
 const tabs: Array<{ key: string; label: string; suffix: string; exact?: boolean; group: "core" | "research" }> = [
-  { key: "overview", label: "Overview", suffix: "", exact: true, group: "core" },
+  { key: "overview", label: "Brief", suffix: "", exact: true, group: "core" },
   { key: "financials", label: "Financials", suffix: "/financials", group: "core" },
   { key: "models", label: "Models", suffix: "/models", group: "core" },
   { key: "peers", label: "Peers", suffix: "/peers", group: "core" },

@@ -27,6 +27,57 @@ const company = {
   cache_state: "fresh",
 } as const;
 
+const provenance = [
+  {
+    source_id: "sec_companyfacts",
+    source_tier: "official_regulator",
+    display_label: "SEC Company Facts (XBRL)",
+    url: "https://data.sec.gov/api/xbrl/companyfacts/",
+    default_freshness_ttl_seconds: 21600,
+    disclosure_note: "Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
+    role: "primary",
+    as_of: "2025-12-31",
+    last_refreshed_at: "2026-05-08T00:00:00Z",
+  },
+  {
+    source_id: "yahoo_finance",
+    source_tier: "commercial_fallback",
+    display_label: "Yahoo Finance",
+    url: "https://finance.yahoo.com/",
+    default_freshness_ttl_seconds: 3600,
+    disclosure_note: "Commercial fallback used only for price, volume, and market-profile context; never for core fundamentals.",
+    role: "fallback",
+    as_of: "2026-05-08",
+    last_refreshed_at: "2026-05-08T00:00:00Z",
+  },
+] as const;
+
+const sourceMix = {
+  source_ids: ["sec_companyfacts", "yahoo_finance"],
+  source_tiers: ["commercial_fallback", "official_regulator"],
+  primary_source_ids: ["sec_companyfacts"],
+  fallback_source_ids: ["yahoo_finance"],
+  official_only: false,
+} as const;
+
+const officialSourceMix = {
+  source_ids: ["sec_companyfacts"],
+  source_tiers: ["official_regulator"],
+  primary_source_ids: ["sec_companyfacts"],
+  fallback_source_ids: [],
+  official_only: true,
+} as const;
+
+const diagnostics = {
+  coverage_ratio: 1,
+  fallback_ratio: 0,
+  stale_flags: [],
+  parser_confidence: 0.95,
+  missing_field_flags: [],
+  reconciliation_penalty: null,
+  reconciliation_disagreement_count: 0,
+} as const;
+
 const financials = [
   {
     filing_type: "10-K",
@@ -306,6 +357,11 @@ function buildPeersResponse(selectedTickers: string[]) {
       fair_value_gap: "DCF-derived fair value gap",
       roic: "Operating efficiency from cached filings",
     },
+    provenance,
+    as_of: "2025-12-31",
+    last_refreshed_at: "2026-05-08T00:00:00Z",
+    source_mix: officialSourceMix,
+    confidence_flags: [],
     refresh,
   };
 }
@@ -326,7 +382,124 @@ async function installCompanyWorkspaceMocks(page: Page) {
     const selectedPeers = peersParam ? peersParam.split(",").filter(Boolean) : ["MSFT"];
 
     if (path.endsWith(`/companies/${ticker}/financials`)) {
-      return json(route, { company, financials, price_history: priceHistory, refresh });
+      return json(route, {
+        company,
+        financials,
+        price_history: priceHistory,
+        provenance,
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: sourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+        segment_analysis: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/changes-since-last-filing`)) {
+      return json(route, {
+        company,
+        current_filing: {
+          accession_number: "0000001-26-000001",
+          filing_type: "10-K",
+          statement_type: "annual",
+          period_start: "2025-01-01",
+          period_end: "2025-12-31",
+          source: "sec",
+          last_updated: "2026-05-08T00:00:00Z",
+          last_checked: "2026-05-08T00:00:00Z",
+          filing_acceptance_at: "2026-05-08T00:00:00Z",
+          fetch_timestamp: "2026-05-08T00:00:00Z",
+        },
+        previous_filing: {
+          accession_number: "0000001-25-000001",
+          filing_type: "10-K",
+          statement_type: "annual",
+          period_start: "2024-01-01",
+          period_end: "2024-12-31",
+          source: "sec",
+          last_updated: "2025-05-08T00:00:00Z",
+          last_checked: "2025-05-08T00:00:00Z",
+          filing_acceptance_at: "2025-05-08T00:00:00Z",
+          fetch_timestamp: "2025-05-08T00:00:00Z",
+        },
+        summary: {
+          filing_type: "10-K",
+          current_period_start: "2025-01-01",
+          current_period_end: "2025-12-31",
+          previous_period_start: "2024-01-01",
+          previous_period_end: "2024-12-31",
+          metric_delta_count: 2,
+          new_risk_indicator_count: 1,
+          segment_shift_count: 1,
+          share_count_change_count: 1,
+          capital_structure_change_count: 1,
+          amended_prior_value_count: 0,
+        },
+        metric_deltas: [
+          {
+            metric_key: "revenue",
+            label: "Revenue",
+            unit: "usd",
+            previous_value: 5700,
+            current_value: 6200,
+            delta: 500,
+            relative_change: 0.0877,
+            direction: "increase",
+          },
+        ],
+        new_risk_indicators: [
+          {
+            indicator_key: "working_capital",
+            label: "Working capital compression",
+            severity: "high",
+            description: "Current ratio compressed year over year.",
+            current_value: 1.8,
+            previous_value: 2.1,
+          },
+        ],
+        segment_shifts: [
+          {
+            segment_id: "core",
+            segment_name: "Core Platform",
+            kind: "business",
+            current_revenue: 4100,
+            previous_revenue: 3800,
+            revenue_delta: 300,
+            current_share_of_revenue: 0.661,
+            previous_share_of_revenue: 0.645,
+            share_delta: 0.016,
+            direction: "increase",
+          },
+        ],
+        share_count_changes: [],
+        capital_structure_changes: [],
+        amended_prior_values: [],
+        provenance: [],
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/capital-structure`)) {
+      return json(route, {
+        company,
+        latest: null,
+        history: [],
+        last_capital_structure_check: null,
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+      });
     }
 
     if (path.endsWith(`/companies/${ticker}/activity-overview`)) {
@@ -355,6 +528,23 @@ async function installCompanyWorkspaceMocks(page: Page) {
           },
         ],
         summary: { total: 1, high: 1, medium: 0, low: 0 },
+        provenance: [
+          {
+            source_id: "ft_activity_overview",
+            source_tier: "derived_from_official",
+            display_label: "Fundamental Terminal Activity Overview",
+            url: "https://github.com/gptvibe/Fundamental-Terminal",
+            default_freshness_ttl_seconds: 21600,
+            disclosure_note: "Unified activity feed assembled from official SEC disclosures and official macro status signals.",
+            role: "derived",
+            as_of: "2026-05-08",
+            last_refreshed_at: "2026-05-08T00:00:00Z",
+          },
+        ],
+        as_of: "2026-05-08",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
         market_context_status: {
           state: "fresh",
           label: "Macro context fresh",
@@ -362,6 +552,90 @@ async function installCompanyWorkspaceMocks(page: Page) {
           source: "Treasury + BLS",
         },
         refresh,
+        error: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/beneficial-ownership/summary`)) {
+      return json(route, {
+        company,
+        summary: {
+          total_filings: 2,
+          initial_filings: 1,
+          amendments: 1,
+          unique_reporting_persons: 2,
+          latest_filing_date: "2026-05-02",
+          latest_event_date: "2026-05-02",
+          max_reported_percent: 0.09,
+          chains_with_amendments: 1,
+          amendments_with_delta: 1,
+          ownership_increase_events: 1,
+          ownership_decrease_events: 0,
+          ownership_unchanged_events: 0,
+          largest_increase_pp: 0.02,
+          largest_decrease_pp: null,
+        },
+        refresh,
+        error: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/governance/summary`)) {
+      return json(route, {
+        company,
+        summary: {
+          total_filings: 3,
+          definitive_proxies: 1,
+          supplemental_proxies: 2,
+          filings_with_meeting_date: 1,
+          filings_with_exec_comp: 1,
+          filings_with_vote_items: 1,
+          latest_meeting_date: "2026-04-18",
+          max_vote_item_count: 4,
+        },
+        refresh,
+        diagnostics,
+        error: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/capital-markets/summary`)) {
+      return json(route, {
+        company,
+        summary: {
+          total_filings: 2,
+          late_filer_notices: 0,
+          registration_filings: 1,
+          prospectus_filings: 1,
+          latest_filing_date: "2026-04-30",
+          max_offering_amount: 500,
+        },
+        refresh,
+        diagnostics,
+        error: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/earnings/summary`)) {
+      return json(route, {
+        company,
+        summary: {
+          total_releases: 2,
+          parsed_releases: 1,
+          metadata_only_releases: 1,
+          releases_with_guidance: 1,
+          releases_with_buybacks: 1,
+          releases_with_dividends: 1,
+          latest_filing_date: "2026-05-07",
+          latest_report_date: "2026-05-07",
+          latest_reported_period_end: "2026-04-30",
+          latest_revenue: 120,
+          latest_operating_income: 35,
+          latest_net_income: 28,
+          latest_diluted_eps: 1.18,
+        },
+        refresh,
+        diagnostics,
         error: null,
       });
     }
@@ -471,12 +745,111 @@ async function installCompanyWorkspaceMocks(page: Page) {
       });
     }
 
+    if (path.endsWith(`/companies/${ticker}/institutional-holdings`)) {
+      return json(route, {
+        company,
+        institutional_holdings: [
+          {
+            reporting_date: "2025-12-31",
+            fund_manager: "Long Horizon Capital",
+            fund_name: "Long Horizon Capital",
+            shares: 1250000,
+            market_value: 136250000,
+            filing_type: "13F-HR",
+            accession_number: "0002000-26-000001",
+            source: "sec",
+          },
+        ],
+        refresh,
+      });
+    }
+
     if (path.endsWith(`/companies/${ticker}/beneficial-ownership`)) {
       return json(route, {
         company,
         filings: [],
         refresh,
         error: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/models`)) {
+      return json(route, {
+        company: { ...company, strict_official_mode: false },
+        requested_models: ["dcf", "residual_income", "ratios", "dupont", "piotroski", "altman_z"],
+        models: [
+          {
+            model_name: "dcf",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              fair_value_per_share: 130,
+              net_debt: 420,
+              model_status: "supported",
+            },
+          },
+          {
+            model_name: "residual_income",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              intrinsic_value: { intrinsic_value_per_share: 125 },
+              primary_for_sector: true,
+              model_status: "supported",
+            },
+          },
+          {
+            model_name: "ratios",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              values: {
+                revenue_growth: 0.09,
+                net_margin: 0.18,
+                liabilities_to_assets: 0.44,
+                equity_ratio: 0.56,
+              },
+            },
+          },
+          {
+            model_name: "dupont",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              net_profit_margin: 0.18,
+            },
+          },
+          {
+            model_name: "piotroski",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              score: 8,
+              score_max: 9,
+            },
+          },
+          {
+            model_name: "altman_z",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              z_score_approximate: 4.1,
+            },
+          },
+        ],
+        provenance,
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: sourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
       });
     }
 
@@ -587,15 +960,23 @@ test.beforeEach(async ({ page }) => {
   await installCompanyWorkspaceMocks(page);
 });
 
-test("overview workspace smoke", async ({ page }) => {
+test("research brief smoke", async ({ page }) => {
   await page.goto(`/company/${ticker.toLowerCase()}`);
 
-  await expect(page.getByRole("button", { name: "Refresh Company Data" })).toBeVisible();
-  await expect(page.getByText("Acme Corporation")).toBeVisible();
-  await expect(page.getByText("Working capital tightened")).toBeVisible();
-  const priceAndFundamentals = page.getByText("Price & Fundamentals");
-  await priceAndFundamentals.scrollIntoViewIfNeeded();
-  await expect(priceAndFundamentals).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh Brief Data" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Acme Corporation", exact: true })).toBeVisible();
+  const snapshotHeading = page.getByRole("heading", { name: "Snapshot", exact: true });
+  await snapshotHeading.scrollIntoViewIfNeeded();
+  await expect(snapshotHeading).toBeVisible();
+  const whatChangedHeading = page.getByRole("heading", { name: "What Changed", exact: true });
+  await whatChangedHeading.scrollIntoViewIfNeeded();
+  await expect(whatChangedHeading).toBeVisible();
+  await expect(page.getByText("Working capital tightened").first()).toBeVisible();
+  await expect(page.getByText("Q2 earnings filing posted").first()).toBeVisible();
+  const valuationHeading = page.getByRole("heading", { name: "Valuation", exact: true });
+  await valuationHeading.scrollIntoViewIfNeeded();
+  await expect(valuationHeading).toBeVisible();
+  await expect(page.locator("#valuation").getByText("Fallback Yahoo Finance", { exact: true }).first()).toBeVisible();
 });
 
 test("peers workspace smoke", async ({ page }) => {
