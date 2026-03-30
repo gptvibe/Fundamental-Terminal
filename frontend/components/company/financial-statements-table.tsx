@@ -1,32 +1,70 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
+import { useMemo } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import { difference, formatSignedCompactDelta } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { FinancialPayload } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
-export function FinancialStatementsTable({ financials, ticker }: { financials: FinancialPayload[]; ticker: string }) {
+type StatementMetricConfig = {
+  key: string;
+  label: string;
+  selectValue: (statement: FinancialPayload) => number | null | undefined;
+  formatValue: (value: number | null | undefined) => string;
+  formatDelta?: (value: number | null | undefined) => string;
+};
+
+const STATEMENT_METRICS: StatementMetricConfig[] = [
+  { key: "revenue", label: "Revenue", selectValue: (statement) => statement.revenue, formatValue: formatCompactNumber },
+  { key: "gross_profit", label: "Gross Profit", selectValue: (statement) => statement.gross_profit, formatValue: formatCompactNumber },
+  { key: "operating_income", label: "Operating Income", selectValue: (statement) => statement.operating_income, formatValue: formatCompactNumber },
+  { key: "net_income", label: "Net Income", selectValue: (statement) => statement.net_income, formatValue: formatCompactNumber },
+  { key: "eps", label: "EPS", selectValue: (statement) => statement.eps, formatValue: formatPerShareValue, formatDelta: formatPerShareDelta },
+  { key: "operating_cash_flow", label: "Operating Cash Flow", selectValue: (statement) => statement.operating_cash_flow, formatValue: formatCompactNumber },
+  { key: "free_cash_flow", label: "Free Cash Flow", selectValue: (statement) => statement.free_cash_flow, formatValue: formatCompactNumber },
+  { key: "total_assets", label: "Total Assets", selectValue: (statement) => statement.total_assets, formatValue: formatCompactNumber },
+  { key: "total_liabilities", label: "Total Liabilities", selectValue: (statement) => statement.total_liabilities, formatValue: formatCompactNumber },
+];
+
+interface FinancialStatementsTableProps {
+  financials: FinancialPayload[];
+  ticker: string;
+  showComparison?: boolean;
+  selectedPeriodKey?: string | null;
+  comparisonPeriodKey?: string | null;
+  selectedFinancial?: FinancialPayload | null;
+  comparisonFinancial?: FinancialPayload | null;
+}
+
+export function FinancialStatementsTable({
+  financials,
+  ticker,
+  showComparison = false,
+  selectedPeriodKey = null,
+  comparisonPeriodKey = null,
+  selectedFinancial = null,
+  comparisonFinancial = null,
+}: FinancialStatementsTableProps) {
   const metricTrends = useMemo(() => buildMetricTrendRows(financials), [financials]);
-  const jsonPayload = useMemo(() => JSON.stringify(financials, null, 2), [financials]);
-  const csvPayload = useMemo(() => buildFinancialsCsv(financials), [financials]);
-  const [tableScrollTop, setTableScrollTop] = useState(0);
-  const rowHeight = 42;
-  const tableViewportHeight = 420;
-  const overscan = 8;
-  const visibleRowCount = Math.ceil(tableViewportHeight / rowHeight) + overscan * 2;
-  const startIndex = Math.max(0, Math.floor(tableScrollTop / rowHeight) - overscan);
-  const endIndex = Math.min(financials.length, startIndex + visibleRowCount);
-  const visibleRows = financials.slice(startIndex, endIndex);
-  const topSpacerHeight = startIndex * rowHeight;
-  const bottomSpacerHeight = Math.max(0, (financials.length - endIndex) * rowHeight);
+  const activeFinancial = selectedFinancial ?? findFinancialByKey(financials, selectedPeriodKey) ?? financials[0] ?? null;
+  const activeComparisonFinancial = showComparison
+    ? comparisonFinancial ?? findFinancialByKey(financials, comparisonPeriodKey)
+    : null;
+  const exportedFinancials = useMemo(
+    () => buildVisibleStatements(activeFinancial, activeComparisonFinancial),
+    [activeComparisonFinancial, activeFinancial]
+  );
+  const jsonPayload = useMemo(() => JSON.stringify(exportedFinancials, null, 2), [exportedFinancials]);
+  const csvPayload = useMemo(() => buildFinancialsCsv(exportedFinancials), [exportedFinancials]);
 
   return (
     <div className="financial-statements-stack">
       <div className="financial-export-row">
-        <div className="financial-trend-table-note">Download the current cached statement history for spreadsheet or model work.</div>
+        <div className="financial-trend-table-note">Download the currently focused statement view for spreadsheet or model work.</div>
         <div className="financial-export-actions">
           <button
             type="button"
@@ -45,8 +83,16 @@ export function FinancialStatementsTable({ financials, ticker }: { financials: F
         </div>
       </div>
 
+      {(activeFinancial || activeComparisonFinancial) ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {activeFinancial ? <span className="pill tone-cyan">Focus {formatStatementLabel(activeFinancial)}</span> : null}
+          {activeComparisonFinancial ? <span className="pill tone-gold">Compare {formatStatementLabel(activeComparisonFinancial)}</span> : null}
+          {showComparison && !activeComparisonFinancial ? <span className="pill tone-red">No comparison period is available in the current view</span> : null}
+        </div>
+      ) : null}
+
       <div className="financial-trend-table-shell">
-        <div className="financial-trend-table-note">Hover a sparkline to inspect yearly values.</div>
+        <div className="financial-trend-table-note">Hover a sparkline to inspect values across the currently selected cadence and range.</div>
         <div className="financial-trend-table-scroll">
           <table className="financial-trend-table">
             <thead>
@@ -80,53 +126,35 @@ export function FinancialStatementsTable({ financials, ticker }: { financials: F
         </div>
       </div>
 
-      <div
-        className="financial-table-shell"
-        style={{ maxHeight: tableViewportHeight, overflowY: "auto" }}
-        onScroll={(event) => setTableScrollTop(event.currentTarget.scrollTop)}
-      >
-        <table className="financial-table">
+      <div className="financial-table-shell">
+        <table className="financial-table" style={{ minWidth: 860 }}>
           <thead>
             <tr>
-              <th>Period End</th>
-              <th>Form</th>
-              <th>Revenue</th>
-              <th>Gross Profit</th>
-              <th>Operating Inc.</th>
-              <th>Net Income</th>
-              <th>EPS</th>
-              <th>OCF</th>
-              <th>FCF</th>
-              <th>Assets</th>
-              <th>Liabilities</th>
+              <th>Metric</th>
+              <th>{activeFinancial ? formatStatementHeader(activeFinancial) : "Selected Period"}</th>
+              {activeComparisonFinancial ? <th>{formatStatementHeader(activeComparisonFinancial)}</th> : null}
+              {activeComparisonFinancial ? <th>Absolute Change</th> : null}
+              {activeComparisonFinancial ? <th>Percent Change</th> : null}
             </tr>
           </thead>
           <tbody>
-            {topSpacerHeight > 0 ? (
-              <tr aria-hidden>
-                <td colSpan={11} style={{ height: topSpacerHeight, padding: 0, border: "none" }} />
-              </tr>
-            ) : null}
-            {visibleRows.map((row) => (
-              <tr key={`${row.period_end}-${row.filing_type}-${row.source}`}>
-                <td>{formatDate(row.period_end)}</td>
-                <td className="form-cell">{row.filing_type}</td>
-                <td>{formatCompactNumber(row.revenue)}</td>
-                <td>{formatCompactNumber(row.gross_profit)}</td>
-                <td>{formatCompactNumber(row.operating_income)}</td>
-                <td>{formatCompactNumber(row.net_income)}</td>
-                <td>{row.eps == null ? "?" : row.eps.toFixed(2)}</td>
-                <td>{formatCompactNumber(row.operating_cash_flow)}</td>
-                <td>{formatCompactNumber(row.free_cash_flow)}</td>
-                <td>{formatCompactNumber(row.total_assets)}</td>
-                <td>{formatCompactNumber(row.total_liabilities)}</td>
-              </tr>
-            ))}
-            {bottomSpacerHeight > 0 ? (
-              <tr aria-hidden>
-                <td colSpan={11} style={{ height: bottomSpacerHeight, padding: 0, border: "none" }} />
-              </tr>
-            ) : null}
+            {STATEMENT_METRICS.map((metric) => {
+              const activeValue = activeFinancial ? metric.selectValue(activeFinancial) : null;
+              const comparisonValue = activeComparisonFinancial ? metric.selectValue(activeComparisonFinancial) : null;
+              const absoluteChange = activeComparisonFinancial ? difference(activeValue, comparisonValue) : null;
+              const relativeChange = activeComparisonFinancial ? calculateRelativeChange(activeValue, comparisonValue) : null;
+              const toneStyle = resolveDeltaStyle(absoluteChange);
+
+              return (
+                <tr key={metric.key}>
+                  <td>{metric.label}</td>
+                  <td>{metric.formatValue(activeValue)}</td>
+                  {activeComparisonFinancial ? <td>{metric.formatValue(comparisonValue)}</td> : null}
+                  {activeComparisonFinancial ? <td style={toneStyle}>{formatMetricDelta(metric, absoluteChange)}</td> : null}
+                  {activeComparisonFinancial ? <td style={toneStyle}>{formatPercent(relativeChange)}</td> : null}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -426,6 +454,82 @@ function trendColor(direction: TrendDirection): string {
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function findFinancialByKey(financials: FinancialPayload[], key: string | null): FinancialPayload | null {
+  if (!key) {
+    return null;
+  }
+  return financials.find((statement) => buildStatementKey(statement) === key) ?? null;
+}
+
+function buildVisibleStatements(
+  activeFinancial: FinancialPayload | null,
+  comparisonFinancial: FinancialPayload | null
+): FinancialPayload[] {
+  const visibleStatements = [activeFinancial, comparisonFinancial].filter((statement): statement is FinancialPayload => Boolean(statement));
+  const seenKeys = new Set<string>();
+  return visibleStatements.filter((statement) => {
+    const statementKey = buildStatementKey(statement);
+    if (seenKeys.has(statementKey)) {
+      return false;
+    }
+    seenKeys.add(statementKey);
+    return true;
+  });
+}
+
+function buildStatementKey(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
+  return `${statement.period_end}|${statement.filing_type}`;
+}
+
+function formatStatementLabel(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
+  return `${statement.filing_type} ${formatDate(statement.period_end)}`;
+}
+
+function formatStatementHeader(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
+  return `${statement.filing_type} ${formatDate(statement.period_end)}`;
+}
+
+function formatPerShareValue(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  return value.toFixed(2);
+}
+
+function formatPerShareDelta(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function formatMetricDelta(metric: StatementMetricConfig, value: number | null): string {
+  if (metric.formatDelta) {
+    return metric.formatDelta(value);
+  }
+  return formatSignedCompactDelta(value);
+}
+
+function calculateRelativeChange(current: number | null | undefined, previous: number | null | undefined): number | null {
+  if (current == null || previous == null || Number.isNaN(current) || Number.isNaN(previous) || previous === 0) {
+    return null;
+  }
+  return (current - previous) / Math.abs(previous);
+}
+
+function resolveDeltaStyle(value: number | null): CSSProperties | undefined {
+  if (value == null || Number.isNaN(value)) {
+    return { color: "var(--text-muted)", fontWeight: 600 };
+  }
+  if (value > 0) {
+    return { color: "var(--positive)", fontWeight: 700 };
+  }
+  if (value < 0) {
+    return { color: "var(--negative)", fontWeight: 700 };
+  }
+  return { color: "var(--text-muted)", fontWeight: 600 };
 }
 
 function triggerDownload(filename: string, payload: string, contentType: string) {

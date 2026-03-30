@@ -15,6 +15,7 @@ from app.api.schemas.financials import (
     CompanyFinancialsResponse,
     CompanyFinancialRestatementsResponse,
     CompanyMetricsTimeseriesResponse,
+    CompanySegmentHistoryResponse,
 )
 
 
@@ -26,6 +27,13 @@ def build_router(main_module: Any) -> APIRouter:
         main_module.company_financials,
         methods=["GET"],
         response_model=CompanyFinancialsResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/segment-history",
+        main_module.company_segment_history,
+        methods=["GET"],
+        response_model=CompanySegmentHistoryResponse,
     )
     add_user_visible_route(
         router,

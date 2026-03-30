@@ -74,6 +74,38 @@ class SegmentAnalysisPayload(BaseModel):
     geographic: SegmentLensPayload | None = None
 
 
+class SegmentHistorySegmentPayload(BaseModel):
+    name: str
+    revenue: Number = None
+    operating_income: Number = None
+    operating_margin: Number = None
+    share_of_revenue: Number = None
+
+
+class SegmentComparabilityFlagsPayload(BaseModel):
+    no_prior_comparable_disclosure: bool = False
+    segment_axis_changed: bool = False
+    partial_operating_income_disclosure: bool = False
+    new_or_removed_segments: bool = False
+
+
+class SegmentHistoryPeriodPayload(BaseModel):
+    period_end: DateType
+    fiscal_year: int | None = None
+    kind: Literal["business", "geographic"]
+    segments: list[SegmentHistorySegmentPayload] = Field(default_factory=list)
+    comparability_flags: SegmentComparabilityFlagsPayload = Field(default_factory=SegmentComparabilityFlagsPayload)
+
+
+class CompanySegmentHistoryResponse(ProvenanceEnvelope):
+    company: CompanyPayload | None
+    kind: Literal["business", "geographic"]
+    years: int
+    periods: list[SegmentHistoryPeriodPayload] = Field(default_factory=list)
+    refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+
+
 class FilingParserSegmentPayload(BaseModel):
     name: str
     revenue: Number = None

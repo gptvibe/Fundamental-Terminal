@@ -7,6 +7,57 @@ import { describe, expect, it, vi } from "vitest";
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import type { FinancialPayload, SegmentAnalysisPayload } from "@/lib/types";
 
+vi.mock("next/navigation", () => ({
+  useParams: () => ({ ticker: "acme" }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  getCompanySegmentHistory: vi.fn().mockResolvedValue({
+    company: null,
+    kind: "business",
+    years: 3,
+    periods: [
+      {
+        period_end: "2025-12-31",
+        fiscal_year: 2025,
+        kind: "business",
+        segments: [
+          { name: "Cloud", revenue: 520, operating_income: 170, operating_margin: 0.3269, share_of_revenue: 0.52 },
+          { name: "Devices", revenue: 300, operating_income: 45, operating_margin: 0.15, share_of_revenue: 0.3 },
+        ],
+        comparability_flags: {
+          no_prior_comparable_disclosure: false,
+          segment_axis_changed: false,
+          partial_operating_income_disclosure: false,
+          new_or_removed_segments: false,
+        },
+      },
+      {
+        period_end: "2024-12-31",
+        fiscal_year: 2024,
+        kind: "business",
+        segments: [
+          { name: "Cloud", revenue: 410, operating_income: 125, operating_margin: 0.3049, share_of_revenue: 0.4556 },
+          { name: "Devices", revenue: 340, operating_income: 55, operating_margin: 0.1618, share_of_revenue: 0.3778 },
+        ],
+        comparability_flags: {
+          no_prior_comparable_disclosure: false,
+          segment_axis_changed: false,
+          partial_operating_income_disclosure: false,
+          new_or_removed_segments: false,
+        },
+      },
+    ],
+    provenance: [],
+    as_of: null,
+    last_refreshed_at: null,
+    source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+    confidence_flags: [],
+    refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+  }),
+}));
+
 vi.mock("recharts", () => {
   const React = require("react");
   const Mock = ({ children }: { children?: React.ReactNode }) => React.createElement("div", null, children);
@@ -141,6 +192,9 @@ describe("BusinessSegmentBreakdown", () => {
     render(React.createElement(BusinessSegmentBreakdown, { financials, segmentAnalysis }));
 
     expect(screen.getByText("What Moved The Business Mix")).toBeTruthy();
+    expect(screen.getByText("supports_selected_period")).toBeTruthy();
+    expect(screen.getByText("supports_compare_mode")).toBeTruthy();
+    expect(screen.getByText("supports_trend_mode")).toBeTruthy();
     expect(screen.getByText(/Mix shifted most in Cloud \+6.4 pts/i)).toBeTruthy();
     expect(screen.getByText("Margin Contribution")).toBeTruthy();
     expect(screen.getByText("Mix is concentrated in one line")).toBeTruthy();
@@ -150,5 +204,41 @@ describe("BusinessSegmentBreakdown", () => {
     expect(screen.getByText("What Moved The Geographic Mix")).toBeTruthy();
     expect(screen.getByText("Geographic disclosure is revenue-only")).toBeTruthy();
     expect(screen.getAllByText(/United States/i).length).toBeGreaterThan(0);
+  });
+
+  it("respects the selected and comparison periods and exposes trend sections", () => {
+    const financials: FinancialPayload[] = [
+      financialPayload("2025-12-31", 1000, 260, [
+        { segment_id: "cloud", segment_name: "Cloud", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 520, share_of_revenue: 0.52, operating_income: 170, assets: null },
+        { segment_id: "devices", segment_name: "Devices", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 300, share_of_revenue: 0.30, operating_income: 45, assets: null },
+      ]),
+      financialPayload("2024-12-31", 900, 220, [
+        { segment_id: "cloud", segment_name: "Cloud", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 410, share_of_revenue: 0.4556, operating_income: 125, assets: null },
+        { segment_id: "devices", segment_name: "Devices", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 340, share_of_revenue: 0.3778, operating_income: 55, assets: null },
+      ]),
+      financialPayload("2023-12-31", 820, 200, [
+        { segment_id: "cloud", segment_name: "Cloud", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 360, share_of_revenue: 0.439, operating_income: 100, assets: null },
+        { segment_id: "devices", segment_name: "Devices", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 320, share_of_revenue: 0.39, operating_income: 48, assets: null },
+      ]),
+    ];
+
+    render(
+      React.createElement(BusinessSegmentBreakdown, {
+        financials,
+        chartState: {
+          cadence: "annual",
+          visiblePeriodCount: 3,
+          selectedFinancial: financials[1],
+          comparisonFinancial: financials[2],
+          selectedPeriodLabel: "10-K Dec 31, 2024",
+          comparisonPeriodLabel: "10-K Dec 31, 2023",
+        },
+      })
+    );
+
+    expect(screen.getByText(/Focus 10-K Dec 31, 2024/i)).toBeTruthy();
+    expect(screen.getByText(/Compare 10-K Dec 31, 2023/i)).toBeTruthy();
+    expect(screen.getByText("Business Revenue Trend")).toBeTruthy();
+    expect(screen.getByText("Business Margin Trend")).toBeTruthy();
   });
 });

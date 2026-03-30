@@ -183,6 +183,14 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ),
     (
         "GET",
+        "/api/companies/{ticker}/segment-history",
+    ): _derived_official_contract(
+        "ft_snapshot_history",
+        "sec_companyfacts",
+        "sec_edgar",
+    ),
+    (
+        "GET",
         "/api/companies/{ticker}/capital-structure",
     ): _derived_official_contract(
         "ft_capital_structure_intelligence",
@@ -254,6 +262,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "/api/companies/{ticker}/models",
     ): _price_sensitive_contract(
         "ft_model_engine",
+        "sec_edgar",
         "sec_companyfacts",
         "fdic_bankfind_financials",
         "federal_reserve_fr_y9c",
@@ -331,6 +340,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "/api/companies/{ticker}/peers",
     ): _price_sensitive_contract(
         "ft_peer_comparison",
+        "sec_edgar",
         "sec_companyfacts",
         "fdic_bankfind_financials",
         "federal_reserve_fr_y9c",

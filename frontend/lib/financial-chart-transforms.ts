@@ -1,10 +1,12 @@
 import type { FilingEventPayload, FinancialPayload } from "@/lib/types";
+import { formatStatementAxisLabel } from "@/lib/financial-chart-state";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
 export type OperatingCostSeriesRow = {
   period: string;
   periodEnd: string;
+  filingType: string;
   sga: number | null;
   researchAndDevelopment: number | null;
   stockBasedCompensation: number | null;
@@ -18,7 +20,10 @@ export type CapitalMarketsSignalRow = {
   debtChanges: number | null;
 };
 
-export function buildOperatingCostSeries(financials: FinancialPayload[]): OperatingCostSeriesRow[] {
+export function buildOperatingCostSeries(
+  financials: FinancialPayload[],
+  cadence?: "annual" | "quarterly" | "ttm" | "reported"
+): OperatingCostSeriesRow[] {
   return [...financials]
     .sort((left, right) => Date.parse(left.period_end) - Date.parse(right.period_end))
     .filter(
@@ -30,8 +35,9 @@ export function buildOperatingCostSeries(financials: FinancialPayload[]): Operat
         statement.income_tax_expense != null
     )
     .map((statement) => ({
-      period: new Intl.DateTimeFormat("en-US", { year: "numeric" }).format(new Date(statement.period_end)),
+      period: formatStatementAxisLabel(statement, cadence),
       periodEnd: statement.period_end,
+      filingType: statement.filing_type,
       sga: statement.sga,
       researchAndDevelopment: statement.research_and_development,
       stockBasedCompensation: statement.stock_based_compensation,

@@ -262,6 +262,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Latest-versus-prior filing comparison derived from cached SEC statements and amendment history.",
     ),
+    "ft_snapshot_history": SourceDefinition(
+        source_id="ft_snapshot_history",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Snapshot History Service",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Reusable history views derived from cached snapshot-bound disclosures such as segment and geographic statement breakdowns.",
+    ),
     "ft_capital_structure_intelligence": SourceDefinition(
         source_id="ft_capital_structure_intelligence",
         tier="derived_from_official",

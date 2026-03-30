@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useParams } from "next/navigation";
 import {
   Bar,
   BarChart,
@@ -12,52 +13,103 @@ import {
   Tooltip,
   Treemap,
   XAxis,
-  YAxis
+  YAxis,
 } from "recharts";
 
+import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { getCompanySegmentHistory } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
+import { buildFinancialPeriodKey, type FinancialCadence } from "@/hooks/use-period-selection";
+import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
+import {
+  dedupeSnapshotSurfaceWarnings,
+  resolveSnapshotSurfaceMode,
+  type SnapshotSurfaceCapabilities,
+  type SnapshotSurfaceWarning,
+} from "@/lib/snapshot-surface";
 import type {
   FinancialPayload,
   FinancialSegmentPayload,
   SegmentAnalysisPayload,
+  SegmentComparabilityFlagsPayload,
   SegmentDisclosurePayload,
+  SegmentHistoryPeriodPayload,
   SegmentLensPayload,
 } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
-const SEGMENT_COLORS = ["var(--positive)", "var(--accent)", "var(--warning)", "var(--negative)", "#A855F7", "var(--positive)", "#64D2FF"];
+const SEGMENT_COLORS = ["var(--positive)", "var(--accent)", "var(--warning)", "var(--negative)", "#A855F7", "#64D2FF", "#0EA5E9"];
+const CAPABILITIES: SnapshotSurfaceCapabilities = {
+  supports_selected_period: true,
+  supports_compare_mode: true,
+  supports_trend_mode: true,
+};
 
 type SegmentKind = "business" | "geographic";
+
+type TooltipEntry = {
+  payload?: SegmentPoint;
+};
 
 type SegmentPoint = {
   id: string;
   name: string;
   axisLabel: string | null;
-  kind: "business" | "geographic" | "other";
+  kind: SegmentKind;
   revenue: number;
   share: number | null;
-  growth: number | null;
   operatingIncome: number | null;
-  assets: number | null;
+  operatingMargin: number | null;
+  growth: number | null;
+  shareDelta: number | null;
+  operatingMarginDelta: number | null;
+  comparisonRevenue: number | null;
+  comparisonShare: number | null;
+  comparisonOperatingMargin: number | null;
   color: string;
 };
 
-type TooltipEntry = {
-  payload?: SegmentPoint;
-  value?: number | string;
-  name?: string;
-  color?: string;
+type SegmentPeriod = {
+  key: string;
+  periodEnd: string;
+  filingType: string | null;
+  label: string;
+  cadence: FinancialCadence | "reported";
+  comparabilityFlags: SegmentComparabilityFlagsPayload;
+  segments: Array<{
+    id: string;
+    name: string;
+    axisLabel: string | null;
+    kind: SegmentKind;
+    revenue: number;
+    share: number | null;
+    operatingIncome: number | null;
+    operatingMargin: number | null;
+  }>;
 };
 
 interface BusinessSegmentBreakdownProps {
   financials: FinancialPayload[];
   segmentAnalysis?: SegmentAnalysisPayload | null;
+  chartState?: SharedFinancialChartState;
+  ticker?: string;
+  reloadKey?: string | null;
 }
 
-export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }: BusinessSegmentBreakdownProps) {
+export function BusinessSegmentBreakdown({
+  financials,
+  segmentAnalysis = null,
+  chartState,
+  ticker,
+  reloadKey = null,
+}: BusinessSegmentBreakdownProps) {
+  const params = useParams<{ ticker?: string }>();
+  const resolvedTicker = (ticker ?? params?.ticker ?? "").trim().toUpperCase();
   const noFinancials = financials.length === 0;
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const [historyPeriods, setHistoryPeriods] = useState<SegmentHistoryPeriodPayload[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const availableKinds = useMemo(() => {
     const kinds = new Set<SegmentKind>();
@@ -86,57 +138,51 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
     }
   }, [activeKind, availableKinds, preferredKind]);
 
-  const segmentStatements = useMemo(() => {
-    const statementsWithKind = financials.filter((statement) => hasKindSegments(statement, activeKind));
-    const annual = statementsWithKind.filter((statement) => ANNUAL_FORMS.has(statement.filing_type));
-    if (annual.length > 0) {
-      return annual;
-    }
-    return statementsWithKind;
-  }, [activeKind, financials]);
+  const localPeriods = useMemo(
+    () => buildLocalPeriods(financials, activeKind, chartState?.cadence),
+    [activeKind, chartState?.cadence, financials]
+  );
+  const requestedYears = useMemo(() => Math.min(Math.max(chartState?.visiblePeriodCount ?? localPeriods.length, 2), 10), [chartState?.visiblePeriodCount, localPeriods.length]);
+  const useAnnualHistory = (chartState?.cadence ?? "annual") === "annual";
 
-  const latestStatement = segmentStatements[0] ?? null;
-  const previousStatement = segmentStatements[1] ?? null;
+  useEffect(() => {
+    if (!resolvedTicker || !useAnnualHistory) {
+      setHistoryPeriods([]);
+      setHistoryError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setHistoryError(null);
+
+    getCompanySegmentHistory(resolvedTicker, {
+      kind: activeKind,
+      years: requestedYears,
+      signal: controller.signal,
+    })
+      .then((payload) => {
+        setHistoryPeriods(payload.periods ?? []);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setHistoryPeriods([]);
+        setHistoryError(error instanceof Error ? error.message : "Segment history is unavailable right now.");
+      });
+
+    return () => controller.abort();
+  }, [activeKind, reloadKey, requestedYears, resolvedTicker, useAnnualHistory]);
+
+  const mergedPeriods = useMemo(() => mergePeriods(localPeriods, buildHistoryPeriods(historyPeriods)), [historyPeriods, localPeriods]);
+  const currentPeriod = useMemo(() => resolveDisplayPeriod(mergedPeriods, chartState?.selectedFinancial ?? null), [chartState?.selectedFinancial, mergedPeriods]);
+  const explicitComparisonPeriod = useMemo(() => resolveDisplayPeriod(mergedPeriods, chartState?.comparisonFinancial ?? null), [chartState?.comparisonFinancial, mergedPeriods]);
+  const implicitComparisonPeriod = useMemo(() => resolveImplicitComparisonPeriod(mergedPeriods, currentPeriod), [currentPeriod, mergedPeriods]);
+  const comparisonPeriod = explicitComparisonPeriod ?? implicitComparisonPeriod;
+  const comparisonIsExplicit = explicitComparisonPeriod !== null;
   const activeLens = activeKind === "business" ? segmentAnalysis?.business ?? null : segmentAnalysis?.geographic ?? null;
 
-  const segmentPoints = useMemo(() => {
-    if (!latestStatement) {
-      return [] as SegmentPoint[];
-    }
-
-    const previousMap = new Map<string, FinancialSegmentPayload>(
-      (previousStatement?.segment_breakdown ?? [])
-        .filter((segment) => segment.kind === activeKind)
-        .map((segment) => [segment.segment_id, segment])
-    );
-
-    const latestSegments = latestStatement.segment_breakdown
-      .filter((segment) => segment.kind === activeKind && typeof segment.revenue === "number" && segment.revenue > 0)
-      .sort((left, right) => (right.revenue ?? 0) - (left.revenue ?? 0));
-
-    const totalRevenue = latestStatement.revenue ?? latestSegments.reduce((sum, segment) => sum + (segment.revenue ?? 0), 0);
-
-    return latestSegments.map((segment, index) => {
-      const currentRevenue = segment.revenue ?? 0;
-      const previousRevenue = previousMap.get(segment.segment_id)?.revenue ?? null;
-      const growth = previousRevenue && previousRevenue !== 0 ? (currentRevenue - previousRevenue) / Math.abs(previousRevenue) : null;
-
-      return {
-        id: segment.segment_id,
-        name: segment.segment_name,
-        axisLabel: segment.axis_label,
-        kind: segment.kind,
-        revenue: currentRevenue,
-        share:
-          segment.share_of_revenue ??
-          (typeof totalRevenue === "number" && totalRevenue !== 0 ? currentRevenue / Math.abs(totalRevenue) : null),
-        growth,
-        operatingIncome: segment.operating_income ?? null,
-        assets: segment.assets ?? null,
-        color: SEGMENT_COLORS[index % SEGMENT_COLORS.length]
-      } satisfies SegmentPoint;
-    });
-  }, [activeKind, latestStatement, previousStatement]);
+  const segmentPoints = useMemo(() => buildSegmentPoints(currentPeriod, comparisonPeriod), [comparisonPeriod, currentPeriod]);
 
   useEffect(() => {
     if (selectedSegmentId && !segmentPoints.some((segment) => segment.id === selectedSegmentId)) {
@@ -144,67 +190,30 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
     }
   }, [selectedSegmentId, segmentPoints]);
 
-  const selectedSegment = useMemo(
-    () => segmentPoints.find((segment) => segment.id === selectedSegmentId) ?? null,
-    [segmentPoints, selectedSegmentId]
-  );
+  const selectedSegment = useMemo(() => segmentPoints.find((segment) => segment.id === selectedSegmentId) ?? null, [segmentPoints, selectedSegmentId]);
+  const pieChartData = useMemo(() => buildPieChartData(segmentPoints, selectedSegment), [segmentPoints, selectedSegment]);
+  const revenueComparisonRows = useMemo(() => (selectedSegment ? [selectedSegment] : segmentPoints), [segmentPoints, selectedSegment]);
+  const marginComparisonRows = useMemo(() => revenueComparisonRows.filter((segment) => segment.operatingMargin !== null), [revenueComparisonRows]);
+  const marginDeltaRows = useMemo(() => marginComparisonRows.filter((segment) => segment.comparisonOperatingMargin !== null), [marginComparisonRows]);
+  const trendPeriods = useMemo(() => mergedPeriods.filter((period) => period.segments.length > 0), [mergedPeriods]);
+  const trendFocusSegments = useMemo(() => selectedSegment ? [selectedSegment] : segmentPoints.slice(0, Math.min(3, segmentPoints.length)), [segmentPoints, selectedSegment]);
+  const revenueTrendData = useMemo(() => buildTrendData(trendPeriods, trendFocusSegments, "revenue"), [trendFocusSegments, trendPeriods]);
+  const marginTrendData = useMemo(() => buildTrendData(trendPeriods, trendFocusSegments, "operatingMargin").filter((row) => trendFocusSegments.some((segment) => row[segment.id] != null)), [trendFocusSegments, trendPeriods]);
 
-  const growthChartData = useMemo(
-    () => (selectedSegment ? [selectedSegment] : segmentPoints),
-    [segmentPoints, selectedSegment]
-  );
+  const warnings = useMemo(() => buildWarnings({
+    currentPeriod,
+    comparisonPeriod: comparisonIsExplicit ? explicitComparisonPeriod : null,
+    comparisonRequested: Boolean(chartState?.comparisonFinancial),
+    historyError,
+    trendPeriodCount: trendPeriods.length,
+    activeKind,
+  }), [activeKind, chartState?.comparisonFinancial, comparisonIsExplicit, currentPeriod, explicitComparisonPeriod, historyError, trendPeriods.length]);
 
-  const hasMarginData = useMemo(
-    () => segmentPoints.some((segment) => segment.operatingIncome !== null),
-    [segmentPoints]
-  );
-
-  const marginChartData = useMemo(
-    () =>
-      (selectedSegment ? [selectedSegment] : segmentPoints)
-        .filter((segment) => segment.operatingIncome !== null)
-        .map((segment) => ({
-          ...segment,
-          operatingMargin:
-            segment.operatingIncome !== null && segment.revenue !== 0
-              ? segment.operatingIncome / segment.revenue
-              : null,
-        })),
-    [segmentPoints, selectedSegment]
-  );
-
-  const pieChartData = useMemo(() => {
-    if (!selectedSegment) {
-      return segmentPoints;
-    }
-
-    const otherRevenue = segmentPoints.reduce((sum, segment) => {
-      if (segment.id === selectedSegment.id) {
-        return sum;
-      }
-      return sum + segment.revenue;
-    }, 0);
-
-    return [
-      selectedSegment,
-      ...(otherRevenue > 0
-        ? [
-            {
-              id: "other",
-              name: "Other Segments",
-              axisLabel: selectedSegment.axisLabel,
-              kind: selectedSegment.kind,
-              revenue: otherRevenue,
-              share: otherRevenue / (otherRevenue + selectedSegment.revenue),
-              growth: null,
-              operatingIncome: null,
-              assets: null,
-              color: "var(--text-muted)"
-            } satisfies SegmentPoint
-          ]
-        : [])
-    ];
-  }, [segmentPoints, selectedSegment]);
+  const mode = resolveSnapshotSurfaceMode({
+    comparisonAvailable: Boolean(chartState?.comparisonFinancial && explicitComparisonPeriod),
+    trendAvailable: trendPeriods.length > 1,
+    capabilities: CAPABILITIES,
+  });
 
   function toggleSegment(segmentId: string) {
     setSelectedSegmentId((current) => (current === segmentId ? null : segmentId));
@@ -218,7 +227,7 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
     );
   }
 
-  if (!segmentPoints.length) {
+  if (!segmentPoints.length || !currentPeriod) {
     return (
       <div className="grid-empty-state" style={{ minHeight: 320 }}>
         <div className="grid-empty-kicker">Reported segments</div>
@@ -232,6 +241,8 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
 
   return (
     <div className="segment-breakdown-shell">
+      <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
+
       <div className="segment-breakdown-toolbar" style={{ gap: 14 }}>
         <div className="segment-filter-row">
           {[...availableKinds].map((kind) => (
@@ -271,10 +282,11 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
         </div>
 
         <div className="segment-meta-row">
-          <span className="pill">{latestStatement?.filing_type ?? "Filing"}</span>
-          <span className="pill">{latestStatement?.period_end ? formatDate(latestStatement.period_end) : "-"}</span>
+          <span className="pill tone-cyan">Focus {currentPeriod.label}</span>
+          {chartState?.comparisonFinancial && explicitComparisonPeriod ? <span className="pill tone-gold">Compare {explicitComparisonPeriod.label}</span> : null}
+          {!chartState?.comparisonFinancial && comparisonPeriod ? <span className="pill">Baseline {comparisonPeriod.label}</span> : null}
           <span className="pill">Axis: {activeLens?.axis_label ?? segmentPoints[0]?.axisLabel ?? "Reported segments"}</span>
-          <span className="pill">Focus: {selectedSegment?.name ?? "All segments"}</span>
+          <span className="pill">Focus Segment: {selectedSegment?.name ?? "All segments"}</span>
         </div>
       </div>
 
@@ -283,7 +295,7 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
       <div className="segment-breakdown-top-grid">
         <div className="segment-chart-card">
           <div className="segment-section-title">Revenue Treemap</div>
-          <div className="segment-section-subtitle">Click a tile to focus the share and growth views.</div>
+          <div className="segment-section-subtitle">Selected period revenue mix. Click a tile to focus the compare and trend views.</div>
           <div className="segment-chart-shell segment-chart-shell-treemap">
             <ResponsiveContainer>
               <Treemap
@@ -301,7 +313,7 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
 
         <div className="segment-chart-card">
           <div className="segment-section-title">Revenue Share</div>
-          <div className="segment-section-subtitle">Hover for share, revenue, and the most recent year-over-year change.</div>
+          <div className="segment-section-subtitle">Selected period share of revenue, with compare deltas surfaced in the detail bars below.</div>
           <div className="segment-chart-shell segment-chart-shell-pie">
             <ResponsiveContainer>
               <PieChart>
@@ -332,32 +344,30 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
       </div>
 
       <div className="segment-chart-card">
-        <div className="segment-section-title">{titleCase(activeKind)} Growth</div>
+        <div className="segment-section-title">{comparisonPeriod ? `${titleCase(activeKind)} Revenue Change` : `${titleCase(activeKind)} Revenue By Segment`}</div>
         <div className="segment-section-subtitle">
-          Latest reported {activeKind} revenue growth versus {previousStatement ? `${previousStatement.filing_type} ${formatDate(previousStatement.period_end)}` : "the previous period"}.
+          {comparisonPeriod
+            ? `${currentPeriod.label} versus ${comparisonPeriod.label}.`
+            : `Only one comparable ${activeKind} disclosure is visible, so this view falls back to the selected-period revenue mix.`}
         </div>
         <div className="segment-chart-shell segment-chart-shell-bar">
           <ResponsiveContainer>
-            <BarChart data={growthChartData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+            <BarChart data={revenueComparisonRows} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
               <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
               <XAxis
                 dataKey="name"
                 stroke={CHART_AXIS_COLOR}
                 tick={chartTick()}
                 interval={0}
-                angle={growthChartData.length > 3 ? -12 : 0}
-                textAnchor={growthChartData.length > 3 ? "end" : "middle"}
-                height={growthChartData.length > 3 ? 56 : 32}
+                angle={revenueComparisonRows.length > 3 ? -12 : 0}
+                textAnchor={revenueComparisonRows.length > 3 ? "end" : "middle"}
+                height={revenueComparisonRows.length > 3 ? 56 : 32}
               />
-              <YAxis
-                stroke={CHART_AXIS_COLOR}
-                tick={chartTick()}
-                tickFormatter={(value) => formatPercent(Number(value))}
-              />
+              <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => comparisonPeriod ? formatPercent(Number(value)) : formatCompactNumber(Number(value))} />
               <Tooltip content={<SegmentTooltip />} />
-              <Bar dataKey="growth" radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
-                {growthChartData.map((segment) => (
-                  <Cell key={segment.id} fill={segment.growth != null && segment.growth < 0 ? "var(--negative)" : segment.color} />
+              <Bar dataKey={comparisonPeriod ? "growth" : "revenue"} radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
+                {revenueComparisonRows.map((segment) => (
+                  <Cell key={segment.id} fill={comparisonPeriod && segment.growth != null && segment.growth < 0 ? "var(--negative)" : segment.color} />
                 ))}
               </Bar>
             </BarChart>
@@ -365,40 +375,103 @@ export function BusinessSegmentBreakdown({ financials, segmentAnalysis = null }:
         </div>
       </div>
 
-      {hasMarginData ? (
+      {marginComparisonRows.length ? (
         <div className="segment-chart-card">
           <div className="segment-section-title">{titleCase(activeKind)} Operating Margin</div>
           <div className="segment-section-subtitle">
-            Operating income as a percentage of reported segment revenue.
+            Selected-period margin is always shown. Compare deltas appear whenever the baseline period reports operating income for the same segments.
           </div>
           <div className="segment-chart-shell segment-chart-shell-bar">
             <ResponsiveContainer>
-              <BarChart data={marginChartData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+              <BarChart data={marginComparisonRows} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
                 <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
                 <XAxis
                   dataKey="name"
                   stroke={CHART_AXIS_COLOR}
                   tick={chartTick()}
                   interval={0}
-                  angle={marginChartData.length > 3 ? -12 : 0}
-                  textAnchor={marginChartData.length > 3 ? "end" : "middle"}
-                  height={marginChartData.length > 3 ? 56 : 32}
+                  angle={marginComparisonRows.length > 3 ? -12 : 0}
+                  textAnchor={marginComparisonRows.length > 3 ? "end" : "middle"}
+                  height={marginComparisonRows.length > 3 ? 56 : 32}
                 />
-                <YAxis
-                  stroke={CHART_AXIS_COLOR}
-                  tick={chartTick()}
-                  tickFormatter={(value) => formatPercent(Number(value))}
-                />
+                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} />
                 <Tooltip content={<SegmentTooltip />} />
-                <Bar dataKey="operatingMargin" name="Op. Margin" radius={[2, 2, 0, 0]}
-                  onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
-                  {marginChartData.map((segment) => (
-                    <Cell
-                      key={segment.id}
-                      fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "var(--negative)" : segment.color}
-                    />
+                <Bar dataKey="operatingMargin" name="Op. Margin" radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
+                  {marginComparisonRows.map((segment) => (
+                    <Cell key={segment.id} fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "var(--negative)" : segment.color} />
                   ))}
                 </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {marginDeltaRows.length ? (
+            <div style={{ overflowX: "auto" }}>
+              <table className="company-data-table" style={{ minWidth: 620 }}>
+                <thead>
+                  <tr>
+                    <th align="left">Segment</th>
+                    <th align="right">Selected Margin</th>
+                    <th align="right">Compare Margin</th>
+                    <th align="right">Delta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {marginDeltaRows.map((row) => (
+                    <tr key={`${row.id}:margin-delta`}>
+                      <td>{row.name}</td>
+                      <td style={{ textAlign: "right" }}>{formatPercent(row.operatingMargin)}</td>
+                      <td style={{ textAlign: "right" }}>{formatPercent(row.comparisonOperatingMargin)}</td>
+                      <td style={{ textAlign: "right", color: (row.operatingMarginDelta ?? 0) >= 0 ? "var(--positive)" : "var(--negative)" }}>
+                        {formatSignedPoints(row.operatingMarginDelta)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {revenueTrendData.length > 1 ? (
+        <div className="segment-chart-card">
+          <div className="segment-section-title">{titleCase(activeKind)} Revenue Trend</div>
+          <div className="segment-section-subtitle">
+            {selectedSegment ? `${selectedSegment.name} across visible periods.` : "Top segments across the visible history window."}
+          </div>
+          <div className="segment-chart-shell segment-chart-shell-bar">
+            <ResponsiveContainer>
+              <BarChart data={revenueTrendData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} interval={0} angle={-12} textAnchor="end" height={56} />
+                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} />
+                <Tooltip />
+                {trendFocusSegments.map((segment) => (
+                  <Bar key={segment.id} dataKey={segment.id} name={segment.name} fill={segment.color} radius={[2, 2, 0, 0]} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      ) : null}
+
+      {marginTrendData.length > 1 ? (
+        <div className="segment-chart-card">
+          <div className="segment-section-title">{titleCase(activeKind)} Margin Trend</div>
+          <div className="segment-section-subtitle">
+            {selectedSegment ? `${selectedSegment.name} operating margin across visible periods.` : "Operating margin trend for the current focus set."}
+          </div>
+          <div className="segment-chart-shell segment-chart-shell-bar">
+            <ResponsiveContainer>
+              <BarChart data={marginTrendData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} interval={0} angle={-12} textAnchor="end" height={56} />
+                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} />
+                <Tooltip />
+                {trendFocusSegments.map((segment) => (
+                  <Bar key={segment.id} dataKey={segment.id} name={segment.name} fill={segment.color} radius={[2, 2, 0, 0]} />
+                ))}
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -511,6 +584,221 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
   );
 }
 
+function buildLocalPeriods(financials: FinancialPayload[], kind: SegmentKind, cadence: FinancialCadence | undefined): SegmentPeriod[] {
+  const source = selectSegmentStatements(financials, kind, cadence);
+  return source.map((statement) => ({
+    key: buildFinancialPeriodKey(statement),
+    periodEnd: statement.period_end,
+    filingType: statement.filing_type,
+    label: `${statement.filing_type} ${formatDate(statement.period_end)}`,
+    cadence: cadence ?? inferCadence(statement.filing_type),
+    comparabilityFlags: emptyComparabilityFlags(),
+    segments: normalizeSegments(
+      statement.segment_breakdown.filter((segment) => segment.kind === kind && typeof segment.revenue === "number" && segment.revenue > 0),
+      kind,
+      statement.revenue
+    ),
+  }));
+}
+
+function buildHistoryPeriods(periods: SegmentHistoryPeriodPayload[]): SegmentPeriod[] {
+  return periods.map((period) => ({
+    key: period.period_end,
+    periodEnd: period.period_end,
+    filingType: null,
+    label: period.fiscal_year != null ? `FY ${period.fiscal_year}` : formatDate(period.period_end),
+    cadence: "annual",
+    comparabilityFlags: period.comparability_flags,
+    segments: normalizeHistorySegments(period),
+  }));
+}
+
+function mergePeriods(localPeriods: SegmentPeriod[], historyPeriods: SegmentPeriod[]): SegmentPeriod[] {
+  const historyByPeriodEnd = new Map(historyPeriods.map((period) => [period.periodEnd, period]));
+  const merged = localPeriods.map((period) => {
+    const history = historyByPeriodEnd.get(period.periodEnd);
+    if (!history) {
+      return period;
+    }
+    return {
+      ...period,
+      comparabilityFlags: history.comparabilityFlags,
+      segments: period.segments.length ? period.segments : history.segments,
+    };
+  });
+  for (const history of historyPeriods) {
+    if (!merged.some((period) => period.periodEnd === history.periodEnd)) {
+      merged.push(history);
+    }
+  }
+  return merged.sort((left, right) => Date.parse(right.periodEnd) - Date.parse(left.periodEnd));
+}
+
+function resolveDisplayPeriod(periods: SegmentPeriod[], statement: FinancialPayload | null): SegmentPeriod | null {
+  if (!periods.length) {
+    return null;
+  }
+  if (!statement) {
+    return periods[0] ?? null;
+  }
+  const key = buildFinancialPeriodKey(statement);
+  return periods.find((period) => period.key === key || period.periodEnd === statement.period_end) ?? periods[0] ?? null;
+}
+
+function resolveImplicitComparisonPeriod(periods: SegmentPeriod[], currentPeriod: SegmentPeriod | null): SegmentPeriod | null {
+  if (!currentPeriod) {
+    return null;
+  }
+  const currentIndex = periods.findIndex((period) => period.key === currentPeriod.key);
+  if (currentIndex < 0) {
+    return periods[1] ?? null;
+  }
+  return periods[currentIndex + 1] ?? null;
+}
+
+function buildSegmentPoints(currentPeriod: SegmentPeriod | null, comparisonPeriod: SegmentPeriod | null): SegmentPoint[] {
+  if (!currentPeriod) {
+    return [];
+  }
+  const comparisonMap = new Map((comparisonPeriod?.segments ?? []).map((segment) => [segment.id, segment]));
+  return currentPeriod.segments
+    .map((segment, index) => {
+      const comparison = comparisonMap.get(segment.id) ?? null;
+      return {
+        id: segment.id,
+        name: segment.name,
+        axisLabel: segment.axisLabel,
+        kind: segment.kind,
+        revenue: segment.revenue,
+        share: segment.share,
+        operatingIncome: segment.operatingIncome,
+        operatingMargin: segment.operatingMargin,
+        growth: calculateRelativeChange(segment.revenue, comparison?.revenue ?? null),
+        shareDelta: calculateDelta(segment.share, comparison?.share ?? null),
+        operatingMarginDelta: calculateDelta(segment.operatingMargin, comparison?.operatingMargin ?? null),
+        comparisonRevenue: comparison?.revenue ?? null,
+        comparisonShare: comparison?.share ?? null,
+        comparisonOperatingMargin: comparison?.operatingMargin ?? null,
+        color: SEGMENT_COLORS[index % SEGMENT_COLORS.length],
+      } satisfies SegmentPoint;
+    })
+    .sort((left, right) => right.revenue - left.revenue);
+}
+
+function buildPieChartData(segmentPoints: SegmentPoint[], selectedSegment: SegmentPoint | null): SegmentPoint[] {
+  if (!selectedSegment) {
+    return segmentPoints;
+  }
+  const otherRevenue = segmentPoints.reduce((sum, segment) => segment.id === selectedSegment.id ? sum : sum + segment.revenue, 0);
+  return [
+    selectedSegment,
+    ...(otherRevenue > 0 ? [{
+      id: "other",
+      name: "Other Segments",
+      axisLabel: selectedSegment.axisLabel,
+      kind: selectedSegment.kind,
+      revenue: otherRevenue,
+      share: otherRevenue / (otherRevenue + selectedSegment.revenue),
+      operatingIncome: null,
+      operatingMargin: null,
+      growth: null,
+      shareDelta: null,
+      operatingMarginDelta: null,
+      comparisonRevenue: null,
+      comparisonShare: null,
+      comparisonOperatingMargin: null,
+      color: "var(--text-muted)",
+    } satisfies SegmentPoint] : []),
+  ];
+}
+
+function buildTrendData(periods: SegmentPeriod[], focusSegments: SegmentPoint[], metric: "revenue" | "operatingMargin"): Array<Record<string, number | string | null>> {
+  return [...periods].slice(0, 8).reverse().map((period) => {
+    const row: Record<string, number | string | null> = { period: period.label };
+    for (const segment of focusSegments) {
+      const matching = period.segments.find((item) => item.id === segment.id) ?? null;
+      row[segment.id] = metric === "revenue" ? matching?.revenue ?? null : matching?.operatingMargin ?? null;
+    }
+    return row;
+  });
+}
+
+function buildWarnings({
+  currentPeriod,
+  comparisonPeriod,
+  comparisonRequested,
+  historyError,
+  trendPeriodCount,
+  activeKind,
+}: {
+  currentPeriod: SegmentPeriod | null;
+  comparisonPeriod: SegmentPeriod | null;
+  comparisonRequested: boolean;
+  historyError: string | null;
+  trendPeriodCount: number;
+  activeKind: SegmentKind;
+}): SnapshotSurfaceWarning[] {
+  const warnings: SnapshotSurfaceWarning[] = [];
+  const flags = currentPeriod?.comparabilityFlags ?? emptyComparabilityFlags();
+  if (comparisonRequested && !comparisonPeriod) {
+    warnings.push({
+      code: "comparison_period_missing",
+      label: "Comparison period unavailable",
+      detail: `The selected comparison period does not expose comparable ${activeKind} disclosure in the current view.`,
+      tone: "warning",
+    });
+  }
+  if (trendPeriodCount < 2) {
+    warnings.push({
+      code: "single_period_visible",
+      label: "Sparse visible history",
+      detail: `Only one ${activeKind} disclosure period is available, so the trend view falls back to the selected period snapshot.`,
+      tone: "info",
+    });
+  }
+  if (flags.no_prior_comparable_disclosure) {
+    warnings.push({
+      code: "no_prior_comparable_disclosure",
+      label: "No prior comparable disclosure",
+      detail: `The selected ${activeKind} period has no prior comparable disclosure, so growth and delta views are limited.`,
+      tone: "warning",
+    });
+  }
+  if (flags.segment_axis_changed) {
+    warnings.push({
+      code: "segment_axis_changed",
+      label: "Segment axis changed",
+      detail: `Management changed the reported ${activeKind} axis, so period-over-period comparisons may not be apples to apples.`,
+      tone: "danger",
+    });
+  }
+  if (flags.partial_operating_income_disclosure) {
+    warnings.push({
+      code: "partial_operating_income_disclosure",
+      label: "Partial operating income disclosure",
+      detail: "Business operating margin is shown only for the segments that reported operating income in the filing.",
+      tone: "warning",
+    });
+  }
+  if (flags.new_or_removed_segments) {
+    warnings.push({
+      code: "new_or_removed_segments",
+      label: "Segment roster changed",
+      detail: `At least one ${activeKind} segment was added or removed between the compared periods.`,
+      tone: "warning",
+    });
+  }
+  if (historyError) {
+    warnings.push({
+      code: "segment_history_fetch_failed",
+      label: "History service unavailable",
+      detail: `${historyError} The component is falling back to statement-level segment disclosures already loaded on the page.`,
+      tone: "info",
+    });
+  }
+  return dedupeSnapshotSurfaceWarnings(warnings);
+}
+
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ border: "1px solid var(--panel-border)", borderRadius: 6, padding: 12, background: "var(--panel)", display: "grid", gap: 4 }}>
@@ -606,11 +894,6 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
     return null;
   }
 
-  const operatingMargin =
-    point.operatingIncome !== null && typeof point.operatingIncome === "number" && point.revenue !== 0
-      ? point.operatingIncome / point.revenue
-      : null;
-
   return (
     <div className="segment-tooltip-card">
       <div className="segment-tooltip-title">{point.name}</div>
@@ -622,22 +905,28 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
         <span>Share</span>
         <strong>{formatPercent(point.share)}</strong>
       </div>
+      {point.comparisonRevenue !== null ? (
+        <div className="segment-tooltip-row">
+          <span>Compare Revenue</span>
+          <strong>{formatCompactNumber(point.comparisonRevenue)}</strong>
+        </div>
+      ) : null}
       {point.operatingIncome !== null ? (
         <div className="segment-tooltip-row">
           <span>Op. Income</span>
           <strong>{formatCompactNumber(point.operatingIncome)}</strong>
         </div>
       ) : null}
-      {operatingMargin !== null ? (
+      {point.operatingMargin !== null ? (
         <div className="segment-tooltip-row">
           <span>Op. Margin</span>
-          <strong>{formatPercent(operatingMargin)}</strong>
+          <strong>{formatPercent(point.operatingMargin)}</strong>
         </div>
       ) : null}
-      {point.assets !== null ? (
+      {point.operatingMarginDelta !== null ? (
         <div className="segment-tooltip-row">
-          <span>Assets</span>
-          <strong>{formatCompactNumber(point.assets)}</strong>
+          <span>Margin Delta</span>
+          <strong>{formatSignedPoints(point.operatingMarginDelta)}</strong>
         </div>
       ) : null}
       <div className="segment-tooltip-row">
@@ -649,10 +938,90 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
   );
 }
 
+function normalizeSegments(segments: FinancialSegmentPayload[], kind: SegmentKind, statementRevenue: number | null): SegmentPeriod["segments"] {
+  const totalRevenue = statementRevenue ?? segments.reduce((sum, segment) => sum + (segment.revenue ?? 0), 0);
+  return [...segments]
+    .sort((left, right) => (right.revenue ?? 0) - (left.revenue ?? 0))
+    .map((segment) => {
+      const revenue = segment.revenue ?? 0;
+      const operatingIncome = segment.operating_income ?? null;
+      return {
+        id: segment.segment_id || slugifySegmentName(segment.segment_name),
+        name: segment.segment_name,
+        axisLabel: segment.axis_label,
+        kind,
+        revenue,
+        share: segment.share_of_revenue ?? (totalRevenue ? revenue / Math.abs(totalRevenue) : null),
+        operatingIncome,
+        operatingMargin: operatingIncome != null && revenue !== 0 ? operatingIncome / revenue : null,
+      };
+    });
+}
+
+function normalizeHistorySegments(period: SegmentHistoryPeriodPayload): SegmentPeriod["segments"] {
+  return [...period.segments]
+    .filter((segment) => typeof segment.revenue === "number" && segment.revenue > 0)
+    .sort((left, right) => (right.revenue ?? 0) - (left.revenue ?? 0))
+    .map((segment) => ({
+      id: slugifySegmentName(segment.name),
+      name: segment.name,
+      axisLabel: null,
+      kind: period.kind,
+      revenue: segment.revenue ?? 0,
+      share: segment.share_of_revenue,
+      operatingIncome: segment.operating_income,
+      operatingMargin: segment.operating_margin,
+    }));
+}
+
+function selectSegmentStatements(financials: FinancialPayload[], kind: SegmentKind, cadence: FinancialCadence | undefined): FinancialPayload[] {
+  const statementsWithKind = financials.filter((statement) => hasKindSegments(statement, kind));
+  if (cadence === "annual") {
+    const annual = statementsWithKind.filter((statement) => ANNUAL_FORMS.has(statement.filing_type));
+    return annual.length ? annual : statementsWithKind;
+  }
+  return statementsWithKind;
+}
+
 function hasKindSegments(statement: FinancialPayload, kind: SegmentKind): boolean {
-  return statement.segment_breakdown.some(
-    (segment) => segment.kind === kind && typeof segment.revenue === "number" && segment.revenue > 0
-  );
+  return statement.segment_breakdown.some((segment) => segment.kind === kind && typeof segment.revenue === "number" && segment.revenue > 0);
+}
+
+function inferCadence(filingType: string | null): FinancialCadence | "reported" {
+  if (filingType && ANNUAL_FORMS.has(filingType)) {
+    return "annual";
+  }
+  if (filingType === "10-Q" || filingType === "6-K") {
+    return "quarterly";
+  }
+  return "reported";
+}
+
+function calculateRelativeChange(current: number | null, previous: number | null): number | null {
+  if (current == null || previous == null || previous === 0) {
+    return null;
+  }
+  return (current - previous) / Math.abs(previous);
+}
+
+function calculateDelta(current: number | null, previous: number | null): number | null {
+  if (current == null || previous == null) {
+    return null;
+  }
+  return current - previous;
+}
+
+function emptyComparabilityFlags(): SegmentComparabilityFlagsPayload {
+  return {
+    no_prior_comparable_disclosure: false,
+    segment_axis_changed: false,
+    partial_operating_income_disclosure: false,
+    new_or_removed_segments: false,
+  };
+}
+
+function slugifySegmentName(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || value;
 }
 
 function formatSignedPoints(value: number | null | undefined): string {

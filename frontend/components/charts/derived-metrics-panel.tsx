@@ -68,16 +68,32 @@ const STRICT_DISABLED_METRIC_KEYS = new Set<MetricKey>(["buyback_yield", "divide
 interface DerivedMetricsPanelProps {
   ticker: string;
   reloadKey?: string;
+  cadence?: Cadence;
+  showCadenceSelector?: boolean;
+  maxPoints?: number;
 }
 
-export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelProps) {
+export function DerivedMetricsPanel({
+  ticker,
+  reloadKey,
+  cadence: controlledCadence,
+  showCadenceSelector = true,
+  maxPoints = MAX_POINTS,
+}: DerivedMetricsPanelProps) {
   const [payload, setPayload] = useState<CompanyMetricsTimeseriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cadence, setCadence] = useState<Cadence>("ttm");
+  const [internalCadence, setInternalCadence] = useState<Cadence>(controlledCadence ?? "ttm");
   const [metric, setMetric] = useState<MetricKey>("revenue_growth");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const { lastEvent } = useJobStream(activeJobId);
+  const cadence = controlledCadence ?? internalCadence;
+
+  useEffect(() => {
+    if (controlledCadence) {
+      setInternalCadence(controlledCadence);
+    }
+  }, [controlledCadence]);
 
   const loadMetrics = useCallback(
     async (showLoading: boolean) => {
@@ -88,7 +104,7 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
         setError(null);
         const nextPayload = await getCompanyMetricsTimeseries(ticker, {
           cadence,
-          maxPoints: MAX_POINTS,
+          maxPoints,
         });
         setPayload(nextPayload);
         setActiveJobId(nextPayload.refresh.job_id);
@@ -100,7 +116,7 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
         }
       }
     },
-    [cadence, ticker]
+    [cadence, maxPoints, ticker]
   );
 
   useEffect(() => {
@@ -175,7 +191,7 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
       return;
     }
     if (!availableCadences.includes(cadence)) {
-      setCadence(availableCadences[0]);
+      setInternalCadence(availableCadences[0]);
     }
   }, [availableCadences, cadence]);
 
@@ -212,19 +228,21 @@ export function DerivedMetricsPanel({ ticker, reloadKey }: DerivedMetricsPanelPr
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <div className="cash-waterfall-toggle-group">
-          {CADENCE_ORDER.map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`chart-chip${cadence === value ? " chart-chip-active" : ""}`}
-              onClick={() => setCadence(value)}
-              disabled={!availableCadences.includes(value)}
-            >
-              {value.toUpperCase()}
-            </button>
-          ))}
-        </div>
+        {showCadenceSelector ? (
+          <div className="cash-waterfall-toggle-group">
+            {CADENCE_ORDER.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`chart-chip${cadence === value ? " chart-chip-active" : ""}`}
+                onClick={() => setInternalCadence(value)}
+                disabled={!availableCadences.includes(value)}
+              >
+                {value.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <label className="pill" style={{ display: "flex", gap: 8, alignItems: "center" }}>
           Metric

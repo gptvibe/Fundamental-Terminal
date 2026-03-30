@@ -6,15 +6,18 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
 
+import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import type { FinancialPayload } from "@/lib/types";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { difference, findPointForStatement, formatSignedCompactDelta, formatSignedMultipleDelta, formatStatementAxisLabel, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 
 type LiquidityStatement = FinancialPayload & {
@@ -26,6 +29,7 @@ type LiquidityStatement = FinancialPayload & {
 type LiquidityDatum = {
   period: string;
   periodEnd: string;
+  filingType: string;
   currentAssets: number | null;
   currentLiabilities: number | null;
   currentRatio: number | null;
@@ -35,26 +39,53 @@ type LiquidityDatum = {
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
-export function LiquidityCapitalChart({ financials }: { financials: FinancialPayload[] }) {
-  const statements = useMemo(() => selectLiquidityStatements(financials), [financials]);
-  const data = useMemo(() => buildLiquiditySeries(statements), [statements]);
+interface LiquidityCapitalChartProps {
+  financials: FinancialPayload[];
+  chartState?: SharedFinancialChartState;
+}
+
+export function LiquidityCapitalChart({ financials, chartState }: LiquidityCapitalChartProps) {
+  const selectedFinancial = chartState?.selectedFinancial ?? null;
+  const comparisonFinancial = chartState?.comparisonFinancial ?? null;
+  const statements = useMemo(
+    () => selectLiquidityStatements(financials, !chartState),
+    [chartState, financials]
+  );
+  const data = useMemo(() => buildLiquiditySeries(statements, chartState?.cadence), [chartState?.cadence, statements]);
+  const focusPoint = useMemo(() => findPointForStatement(data, selectedFinancial), [data, selectedFinancial]);
+  const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);
+  const latest = data.length ? data[data.length - 1] : null;
+  const summaryPoint = focusPoint ?? latest;
+  const retainedSeries = useMemo(() => data.filter((item) => item.retainedEarnings !== null), [data]);
+  const focusRetainedPoint = useMemo(() => findPointForStatement(retainedSeries, selectedFinancial), [retainedSeries, selectedFinancial]);
+  const comparisonRetainedPoint = useMemo(
+    () => findPointForStatement(retainedSeries, comparisonFinancial),
+    [comparisonFinancial, retainedSeries]
+  );
+  const hasRetainedSeries = retainedSeries.length >= 2;
 
   if (!data.length) {
     return <PanelEmptyState message="No liquidity or retained earnings history is available in cached filings yet." />;
   }
 
-  const latest = data.length ? data[data.length - 1] : null;
-  const retainedSeries = data.filter((item) => item.retainedEarnings !== null);
-  const hasRetainedSeries = retainedSeries.length >= 2;
-
   return (
     <div className="liquidity-shell">
-      {latest ? (
+      {chartState ? <FinancialChartStateBar state={chartState} /> : null}
+
+      {summaryPoint ? (
         <div className="liquidity-meta">
-          <span>Latest period {formatDate(latest.periodEnd)}</span>
-          <span>Current ratio {formatRatio(latest.currentRatio)}</span>
-          <span>Working capital {formatCompactNumber(latest.workingCapital)}</span>
-          <span>Retained earnings {formatCompactNumber(latest.retainedEarnings)}</span>
+          <span>Period {formatDate(summaryPoint.periodEnd)}</span>
+          <span>Current ratio {formatRatio(summaryPoint.currentRatio)}</span>
+          <span>Working capital {formatCompactNumber(summaryPoint.workingCapital)}</span>
+          <span>Retained earnings {formatCompactNumber(summaryPoint.retainedEarnings)}</span>
+        </div>
+      ) : null}
+
+      {summaryPoint && comparisonPoint ? (
+        <div className="liquidity-meta">
+          <span>Current ratio Δ {formatSignedMultipleDelta(difference(summaryPoint.currentRatio, comparisonPoint.currentRatio))}</span>
+          <span>Working capital Δ {formatSignedCompactDelta(difference(summaryPoint.workingCapital, comparisonPoint.workingCapital))}</span>
+          <span>Retained earnings Δ {formatSignedCompactDelta(difference(summaryPoint.retainedEarnings, comparisonPoint.retainedEarnings))}</span>
         </div>
       ) : null}
 
@@ -82,6 +113,8 @@ export function LiquidityCapitalChart({ financials }: { financials: FinancialPay
                   tickFormatter={(value) => formatRatio(Number(value))}
                   width={66}
                 />
+                {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} yAxisId="values" stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                {focusPoint ? <ReferenceLine x={focusPoint.period} yAxisId="values" stroke="var(--accent)" strokeDasharray="4 3" /> : null}
                 <Tooltip
                   {...RECHARTS_TOOLTIP_PROPS}
                   formatter={(value: number, name: string) => {
@@ -131,6 +164,8 @@ export function LiquidityCapitalChart({ financials }: { financials: FinancialPay
                     tickFormatter={(value) => formatCompactNumber(Number(value))}
                     width={78}
                   />
+                  {comparisonRetainedPoint ? <ReferenceLine x={comparisonRetainedPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                  {focusRetainedPoint ? <ReferenceLine x={focusRetainedPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
                   <Tooltip
                     {...RECHARTS_TOOLTIP_PROPS}
                     formatter={(value: number) => formatCompactNumber(value)}
@@ -158,14 +193,14 @@ export function LiquidityCapitalChart({ financials }: { financials: FinancialPay
   );
 }
 
-function selectLiquidityStatements(financials: FinancialPayload[]): LiquidityStatement[] {
+function selectLiquidityStatements(financials: FinancialPayload[], preferAnnual: boolean): LiquidityStatement[] {
   const casted = financials as LiquidityStatement[];
   const annual = casted.filter(
     (statement) =>
       ANNUAL_FORMS.has(statement.filing_type) &&
       (statement.current_assets != null || statement.current_liabilities != null || statement.retained_earnings != null)
   );
-  if (annual.length >= 2) {
+  if (preferAnnual && annual.length >= 2) {
     return annual;
   }
   return casted.filter(
@@ -174,7 +209,10 @@ function selectLiquidityStatements(financials: FinancialPayload[]): LiquiditySta
   );
 }
 
-function buildLiquiditySeries(statements: LiquidityStatement[]): LiquidityDatum[] {
+function buildLiquiditySeries(
+  statements: LiquidityStatement[],
+  cadence?: "annual" | "quarterly" | "ttm"
+): LiquidityDatum[] {
   return [...statements]
     .sort((left, right) => Date.parse(left.period_end) - Date.parse(right.period_end))
     .map((statement) => {
@@ -183,8 +221,9 @@ function buildLiquiditySeries(statements: LiquidityStatement[]): LiquidityDatum[
       const currentRatio = computeRatio(currentAssets, currentLiabilities);
       const workingCapital = computeWorkingCapital(currentAssets, currentLiabilities);
       return {
-        period: new Intl.DateTimeFormat("en-US", { year: "numeric" }).format(new Date(statement.period_end)),
+        period: formatStatementAxisLabel(statement, cadence),
         periodEnd: statement.period_end,
+        filingType: statement.filing_type,
         currentAssets,
         currentLiabilities,
         currentRatio,

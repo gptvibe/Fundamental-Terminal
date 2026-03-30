@@ -497,6 +497,48 @@ def test_models_route_includes_registry_backed_provenance(monkeypatch):
     assert payload["models"][0]["result"]["assumption_provenance"]["price_snapshot"]["price_source"] == "yahoo_finance"
 
 
+def test_models_route_accepts_sec_filing_statement_provenance(monkeypatch):
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(
+        main_module,
+        "get_company_financials",
+        lambda *_args, **_kwargs: [
+            _financial_statement(source="https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/a10-k2025.htm")
+        ],
+    )
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_models",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                model_name="dcf",
+                model_version="v2",
+                created_at=datetime(2026, 3, 22, tzinfo=timezone.utc),
+                input_periods={"period_end": "2025-12-31"},
+                result={
+                    "model_status": "ok",
+                    "base_period_end": "2025-12-31",
+                },
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/models")
+
+    assert response.status_code == 200
+    payload = response.json()
+    _assert_provenance_envelope(payload, {"ft_model_engine", "sec_edgar"})
+    assert payload["source_mix"]["fallback_source_ids"] == []
+    assert payload["source_mix"]["official_only"] is True
+
+
 def test_peers_route_includes_registry_backed_provenance(monkeypatch):
     snapshot = _snapshot()
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)

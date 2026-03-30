@@ -95,6 +95,7 @@ from app.services.market_context import (
     get_market_context_v2,
 )
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
+from app.services.segment_history import build_segment_history
 from app.services.sector_context import get_company_sector_context
 from app.services.screener import build_official_screener_filter_catalog, run_official_screener
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
@@ -466,6 +467,68 @@ def company_financials(
     if not_modified is not None:
         return not_modified  # type: ignore[return-value]
     return payload
+
+
+@app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
+def company_segment_history(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    years: int = Query(default=5, ge=1, le=20),
+    kind: Literal["business", "geographic"] = Query(default="business"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanySegmentHistoryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanySegmentHistoryResponse(
+            company=None,
+            kind=kind,
+            years=years,
+            periods=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(
+                stale_flags=["company_missing"],
+                missing_field_flags=["segment_history_empty"],
+            ),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    financials = _visible_financials_for_company(session, snapshot.company)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+
+    history_result = build_segment_history(financials, kind=kind, years=years)
+    refresh = _refresh_for_segment_history(background_tasks, snapshot, financials)
+    periods = [_serialize_segment_history_period(period) for period in history_result.periods]
+    diagnostics = _diagnostics_for_segment_history_response(periods, requested_years=years, refresh=refresh)
+    last_refreshed_at = _merge_last_checked(*(statement.last_checked for statement in history_result.provenance_statements))
+    latest_period_end = periods[0].period_end if periods else None
+    payload = CompanySegmentHistoryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, last_refreshed_at),
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+        ),
+        kind=kind,
+        years=years,
+        periods=periods,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_segment_history_provenance_contract(
+            history_result.provenance_statements,
+            latest_period_end=latest_period_end,
+            last_refreshed_at=last_refreshed_at,
+            periods=periods,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
 
 
 def company_capital_structure(
@@ -2754,6 +2817,18 @@ def _refresh_for_financial_page(
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_segment_history(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    financials: list[FinancialStatement],
+) -> RefreshState:
+    if snapshot.cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+    if _needs_segment_backfill(financials):
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _metrics_staleness_reason(
     snapshot: CompanyCacheSnapshot,
     price_cache_state: Literal["fresh", "stale", "missing"],
@@ -3198,6 +3273,26 @@ def _diagnostics_for_financial_response(
     )
 
 
+def _diagnostics_for_segment_history_response(
+    periods: list[SegmentHistoryPeriodPayload],
+    *,
+    requested_years: int,
+    refresh: RefreshState,
+) -> DataQualityDiagnosticsPayload:
+    missing_field_flags: list[str] = []
+    if not periods:
+        missing_field_flags.append("segment_history_empty")
+    if any(period.comparability_flags.partial_operating_income_disclosure for period in periods):
+        missing_field_flags.append("partial_operating_income_disclosure")
+
+    coverage_ratio = None if requested_years <= 0 else len(periods) / requested_years
+    return _build_data_quality_diagnostics(
+        coverage_ratio=coverage_ratio,
+        stale_flags=_stale_flags_from_refresh(refresh),
+        missing_field_flags=missing_field_flags,
+    )
+
+
 def _diagnostics_for_capital_structure(
     history: list[CapitalStructureSnapshotPayload],
     refresh: RefreshState,
@@ -3619,6 +3714,61 @@ def _financials_provenance_contract(
         ),
         confidence_flags=confidence_flags,
     )
+
+
+def _segment_history_provenance_contract(
+    statements: list[Any],
+    *,
+    latest_period_end: DateType | None,
+    last_refreshed_at: datetime | None,
+    periods: list[SegmentHistoryPeriodPayload],
+    diagnostics: DataQualityDiagnosticsPayload,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = [
+        SourceUsage(
+            source_id="ft_snapshot_history",
+            role="derived",
+            as_of=latest_period_end,
+            last_refreshed_at=last_refreshed_at,
+        )
+    ]
+
+    for statement in statements[:12]:
+        usage = _source_usage_from_hint(
+            getattr(statement, "source", None),
+            role="primary",
+            as_of=getattr(statement, "period_end", None),
+            last_refreshed_at=getattr(statement, "last_checked", None),
+            default_source_id="sec_companyfacts",
+        )
+        if usage is not None:
+            usages.append(usage)
+
+    confidence_flags = [
+        *_confidence_flags_from_diagnostics(diagnostics),
+        *_confidence_flags_from_refresh(refresh),
+        *_segment_history_confidence_flags(periods),
+    ]
+    return _build_provenance_contract(
+        usages,
+        as_of=latest_period_end,
+        last_refreshed_at=last_refreshed_at,
+        confidence_flags=confidence_flags,
+    )
+
+
+def _segment_history_confidence_flags(periods: list[SegmentHistoryPeriodPayload]) -> list[str]:
+    flags: set[str] = set()
+    if any(period.comparability_flags.no_prior_comparable_disclosure for period in periods):
+        flags.add("no_prior_comparable_disclosure")
+    if any(period.comparability_flags.segment_axis_changed for period in periods):
+        flags.add("segment_axis_changed")
+    if any(period.comparability_flags.partial_operating_income_disclosure for period in periods):
+        flags.add("partial_operating_income_disclosure")
+    if any(period.comparability_flags.new_or_removed_segments for period in periods):
+        flags.add("new_or_removed_segments")
+    return sorted(flags)
 
 
 def _capital_structure_provenance_contract(
@@ -4319,6 +4469,40 @@ def _serialize_financial_segment(payload: dict[str, Any]) -> FinancialSegmentPay
         share_of_revenue=payload.get("share_of_revenue"),
         operating_income=payload.get("operating_income"),
         assets=payload.get("assets"),
+    )
+
+
+def _serialize_segment_history_period(payload: Any) -> SegmentHistoryPeriodPayload:
+    return SegmentHistoryPeriodPayload(
+        period_end=getattr(payload, "period_end"),
+        fiscal_year=getattr(payload, "fiscal_year", None),
+        kind=getattr(payload, "kind"),
+        segments=[
+            _serialize_segment_history_segment(item)
+            for item in list(getattr(payload, "segments", []) or [])
+            if isinstance(item, dict)
+        ],
+        comparability_flags=_serialize_segment_comparability_flags(getattr(payload, "comparability_flags", {})),
+    )
+
+
+def _serialize_segment_history_segment(payload: dict[str, Any]) -> SegmentHistorySegmentPayload:
+    return SegmentHistorySegmentPayload(
+        name=str(payload.get("name") or "Unknown"),
+        revenue=payload.get("revenue"),
+        operating_income=payload.get("operating_income"),
+        operating_margin=payload.get("operating_margin"),
+        share_of_revenue=payload.get("share_of_revenue"),
+    )
+
+
+def _serialize_segment_comparability_flags(payload: Any) -> SegmentComparabilityFlagsPayload:
+    data = payload if isinstance(payload, dict) else {}
+    return SegmentComparabilityFlagsPayload(
+        no_prior_comparable_disclosure=bool(data.get("no_prior_comparable_disclosure")),
+        segment_axis_changed=bool(data.get("segment_axis_changed")),
+        partial_operating_income_disclosure=bool(data.get("partial_operating_income_disclosure")),
+        new_or_removed_segments=bool(data.get("new_or_removed_segments")),
     )
 
 

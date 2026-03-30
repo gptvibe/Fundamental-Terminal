@@ -14,6 +14,7 @@ import {
   CompanyDerivedMetricsSummaryResponse,
   CompanyFinancialsResponse,
   CompanyFinancialRestatementsResponse,
+  CompanySegmentHistoryResponse,
   CompanyBeneficialOwnershipResponse,
   CompanyBeneficialOwnershipSummaryResponse,
   CompanyEventsResponse,
@@ -63,6 +64,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/search\?/, policy: { ttlMs: 20_000, staleMs: 90_000 } },
   { pattern: /^\/screener\/filters(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
+  { pattern: /^\/companies\/[^/]+\/segment-history(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/model-evaluations\/latest(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 240_000 } },
@@ -389,6 +391,27 @@ export function getCompanyCapitalStructure(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-structure${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanySegmentHistory(
+  ticker: string,
+  options?: {
+    kind?: "business" | "geographic";
+    years?: number;
+    asOf?: string | null;
+    signal?: AbortSignal;
+  }
+): Promise<CompanySegmentHistoryResponse> {
+  const params = new URLSearchParams();
+  if (options?.kind) {
+    params.set("kind", options.kind);
+  }
+  if (options?.years != null) {
+    params.set("years", String(options.years));
+  }
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/segment-history${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyChangesSinceLastFiling(

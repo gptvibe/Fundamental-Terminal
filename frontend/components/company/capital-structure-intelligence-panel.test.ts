@@ -17,7 +17,7 @@ vi.mock("@/hooks/use-job-stream", () => ({
 }));
 
 describe("CapitalStructureIntelligencePanel", () => {
-  it("loads the persisted capital structure route and renders ladder and provenance details", async () => {
+  it("loads the persisted capital structure route and renders ladder, trend status, and provenance details", async () => {
     vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
       company: {
         ticker: "AAPL",
@@ -200,10 +200,15 @@ describe("CapitalStructureIntelligencePanel", () => {
       expect(getCompanyCapitalStructure).toHaveBeenCalledWith("AAPL", { maxPeriods: 4 });
     });
 
-    expect(screen.getByText("Debt Maturity Ladder")).toBeTruthy();
-    expect(screen.getByText("Lease Obligations")).toBeTruthy();
-    expect(screen.getAllByText("Next 12 months")).toHaveLength(2);
-    expect(screen.getByText("Fundamental Terminal Capital Structure Intelligence")).toBeTruthy();
-    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("supports_selected_period")).toBeTruthy();
+      expect(screen.getByText("supports_compare_mode")).toBeTruthy();
+      expect(screen.getByText("supports_trend_mode")).toBeTruthy();
+      expect(screen.getByText("Debt Maturity Ladder")).toBeTruthy();
+      expect(screen.getByText("Lease Obligations")).toBeTruthy();
+      expect(screen.getAllByText("Next 12 months")).toHaveLength(2);
+      expect(screen.getByText("Fundamental Terminal Capital Structure Intelligence")).toBeTruthy();
+      expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    });
   });
 });

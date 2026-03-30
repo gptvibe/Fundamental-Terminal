@@ -7,6 +7,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import CompanyFinancialsTabPage from "@/app/company/[ticker]/financials/page";
 
 const workspaceFixture = vi.hoisted(() => ({ current: null as any }));
+const navigationFixture = vi.hoisted(() => ({
+  pathname: "/company/acme/financials",
+  searchParams: new URLSearchParams(),
+  replace: vi.fn(),
+}));
 
 function makeWorkspaceFixture() {
   return {
@@ -198,6 +203,9 @@ function makeWorkspaceFixture() {
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
+  useRouter: () => ({ replace: navigationFixture.replace }),
+  usePathname: () => navigationFixture.pathname,
+  useSearchParams: () => navigationFixture.searchParams,
 }));
 
 vi.mock("@/hooks/use-company-workspace", () => ({
@@ -213,7 +221,13 @@ vi.mock("@/components/layout/company-utility-rail", () => ({
 }));
 
 vi.mock("@/components/ui/panel", () => ({
-  Panel: ({ title, children }: { title: string; children?: React.ReactNode }) => React.createElement("section", null, React.createElement("h2", null, title), children),
+  Panel: ({ title, subtitle, aside, children }: { title: React.ReactNode; subtitle?: React.ReactNode; aside?: React.ReactNode; children?: React.ReactNode }) =>
+    React.createElement(
+      "section",
+      null,
+      React.createElement("div", null, React.createElement("h2", null, title), subtitle ? React.createElement("p", null, subtitle) : null, aside),
+      children
+    ),
 }));
 
 vi.mock("@/components/ui/status-pill", () => ({
@@ -227,6 +241,8 @@ vi.mock("@/components/company/capital-structure-intelligence-panel", () => ({
 describe("CompanyFinancialsTabPage", () => {
   beforeEach(() => {
     workspaceFixture.current = makeWorkspaceFixture();
+    navigationFixture.searchParams = new URLSearchParams();
+    navigationFixture.replace.mockReset();
   });
 
   it("renders registry-backed source freshness metadata for financials", () => {
@@ -234,6 +250,12 @@ describe("CompanyFinancialsTabPage", () => {
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
     expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
+    expect(screen.getByText("Period & Comparison")).toBeTruthy();
+    expect(screen.getByText("Annual Financial Comparison")).toBeTruthy();
+    expect(screen.getAllByText("Point-in-Time Composition").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Period Comparison").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Historical Trends").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Annual only").length).toBe(2);
     expect(screen.getByText("Statement Reconciliation")).toBeTruthy();
     expect(screen.getByText(/RevenueFromContractWithCustomerExcludingAssessedTax/i)).toBeTruthy();
     expect(screen.getByText("revenue_reconciliation_disagreement")).toBeTruthy();
@@ -302,6 +324,9 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getByText("Regulated Bank Snapshot")).toBeTruthy();
     expect(screen.getByText("Derived Bank Metrics")).toBeTruthy();
     expect(screen.getByText("Regulated Bank Statements")).toBeTruthy();
+    expect(screen.getAllByText("Point-in-Time Composition").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Period Comparison").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Historical Trends").length).toBeGreaterThan(0);
     expect(screen.getByText("FDIC / FR Y-9C + SEC")).toBeTruthy();
     expect(screen.getAllByText("3.80%").length).toBeGreaterThan(0);
     expect(screen.queryByText("Capital Structure Intelligence")).toBeNull();

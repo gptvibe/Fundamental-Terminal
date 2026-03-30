@@ -235,6 +235,38 @@ export interface SegmentAnalysisPayload {
   geographic: SegmentLensPayload | null;
 }
 
+export interface SegmentHistorySegmentPayload {
+  name: string;
+  revenue: number | null;
+  operating_income: number | null;
+  operating_margin: number | null;
+  share_of_revenue: number | null;
+}
+
+export interface SegmentComparabilityFlagsPayload {
+  no_prior_comparable_disclosure: boolean;
+  segment_axis_changed: boolean;
+  partial_operating_income_disclosure: boolean;
+  new_or_removed_segments: boolean;
+}
+
+export interface SegmentHistoryPeriodPayload {
+  period_end: string;
+  fiscal_year: number | null;
+  kind: "business" | "geographic";
+  segments: SegmentHistorySegmentPayload[];
+  comparability_flags: SegmentComparabilityFlagsPayload;
+}
+
+export interface CompanySegmentHistoryResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  kind: "business" | "geographic";
+  years: number;
+  periods: SegmentHistoryPeriodPayload[];
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
 export interface FinancialFactReferencePayload {
   accession_number: string | null;
   form: string | null;
