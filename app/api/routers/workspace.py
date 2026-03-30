@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
+from app.api.source_contracts import add_user_visible_route
 from app.api.schemas.workspace import (
     CompanyEarningsResponse,
     CompanyEarningsSummaryResponse,
@@ -14,25 +15,29 @@ from app.api.schemas.workspace import (
 
 def build_router(main_module: Any) -> APIRouter:
     router = APIRouter(tags=["workspace"])
-    router.add_api_route(
+    add_user_visible_route(
+        router,
         "/api/companies/{ticker}/earnings",
         main_module.company_earnings,
         methods=["GET"],
         response_model=CompanyEarningsResponse,
     )
-    router.add_api_route(
+    add_user_visible_route(
+        router,
         "/api/companies/{ticker}/earnings/summary",
         main_module.company_earnings_summary,
         methods=["GET"],
         response_model=CompanyEarningsSummaryResponse,
     )
-    router.add_api_route(
+    add_user_visible_route(
+        router,
         "/api/companies/{ticker}/earnings/workspace",
         main_module.company_earnings_workspace,
         methods=["GET"],
         response_model=CompanyEarningsWorkspaceResponse,
     )
-    router.add_api_route(
+    add_user_visible_route(
+        router,
         "/api/watchlist/summary",
         main_module.watchlist_summary,
         methods=["POST"],

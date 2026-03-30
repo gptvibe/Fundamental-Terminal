@@ -3,9 +3,14 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Any
 
 
 DEFAULT_SEC_USER_AGENT = "FundamentalTerminal/1.0 (contact@example.com)"
+SEC_CLIENT_MIN_REQUEST_INTERVAL_FLOOR_SECONDS = 0.2
+SEC_CLIENT_RETRY_BACKOFF_FLOOR_SECONDS = 0.1
+DEFAULT_SEC_MAX_RETRY_BACKOFF_SECONDS = 8.0
+DEFAULT_SEC_MAX_RETRY_AFTER_SECONDS = 30.0
 
 
 def _int_env(name: str, default: int, *, minimum: int = 0) -> int:
@@ -90,6 +95,8 @@ class Settings:
     sec_13f_extra_managers: tuple[str, ...] = _csv_env("SEC_13F_EXTRA_MANAGERS")
     sec_max_retries: int = _int_env("SEC_MAX_RETRIES", 3, minimum=1)
     sec_retry_backoff_seconds: float = _float_env("SEC_RETRY_BACKOFF_SECONDS", 0.5)
+    sec_max_retry_backoff_seconds: float = _float_env("SEC_MAX_RETRY_BACKOFF_SECONDS", DEFAULT_SEC_MAX_RETRY_BACKOFF_SECONDS, minimum=SEC_CLIENT_RETRY_BACKOFF_FLOOR_SECONDS)
+    sec_max_retry_after_seconds: float = _float_env("SEC_MAX_RETRY_AFTER_SECONDS", DEFAULT_SEC_MAX_RETRY_AFTER_SECONDS, minimum=1.0)
     sec_cache_prune_interval_seconds: int = _int_env("SEC_CACHE_PRUNE_INTERVAL_SECONDS", 3600, minimum=60)
     sec_cache_prune_max_entries: int = _int_env("SEC_CACHE_PRUNE_MAX_ENTRIES", 5000, minimum=0)
     market_max_retries: int = _int_env("MARKET_MAX_RETRIES", 3, minimum=1)
@@ -119,6 +126,48 @@ class Settings:
     hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()
     valuation_workbench_enabled: bool = os.getenv("VALUATION_WORKBENCH_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
+
+
+@dataclass(frozen=True, slots=True)
+class SecClientConfig:
+    user_agent: str
+    timeout_seconds: float
+    min_request_interval_seconds: float
+    max_retries: int
+    retry_backoff_seconds: float
+    max_retry_backoff_seconds: float
+    max_retry_after_seconds: float
+
+
+def build_sec_client_config(settings_like: Any) -> SecClientConfig:
+    user_agent = str(getattr(settings_like, "sec_user_agent", DEFAULT_SEC_USER_AGENT) or DEFAULT_SEC_USER_AGENT).strip() or DEFAULT_SEC_USER_AGENT
+    timeout_seconds = max(1.0, float(getattr(settings_like, "sec_timeout_seconds", 30.0)))
+    min_request_interval_seconds = max(
+        SEC_CLIENT_MIN_REQUEST_INTERVAL_FLOOR_SECONDS,
+        float(getattr(settings_like, "sec_min_request_interval_seconds", SEC_CLIENT_MIN_REQUEST_INTERVAL_FLOOR_SECONDS)),
+    )
+    max_retries = max(1, int(getattr(settings_like, "sec_max_retries", 3)))
+    retry_backoff_seconds = max(
+        SEC_CLIENT_RETRY_BACKOFF_FLOOR_SECONDS,
+        float(getattr(settings_like, "sec_retry_backoff_seconds", 0.5)),
+    )
+    max_retry_backoff_seconds = max(
+        retry_backoff_seconds,
+        float(getattr(settings_like, "sec_max_retry_backoff_seconds", DEFAULT_SEC_MAX_RETRY_BACKOFF_SECONDS)),
+    )
+    max_retry_after_seconds = max(
+        retry_backoff_seconds,
+        float(getattr(settings_like, "sec_max_retry_after_seconds", DEFAULT_SEC_MAX_RETRY_AFTER_SECONDS)),
+    )
+    return SecClientConfig(
+        user_agent=user_agent,
+        timeout_seconds=timeout_seconds,
+        min_request_interval_seconds=min_request_interval_seconds,
+        max_retries=max_retries,
+        retry_backoff_seconds=retry_backoff_seconds,
+        max_retry_backoff_seconds=max_retry_backoff_seconds,
+        max_retry_after_seconds=max_retry_after_seconds,
+    )
 
 
 settings = Settings()

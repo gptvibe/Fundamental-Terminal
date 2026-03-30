@@ -1496,6 +1496,211 @@ export interface CompanyActivityOverviewResponse extends ProvenanceEnvelope {
   error: string | null;
 }
 
+export type ScreenerPeriodType = "quarterly" | "annual" | "ttm";
+export type ScreenerRankingScoreKey = "quality" | "value" | "capital_allocation" | "dilution_risk" | "filing_risk";
+export type ScreenerSortDirection = "asc" | "desc";
+export type ScreenerSortField =
+  | "ticker"
+  | "period_end"
+  | "revenue_growth"
+  | "operating_margin"
+  | "fcf_margin"
+  | "leverage_ratio"
+  | "dilution"
+  | "sbc_burden"
+  | "shareholder_yield"
+  | "filing_lag_days"
+  | "restatement_count"
+  | "quality_score"
+  | "value_score"
+  | "capital_allocation_score"
+  | "dilution_risk_score"
+  | "filing_risk_score";
+
+export interface ScreenerMetricSnapshotPayload {
+  value: number | null;
+  unit: string;
+  is_proxy: boolean;
+  source_key: string;
+  quality_flags: string[];
+}
+
+export interface ScreenerRankingComponentPayload {
+  component_key: string;
+  label: string;
+  source_key: string;
+  value: number | null;
+  unit: string;
+  weight: number;
+  directionality: "higher_increases_score" | "lower_increases_score";
+  component_score: number | null;
+  is_proxy: boolean;
+  confidence_notes: string[];
+}
+
+export interface ScreenerRankingPayload {
+  score_key: ScreenerRankingScoreKey;
+  label: string;
+  score: number | null;
+  rank: number | null;
+  percentile: number | null;
+  universe_size: number;
+  universe_basis: "candidate_universe_pre_filter";
+  score_directionality: "higher_is_better" | "higher_is_worse";
+  confidence_notes: string[];
+  components: ScreenerRankingComponentPayload[];
+}
+
+export interface ScreenerRankingsPayload {
+  quality: ScreenerRankingPayload;
+  value: ScreenerRankingPayload;
+  capital_allocation: ScreenerRankingPayload;
+  dilution_risk: ScreenerRankingPayload;
+  filing_risk: ScreenerRankingPayload;
+}
+
+export interface ScreenerRankingDefinitionComponentPayload {
+  component_key: string;
+  label: string;
+  source_key: string;
+  unit: string;
+  weight: number;
+  directionality: "higher_increases_score" | "lower_increases_score";
+  notes: string[];
+}
+
+export interface ScreenerRankingDefinitionPayload {
+  score_key: ScreenerRankingScoreKey;
+  label: string;
+  description: string;
+  score_directionality: "higher_is_better" | "higher_is_worse";
+  universe_basis: "candidate_universe_pre_filter";
+  method_summary: string;
+  components: ScreenerRankingDefinitionComponentPayload[];
+  confidence_notes_policy: string[];
+  notes: string[];
+}
+
+export interface ScreenerMetricsPayload {
+  revenue_growth: ScreenerMetricSnapshotPayload;
+  operating_margin: ScreenerMetricSnapshotPayload;
+  fcf_margin: ScreenerMetricSnapshotPayload;
+  leverage_ratio: ScreenerMetricSnapshotPayload;
+  dilution: ScreenerMetricSnapshotPayload;
+  sbc_burden: ScreenerMetricSnapshotPayload;
+  shareholder_yield: ScreenerMetricSnapshotPayload;
+}
+
+export interface ScreenerFilingQualityPayload {
+  filing_lag_days: ScreenerMetricSnapshotPayload;
+  stale_period_flag: ScreenerMetricSnapshotPayload;
+  restatement_flag: ScreenerMetricSnapshotPayload;
+  restatement_count: number;
+  latest_restatement_filing_date: string | null;
+  latest_restatement_period_end: string | null;
+  aggregated_quality_flags: string[];
+}
+
+export interface ScreenerCompanyPayload {
+  ticker: string;
+  cik: string;
+  name: string;
+  sector: string | null;
+  market_sector: string | null;
+  market_industry: string | null;
+  cache_state: CacheState;
+}
+
+export interface ScreenerResultPayload {
+  company: ScreenerCompanyPayload;
+  period_type: ScreenerPeriodType;
+  period_end: string | null;
+  filing_type: string | null;
+  last_metrics_check: string | null;
+  last_model_check: string | null;
+  metrics: ScreenerMetricsPayload;
+  filing_quality: ScreenerFilingQualityPayload;
+  rankings: ScreenerRankingsPayload;
+}
+
+export interface ScreenerCoverageSummaryPayload {
+  candidate_count: number;
+  matched_count: number;
+  returned_count: number;
+  fresh_count: number;
+  stale_count: number;
+  missing_shareholder_yield_count: number;
+  restatement_flagged_count: number;
+  stale_period_flagged_count: number;
+}
+
+export interface ScreenerSortPayload {
+  field: ScreenerSortField;
+  direction: ScreenerSortDirection;
+}
+
+export interface ScreenerFilterInputPayload {
+  revenue_growth_min: number | null;
+  operating_margin_min: number | null;
+  fcf_margin_min: number | null;
+  leverage_ratio_max: number | null;
+  dilution_max: number | null;
+  sbc_burden_max: number | null;
+  shareholder_yield_min: number | null;
+  max_filing_lag_days: number | null;
+  exclude_restatements: boolean;
+  exclude_stale_periods: boolean;
+  excluded_quality_flags: string[];
+}
+
+export interface OfficialScreenerSearchRequest {
+  period_type: ScreenerPeriodType;
+  ticker_universe: string[];
+  filters: ScreenerFilterInputPayload;
+  sort: ScreenerSortPayload;
+  limit: number;
+  offset: number;
+}
+
+export interface OfficialScreenerQueryPayload {
+  period_type: ScreenerPeriodType;
+  ticker_universe: string[];
+  filters: ScreenerFilterInputPayload;
+  sort: ScreenerSortPayload;
+  limit: number;
+  offset: number;
+  strict_official_only: boolean;
+}
+
+export interface ScreenerFilterDefinitionPayload {
+  field: string;
+  label: string;
+  description: string;
+  comparator: "min" | "max" | "boolean" | "exclude_any";
+  source_kind: "derived_metric" | "model_result" | "restatement_record" | "quality_flag";
+  source_key: string;
+  unit: string | null;
+  official_only: boolean;
+  notes: string[];
+  suggested_values: string[];
+}
+
+export interface OfficialScreenerMetadataResponse extends ProvenanceEnvelope {
+  strict_official_only: boolean;
+  default_period_type: ScreenerPeriodType;
+  period_types: ScreenerPeriodType[];
+  default_sort: ScreenerSortPayload;
+  filters: ScreenerFilterDefinitionPayload[];
+  rankings: ScreenerRankingDefinitionPayload[];
+  notes: string[];
+}
+
+export interface OfficialScreenerSearchResponse extends ProvenanceEnvelope {
+  query: OfficialScreenerQueryPayload;
+  coverage: ScreenerCoverageSummaryPayload;
+  results: ScreenerResultPayload[];
+}
+
 export interface WatchlistSummaryRequest {
   tickers: string[];
 }

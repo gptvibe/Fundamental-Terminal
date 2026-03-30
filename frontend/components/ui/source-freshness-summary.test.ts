@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
@@ -52,8 +52,15 @@ describe("SourceFreshnessSummary", () => {
     expect(screen.getByText("Official + labeled fallback")).toBeTruthy();
     expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide provenance drawer" })).toBeTruthy();
+    expect(screen.getByLabelText("Provenance drawer")).toBeTruthy();
     expect(screen.getByText("commercial fallback present")).toBeTruthy();
     expect(screen.getByText("TTL 6h")).toBeTruthy();
     expect(screen.getByText("TTL 1h")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide provenance drawer" }));
+
+    expect(screen.queryByLabelText("Provenance drawer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Open provenance drawer" })).toBeTruthy();
   });
 });

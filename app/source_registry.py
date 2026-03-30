@@ -270,6 +270,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Persisted capital structure roll-forwards, maturities, payout mix, and dilution bridges derived from official SEC companyfacts statements.",
     ),
+    "ft_screener_backend": SourceDefinition(
+        source_id="ft_screener_backend",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Official Screener Backend",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Cross-sectional screening read model built from persisted official-company metrics, official restatement history, and official-only capital allocation proxies.",
+    ),
     "manual_override": SourceDefinition(
         source_id="manual_override",
         tier="manual_override",

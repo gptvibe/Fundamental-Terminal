@@ -43,6 +43,7 @@ export function AppChrome({ children }: AppChromeProps) {
   const workspace = useMemo(() => deriveWorkspace(pathname), [pathname]);
   const isHomeRoute = pathname === "/";
   const isCompanyRoute = pathname?.startsWith("/company/") ?? false;
+  const isScreenerRoute = pathname === "/screener";
   const normalizedSearchText = useMemo(() => normalizeSearchText(searchText), [searchText]);
   const trimmedSearchText = normalizedSearchText.trim();
   const showAutocomplete = autocompleteOpen && trimmedSearchText.length > 0;
@@ -368,6 +369,10 @@ export function AppChrome({ children }: AppChromeProps) {
         </div>
 
         <div className={`app-topbar-tools${isHomeRoute ? " is-home-route" : ""}`}>
+          <button type="button" className={`app-device-shortcut${isScreenerRoute ? " is-active" : ""}`} onClick={() => router.push("/screener")} title="Open the official screener">
+            Screener
+          </button>
+
           <button type="button" className="app-device-shortcut" onClick={() => router.push("/watchlist")} title="Open your browser-only saved list">
             Saved
             <span className="app-device-shortcut-count">{savedCompanyCount}</span>
@@ -509,6 +514,10 @@ function deriveWorkspace(pathname: string | null): { label: string; ticker: stri
   }
 
   const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] === "screener") {
+    return { label: "Official Screener", ticker: null };
+  }
+
   if (parts[0] === "watchlist") {
     return { label: "Watchlist", ticker: null };
   }

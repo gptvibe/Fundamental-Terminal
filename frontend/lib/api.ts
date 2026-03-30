@@ -34,6 +34,9 @@ import {
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
+  OfficialScreenerMetadataResponse,
+  OfficialScreenerSearchRequest,
+  OfficialScreenerSearchResponse,
   WatchlistSummaryResponse,
   FinancialHistoryPoint,
   RefreshQueuedResponse
@@ -58,6 +61,7 @@ const DEFAULT_READ_POLICY: ReadCachePolicy = {
 
 const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> = [
   { pattern: /^\/companies\/search\?/, policy: { ttlMs: 20_000, staleMs: 90_000 } },
+  { pattern: /^\/screener\/filters(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -334,6 +338,19 @@ export function searchCompanies(
 
 export function resolveCompanyIdentifier(query: string): Promise<CompanyResolutionResponse> {
   return fetchJson(`/companies/resolve?query=${encodeURIComponent(query)}`);
+}
+
+export function getOfficialScreenerMetadata(): Promise<OfficialScreenerMetadataResponse> {
+  return fetchJson("/screener/filters");
+}
+
+export function searchOfficialScreener(
+  payload: OfficialScreenerSearchRequest
+): Promise<OfficialScreenerSearchResponse> {
+  return fetchJson("/screener/search", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 function currentAsOfParam(): string | undefined {

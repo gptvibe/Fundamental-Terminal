@@ -436,6 +436,9 @@ export default function HomePage() {
                 <button type="button" className="ticker-button home-action-secondary" onClick={() => void openSearch("models")}>
                   Open Valuation Models
                 </button>
+                <button type="button" className="ticker-button home-action-secondary" onClick={() => router.push("/screener")}>
+                  Open Official Screener
+                </button>
               </div>
             </form>
 

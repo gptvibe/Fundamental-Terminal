@@ -196,6 +196,8 @@ describe("PeerComparisonDashboard", () => {
     expect(screen.getByRole("button", { name: "Collapse compare tray" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Selected 1/4")).toBeTruthy();
     expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide provenance drawer" })).toBeTruthy();
+    expect(screen.getByLabelText("Provenance drawer")).toBeTruthy();
 
     fireEvent.click(screen.getByTitle("GOOG — Alphabet"));
 
@@ -239,5 +241,9 @@ describe("PeerComparisonDashboard", () => {
 
     expect(screen.getAllByText(/Peer comparison disabled/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/no official end-of-day equity price source is enabled/i)).toBeTruthy();
+    expect(screen.queryByText("Quality Radar")).toBeNull();
+    expect(screen.queryByText("Valuation + Return Signals")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Collapse compare tray" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Hide provenance drawer" })).toBeNull();
   });
 });

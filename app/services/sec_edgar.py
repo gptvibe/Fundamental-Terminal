@@ -10,6 +10,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -18,7 +19,7 @@ from sqlalchemy import Select, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.config import SecClientConfig, build_sec_client_config, settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
@@ -867,14 +868,15 @@ class StatementAccumulator:
 
 class EdgarClient:
     def __init__(self) -> None:
+        self._client_config = build_sec_client_config(settings)
         self._http = httpx.Client(
             headers={
-                "User-Agent": settings.sec_user_agent,
+                "User-Agent": self._client_config.user_agent,
                 "Accept": "application/json",
                 "Accept-Encoding": "gzip, deflate",
             },
             follow_redirects=True,
-            timeout=settings.sec_timeout_seconds,
+            timeout=self._client_config.timeout_seconds,
         )
         self._last_request_monotonic = 0.0
         self._company_tickers_cache: list[dict[str, Any]] | None = None
@@ -886,8 +888,7 @@ class EdgarClient:
         if cached_response is not None:
             return cached_response
 
-        max_retries = settings.sec_max_retries
-        backoff = settings.sec_retry_backoff_seconds
+        max_retries = self._client_config.max_retries
         attempt = 0
         while True:
             self._throttle()
@@ -895,7 +896,7 @@ class EdgarClient:
             self._last_request_monotonic = time.monotonic()
             if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
                 retry_after = response.headers.get("retry-after")
-                wait = _retry_wait(retry_after, backoff, attempt)
+                wait = _retry_wait(retry_after, self._client_config, attempt)
                 response.close()
                 time.sleep(wait)
                 attempt += 1
@@ -909,7 +910,7 @@ class EdgarClient:
 
     def _throttle(self) -> None:
         elapsed = time.monotonic() - self._last_request_monotonic
-        wait_for = settings.sec_min_request_interval_seconds - elapsed
+        wait_for = self._client_config.min_request_interval_seconds - elapsed
         if wait_for > 0:
             time.sleep(wait_for)
 
@@ -3577,10 +3578,26 @@ def _clean_text(value: Any) -> str | None:
     return text or None
 
 
-def _retry_wait(retry_after: str | None, backoff: float, attempt: int) -> float:
-    if retry_after and retry_after.isdigit():
-        return float(retry_after)
-    return backoff * (2 ** attempt)
+def _retry_wait(retry_after: str | None, client_config: SecClientConfig, attempt: int) -> float:
+    retry_after_seconds = _parse_retry_after_seconds(retry_after)
+    if retry_after_seconds is not None:
+        return min(max(retry_after_seconds, client_config.retry_backoff_seconds), client_config.max_retry_after_seconds)
+    return min(client_config.retry_backoff_seconds * (2 ** attempt), client_config.max_retry_backoff_seconds)
+
+
+def _parse_retry_after_seconds(retry_after: str | None) -> float | None:
+    cleaned = str(retry_after or "").strip()
+    if not cleaned:
+        return None
+    if cleaned.isdigit():
+        return float(cleaned)
+    try:
+        retry_at = parsedate_to_datetime(cleaned)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
 
 
 def _normalize_datetime_value(value: datetime | None) -> datetime | None:

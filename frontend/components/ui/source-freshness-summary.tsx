@@ -1,5 +1,7 @@
 "use client";
 
+import { useId, useState } from "react";
+
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { formatDate } from "@/lib/format";
 import type { ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
@@ -23,6 +25,8 @@ export function SourceFreshnessSummary({
 }: SourceFreshnessSummaryProps) {
   const entries = provenance ?? [];
   const flags = confidenceFlags ?? [];
+  const drawerId = useId();
+  const [drawerOpen, setDrawerOpen] = useState(true);
 
   if (!entries.length && !asOf && !lastRefreshedAt && !flags.length) {
     return <div className="text-muted">{emptyMessage}</div>;
@@ -49,33 +53,52 @@ export function SourceFreshnessSummary({
 
       {entries.length ? (
         <div style={{ display: "grid", gap: 10 }}>
-          {entries.map((entry) => (
-            <div key={entry.source_id} className="filing-link-card" style={{ display: "grid", gap: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <strong>{entry.display_label}</strong>
-                  <div className="text-muted" style={{ fontSize: "var(--text-xs)" }}>{entry.source_id}</div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span className="pill">{humanizeFlag(entry.role)}</span>
-                  <span className="pill">{humanizeFlag(entry.source_tier)}</span>
-                  <span className="pill">TTL {formatTtl(entry.default_freshness_ttl_seconds)}</span>
-                </div>
-              </div>
-
-              <div className="text-muted" style={{ fontSize: "var(--text-sm)", lineHeight: 1.55 }}>
-                {entry.disclosure_note}
-              </div>
-
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                {entry.as_of ? <span className="text-muted">As of {formatDate(entry.as_of)}</span> : null}
-                {entry.last_refreshed_at ? <span className="text-muted">Refreshed {formatDate(entry.last_refreshed_at)}</span> : null}
-                <a href={entry.url} target="_blank" rel="noreferrer" className="ticker-button" style={{ width: "fit-content" }}>
-                  Open source
-                </a>
-              </div>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div className="text-muted" style={{ fontSize: "var(--text-sm)" }}>
+              Registry-backed provenance details for this surface.
             </div>
-          ))}
+            <button
+              type="button"
+              className="ticker-button"
+              aria-expanded={drawerOpen}
+              aria-controls={drawerId}
+              onClick={() => setDrawerOpen((current) => !current)}
+            >
+              {drawerOpen ? "Hide provenance drawer" : "Open provenance drawer"}
+            </button>
+          </div>
+
+          {drawerOpen ? (
+            <div id={drawerId} aria-label="Provenance drawer" style={{ display: "grid", gap: 10 }}>
+              {entries.map((entry) => (
+                <div key={entry.source_id} className="filing-link-card" style={{ display: "grid", gap: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <strong>{entry.display_label}</strong>
+                      <div className="text-muted" style={{ fontSize: "var(--text-xs)" }}>{entry.source_id}</div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <span className="pill">{humanizeFlag(entry.role)}</span>
+                      <span className="pill">{humanizeFlag(entry.source_tier)}</span>
+                      <span className="pill">TTL {formatTtl(entry.default_freshness_ttl_seconds)}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-muted" style={{ fontSize: "var(--text-sm)", lineHeight: 1.55 }}>
+                    {entry.disclosure_note}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    {entry.as_of ? <span className="text-muted">As of {formatDate(entry.as_of)}</span> : null}
+                    {entry.last_refreshed_at ? <span className="text-muted">Refreshed {formatDate(entry.last_refreshed_at)}</span> : null}
+                    <a href={entry.url} target="_blank" rel="noreferrer" className="ticker-button" style={{ width: "fit-content" }}>
+                      Open source
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

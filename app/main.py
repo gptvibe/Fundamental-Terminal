@@ -96,6 +96,7 @@ from app.services.market_context import (
 )
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.sector_context import get_company_sector_context
+from app.services.screener import build_official_screener_filter_catalog, run_official_screener
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
@@ -333,6 +334,43 @@ def resolve_company_identifier(query: str = Query(..., min_length=1), session: S
         ticker=_resolve_canonical_ticker(session, identity) or identity.ticker,
         name=identity.name,
         error=None,
+    )
+
+
+@app.get("/api/screener/filters", response_model=OfficialScreenerMetadataResponse)
+def official_screener_filters() -> OfficialScreenerMetadataResponse:
+    payload = build_official_screener_filter_catalog()
+    source_hints = dict(payload.pop("source_hints", None) or {})
+    confidence_flags = list(payload.pop("confidence_flags", None) or [])
+    return OfficialScreenerMetadataResponse(
+        **payload,
+        **_official_screener_provenance_contract(
+            source_hints=source_hints,
+            as_of=None,
+            last_refreshed_at=None,
+            confidence_flags=confidence_flags,
+        ),
+    )
+
+
+@app.post("/api/screener/search", response_model=OfficialScreenerSearchResponse)
+def official_screener_search(
+    payload: OfficialScreenerSearchRequest,
+    session: Session = Depends(get_db_session),
+) -> OfficialScreenerSearchResponse:
+    result = run_official_screener(session, payload.model_dump(mode="python"))
+    source_hints = dict(result.pop("source_hints", None) or {})
+    confidence_flags = list(result.pop("confidence_flags", None) or [])
+    provenance_as_of = result.pop("as_of", None)
+    provenance_last_refreshed_at = result.pop("last_refreshed_at", None)
+    return OfficialScreenerSearchResponse(
+        **result,
+        **_official_screener_provenance_contract(
+            source_hints=source_hints,
+            as_of=provenance_as_of,
+            last_refreshed_at=provenance_last_refreshed_at,
+            confidence_flags=confidence_flags,
+        ),
     )
 
 
@@ -3846,6 +3884,62 @@ def _models_provenance_contract(
             price_last_checked,
         ),
         confidence_flags=confidence_flags,
+    )
+
+
+def _official_screener_provenance_contract(
+    *,
+    source_hints: dict[str, Any],
+    as_of: DateType | datetime | str | None,
+    last_refreshed_at: datetime | None,
+    confidence_flags: list[str] | None = None,
+) -> dict[str, Any]:
+    usages: list[SourceUsage] = [
+        SourceUsage(
+            source_id="ft_screener_backend",
+            role="derived",
+            as_of=as_of,
+            last_refreshed_at=last_refreshed_at,
+        )
+    ]
+
+    if bool(source_hints.get("uses_metrics")):
+        usages.append(
+            SourceUsage(
+                source_id="ft_derived_metrics_mart",
+                role="derived",
+                as_of=as_of,
+                last_refreshed_at=last_refreshed_at,
+            )
+        )
+
+    if bool(source_hints.get("uses_shareholder_yield_model")):
+        usages.append(
+            SourceUsage(
+                source_id="ft_model_engine",
+                role="derived",
+                as_of=as_of,
+                last_refreshed_at=last_refreshed_at,
+            )
+        )
+
+    statement_sources = source_hints.get("statement_sources") if isinstance(source_hints.get("statement_sources"), list) else []
+    for source_hint in statement_sources or ["sec_companyfacts"]:
+        usage = _source_usage_from_hint(
+            str(source_hint),
+            role="primary",
+            as_of=as_of,
+            last_refreshed_at=last_refreshed_at,
+            default_source_id="sec_companyfacts",
+        )
+        if usage is not None:
+            usages.append(usage)
+
+    return _build_provenance_contract(
+        usages,
+        as_of=as_of,
+        last_refreshed_at=last_refreshed_at,
+        confidence_flags=["official_source_only", *(confidence_flags or [])],
     )
 
 
