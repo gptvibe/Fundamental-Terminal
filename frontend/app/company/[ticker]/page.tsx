@@ -23,6 +23,15 @@ import {
   getCompanyModels,
   getCompanyPeers,
 } from "@/lib/api";
+import {
+  toneForAlertLevel,
+  toneForAlertSource,
+  toneForEntryBadge,
+  toneForEntryCard,
+  toneForEntryType,
+  toneForInsiderSentiment,
+  type SemanticTone,
+} from "@/lib/activity-feed-tone";
 import { MODEL_NAMES } from "@/lib/constants";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
@@ -116,6 +125,7 @@ type SectionLink = {
 type MonitorChecklistItem = {
   title: string;
   detail: string;
+  tone: SemanticTone;
 };
 
 type BriefCompany = {
@@ -611,22 +621,27 @@ export default function CompanyResearchBriefPage() {
               <div className="company-pulse-list">
                 <div className="company-pulse-heading">Top alerts</div>
                 {topAlerts.length ? (
-                  topAlerts.map((alert) => (
-                    <AlertOrEntryCard
-                      key={alert.id}
-                      href={alert.href}
-                      danger={alert.level === "high"}
-                      topLeft={
-                        <>
-                          <span className="pill">{alert.level}</span>
-                          <span className="pill">{alert.source}</span>
-                        </>
-                      }
-                      topRight={formatDate(alert.date)}
-                      title={alert.title}
-                      detail={alert.detail}
-                    />
-                  ))
+                  topAlerts.map((alert) => {
+                    const levelTone = toneForAlertLevel(alert.level);
+                    const sourceTone = toneForAlertSource(alert.source);
+
+                    return (
+                      <AlertOrEntryCard
+                        key={alert.id}
+                        href={alert.href}
+                        tone={levelTone}
+                        topLeft={
+                          <>
+                            <span className={`pill tone-${levelTone}`}>{alert.level}</span>
+                            <span className={`pill tone-${sourceTone}`}>{alert.source}</span>
+                          </>
+                        }
+                        topRight={formatDate(alert.date)}
+                        title={alert.title}
+                        detail={alert.detail}
+                      />
+                    );
+                  })
                 ) : (
                   <ResearchBriefStateBlock
                     kind="empty"
@@ -641,21 +656,28 @@ export default function CompanyResearchBriefPage() {
               <div className="company-pulse-list">
                 <div className="company-pulse-heading">Latest timeline</div>
                 {latestEntries.length ? (
-                  latestEntries.map((entry) => (
-                    <AlertOrEntryCard
-                      key={entry.id}
-                      href={entry.href}
-                      topLeft={
-                        <>
-                          <span className="pill">{formatFeedEntryType(entry.type)}</span>
-                          <span className="pill">{entry.badge}</span>
-                        </>
-                      }
-                      topRight={formatDate(entry.date)}
-                      title={entry.title}
-                      detail={entry.detail}
-                    />
-                  ))
+                  latestEntries.map((entry) => {
+                    const typeTone = toneForEntryType(entry.type);
+                    const badgeTone = toneForEntryBadge(entry.type, entry.badge);
+                    const cardTone = toneForEntryCard(entry);
+
+                    return (
+                      <AlertOrEntryCard
+                        key={entry.id}
+                        href={entry.href}
+                        tone={cardTone}
+                        topLeft={
+                          <>
+                            <span className={`pill tone-${typeTone}`}>{formatFeedEntryType(entry.type)}</span>
+                            <span className={`pill tone-${badgeTone}`}>{entry.badge}</span>
+                          </>
+                        }
+                        topRight={formatDate(entry.date)}
+                        title={entry.title}
+                        detail={entry.detail}
+                      />
+                    );
+                  })
                 ) : (
                   <ResearchBriefStateBlock
                     kind="empty"
@@ -1019,22 +1041,27 @@ export default function CompanyResearchBriefPage() {
             />
           ) : topAlerts.length ? (
             <div className="workspace-card-stack">
-              {topAlerts.map((alert) => (
-                <AlertOrEntryCard
-                  key={alert.id}
-                  href={alert.href}
-                  danger={alert.level === "high"}
-                  topLeft={
-                    <>
-                      <span className="pill">{alert.level}</span>
-                      <span className="pill">{alert.source}</span>
-                    </>
-                  }
-                  topRight={formatDate(alert.date)}
-                  title={alert.title}
-                  detail={alert.detail}
-                />
-              ))}
+              {topAlerts.map((alert) => {
+                const levelTone = toneForAlertLevel(alert.level);
+                const sourceTone = toneForAlertSource(alert.source);
+
+                return (
+                  <AlertOrEntryCard
+                    key={alert.id}
+                    href={alert.href}
+                    tone={levelTone}
+                    topLeft={
+                      <>
+                        <span className={`pill tone-${levelTone}`}>{alert.level}</span>
+                        <span className={`pill tone-${sourceTone}`}>{alert.source}</span>
+                      </>
+                    }
+                    topRight={formatDate(alert.date)}
+                    title={alert.title}
+                    detail={alert.detail}
+                  />
+                );
+              })}
             </div>
           ) : (
             <ResearchBriefStateBlock
@@ -1058,21 +1085,28 @@ export default function CompanyResearchBriefPage() {
             />
           ) : latestEntries.length ? (
             <div className="workspace-card-stack">
-              {latestEntries.map((entry) => (
-                <AlertOrEntryCard
-                  key={entry.id}
-                  href={entry.href}
-                  topLeft={
-                    <>
-                      <span className="pill">{formatFeedEntryType(entry.type)}</span>
-                      <span className="pill">{entry.badge}</span>
-                    </>
-                  }
-                  topRight={formatDate(entry.date)}
-                  title={entry.title}
-                  detail={entry.detail}
-                />
-              ))}
+              {latestEntries.map((entry) => {
+                const typeTone = toneForEntryType(entry.type);
+                const badgeTone = toneForEntryBadge(entry.type, entry.badge);
+                const cardTone = toneForEntryCard(entry);
+
+                return (
+                  <AlertOrEntryCard
+                    key={entry.id}
+                    href={entry.href}
+                    tone={cardTone}
+                    topLeft={
+                      <>
+                        <span className={`pill tone-${typeTone}`}>{formatFeedEntryType(entry.type)}</span>
+                        <span className={`pill tone-${badgeTone}`}>{entry.badge}</span>
+                      </>
+                    }
+                    topRight={formatDate(entry.date)}
+                    title={entry.title}
+                    detail={entry.detail}
+                  />
+                );
+              })}
             </div>
           ) : (
             <ResearchBriefStateBlock
@@ -1088,7 +1122,7 @@ export default function CompanyResearchBriefPage() {
           {monitorChecklist.length ? (
             <div className="research-brief-checklist-grid">
               {monitorChecklist.map((item) => (
-                <div key={item.title} className="research-brief-checklist-card">
+                <div key={item.title} className={`research-brief-checklist-card tone-${item.tone}`}>
                   <div className="research-brief-checklist-title">{item.title}</div>
                   <div className="research-brief-checklist-detail">{item.detail}</div>
                 </div>
@@ -1444,19 +1478,20 @@ function PeerComparisonSnapshot({ response }: { response: CompanyPeersResponse }
 
 function AlertOrEntryCard({
   href,
+  tone,
   topLeft,
   topRight,
   title,
   detail,
-  danger = false,
 }: {
   href: string | null;
+  tone: SemanticTone;
   topLeft: ReactNode;
   topRight: string;
   title: string;
   detail: string;
-  danger?: boolean;
 }) {
+  const cardClassName = `filing-link-card company-pulse-card tone-${tone}`;
   const content = (
     <>
       <div className="company-pulse-card-top">
@@ -1474,7 +1509,7 @@ function AlertOrEntryCard({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className={`filing-link-card company-pulse-card${danger ? " is-danger" : ""}`}
+        className={cardClassName}
         style={{ display: "grid", gap: 8, textDecoration: "none" }}
       >
         {content}
@@ -1483,7 +1518,7 @@ function AlertOrEntryCard({
   }
 
   return (
-    <div className={`filing-link-card company-pulse-card${danger ? " is-danger" : ""}`} style={{ display: "grid", gap: 8 }}>
+    <div className={cardClassName} style={{ display: "grid", gap: 8 }}>
       {content}
     </div>
   );
@@ -1781,18 +1816,28 @@ function buildMonitorChecklist({
       : company?.last_checked
         ? `No refresh queued. Last full company check ran on ${formatDate(company.last_checked)}.`
         : "No refresh queued yet.",
+    tone: refreshState?.job_id || company?.last_checked ? "cyan" : "gold",
   });
 
   if (activityOverview) {
     items.push({
       title: "Alert count",
       detail: `${activityOverview.summary.high.toLocaleString()} high, ${activityOverview.summary.medium.toLocaleString()} medium, and ${activityOverview.summary.low.toLocaleString()} low alert${activityOverview.summary.total === 1 ? " is" : "s are"} currently active.`,
+      tone:
+        activityOverview.summary.high > 0
+          ? "red"
+          : activityOverview.summary.medium > 0
+            ? "gold"
+            : activityOverview.summary.low > 0
+              ? "green"
+              : "cyan",
     });
 
     if (activityOverview.entries[0]) {
       items.push({
         title: "Latest activity",
         detail: `${activityOverview.entries[0].title} on ${formatDate(activityOverview.entries[0].date)} should be the first thing to revisit if the thesis changes.`,
+        tone: toneForEntryCard(activityOverview.entries[0]),
       });
     }
   }
@@ -1801,6 +1846,7 @@ function buildMonitorChecklist({
     items.push({
       title: "Insider watch",
       detail: `Insider tone is ${titleCase(insiderSummary.sentiment)} with net open-market value of ${formatCompactCurrency(insiderSummary.metrics.net_value)}.`,
+      tone: toneForInsiderSentiment(insiderSummary.sentiment),
     });
   }
 
@@ -1815,6 +1861,7 @@ function buildMonitorChecklist({
       detail: latestReportingDate
         ? `Institutional history is current through ${formatDate(latestReportingDate)} and should be revisited after the next reporting quarter posts.`
         : "Institutional history is cached but not yet tied to a latest reporting quarter.",
+      tone: "cyan",
     });
   }
 

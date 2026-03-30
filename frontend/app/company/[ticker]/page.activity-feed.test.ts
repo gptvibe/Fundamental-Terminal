@@ -198,6 +198,9 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
     expect(screen.getAllByText("Jane Doe filed Form 144 planned sale").length).toBeGreaterThan(0);
     expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
+    expect(screen.getAllByText("high")[0]?.className).toContain("tone-red");
+    expect(screen.getByText("Insider watch").closest(".research-brief-checklist-card")?.className).toContain("tone-green");
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();

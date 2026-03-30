@@ -11,6 +11,7 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyActivityOverview } from "@/lib/api";
+import { toneForAlertLevel, toneForAlertSource, toneForEntryBadge, toneForEntryCard, toneForEntryType } from "@/lib/activity-feed-tone";
 import { formatDate } from "@/lib/format";
 import type { CompanyActivityOverviewResponse } from "@/lib/types";
 
@@ -150,26 +151,32 @@ export default function CompanySecFeedPage() {
                 ["high", `High (${activityData?.summary.high ?? 0})`],
                 ["medium", `Medium (${activityData?.summary.medium ?? 0})`],
                 ["low", `Low (${activityData?.summary.low ?? 0})`],
-              ] as const).map(([level, label]) => (
-                <button
-                  key={level}
-                  type="button"
-                  className="pill workspace-filter-pill"
-                  onClick={() => setAlertLevelFilter(level)}
-                  aria-pressed={alertLevelFilter === level}
-                >
-                  {label}
-                </button>
-              ))}
+              ] as const).map(([level, label]) => {
+                const tone = level === "all" ? "cyan" : toneForAlertLevel(level);
+
+                return (
+                  <button
+                    key={level}
+                    type="button"
+                    className={`pill workspace-filter-pill tone-${tone}`}
+                    onClick={() => setAlertLevelFilter(level)}
+                    aria-pressed={alertLevelFilter === level}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {topAlerts.length ? topAlerts.map((alert) => {
+                const levelTone = toneForAlertLevel(alert.level);
+                const sourceTone = toneForAlertSource(alert.source);
                 const content = (
                   <>
                     <div className="workspace-card-row">
                       <div className="workspace-pill-row">
-                        <span className="pill">{alert.level}</span>
-                        <span className="pill">{alert.source}</span>
+                        <span className={`pill tone-${levelTone}`}>{alert.level}</span>
+                        <span className={`pill tone-${sourceTone}`}>{alert.source}</span>
                       </div>
                       <div className="text-muted">{formatDate(alert.date)}</div>
                     </div>
@@ -185,7 +192,7 @@ export default function CompanySecFeedPage() {
                       href={alert.href}
                       target="_blank"
                       rel="noreferrer"
-                      className={`filing-link-card workspace-card-link${alert.level === "high" ? " is-danger" : ""}`}
+                      className={`filing-link-card workspace-card-link tone-${levelTone}`}
                     >
                       {content}
                     </a>
@@ -195,7 +202,7 @@ export default function CompanySecFeedPage() {
                 return (
                   <div
                     key={alert.id}
-                    className={`filing-link-card workspace-card-link${alert.level === "high" ? " is-danger" : ""}`}
+                    className={`filing-link-card workspace-card-link tone-${levelTone}`}
                   >
                     {content}
                   </div>
@@ -213,12 +220,15 @@ export default function CompanySecFeedPage() {
         ) : feed.length ? (
           <div className="workspace-card-stack">
             {feed.map((entry) => {
+              const typeTone = toneForEntryType(entry.type);
+              const badgeTone = toneForEntryBadge(entry.type, entry.badge);
+              const cardTone = toneForEntryCard(entry);
               const content = (
                 <>
                   <div className="workspace-card-row">
                     <div className="workspace-pill-row">
-                      <span className="pill">{formatFeedEntryType(entry.type)}</span>
-                      <span className="pill">{entry.badge}</span>
+                      <span className={`pill tone-${typeTone}`}>{formatFeedEntryType(entry.type)}</span>
+                      <span className={`pill tone-${badgeTone}`}>{entry.badge}</span>
                     </div>
                     <div className="text-muted">{formatDate(entry.date)}</div>
                   </div>
@@ -229,14 +239,14 @@ export default function CompanySecFeedPage() {
 
               if (entry.href) {
                 return (
-                  <a key={entry.id} href={entry.href} target="_blank" rel="noreferrer" className="filing-link-card workspace-card-link">
+                  <a key={entry.id} href={entry.href} target="_blank" rel="noreferrer" className={`filing-link-card workspace-card-link tone-${cardTone}`}>
                     {content}
                   </a>
                 );
               }
 
               return (
-                <div key={entry.id} className="filing-link-card workspace-card-link">
+                <div key={entry.id} className={`filing-link-card workspace-card-link tone-${cardTone}`}>
                   {content}
                 </div>
               );

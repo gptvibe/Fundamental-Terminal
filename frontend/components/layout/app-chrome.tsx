@@ -302,8 +302,7 @@ export function AppChrome({ children }: AppChromeProps) {
             </div>
           ) : (
             <div className="app-home-intro" aria-label="Home workspace summary">
-              <span className="app-home-intro-label">Institutional Research Terminal</span>
-              <span className="app-home-intro-copy">Search launches from home. Company routes keep a compact cross-route command.</span>
+              <span className="app-home-intro-label">The best free SEC-first research workstation for U.S. public equities</span>
             </div>
           )}
 

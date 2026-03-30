@@ -346,6 +346,54 @@ a.filing-link-card:focus-visible,
   border-color: color-mix(in srgb, var(--danger) 45%, var(--panel-border));
 }
 
+.filing-link-card.tone-cyan,
+.research-brief-checklist-card.tone-cyan {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+}
+
+.filing-link-card.tone-green,
+.research-brief-checklist-card.tone-green {
+  border-color: color-mix(in srgb, var(--positive) 28%, var(--panel-border));
+  background: color-mix(in srgb, var(--positive) 4%, var(--panel));
+}
+
+.filing-link-card.tone-gold,
+.research-brief-checklist-card.tone-gold {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--panel-border));
+  background: color-mix(in srgb, var(--warning) 5%, var(--panel));
+}
+
+.filing-link-card.tone-red,
+.research-brief-checklist-card.tone-red {
+  border-color: color-mix(in srgb, var(--danger) 32%, var(--panel-border));
+  background: color-mix(in srgb, var(--danger) 5%, var(--panel));
+}
+
+a.filing-link-card.tone-cyan:hover,
+.filing-link-card.tone-cyan:hover {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+}
+
+a.filing-link-card.tone-green:hover,
+.filing-link-card.tone-green:hover {
+  border-color: color-mix(in srgb, var(--positive) 38%, var(--panel-border));
+  background: color-mix(in srgb, var(--positive) 8%, var(--panel));
+}
+
+a.filing-link-card.tone-gold:hover,
+.filing-link-card.tone-gold:hover {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--panel-border));
+  background: color-mix(in srgb, var(--warning) 9%, var(--panel));
+}
+
+a.filing-link-card.tone-red:hover,
+.filing-link-card.tone-red:hover {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--panel-border));
+  background: color-mix(in srgb, var(--danger) 8%, var(--panel));
+}
+
 .workspace-card-title {
   font-size: 15px;
   font-weight: 600;
@@ -380,6 +428,30 @@ a.filing-link-card:focus-visible,
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.workspace-filter-pill.tone-cyan[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: color-mix(in srgb, var(--accent) 86%, var(--text));
+}
+
+.workspace-filter-pill.tone-green[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--positive) 45%, var(--panel-border));
+  background: color-mix(in srgb, var(--positive) 16%, transparent);
+  color: color-mix(in srgb, var(--positive) 88%, var(--text));
+}
+
+.workspace-filter-pill.tone-gold[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--warning) 46%, var(--panel-border));
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: color-mix(in srgb, var(--warning) 90%, var(--text));
+}
+
+.workspace-filter-pill.tone-red[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--panel-border));
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: color-mix(in srgb, var(--danger) 88%, var(--text));
 }
 
 .workspace-two-column-panels {
@@ -3524,6 +3596,30 @@ select {
   color: var(--surface-pill-text);
   font-size: var(--text-xs);
   line-height: 1.35;
+}
+
+.pill.tone-cyan {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-pill-bg));
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+}
+
+.pill.tone-green {
+  border-color: color-mix(in srgb, var(--positive) 30%, var(--panel-border));
+  background: color-mix(in srgb, var(--positive) 12%, var(--surface-pill-bg));
+  color: color-mix(in srgb, var(--positive) 82%, var(--text));
+}
+
+.pill.tone-gold {
+  border-color: color-mix(in srgb, var(--warning) 30%, var(--panel-border));
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface-pill-bg));
+  color: color-mix(in srgb, var(--warning) 84%, var(--text));
+}
+
+.pill.tone-red {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--panel-border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface-pill-bg));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
 }
 
 .status-console {
