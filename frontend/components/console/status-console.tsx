@@ -18,7 +18,7 @@ export function StatusConsole({ entries, connectionState }: StatusConsoleProps) 
             <span className="status-console-time">{formatTime(entry.timestamp)}</span>
             <span className={`status-console-stage ${classNameForLevel(entry.level)}`}>{entry.stage}</span>
             {(entry.ticker || entry.kind || entry.trace_id) ? (
-              <span className="text-muted" style={{ fontSize: 11 }}>
+              <span className="status-console-meta">
                 {[entry.ticker, entry.kind, entry.trace_id ? `#${entry.trace_id.slice(0, 8)}` : null].filter(Boolean).join(" · ")}
               </span>
             ) : null}

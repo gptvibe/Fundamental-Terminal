@@ -24,7 +24,7 @@ export function CommercialFallbackNotice({
         <span className="pill">commercial_fallback</span>
         <span className="pill">{joinedSources}</span>
       </div>
-      <div className="text-muted" style={{ fontSize: 13 }}>
+      <div className="text-muted" style={{ fontSize: "var(--text-sm)", lineHeight: 1.55 }}>
         {subject} includes a labeled commercial fallback from {joinedSources}. Core fundamentals remain sourced from official filings and public datasets.
       </div>
     </div>

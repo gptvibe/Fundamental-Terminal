@@ -8,8 +8,8 @@
 
   /* ── Text ── */
   --text: #d4d4d8;
-  --text-soft: #a1a1aa;
-  --text-muted: #8b8b94;
+  --text-soft: #adadb6;
+  --text-muted: #9b9ba5;
 
   /* ── Accent (single) ── */
   --accent: #7eb8da;
@@ -32,26 +32,26 @@
   --surface-soft-alt: rgba(22, 24, 27, 0.94);
   --surface-pill-bg: rgba(113, 113, 122, 0.10);
   --surface-pill-border: rgba(113, 113, 122, 0.18);
-  --surface-pill-text: #a1a1aa;
+  --surface-pill-text: #b0b0ba;
   --surface-strong-text: #e4e4e7;
-  --surface-muted-text: #71717a;
+  --surface-muted-text: #8b8b95;
 
   /* ── Tooltip ── */
   --tooltip-bg: #16181b;
   --tooltip-border: rgba(255, 255, 255, 0.08);
   --tooltip-text: #e4e4e7;
-  --tooltip-muted: #a1a1aa;
+  --tooltip-muted: #adadb6;
 
   /* ── Console ── */
   --console-bg: #0e0f11;
   --console-border: rgba(255, 255, 255, 0.06);
   --console-text: #d4d4d8;
-  --console-muted: #71717a;
+  --console-muted: #8b8b95;
 
   /* ── Chart palette ── */
   --chart-grid: rgba(255, 255, 255, 0.04);
-  --chart-axis: #71717a;
-  --chart-legend: #a1a1aa;
+  --chart-axis: #8a8a94;
+  --chart-legend: #adadb6;
   --chart-series-1: #7eb8da;
   --chart-series-2: #4ade80;
   --chart-series-3: #fbbf24;
@@ -91,11 +91,11 @@
   --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
 
   /* ── Text scale ── */
-  --text-xs: 0.6875rem;
-  --text-sm: 0.75rem;
-  --text-base: 0.8125rem;
-  --text-md: 0.875rem;
-  --text-lg: 1rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.0625rem;
   --text-xl: 1.25rem;
   --text-2xl: 1.5rem;
   --text-3xl: 2rem;
@@ -104,7 +104,7 @@
   --ag-background: #111214;
   --ag-foreground: #d4d4d8;
   --ag-header-background: #16181b;
-  --ag-header-foreground: #a1a1aa;
+  --ag-header-foreground: #adadb6;
   --ag-odd-row-background: rgba(255, 255, 255, 0.015);
   --ag-row-hover: rgba(126, 184, 218, 0.06);
   --ag-selected-row: rgba(74, 222, 128, 0.08);
@@ -121,7 +121,7 @@
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--panel-border));
   background: color-mix(in srgb, var(--accent) 10%, var(--panel));
   color: var(--text-muted);
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -138,7 +138,7 @@
 
 .filing-filter-button {
   padding: 8px 12px;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
 }
 
 .filing-filter-button.is-active {
@@ -203,7 +203,7 @@
 
 .filing-timeline-date {
   font-family: var(--mono);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -216,7 +216,7 @@
   border: 1px solid var(--panel-border);
   background: color-mix(in srgb, var(--panel-alt) 86%, transparent);
   font-family: var(--mono);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
 }
@@ -250,7 +250,7 @@
   flex-wrap: wrap;
   gap: 8px;
   color: var(--text-muted);
-  font-size: 0.77rem;
+  font-size: var(--text-xs);
 }
 
 .filing-timeline-meta span {
@@ -353,11 +353,13 @@ a.filing-link-card:focus-visible,
 }
 
 .workspace-card-copy {
-  font-size: 13px;
+  font-size: var(--text-sm);
+  line-height: 1.55;
 }
 
 .workspace-card-copy-small {
-  font-size: 12px;
+  font-size: var(--text-xs);
+  line-height: 1.55;
 }
 
 .workspace-filter-row {
@@ -529,7 +531,7 @@ a.filing-link-card:focus-visible,
   background: color-mix(in srgb, var(--accent) 10%, var(--surface-pill-bg));
   color: var(--accent);
   font-family: var(--mono);
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
   font-weight: 700;
 }
 
@@ -544,7 +546,7 @@ a.filing-link-card:focus-visible,
   flex-wrap: wrap;
   gap: 8px;
   color: var(--text-muted);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .filing-viewer-meta span {
@@ -575,7 +577,7 @@ a.filing-link-card:focus-visible,
   display: grid;
   place-items: center;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-sm);
   background: var(--panel);
   z-index: 1;
 }
@@ -605,7 +607,7 @@ a.filing-link-card:focus-visible,
 
 .filing-count-form {
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -680,8 +682,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-stack);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: var(--text-base);
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -723,11 +725,11 @@ select {
   --ag-row-hover-color: var(--ag-row-hover);
   --ag-selected-row-background-color: var(--ag-selected-row);
   --ag-font-family: var(--font-stack);
-  --ag-font-size: 12px;
+  --ag-font-size: var(--text-sm);
   --ag-cell-horizontal-padding: 8px;
   --ag-grid-size: 4px;
-  --ag-row-height: 28px;
-  --ag-header-height: 32px;
+  --ag-row-height: 30px;
+  --ag-header-height: 34px;
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -2091,7 +2093,7 @@ select {
   border-radius: 0;
   color: var(--text-muted);
   font-family: var(--mono);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   letter-spacing: 0.04em;
   padding: 8px 10px;
   text-decoration: none;
@@ -2230,7 +2232,7 @@ select {
   background: var(--surface-pill-bg);
   color: var(--surface-pill-text);
   font-family: var(--mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -2294,12 +2296,13 @@ select {
 
 .company-research-header-subtitle {
   margin-top: 8px;
-  font-size: 0.95rem;
+  font-size: var(--text-base);
+  line-height: 1.45;
 }
 
 .company-research-header-description {
-  font-size: 0.9rem;
-  line-height: 1.55;
+  font-size: var(--text-base);
+  line-height: 1.6;
   max-width: 74ch;
 }
 
@@ -2371,7 +2374,7 @@ select {
 
 .utility-action-label {
   font-family: var(--mono);
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -2402,8 +2405,8 @@ select {
 
 .utility-action-description {
   color: var(--text-muted);
-  font-size: 0.8rem;
-  line-height: 1.5;
+  font-size: var(--text-sm);
+  line-height: 1.55;
 }
 
 .utility-status-stack {
@@ -2723,7 +2726,7 @@ select {
 
 .panel-title {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: none;
@@ -2732,8 +2735,8 @@ select {
 
 .panel-subtitle {
   margin: 2px 0 0;
-  font-size: 0.78rem;
-  line-height: 1.45;
+  font-size: var(--text-sm);
+  line-height: 1.55;
   color: var(--text-muted);
 }
 
@@ -2790,12 +2793,13 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   border-radius: var(--radius);
   border: 1px solid var(--panel-border);
   background: var(--surface-pill-bg);
-  color: var(--text-muted);
+  color: var(--surface-pill-text);
   font-size: var(--text-xs);
+  line-height: 1.35;
 }
 
 .status-console {
@@ -2805,10 +2809,10 @@ select {
   border-radius: var(--radius);
   border: 1px solid var(--console-border);
   background: var(--console-bg);
-  padding: 8px;
+  padding: 10px;
   font-family: var(--mono);
-  font-size: 11px;
-  line-height: 1.5;
+  font-size: var(--text-xs);
+  line-height: 1.6;
   color: var(--console-text);
   box-shadow: none;
 }
@@ -2831,6 +2835,11 @@ select {
 .status-console-time,
 .status-console-empty {
   color: var(--console-muted);
+}
+
+.status-console-meta {
+  color: var(--console-muted);
+  font-size: var(--text-xs);
 }
 
 .status-console-stage {
@@ -3344,7 +3353,7 @@ select {
 }
 
 .summary-card-label {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -3582,7 +3591,7 @@ select {
 }
 
 .grid-empty-kicker {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent);
@@ -3826,7 +3835,7 @@ select {
 
 .financial-export-button {
   padding: 8px 12px;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
 }
 
 .financial-trend-table-shell {
@@ -3838,8 +3847,9 @@ select {
 
 .financial-trend-table-note {
   padding: 12px 14px 0;
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
+  line-height: 1.55;
 }
 
 .financial-trend-table-scroll {
@@ -3851,7 +3861,7 @@ select {
   width: 100%;
   min-width: 640px;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3885,7 +3895,7 @@ select {
 
 .financial-trend-subtitle {
   margin-top: 4px;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
 }
 
@@ -3908,7 +3918,7 @@ select {
 }
 
 .financial-trend-direction {
-  font-size: 0.72rem;
+  font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-muted);
@@ -3920,7 +3930,7 @@ select {
 }
 
 .financial-trend-empty {
-  font-size: 0.78rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -3928,7 +3938,7 @@ select {
   width: 100%;
   border-collapse: collapse;
   min-width: 1140px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3940,6 +3950,7 @@ select {
   text-align: left;
   background: #121212;
   color: var(--accent);
+  font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -3971,7 +3982,7 @@ select {
 }
 
 .financial-history-note {
-  font-size: 0.82rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 

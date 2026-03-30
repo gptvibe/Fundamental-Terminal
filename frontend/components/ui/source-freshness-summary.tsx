@@ -54,7 +54,7 @@ export function SourceFreshnessSummary({
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <strong>{entry.display_label}</strong>
-                  <div className="text-muted" style={{ fontSize: 12 }}>{entry.source_id}</div>
+                  <div className="text-muted" style={{ fontSize: "var(--text-xs)" }}>{entry.source_id}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <span className="pill">{humanizeFlag(entry.role)}</span>
@@ -63,7 +63,7 @@ export function SourceFreshnessSummary({
                 </div>
               </div>
 
-              <div className="text-muted" style={{ fontSize: 13 }}>
+              <div className="text-muted" style={{ fontSize: "var(--text-sm)", lineHeight: 1.55 }}>
                 {entry.disclosure_note}
               </div>
 
