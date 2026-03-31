@@ -184,6 +184,7 @@ export function useCompanyWorkspace(
 
       pending = true;
       try {
+        invalidateApiReadCacheForTicker(ticker);
         const result = await loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional });
         if (cancelled) {
           return;

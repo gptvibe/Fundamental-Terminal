@@ -10,7 +10,6 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyBeneficialOwnership, getCompanyBeneficialOwnershipSummary } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
@@ -195,9 +194,23 @@ export default function CompanyOwnershipChangesPage() {
         title="Stake Changes"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector ?? null}
-        cacheState={pageCompany?.cache_state ?? null}
         description="SEC-first stake-change workspace centered on Schedules 13D and 13G, amendment chains, and quantified ownership deltas."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: pageCompany?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || workspaceLoading,
+          hasData: Boolean(pageCompany || summary || filings.length),
+          lastChecked: pageCompany?.last_checked ?? null,
+          errors: [error],
+          detailLines: [
+            `Major stake filings: ${(summary?.total_filings ?? filings.length).toLocaleString()}`,
+            `Latest filing: ${summary?.latest_filing_date ? formatDate(summary.latest_filing_date) : latestFilingDate ? formatDate(latestFilingDate) : "Pending"}`,
+            formMix || "Form mix pending",
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || workspaceLoading) && !pageCompany && !summary && !filings.length}
+        summariesLoading={(loading || workspaceLoading) && !pageCompany && !summary && !filings.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "13D / 13G Filings", value: (summary?.total_filings ?? filings.length).toLocaleString() },

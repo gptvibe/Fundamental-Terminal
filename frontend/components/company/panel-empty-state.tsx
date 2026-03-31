@@ -6,14 +6,34 @@ interface PanelEmptyStateProps {
   title?: string;
   minHeight?: number;
   className?: string;
+  loading?: boolean;
+  loadingMessage?: string;
 }
 
-export function PanelEmptyState({ message, kicker = "Current view", title = "Nothing to show yet", minHeight = 220, className }: PanelEmptyStateProps) {
+export function PanelEmptyState({
+  message,
+  kicker = "Current view",
+  title = "Nothing to show yet",
+  minHeight = 220,
+  className,
+  loading = false,
+  loadingMessage,
+}: PanelEmptyStateProps) {
+  const resolvedKicker = loading ? "Loading" : kicker;
+  const resolvedTitle = loading ? "Preparing this panel" : title;
+  const resolvedMessage = loading ? loadingMessage ?? message : message;
+
   return (
-    <div className={clsx("grid-empty-state", className)} style={{ minHeight }}>
-      <div className="grid-empty-kicker">{kicker}</div>
-      <div className="grid-empty-title">{title}</div>
-      <div className="grid-empty-copy">{message}</div>
+    <div
+      className={clsx("grid-empty-state", loading && "grid-empty-state-loading", className)}
+      style={{ minHeight }}
+      role={loading ? "status" : undefined}
+      aria-live={loading ? "polite" : undefined}
+    >
+      {loading ? <div className="workspace-skeleton grid-empty-loading-line" aria-hidden="true" /> : null}
+      <div className="grid-empty-kicker">{resolvedKicker}</div>
+      <div className="grid-empty-title">{resolvedTitle}</div>
+      <div className="grid-empty-copy">{resolvedMessage}</div>
     </div>
   );
 }

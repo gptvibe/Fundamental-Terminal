@@ -14,7 +14,6 @@ import { Form144FilingsTable } from "@/components/tables/form144-filings-table";
 import { InsiderTransactionsTable } from "@/components/tables/insider-transactions-table";
 import { Panel } from "@/components/ui/panel";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyForm144Filings } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
@@ -97,9 +96,23 @@ export default function CompanyInsidersPage() {
         title="Insiders"
         companyName={company?.name ?? ticker}
         sector={company?.sector ?? null}
-        cacheState={company?.cache_state ?? null}
         description="SEC-first insider workspace with open-market Form 4 activity and Form 144 planned sales kept current through background refreshes."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: company?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || form144Loading,
+          hasData: Boolean(company || insiderTrades.length || form144Count),
+          lastChecked: company?.last_checked_insiders ?? company?.last_checked ?? null,
+          errors: [insiderError, form144Error],
+          detailLines: [
+            `Cached trades: ${insiderTrades.length.toLocaleString()}`,
+            `Latest filing: ${latestTradeDate ? formatDate(latestTradeDate) : "Pending"}`,
+            `Form 144 filings: ${form144Count.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || form144Loading) && !company && !insiderTrades.length && !form144Count}
+        summariesLoading={(loading || form144Loading) && !company && !insiderTrades.length && !form144Count}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Cached Trades", value: insiderTrades.length.toLocaleString() },

@@ -526,17 +526,14 @@ function deriveWorkspace(pathname: string | null): { label: string; ticker: stri
   }
 
   const ticker = decodeURIComponent(parts[1]).toUpperCase();
-  const section = parts[2] ?? "overview";
+  const section = parts[2] ?? "brief";
 
   switch (section) {
+    case "brief":
     case "overview":
-      return { label: "Overview", ticker };
+      return { label: "Brief", ticker };
     case "financials":
       return { label: "Financials", ticker };
-    case "ownership":
-      return { label: "Ownership", ticker };
-    case "insiders":
-      return { label: "Insiders", ticker };
     case "models":
       return { label: "Models", ticker };
     case "peers":
@@ -549,8 +546,12 @@ function deriveWorkspace(pathname: string | null): { label: string; ticker: stri
       return { label: "Events", ticker };
     case "governance":
       return { label: "Governance", ticker };
+    case "ownership":
     case "ownership-changes":
-      return { label: "Stake Changes", ticker };
+    case "stakes":
+      return { label: "Ownership & Stakes", ticker };
+    case "insiders":
+      return { label: "Insiders", ticker };
     case "capital-markets":
       return { label: "Capital Markets", ticker };
     case "sec-feed":

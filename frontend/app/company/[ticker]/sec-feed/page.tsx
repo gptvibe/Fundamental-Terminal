@@ -8,7 +8,6 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyActivityOverview } from "@/lib/api";
 import { toneForAlertLevel, toneForAlertSource, toneForEntryBadge, toneForEntryCard, toneForEntryType } from "@/lib/activity-feed-tone";
@@ -106,9 +105,23 @@ export default function CompanySecFeedPage() {
         title="SEC Feed"
         companyName={company?.name ?? activityData?.company?.name ?? ticker}
         sector={company?.sector ?? activityData?.company?.sector ?? null}
-        cacheState={company?.cache_state ?? activityData?.company?.cache_state ?? null}
         description="Unified SEC signal stream across filings, events, governance, insider activity, Form 144 planned sales, and ownership updates."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: company?.cache_state ?? activityData?.company?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || workspaceLoading,
+          hasData: Boolean(company || activityData?.company || feed.length || filteredAlerts.length),
+          lastChecked: company?.last_checked ?? activityData?.company?.last_checked ?? null,
+          errors: [error],
+          detailLines: [
+            `Feed entries: ${feed.length.toLocaleString()}`,
+            `Latest SEC activity: ${latestDate ? formatDate(latestDate) : "Pending"}`,
+            "Sources unified: filings, events, governance, ownership, insiders, Form 144, and 13F",
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || workspaceLoading) && !company && !activityData?.company && !feed.length}
+        summariesLoading={(loading || workspaceLoading) && !company && !activityData?.company && !feed.length && !filteredAlerts.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Feed Entries", value: feed.length.toLocaleString() },

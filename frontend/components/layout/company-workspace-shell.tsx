@@ -11,9 +11,13 @@ interface CompanyWorkspaceShellProps {
 
 export function CompanyWorkspaceShell({ children, rail, className, mainClassName, railClassName }: CompanyWorkspaceShellProps) {
   return (
-    <div className={clsx("company-workspace-shell", className)}>
-      <div className={clsx("company-workspace-main", mainClassName)}>{children}</div>
-      <aside className={clsx("company-workspace-rail", railClassName)}>{rail}</aside>
+    <div className={clsx("company-workspace-shell", className)} data-company-workspace-shell="true">
+      <section className={clsx("company-workspace-main", mainClassName)} aria-label="Company workspace content">
+        {children}
+      </section>
+      <aside className={clsx("company-workspace-rail", railClassName)} aria-label="Company workspace utility rail">
+        {rail}
+      </aside>
     </div>
   );
 }

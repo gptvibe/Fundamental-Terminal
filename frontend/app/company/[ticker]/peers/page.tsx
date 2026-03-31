@@ -7,7 +7,6 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { formatDate } from "@/lib/format";
 
@@ -74,13 +73,24 @@ export default function CompanyPeersPage() {
         title="Peers"
         companyName={company?.name ?? ticker}
         sector={company?.sector}
-        cacheState={company?.cache_state ?? null}
         description={
           strictOfficialMode
             ? "Peer matching stays official-only in strict mode, using SEC SIC classification while price-dependent comparison charts remain disabled."
             : "Compare valuation, quality, and growth against a cached peer set without blocking the page on live vendor fetches."
         }
-        aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
+        freshness={{
+          cacheState: company?.cache_state ?? null,
+          refreshState,
+          loading,
+          hasData: Boolean(company || financials.length),
+          lastChecked: company?.last_checked ?? null,
+          detailLines: [
+            `Financial statements available: ${financials.length.toLocaleString()}`,
+            "Selection model: focus company plus up to 4 peers",
+            company?.last_checked ? `Last checked: ${formatDate(company.last_checked)}` : "Last checked: pending",
+          ],
+        }}
+        freshnessPlacement="subtitle"
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Sector", value: company?.sector ?? null },

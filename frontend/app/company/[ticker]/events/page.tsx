@@ -8,7 +8,6 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyFilingEvents, getCompanyFilingEventsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -114,9 +113,23 @@ export default function CompanyEventsPage() {
         title="Events"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
-        cacheState={pageCompany?.cache_state ?? null}
         description="Current-report intelligence stays anchored to SEC 8-K filings, with categorized event cards and aggregate summaries served from cache before any background refresh completes."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: pageCompany?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || workspaceLoading,
+          hasData: Boolean(pageCompany || summary || events.length),
+          lastChecked: pageCompany?.last_checked ?? null,
+          errors: [error, data?.error],
+          detailLines: [
+            `8-K events: ${(summary?.total_events ?? events.length).toLocaleString()}`,
+            `Latest event: ${summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
+            categorySummary || "Event categories pending",
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || workspaceLoading) && !pageCompany && !summary && !events.length}
+        summariesLoading={(loading || workspaceLoading) && !pageCompany && !summary && !events.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Current Reports", value: (summary?.total_events ?? events.length).toLocaleString() },

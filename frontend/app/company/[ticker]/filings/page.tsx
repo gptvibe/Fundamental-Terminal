@@ -13,7 +13,6 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -212,9 +211,23 @@ export default function CompanyFilingsPage() {
         title="Filings"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
-        cacheState={pageCompany?.cache_state ?? null}
         description="SEC-first filing workflow keeps the recent timeline, parser snapshot, and document viewer available from cache while background refresh jobs backfill newer submissions."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: pageCompany?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || workspaceLoading || insightsLoading || eventsLoading,
+          hasData: Boolean(pageCompany || filings.length || insightsData || allEvents.length),
+          lastChecked: pageCompany?.last_checked ?? null,
+          errors: [error, insightsError, eventsError],
+          detailLines: [
+            `Recent filings: ${filings.length.toLocaleString()}`,
+            `Timeline source: ${sourceLabel}`,
+            `Classified 8-K events: ${allEvents.length.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || workspaceLoading) && !pageCompany && !filings.length && !allEvents.length}
+        summariesLoading={(loading || workspaceLoading) && !pageCompany && !filings.length && !allEvents.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Recent Filings", value: filings.length.toLocaleString() },

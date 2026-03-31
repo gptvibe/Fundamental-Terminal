@@ -333,6 +333,16 @@ export default function CompanyResearchBriefPage() {
     company: pageCompany,
     loading: briefData.activityOverview.loading,
   });
+  const initialCompanyLoad =
+    loading &&
+    !pageCompany &&
+    !latestFinancial &&
+    !financials.length &&
+    !priceHistory.length &&
+    !briefData.activityOverview.data &&
+    !error &&
+    !insiderError &&
+    !institutionalError;
 
   return (
     <CompanyWorkspaceShell
@@ -374,6 +384,20 @@ export default function CompanyResearchBriefPage() {
         title={pageCompany?.name ?? ticker}
         companyName={`${ticker} · Research Brief`}
         sector={pageCompany?.sector ?? pageCompany?.market_sector ?? null}
+        freshness={{
+          cacheState: pageCompany?.cache_state ?? null,
+          refreshState,
+          loading,
+          hasData: Boolean(pageCompany || latestFinancial || financials.length || priceHistory.length),
+          lastChecked: pageCompany?.last_checked ?? null,
+          errors: [error, insiderError, institutionalError],
+          detailLines: [
+            `Annual filings cached: ${annualStatements.length.toLocaleString()}`,
+            `Price history points: ${priceHistory.length.toLocaleString()}`,
+            `Current alerts: ${latestAlertCount.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="title"
         className="research-brief-header-compact"
       >
         <ResearchBriefHeroSummary
@@ -386,11 +410,11 @@ export default function CompanyResearchBriefPage() {
               value:
                 topSegment && topSegment.share_of_revenue != null
                   ? `${topSegment.segment_name} · ${formatPercent(topSegment.share_of_revenue)}`
-                  : topSegment?.segment_name ?? "—",
+                  : topSegment?.segment_name ?? null,
             },
             {
               label: "Latest Filing",
-              value: latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : "—",
+              value: latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : null,
             },
           ]}
           metaItems={[
@@ -399,6 +423,8 @@ export default function CompanyResearchBriefPage() {
             pageCompany?.last_checked ? `Updated ${formatDate(pageCompany.last_checked)}` : null,
           ]}
           fallbackLabels={fallbackLabels}
+          loading={initialCompanyLoad}
+          loadingMessage={initialCompanyLoad ? "No cached company snapshot exists yet. Fetching the first overview now." : null}
         />
       </CompanyResearchHeader>
 
@@ -1283,22 +1309,42 @@ function ResearchBriefHeroSummary({
   metrics,
   metaItems,
   fallbackLabels,
+  loading = false,
+  loadingMessage = null,
 }: {
   summary: string;
-  metrics: Array<{ label: string; value: string }>;
+  metrics: Array<{ label: string; value: string | null }>;
   metaItems: Array<string | null>;
   fallbackLabels: string[];
+  loading?: boolean;
+  loadingMessage?: string | null;
 }) {
   const visibleMetaItems = metaItems.filter((item): item is string => Boolean(item));
+  const heroSkeletonWidths = ["72%", "58%", "66%", "80%"];
 
   return (
     <div className="research-brief-hero">
+      {loadingMessage ? (
+        <div className="research-brief-hero-loading" role="status" aria-live="polite">
+          {loadingMessage}
+        </div>
+      ) : null}
       <p className="research-brief-hero-summary">{summary}</p>
       <div className="research-brief-hero-metrics">
-        {metrics.map((item) => (
+        {metrics.map((item, index) => (
           <div key={item.label} className="research-brief-hero-metric">
             <div className="research-brief-hero-metric-label">{item.label}</div>
-            <div className="research-brief-hero-metric-value">{item.value}</div>
+            <div className="research-brief-hero-metric-value">
+              {loading ? (
+                <span
+                  aria-hidden="true"
+                  className="workspace-skeleton research-brief-hero-metric-skeleton"
+                  style={{ width: heroSkeletonWidths[index % heroSkeletonWidths.length] }}
+                />
+              ) : (
+                item.value ?? "\u2014"
+              )}
+            </div>
           </div>
         ))}
       </div>

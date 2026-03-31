@@ -15,7 +15,6 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { HedgeFundActivityTable } from "@/components/tables/hedge-fund-activity-table";
 import { Panel } from "@/components/ui/panel";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyInstitutionalHoldings, getCompanyInstitutionalHoldingsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -185,9 +184,23 @@ export default function CompanyOwnershipPage() {
         title="Ownership"
         companyName={company?.name ?? ticker}
         sector={company?.sector}
-        cacheState={company?.cache_state ?? null}
         description="Institutional ownership stays 13F-first, showing persisted fund positioning, amendments, and smart-money context immediately while refresh jobs refill the cache in the background."
-        aside={ownershipRefreshState ? <StatusPill state={ownershipRefreshState} /> : undefined}
+        freshness={{
+          cacheState: company?.cache_state ?? null,
+          refreshState: ownershipRefreshState,
+          loading,
+          hasData: Boolean(company || summary || institutionalHoldings.length || financials.length),
+          lastChecked: company?.last_checked ?? null,
+          errors: [institutionalError, summaryError],
+          detailLines: [
+            `Tracked holdings: ${(summary?.total_rows ?? institutionalHoldings.length).toLocaleString()}`,
+            `Unique managers: ${(summary?.unique_managers ?? 0).toLocaleString()}`,
+            `Financial periods available: ${financials.length.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={loading && !company && !summary && !institutionalHoldings.length}
+        summariesLoading={loading && !company && !summary && !institutionalHoldings.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Tracked Holdings", value: (summary?.total_rows ?? institutionalHoldings.length).toLocaleString() },

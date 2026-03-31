@@ -9,7 +9,6 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyExecutiveCompensation, getCompanyGovernance, getCompanyGovernanceSummary } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
@@ -144,9 +143,23 @@ export default function CompanyGovernancePage() {
         title="Governance"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
-        cacheState={pageCompany?.cache_state ?? null}
         description="Proxy intelligence stays centered on SEC DEF 14A and DEFA14A filings, surfacing meeting metadata, vote outcomes, and executive compensation tables from cache before refresh jobs complete."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: pageCompany?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || workspaceLoading,
+          hasData: Boolean(pageCompany || summary || filings.length || execRows.length),
+          lastChecked: pageCompany?.last_checked ?? null,
+          errors: [error],
+          detailLines: [
+            `Proxy filings: ${(summary?.total_filings ?? filings.length).toLocaleString()}`,
+            `Latest proxy: ${latestFilingDate ? formatDate(latestFilingDate) : "Pending"}`,
+            `Exec comp rows: ${execRows.length.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || workspaceLoading) && !pageCompany && !summary && !filings.length && !execRows.length}
+        summariesLoading={(loading || workspaceLoading) && !pageCompany && !summary && !filings.length && !execRows.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Proxy Filings", value: (summary?.total_filings ?? filings.length).toLocaleString() },

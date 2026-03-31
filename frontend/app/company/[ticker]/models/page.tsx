@@ -17,7 +17,6 @@ import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-no
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
@@ -319,13 +318,28 @@ export default function CompanyModelsPage() {
         title={data?.company?.name ?? financialData?.company?.name ?? ticker}
         companyName={`${ticker} · Valuation and model workspace`}
         sector={data?.company?.sector ?? financialData?.company?.sector ?? null}
-        cacheState={data?.company?.cache_state ?? financialData?.company?.cache_state ?? null}
         description={
           strictOfficialMode
             ? "Valuation conclusion, confidence, and scenario context from SEC-aligned cached model outputs, with price-dependent workflows withheld in strict mode."
             : "Valuation conclusion, confidence, and scenario context from SEC fundamentals and cached market inputs, refreshed in the background as inputs age."
         }
-        aside={data ? <StatusPill state={data.refresh} /> : undefined}
+        freshness={{
+          cacheState: data?.company?.cache_state ?? financialData?.company?.cache_state ?? null,
+          refreshState: data?.refresh ?? financialData?.refresh ?? null,
+          loading,
+          hasData: Boolean(data || financialData || models.length),
+          lastChecked: data?.company?.last_checked ?? financialData?.company?.last_checked ?? null,
+          errors: [error],
+          detailLines: [
+            `Available models: ${modelSummary.cachedCount}/${MODEL_NAMES.length}`,
+            `Last updated: ${modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"}`,
+            `Price history points available: ${(financialData?.price_history ?? []).length.toLocaleString()}`,
+            `DuPont basis: ${modelSummary.dupontBasis ?? dupontMode.toUpperCase()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={loading && !data && !financialData}
+        summariesLoading={loading && !data && !financialData}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Models", value: `${modelSummary.cachedCount}/${MODEL_NAMES.length}` },

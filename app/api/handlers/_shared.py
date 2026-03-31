@@ -2717,12 +2717,31 @@ def _get_hot_cached_payload(key: str) -> tuple[dict[str, Any], bool] | None:
 
 
 def _store_hot_cached_payload(key: str, payload: BaseModel) -> None:
+    serialized = payload.model_dump(mode="json")
+    if _is_company_missing_payload(serialized):
+        _record_cache_metric("hot_cache.skip_company_missing")
+        return
+
     now = time.monotonic()
     fresh_until = now + settings.hot_response_cache_ttl_seconds
     stale_until = fresh_until + settings.hot_response_cache_stale_ttl_seconds
     with _hot_response_cache_lock:
-        _hot_response_cache[key] = (fresh_until, stale_until, payload.model_dump(mode="json"))
+        _hot_response_cache[key] = (fresh_until, stale_until, serialized)
     _record_cache_metric("hot_cache.store")
+
+
+def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
+    confidence_flags = payload.get("confidence_flags")
+    if isinstance(confidence_flags, list) and "company_missing" in confidence_flags:
+        return True
+
+    diagnostics = payload.get("diagnostics")
+    if isinstance(diagnostics, dict):
+        stale_flags = diagnostics.get("stale_flags")
+        if isinstance(stale_flags, list) and "company_missing" in stale_flags:
+            return True
+
+    return False
 
 
 def _apply_conditional_headers(

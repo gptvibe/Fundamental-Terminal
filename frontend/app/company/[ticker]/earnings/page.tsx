@@ -12,7 +12,6 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyEarningsWorkspace } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
@@ -227,13 +226,27 @@ export default function CompanyEarningsPage() {
         title="Earnings"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
-        cacheState={pageCompany?.cache_state ?? null}
         description={
           strictOfficialMode
             ? "Release-level earnings analysis stays SEC-first, while price-window backtests remain disabled in strict official mode."
             : "Release-level earnings analysis stays SEC-first, serving cached 8-K Item 2.02 data immediately and polling in the background when refresh jobs are active."
         }
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: pageCompany?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: loading || workspaceLoading,
+          hasData: Boolean(pageCompany || summary || sortedReleases.length || (workspaceData?.model_points ?? []).length),
+          lastChecked: lastCheckedValue,
+          errors: [combinedError],
+          detailLines: [
+            `Releases tracked: ${totalReleases.toLocaleString()}`,
+            `Latest period: ${latestPeriodLabel}`,
+            `With guidance: ${releasesWithGuidance.toLocaleString()} · capital return: ${releasesWithCapitalReturn.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(loading || workspaceLoading) && !pageCompany && !summary && !sortedReleases.length}
+        summariesLoading={(loading || workspaceLoading) && !pageCompany && !summary && !sortedReleases.length}
         facts={[
           { label: "Releases", value: totalReleases.toLocaleString() },
           { label: "Parsed Releases", value: parsedReleases.toLocaleString() },

@@ -17,7 +17,6 @@ import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-no
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { usePeriodSelection } from "@/hooks/use-period-selection";
 import { resolveFilingChartCadence } from "@/lib/annual-financial-scope";
@@ -211,9 +210,23 @@ export default function CompanyFinancialsTabPage() {
         title="Financials"
         companyName={company?.name ?? ticker}
         sector={company?.sector}
-        cacheState={company?.cache_state ?? null}
         description={headerDescription}
-        aside={refreshState ? <StatusPill state={refreshState} /> : undefined}
+        freshness={{
+          cacheState: company?.cache_state ?? null,
+          refreshState,
+          loading,
+          hasData: Boolean(company || financials.length || priceHistory.length),
+          lastChecked: company?.last_checked ?? null,
+          errors: [error],
+          detailLines: [
+            `Statements visible: ${pageFinancials.length.toLocaleString()} of ${financials.length.toLocaleString()}`,
+            `Annual filings available: ${annualStatements.length.toLocaleString()}`,
+            `Price history points available: ${priceHistory.length.toLocaleString()}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={loading && !company && !financials.length && !priceHistory.length}
+        summariesLoading={loading && !company && !financials.length && !priceHistory.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Statements", value: `${pageFinancials.length.toLocaleString()} visible` },
@@ -307,7 +320,7 @@ export default function CompanyFinancialsTabPage() {
                   comparisonFinancial={comparisonFinancial}
                 />
               ) : (
-                <PanelEmptyState message={loading ? "Loading regulated bank statements..." : "No regulated bank statements are available yet for this ticker."} />
+                <PanelEmptyState loading={loading} loadingMessage="Loading regulated bank statements..." message="No regulated bank statements are available yet for this ticker." />
               )}
             </Panel>
           </div>
@@ -349,7 +362,7 @@ export default function CompanyFinancialsTabPage() {
                   reloadKey={reloadKey}
                 />
               ) : (
-                <PanelEmptyState message={loading ? "Loading segment data..." : "No business segment breakdowns are reported for this company."} />
+                <PanelEmptyState loading={loading} loadingMessage="Loading segment data..." message="No business segment breakdowns are reported for this company." />
               )}
             </Panel>
 
@@ -436,7 +449,7 @@ export default function CompanyFinancialsTabPage() {
                   comparisonFinancial={comparisonFinancial}
                 />
               ) : (
-                <PanelEmptyState message={loading ? "Loading financial statements..." : "No financial statements are available yet for this ticker."} />
+                <PanelEmptyState loading={loading} loadingMessage="Loading financial statements..." message="No financial statements are available yet for this ticker." />
               )}
             </Panel>
           </div>
@@ -463,7 +476,7 @@ export default function CompanyFinancialsTabPage() {
             </Panel>
 
             <Panel title="Balance Sheet" subtitle="Historical assets versus liabilities across the selected range.">
-              {pageFinancials.length ? <BalanceSheetChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState message={loading ? "Loading balance-sheet history..." : "No balance-sheet history is available yet."} />}
+              {pageFinancials.length ? <BalanceSheetChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState loading={loading} loadingMessage="Loading balance-sheet history..." message="No balance-sheet history is available yet." />}
             </Panel>
 
             <Panel title="Liquidity & Capital" subtitle="Historical current assets, liabilities, and retained earnings from reported filings.">
@@ -475,7 +488,7 @@ export default function CompanyFinancialsTabPage() {
             </Panel>
 
             <Panel title="Share Dilution Tracker" subtitle="Historical shares outstanding and period-over-period dilution rates from reported filings.">
-              {pageFinancials.length ? <ShareDilutionTrackerChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState message={loading ? "Loading share-count history..." : "No share-count history is available yet."} />}
+              {pageFinancials.length ? <ShareDilutionTrackerChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState loading={loading} loadingMessage="Loading share-count history..." message="No share-count history is available yet." />}
             </Panel>
           </div>
         </>

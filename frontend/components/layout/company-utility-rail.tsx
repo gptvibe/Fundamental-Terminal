@@ -40,6 +40,8 @@ export function CompanyUtilityRail({
   refreshState,
   refreshing,
   onRefresh,
+  actionTitle,
+  actionSubtitle,
   primaryActionLabel,
   primaryActionDescription,
   secondaryActionHref,
@@ -63,6 +65,7 @@ export function CompanyUtilityRail({
     (Boolean(effectiveState.triggered && effectiveState.job_id) &&
       connectionState !== "idle" &&
       connectionState !== "error");
+  const effectiveStatusLines = [...buildRefreshStatusLines(effectiveState, refreshInProgress), ...(statusLines ?? [])];
   const secondaryPanels = presentation === "brief"
     ? (
         <>
@@ -79,7 +82,11 @@ export function CompanyUtilityRail({
 
   return (
     <div className={`company-utility-stack${presentation === "brief" ? " company-utility-stack-brief" : ""}`}>
-      <Panel title={presentation === "brief" ? "Brief Actions" : "Actions"} variant="subtle">
+      <Panel
+        title={actionTitle ?? (presentation === "brief" ? "Brief Actions" : "Actions")}
+        subtitle={actionSubtitle}
+        variant="subtle"
+      >
         <div className="utility-action-bar">
           <div className="utility-action-item">
             <StatusPill state={effectiveState} />
@@ -112,19 +119,19 @@ export function CompanyUtilityRail({
           ) : null}
         </div>
 
-        {presentation === "brief" && statusLines?.length ? (
+        {presentation === "brief" && effectiveStatusLines.length ? (
           <div className="utility-status-quiet" aria-label="Brief data status">
-            {statusLines.map((line, index) => (
+            {effectiveStatusLines.map((line, index) => (
               <div key={index} className="utility-status-quiet-line">{line}</div>
             ))}
           </div>
         ) : null}
       </Panel>
 
-      {presentation !== "brief" && statusLines?.length ? (
+      {presentation !== "brief" && effectiveStatusLines.length ? (
         <Panel title="Data Status" variant="subtle">
           <div className="utility-status-stack">
-            {statusLines.map((line, index) => (
+            {effectiveStatusLines.map((line, index) => (
               <div key={index} className="utility-status-line">{line}</div>
             ))}
           </div>
@@ -140,4 +147,34 @@ export function CompanyUtilityRail({
       ) : null}
     </div>
   );
+}
+
+function buildRefreshStatusLines(refreshState: RefreshState, refreshInProgress: boolean): string[] {
+  const lines = [
+    `Refresh status: ${describeRefreshStatus(refreshState, refreshInProgress)}`,
+    refreshState.job_id ? `Background job: ${refreshState.job_id}` : null,
+  ];
+
+  return lines.filter((line): line is string => Boolean(line));
+}
+
+function describeRefreshStatus(refreshState: RefreshState, refreshInProgress: boolean): string {
+  if (refreshInProgress || refreshState.job_id) {
+    return "running in the background";
+  }
+
+  switch (refreshState.reason) {
+    case "fresh":
+      return "cache is up to date";
+    case "stale":
+      return "cached data is stale";
+    case "missing":
+      return "first snapshot is still warming";
+    case "manual":
+      return "manual refresh requested";
+    case "none":
+      return "background-first";
+    default:
+      return refreshState.reason;
+  }
 }

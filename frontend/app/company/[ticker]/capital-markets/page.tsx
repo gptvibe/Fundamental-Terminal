@@ -9,7 +9,6 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
-import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyCapitalMarkets, getCompanyCapitalMarketsSummary, getCompanyFilingEvents } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
@@ -120,9 +119,23 @@ export default function CompanyCapitalMarketsPage() {
         title="Capital Markets"
         companyName={company?.name ?? eventsData?.company?.name ?? ticker}
         sector={company?.sector ?? eventsData?.company?.sector ?? null}
-        cacheState={company?.cache_state ?? eventsData?.company?.cache_state ?? null}
         description="SEC-first financing workspace covering registration activity, dilution, debt changes, and financing-related current reports."
-        aside={effectiveRefreshState ? <StatusPill state={effectiveRefreshState} /> : undefined}
+        freshness={{
+          cacheState: company?.cache_state ?? eventsData?.company?.cache_state ?? null,
+          refreshState: effectiveRefreshState,
+          loading: eventsLoading || capitalRaisesLoading || workspaceLoading,
+          hasData: Boolean(company || eventsData?.company || capitalSummary || capitalRaises.length || capitalMarketsEvents.length),
+          lastChecked: company?.last_checked ?? eventsData?.company?.last_checked ?? null,
+          errors: [eventsError, capitalRaisesError],
+          detailLines: [
+            `Financing events: ${capitalMarketsEvents.length.toLocaleString()}`,
+            `Capital raise filings: ${(capitalSummary?.total_filings ?? capitalRaises.length).toLocaleString()}`,
+            `Latest financing event: ${latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
+          ],
+        }}
+        freshnessPlacement="subtitle"
+        factsLoading={(eventsLoading || capitalRaisesLoading || workspaceLoading) && !company && !eventsData?.company && !capitalRaises.length && !capitalMarketsEvents.length}
+        summariesLoading={(eventsLoading || capitalRaisesLoading || workspaceLoading) && !company && !eventsData?.company && !capitalRaises.length && !capitalMarketsEvents.length}
         facts={[
           { label: "Ticker", value: ticker },
           { label: "Latest Event", value: latestEventDate ? formatDate(latestEventDate) : "Pending" },
