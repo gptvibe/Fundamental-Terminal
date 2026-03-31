@@ -56,7 +56,7 @@ def _csv_env(name: str) -> tuple[str, ...]:
 class Settings:
     database_url: str = os.getenv(
         "DATABASE_URL",
-        "postgresql+psycopg://user:password@localhost:5432/database_name",
+        "postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals",
     )
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     sec_user_agent: str = _load_sec_user_agent()

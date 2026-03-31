@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.db import SessionLocal, get_engine
+from app.model_engine.engine import ModelEngine
+from app.model_engine.registry import MODEL_REGISTRY
 from app.services.sec_edgar import CompanyIdentity, EdgarClient, EdgarIngestionService, upsert_company_identity
+from app.services.cache_queries import get_company_snapshot
 from app.services.sp500 import DEFAULT_SP500_TICKERS_PATH, load_sp500_tickers, normalize_index_ticker
 
 
@@ -140,6 +143,17 @@ def _refresh_seeded_companies(tickers: list[str], *, force: bool, core_only: boo
             else:
                 refreshed += 1
 
+            if not core_only:
+                warmed_models, total_models = _warm_company_model_cache(ticker)
+                logger.info(
+                    "[%s/%s] %s -> warmed %s/%s model outputs",
+                    index,
+                    len(tickers),
+                    ticker,
+                    warmed_models,
+                    total_models,
+                )
+
             logger.info("[%s/%s] %s -> %s (%s)", index, len(tickers), ticker, result.status, result.detail)
     finally:
         service.close()
@@ -151,6 +165,24 @@ def _refresh_seeded_companies(tickers: list[str], *, force: bool, core_only: boo
         failed,
     )
     return 1 if failed else 0
+
+
+def _warm_company_model_cache(ticker: str) -> tuple[int, int]:
+    model_names = list(MODEL_REGISTRY.keys())
+    if not model_names:
+        return 0, 0
+
+    get_engine()
+    with SessionLocal() as session:
+        snapshot = get_company_snapshot(session, ticker)
+        if snapshot is None:
+            raise ValueError(f"Unable to warm model cache for unknown ticker '{ticker}'")
+
+        results = ModelEngine(session).compute_models(snapshot.company.id, model_names=model_names, force=False)
+        if any(not result.cached for result in results):
+            session.commit()
+
+    return sum(1 for result in results if not result.cached), len(results)
 
 
 def _build_sec_identity_map(client: EdgarClient) -> dict[str, CompanyIdentity]:

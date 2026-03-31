@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import FastAPI
 
 from app.api.source_contracts import ensure_user_visible_routes_have_source_contracts
@@ -37,9 +35,9 @@ ROUTER_BUILDERS = (
 )
 
 
-def register_routers(app: FastAPI, main_module: Any) -> None:
+def register_routers(app: FastAPI) -> None:
     for builder in ROUTER_BUILDERS:
-        app.include_router(builder(main_module))
+        app.include_router(builder())
     ensure_user_visible_routes_have_source_contracts(app)
 
 

@@ -139,7 +139,7 @@ The mobile layout swaps the desktop tab rail for a compact section picker and st
 2. Set the database URL and SEC contact:
 
    ```bash
-   set DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/database_name
+   set DATABASE_URL=postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals
    set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
    ```
 

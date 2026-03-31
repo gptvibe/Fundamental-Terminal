@@ -587,6 +587,12 @@ def _reference_date(input_payload: dict[str, Any] | None, dataset: CompanyDatase
             return as_of_date
     if dataset is not None and dataset.as_of_date is not None:
         return dataset.as_of_date
+    if dataset is not None and dataset.market_snapshot is not None and dataset.market_snapshot.price_date is not None:
+        return dataset.market_snapshot.price_date
+    if dataset is not None and dataset.financials:
+        latest_period_end = dataset.financials[0].period_end
+        if latest_period_end is not None:
+            return latest_period_end
     return datetime.now(timezone.utc).date()
 
 

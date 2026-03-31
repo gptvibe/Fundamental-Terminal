@@ -77,6 +77,9 @@ def fetch_hqm_snapshot(http_client: httpx.Client | None = None) -> HqmSnapshot:
             source_name=snapshot.source_name,
             source_url=source_url,
         )
+    except httpx.HTTPError as exc:
+        logger.warning("HQM yield curve fetch failed across all URLs; returning empty snapshot: %s", exc)
+        return _empty_hqm_snapshot()
     except Exception:
         logger.warning("HQM yield curve fetch failed across all URLs; returning empty snapshot", exc_info=True)
         return _empty_hqm_snapshot()

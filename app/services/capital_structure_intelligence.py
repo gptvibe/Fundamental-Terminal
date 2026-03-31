@@ -428,8 +428,8 @@ def _section_meta(
 ) -> dict[str, Any]:
     confidence_score = 0.0 if total_count <= 0 else max(0.0, min(1.0, present_count / total_count))
     return {
-        "as_of": as_of,
-        "last_refreshed_at": last_refreshed_at,
+        "as_of": as_of.isoformat(),
+        "last_refreshed_at": last_refreshed_at.isoformat() if last_refreshed_at is not None else None,
         "provenance_sources": provenance_sources,
         "confidence_score": json_number(confidence_score),
         "confidence_flags": sorted(set(confidence_flags)),

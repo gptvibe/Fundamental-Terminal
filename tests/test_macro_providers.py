@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 import app.services.macro_providers.treasury_hqm as hqm_module
@@ -83,6 +84,21 @@ def test_hqm_provider_returns_unavailable_on_empty_body():
     result = hqm_module.fetch_hqm_snapshot(http_client=client)
     # Empty body should return unavailable or at least not raise
     assert result.status in ("unavailable", "partial")
+
+
+def test_hqm_provider_suppresses_traceback_for_expected_http_failures(caplog, monkeypatch):
+    request = httpx.Request("GET", "https://home.treasury.gov/sites/default/files/interest-rates/hqmYieldCurveData.csv")
+    response = httpx.Response(status_code=404, request=request)
+
+    def _raise_http_error(_client):
+        raise httpx.HTTPStatusError("not found", request=request, response=response)
+
+    monkeypatch.setattr(hqm_module, "_fetch_hqm_csv_with_fallback", _raise_http_error)
+
+    result = hqm_module.fetch_hqm_snapshot(http_client=object())
+
+    assert result.status == "unavailable"
+    assert "Traceback" not in caplog.text
 
 
 # ---------------------------------------------------------------------------

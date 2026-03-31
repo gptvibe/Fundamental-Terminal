@@ -186,7 +186,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         upside = (intrinsic_value_per_share - float(price_snap["latest_price"])) / float(price_snap["latest_price"])
 
     return {
-        "status": status,
+        "status": "ok" if status == "supported" else status,
         "model_status": status,
         "explanation": status_explanation(status),
         "applicability": applicability,

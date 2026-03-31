@@ -54,6 +54,7 @@ def test_queue_company_refresh_uses_db_lock_to_dedupe(monkeypatch):
 def test_queue_company_refresh_schedules_task_when_lock_acquired(monkeypatch):
     fake_session = _FakeSession()
     background_tasks = BackgroundTasks()
+    started: list[tuple[str, str, bool]] = []
 
     monkeypatch.setattr(fetch_trigger, "get_engine", lambda: None)
     monkeypatch.setattr(fetch_trigger, "SessionLocal", _SessionFactory(fake_session))
@@ -61,9 +62,11 @@ def test_queue_company_refresh_schedules_task_when_lock_acquired(monkeypatch):
     monkeypatch.setattr(fetch_trigger, "acquire_refresh_lock", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(fetch_trigger.status_broker, "get_active_job_id", lambda **_kwargs: None)
     monkeypatch.setattr(fetch_trigger.status_broker, "create_job", lambda **_kwargs: "job-new")
+    monkeypatch.setattr(fetch_trigger, "_start_refresh_job", lambda job_id, ticker, force: started.append((job_id, ticker, force)))
 
     job_id = fetch_trigger.queue_company_refresh(background_tasks, "MSFT", force=True)
 
     assert job_id == "job-new"
     assert fake_session.committed is True
-    assert len(background_tasks.tasks) == 1
+    assert len(background_tasks.tasks) == 0
+    assert started == [("job-new", "MSFT", True)]

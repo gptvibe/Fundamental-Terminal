@@ -41,6 +41,7 @@ coverage/
 *.tmp
 tmp/
 temp/
+data/sec_cache/
 
 # IDE / OS
 .vscode/

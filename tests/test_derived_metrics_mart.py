@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
-from app.services.derived_metrics_mart import METRIC_REGISTRY, build_derived_metric_points
+from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
+from sqlalchemy.dialects.postgresql import insert
+
+from app.models import DerivedMetricPoint
+
+from app.services.derived_metrics_mart import (
+    DERIVED_METRIC_UPSERT_BATCH_SIZE,
+    METRIC_REGISTRY,
+    _chunked_payloads,
+    build_derived_metric_points,
+)
 
 
 def _statement(
@@ -264,3 +274,33 @@ def test_build_derived_metric_points_includes_bank_metrics():
 
     metric_keys = {point["metric_key"] for point in points}
     assert {"net_interest_margin", "provision_burden", "cet1_ratio", "roatce"}.issubset(metric_keys)
+
+
+def test_derived_metric_upsert_batches_stay_under_postgres_parameter_limit():
+    payloads = [
+        {
+            "company_id": index,
+            "period_start": date(2025, 1, 1),
+            "period_end": date(2025, 3, 31),
+            "period_type": "quarterly",
+            "filing_type": "10-Q",
+            "metric_key": f"metric_{index}",
+            "metric_value": float(index),
+            "metric_date": date(2025, 3, 31),
+            "is_proxy": False,
+            "provenance": {"formula_version": "sec_metrics_mart_v1"},
+            "source_statement_ids": [index],
+            "quality_flags": [],
+            "last_updated": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "last_checked": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        }
+        for index in range(DERIVED_METRIC_UPSERT_BATCH_SIZE + 5)
+    ]
+
+    batches = _chunked_payloads(payloads, DERIVED_METRIC_UPSERT_BATCH_SIZE)
+
+    assert [len(batch) for batch in batches] == [DERIVED_METRIC_UPSERT_BATCH_SIZE, 5]
+
+    compiled = insert(DerivedMetricPoint).values(batches[0]).compile(dialect=postgresql_dialect())
+    assert len(compiled.params) == DERIVED_METRIC_UPSERT_BATCH_SIZE * 14
+    assert len(compiled.params) <= 65535

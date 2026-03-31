@@ -34,6 +34,9 @@ FLOW_FIELDS = {
     "provision_for_credit_losses",
 }
 FORMULA_VERSION = "sec_metrics_mart_v1"
+POSTGRES_MAX_BIND_PARAMS = 65535
+DERIVED_METRIC_UPSERT_COLUMN_COUNT = 14
+DERIVED_METRIC_UPSERT_BATCH_SIZE = POSTGRES_MAX_BIND_PARAMS // DERIVED_METRIC_UPSERT_COLUMN_COUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,24 +107,29 @@ def recompute_and_persist_company_derived_metrics(
         }
         payloads.append(payload)
 
-    statement = insert(DerivedMetricPoint).values(payloads)
-    statement = statement.on_conflict_do_update(
-        constraint="uq_derived_metric_points_company_period_type_metric",
-        set_={
-            "period_start": statement.excluded.period_start,
-            "filing_type": statement.excluded.filing_type,
-            "metric_value": statement.excluded.metric_value,
-            "metric_date": statement.excluded.metric_date,
-            "is_proxy": statement.excluded.is_proxy,
-            "provenance": statement.excluded.provenance,
-            "source_statement_ids": statement.excluded.source_statement_ids,
-            "quality_flags": statement.excluded.quality_flags,
-            "last_updated": statement.excluded.last_updated,
-            "last_checked": statement.excluded.last_checked,
-        },
-    )
-    session.execute(statement)
+    for batch in _chunked_payloads(payloads, DERIVED_METRIC_UPSERT_BATCH_SIZE):
+        statement = insert(DerivedMetricPoint).values(batch)
+        statement = statement.on_conflict_do_update(
+            constraint="uq_derived_metric_points_company_period_type_metric",
+            set_={
+                "period_start": statement.excluded.period_start,
+                "filing_type": statement.excluded.filing_type,
+                "metric_value": statement.excluded.metric_value,
+                "metric_date": statement.excluded.metric_date,
+                "is_proxy": statement.excluded.is_proxy,
+                "provenance": statement.excluded.provenance,
+                "source_statement_ids": statement.excluded.source_statement_ids,
+                "quality_flags": statement.excluded.quality_flags,
+                "last_updated": statement.excluded.last_updated,
+                "last_checked": statement.excluded.last_checked,
+            },
+        )
+        session.execute(statement)
     return len(payloads)
+
+
+def _chunked_payloads(items: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]:
+    return [items[index:index + size] for index in range(0, len(items), size)]
 
 
 def build_derived_metric_points(financials: list[FinancialStatement], prices: list[PriceHistory]) -> list[dict[str, Any]]:

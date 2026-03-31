@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 
 from fastapi import BackgroundTasks
@@ -9,6 +10,30 @@ from app.services.refresh_state import acquire_refresh_lock, ensure_company
 
 from app.services.sec_edgar import run_refresh_job
 from app.services.status_stream import status_broker
+
+
+_refresh_threads: dict[str, threading.Thread] = {}
+_refresh_threads_lock = threading.Lock()
+
+
+def _run_refresh_job_detached(ticker: str, force: bool, job_id: str) -> None:
+    try:
+        run_refresh_job(ticker, force, job_id)
+    finally:
+        with _refresh_threads_lock:
+            _refresh_threads.pop(job_id, None)
+
+
+def _start_refresh_job(job_id: str, ticker: str, force: bool) -> None:
+    thread = threading.Thread(
+        target=_run_refresh_job_detached,
+        args=(ticker, force, job_id),
+        name=f"refresh-{ticker}-{job_id[:8]}",
+        daemon=True,
+    )
+    with _refresh_threads_lock:
+        _refresh_threads[job_id] = thread
+    thread.start()
 
 
 def queue_company_refresh(
@@ -41,5 +66,6 @@ def queue_company_refresh(
                 return duplicate_job_id
             session.commit()
 
-    background_tasks.add_task(run_refresh_job, normalized_ticker, force, job_id)
+    _ = background_tasks
+    _start_refresh_job(job_id, normalized_ticker, force)
     return job_id

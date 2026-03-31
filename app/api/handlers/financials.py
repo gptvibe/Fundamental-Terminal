@@ -1,0 +1,29 @@
+from __future__ import annotations
+
+from app.api.handlers._dispatch import route_handler
+
+
+company_financials = route_handler("company_financials")
+company_segment_history = route_handler("company_segment_history")
+company_capital_structure = route_handler("company_capital_structure")
+company_filing_insights = route_handler("company_filing_insights")
+company_changes_since_last_filing = route_handler("company_changes_since_last_filing")
+company_metrics_timeseries = route_handler("company_metrics_timeseries")
+company_derived_metrics = route_handler("company_derived_metrics")
+company_derived_metrics_summary = route_handler("company_derived_metrics_summary")
+company_financial_restatements = route_handler("company_financial_restatements")
+company_financial_history = route_handler("company_financial_history")
+
+
+__all__ = [
+    "company_capital_structure",
+    "company_changes_since_last_filing",
+    "company_derived_metrics",
+    "company_derived_metrics_summary",
+    "company_filing_insights",
+    "company_financial_history",
+    "company_financial_restatements",
+    "company_financials",
+    "company_metrics_timeseries",
+    "company_segment_history",
+]

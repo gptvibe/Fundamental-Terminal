@@ -104,6 +104,8 @@ def test_build_capital_structure_snapshots_outputs_rollforward_payout_and_diluti
     assert latest["data"]["net_dilution_bridge"]["shares_issued"] == 5
     assert latest["data"]["net_dilution_bridge"]["shares_repurchased"] == 3
     assert latest["data"]["net_dilution_bridge"]["ending_shares"] == 102
+    assert latest["data"]["debt_maturity_ladder"]["meta"]["as_of"] == "2025-12-31"
+    assert latest["data"]["debt_maturity_ladder"]["meta"]["last_refreshed_at"] == "2026-03-25T00:00:00+00:00"
     assert latest["data"]["debt_maturity_ladder"]["meta"]["confidence_score"] == 1
     assert latest["data"]["lease_obligations"]["meta"]["confidence_score"] == 1
 
