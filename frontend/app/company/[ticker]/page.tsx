@@ -142,17 +142,17 @@ const BRIEF_SECTIONS = [
   },
   {
     id: "what-changed",
-    title: "What Changed",
+    title: "What changed",
     question: "What is new since the last filing or review?",
   },
   {
     id: "business-quality",
-    title: "Business Quality",
+    title: "Business quality",
     question: "Is the business getting stronger, weaker, or just noisier?",
   },
   {
     id: "capital-risk",
-    title: "Capital & Risk",
+    title: "Capital & risk",
     question: "Is the equity claim being protected, diluted, or put at risk?",
   },
   {
@@ -166,6 +166,9 @@ const BRIEF_SECTIONS = [
     question: "What should I keep watching after I leave this page?",
   },
 ] as const;
+
+const BRIEF_SECTION_IDS = BRIEF_SECTIONS.map((section) => section.id);
+const RESEARCH_BRIEF_SECTION_STORAGE_PREFIX = "fundamental-terminal:research-brief:sections";
 
 const INITIAL_ASYNC_STATE: ResearchBriefAsyncState = {
   activityOverview: { data: null, error: null, loading: true },
@@ -210,7 +213,8 @@ export default function CompanyResearchBriefPage() {
   });
 
   const briefData = useResearchBriefData(ticker, reloadKey);
-  const activeSectionId = useActiveBriefSection(BRIEF_SECTIONS.map((section) => section.id));
+  const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
+  const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker);
   const pageCompany = company ?? data?.company ?? briefData.activityOverview.data?.company ?? briefData.models.data?.company ?? null;
   const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
   const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
@@ -354,7 +358,7 @@ export default function CompanyResearchBriefPage() {
           refreshState={refreshState}
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}
-          actionTitle="Next Steps"
+          actionTitle="Next steps"
           actionSubtitle="Refresh the brief in the background or jump straight into the full underwriting workspace."
           primaryActionLabel="Refresh Brief Data"
           primaryActionDescription="Rebuilds cached company, filing, market, and summary surfaces without turning the default brief into a live-fetch route."
@@ -371,7 +375,7 @@ export default function CompanyResearchBriefPage() {
           connectionState={connectionState}
           presentation="brief"
         >
-          <Panel title="Risk & Red Flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals" variant="subtle">
+          <Panel title="Risk & red flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals" variant="subtle">
             <RiskRedFlagPanel financials={financials} />
           </Panel>
         </CompanyUtilityRail>
@@ -451,6 +455,8 @@ export default function CompanyResearchBriefPage() {
         summary={null}
         cues={[]}
         links={snapshotLinks}
+        expanded={expandedSections.snapshot ?? true}
+        onToggle={() => toggleSection("snapshot")}
       >
         <EvidenceCard
           title="Price vs operating momentum"
@@ -543,7 +549,7 @@ export default function CompanyResearchBriefPage() {
 
       <ResearchBriefSection
         id="what-changed"
-        title="What Changed"
+        title="What changed"
         question="What is new since the last filing or review?"
         summary={whatChangedNarrative}
         cues={[
@@ -565,6 +571,8 @@ export default function CompanyResearchBriefPage() {
           },
         ]}
         links={whatChangedLinks}
+        expanded={expandedSections["what-changed"] ?? true}
+        onToggle={() => toggleSection("what-changed")}
       >
         <EvidenceCard title="Update scoreboard" copy="The shortest possible read on filing deltas, earnings capture, and alert volume.">
           {briefData.changes.error && !briefData.changes.data && briefData.earningsSummary.error && !briefData.earningsSummary.data ? (
@@ -728,7 +736,7 @@ export default function CompanyResearchBriefPage() {
 
       <ResearchBriefSection
         id="business-quality"
-        title="Business Quality"
+        title="Business quality"
         question="Is the business getting stronger, weaker, or just noisier?"
         summary={businessQualityNarrative}
         cues={[
@@ -743,6 +751,8 @@ export default function CompanyResearchBriefPage() {
           },
         ]}
         links={businessQualityLinks}
+        expanded={expandedSections["business-quality"] ?? true}
+        onToggle={() => toggleSection("business-quality")}
       >
         <EvidenceCard title="Quality summary" copy="A compact read on margins, profitability, leverage, growth, and share-count direction.">
           {error && !financials.length ? (
@@ -813,7 +823,7 @@ export default function CompanyResearchBriefPage() {
 
       <ResearchBriefSection
         id="capital-risk"
-        title="Capital & Risk"
+        title="Capital & risk"
         question="Is the equity claim being protected, diluted, or put at risk?"
         summary={capitalRiskNarrative}
         cues={[
@@ -831,6 +841,8 @@ export default function CompanyResearchBriefPage() {
           },
         ]}
         links={capitalRiskLinks}
+        expanded={expandedSections["capital-risk"] ?? true}
+        onToggle={() => toggleSection("capital-risk")}
       >
         <EvidenceCard
           title="Capital structure intelligence"
@@ -981,6 +993,8 @@ export default function CompanyResearchBriefPage() {
           },
         ]}
         links={valuationLinks}
+        expanded={expandedSections.valuation ?? true}
+        onToggle={() => toggleSection("valuation")}
       >
         <EvidenceCard
           title="Valuation summary"
@@ -1054,6 +1068,8 @@ export default function CompanyResearchBriefPage() {
           },
         ]}
         links={monitorLinks}
+        expanded={expandedSections.monitor ?? true}
+        onToggle={() => toggleSection("monitor")}
       >
         <EvidenceCard title="Priority alerts" copy="The monitor starts with the highest-signal items the user is likely to revisit first.">
           {briefData.activityOverview.error && !briefData.activityOverview.data ? (
@@ -1274,6 +1290,53 @@ function useActiveBriefSection(sectionIds: string[]): string {
   return activeSectionId;
 }
 
+function useResearchBriefSectionPreferences(ticker: string): {
+  expandedSections: Record<string, boolean>;
+  toggleSection: (sectionId: string) => void;
+} {
+  const storageKey = `${RESEARCH_BRIEF_SECTION_STORAGE_PREFIX}:${ticker}`;
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => createDefaultResearchBriefSectionState());
+  const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false);
+
+  useEffect(() => {
+    const defaultState = createDefaultResearchBriefSectionState();
+
+    try {
+      const rawState = window.localStorage.getItem(storageKey);
+
+      if (!rawState) {
+        setExpandedSections(defaultState);
+        setHasLoadedPreferences(true);
+        return;
+      }
+
+      const parsedState = JSON.parse(rawState) as unknown;
+      setExpandedSections(mergeResearchBriefSectionState(defaultState, parsedState));
+    } catch {
+      setExpandedSections(defaultState);
+    } finally {
+      setHasLoadedPreferences(true);
+    }
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!hasLoadedPreferences) {
+      return;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(expandedSections));
+  }, [expandedSections, hasLoadedPreferences, storageKey]);
+
+  function toggleSection(sectionId: string) {
+    setExpandedSections((current) => ({
+      ...current,
+      [sectionId]: !current[sectionId],
+    }));
+  }
+
+  return { expandedSections, toggleSection };
+}
+
 function ResearchBriefSection({
   id,
   title,
@@ -1281,6 +1344,8 @@ function ResearchBriefSection({
   summary,
   cues,
   links,
+  expanded,
+  onToggle,
   children,
 }: {
   id: string;
@@ -1289,11 +1354,23 @@ function ResearchBriefSection({
   summary?: string | null;
   cues: ResearchBriefCue[];
   links: SectionLink[];
+  expanded: boolean;
+  onToggle: () => void;
   children: ReactNode;
 }) {
+  const contentId = `${id}-content`;
+
   return (
     <section id={id} data-brief-section className="research-brief-anchor">
-      <Panel title={title} subtitle={question} aside={<SectionLinks links={links} />} variant="subtle">
+      <Panel
+        title={title}
+        subtitle={question}
+        aside={<ResearchBriefSectionControls links={links} expanded={expanded} title={title} contentId={contentId} onToggle={onToggle} />}
+        variant="subtle"
+        bodyId={contentId}
+        bodyHidden={!expanded}
+        className="research-brief-section-panel"
+      >
         <div className="research-brief-section-stack">
           {summary ? <p className="research-brief-section-summary">{summary}</p> : null}
           <ResearchBriefFreshness cues={cues} />
@@ -1379,6 +1456,37 @@ function ResearchBriefSectionNav({ activeSectionId }: { activeSectionId: string 
         </a>
       ))}
     </nav>
+  );
+}
+
+function ResearchBriefSectionControls({
+  links,
+  expanded,
+  title,
+  contentId,
+  onToggle,
+}: {
+  links: SectionLink[];
+  expanded: boolean;
+  title: string;
+  contentId: string;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="research-brief-section-controls">
+      <SectionLinks links={links} />
+      <button
+        type="button"
+        className="research-brief-section-toggle"
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${title}`}
+        onClick={onToggle}
+      >
+        <span>{expanded ? "Collapse" : "Expand"}</span>
+        <span className="research-brief-section-toggle-chevron" aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
@@ -1568,6 +1676,30 @@ function AlertOrEntryCard({
       {content}
     </div>
   );
+}
+
+function createDefaultResearchBriefSectionState(): Record<string, boolean> {
+  return Object.fromEntries(BRIEF_SECTION_IDS.map((sectionId) => [sectionId, true]));
+}
+
+function mergeResearchBriefSectionState(
+  defaultState: Record<string, boolean>,
+  parsedState: unknown
+): Record<string, boolean> {
+  if (!parsedState || typeof parsedState !== "object") {
+    return defaultState;
+  }
+
+  const nextState = { ...defaultState };
+
+  for (const sectionId of BRIEF_SECTION_IDS) {
+    const value = (parsedState as Record<string, unknown>)[sectionId];
+    if (typeof value === "boolean") {
+      nextState[sectionId] = value;
+    }
+  }
+
+  return nextState;
 }
 
 function resolveAsyncState<T>(

@@ -7,10 +7,23 @@ interface PanelProps {
   aside?: ReactNode;
   children: ReactNode;
   className?: string;
+  bodyClassName?: string;
+  bodyId?: string;
+  bodyHidden?: boolean;
   variant?: "default" | "subtle" | "hero" | "ghost";
 }
 
-export function Panel({ title, subtitle, aside, children, className, variant = "default" }: PanelProps) {
+export function Panel({
+  title,
+  subtitle,
+  aside,
+  children,
+  className,
+  bodyClassName,
+  bodyId,
+  bodyHidden = false,
+  variant = "default",
+}: PanelProps) {
   return (
     <section className={clsx("panel", `panel-${variant}`, className)}>
       <div className="panel-header">
@@ -20,7 +33,9 @@ export function Panel({ title, subtitle, aside, children, className, variant = "
         </div>
         {aside}
       </div>
-      <div className="panel-body">{children}</div>
+      <div id={bodyId} className={clsx("panel-body", bodyClassName)} hidden={bodyHidden}>
+        {children}
+      </div>
     </section>
   );
 }

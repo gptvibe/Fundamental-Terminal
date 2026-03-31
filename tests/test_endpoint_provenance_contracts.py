@@ -357,7 +357,7 @@ def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch
                 statement_type="canonical_xbrl",
                 period_start=date(2025, 1, 1),
                 period_end=date(2025, 12, 31),
-                source="https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+                source="https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20250927x10k.htm",
                 filing_acceptance_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
                 last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
                 last_checked=datetime(2026, 3, 22, tzinfo=timezone.utc),
@@ -435,7 +435,7 @@ def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch
 
     assert response.status_code == 200
     payload = response.json()
-    _assert_provenance_envelope(payload, {"ft_capital_structure_intelligence", "sec_companyfacts"})
+    _assert_provenance_envelope(payload, {"ft_capital_structure_intelligence", "sec_companyfacts", "sec_edgar"})
     assert payload["latest"]["summary"]["total_debt"] == 110000000000
     assert payload["source_mix"]["official_only"] is True
     assert "lease_obligations_missing" in payload["confidence_flags"]

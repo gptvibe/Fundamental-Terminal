@@ -53,14 +53,26 @@ vi.mock("@/components/layout/company-research-header", () => ({
 }));
 
 vi.mock("@/components/ui/panel", () => ({
-  Panel: ({ title, subtitle, aside, children }: { title: React.ReactNode; subtitle?: React.ReactNode; aside?: React.ReactNode; children?: React.ReactNode }) =>
+  Panel: ({
+    title,
+    subtitle,
+    aside,
+    children,
+    bodyHidden,
+  }: {
+    title: React.ReactNode;
+    subtitle?: React.ReactNode;
+    aside?: React.ReactNode;
+    children?: React.ReactNode;
+    bodyHidden?: boolean;
+  }) =>
     React.createElement(
       "section",
       null,
       React.createElement("h2", null, title),
       subtitle ? React.createElement("p", null, subtitle) : null,
       aside,
-      children,
+      bodyHidden ? null : children,
     ),
 }));
 
@@ -170,6 +182,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock());
   vi.mocked(getCompanyActivityOverview).mockResolvedValue(buildActivityOverviewResponse());
   vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue(buildChangesResponse());
@@ -191,11 +204,12 @@ describe("CompanyResearchBriefPage", () => {
     });
 
     expect(screen.getByRole("button", { name: "Refresh Brief Data" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "What Changed" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Business Quality" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Capital & Risk" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What changed" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Business quality" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Capital & risk" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Valuation" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse Snapshot" })).toBeTruthy();
     expect(screen.getAllByText("Jane Doe filed Form 144 planned sale").length).toBeGreaterThan(0);
     expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
     expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
@@ -205,6 +219,23 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
+  });
+
+  it("hydrates collapsed brief sections from localStorage", async () => {
+    window.localStorage.setItem(
+      "fundamental-terminal:research-brief:sections:ACME",
+      JSON.stringify({ snapshot: false })
+    );
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Expand Snapshot" })).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("price-fundamentals")).toBeNull();
+    });
   });
 
   it("renders deterministic empty states when persisted brief slices are unavailable", async () => {

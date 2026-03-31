@@ -83,7 +83,7 @@ export function CompanyUtilityRail({
   return (
     <div className={`company-utility-stack${presentation === "brief" ? " company-utility-stack-brief" : ""}`}>
       <Panel
-        title={actionTitle ?? (presentation === "brief" ? "Brief Actions" : "Actions")}
+        title={actionTitle ?? (presentation === "brief" ? "Brief actions" : "Actions")}
         subtitle={actionSubtitle}
         variant="subtle"
       >
@@ -93,7 +93,7 @@ export function CompanyUtilityRail({
             <button
               onClick={() => void onRefresh()}
               disabled={refreshInProgress}
-              className="ticker-button utility-action-button"
+              className="ticker-button utility-action-button utility-action-button-primary"
             >
               {refreshInProgress ? (
                 <span className="utility-action-spinner" aria-hidden="true" />
@@ -108,7 +108,7 @@ export function CompanyUtilityRail({
             <div className="utility-action-item">
               <Link
                 href={secondaryActionHref}
-                className="ticker-button utility-action-button utility-action-link-button"
+                className="ticker-button utility-action-button utility-action-button-secondary utility-action-link-button"
               >
                 {secondaryActionLabel ?? "Navigate"}
               </Link>
@@ -129,7 +129,7 @@ export function CompanyUtilityRail({
       </Panel>
 
       {presentation !== "brief" && effectiveStatusLines.length ? (
-        <Panel title="Data Status" variant="subtle">
+        <Panel title="Data status" variant="subtle">
           <div className="utility-status-stack">
             {effectiveStatusLines.map((line, index) => (
               <div key={index} className="utility-status-line">{line}</div>

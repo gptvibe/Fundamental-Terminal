@@ -195,6 +195,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ): _derived_official_contract(
         "ft_capital_structure_intelligence",
         "sec_companyfacts",
+        "sec_edgar",
         "fdic_bankfind_financials",
         "federal_reserve_fr_y9c",
     ),

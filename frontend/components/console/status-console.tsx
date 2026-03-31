@@ -9,7 +9,7 @@ export function StatusConsole({ entries, connectionState }: StatusConsoleProps) 
   return (
     <div className="status-console">
       <div className="status-console-header">
-        <span>Live Updates</span>
+        <span>Live updates</span>
         <span>{labelForConnectionState(connectionState)}</span>
       </div>
       {entries.length ? (
