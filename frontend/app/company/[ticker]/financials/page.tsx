@@ -55,6 +55,10 @@ const FinancialQualitySummary = dynamic(
   () => import("@/components/company/financial-quality-summary").then((module) => module.FinancialQualitySummary),
   { ssr: false, loading: () => <div className="text-muted">Loading quality summary...</div> }
 );
+const RatioHistoryTable = dynamic(
+  () => import("@/components/company/ratio-history-table").then((module) => module.RatioHistoryTable),
+  { ssr: false, loading: () => <div className="text-muted">Loading ratio history...</div> }
+);
 const ShareDilutionTrackerChart = dynamic(
   () => import("@/components/charts/share-dilution-tracker-chart").then((module) => module.ShareDilutionTrackerChart),
   { ssr: false, loading: () => <div className="text-muted">Loading dilution chart...</div> }
@@ -361,13 +365,39 @@ export default function CompanyFinancialsTabPage() {
               description="Use shared compare mode to inspect what changed between periods. Annual-only surfaces call out their fiscal-year fallback explicitly when a quarterly period is selected."
             />
 
-            <Panel title="Financial Quality Summary" subtitle="Annual-only quality summary. Quarterly selections fall back to the matching fiscal year for compare and trend." aside={<span className="pill tone-gold">Annual only</span>}>
-              <FinancialQualitySummary
-                financials={financials}
-                visibleFinancials={pageFinancials}
-                selectedFinancial={activeFinancial}
-                comparisonFinancial={comparisonFinancial}
-              />
+            <Panel title="Financial Quality" subtitle="Annual-only summary cards, expandable ratio trends, and multi-year ratio history aligned to the same shared range and comparison state." aside={<span className="pill tone-gold">Annual only</span>}>
+              <div style={{ display: "grid", gap: 18 }}>
+                <div style={{ display: "grid", gap: 12 }}>
+                  <div style={{ display: "grid", gap: 4 }}>
+                    <div className="financials-workflow-eyebrow">Summary + Trend</div>
+                    <div className="company-data-table-note">Start with the selected-year quality snapshot, then expand trend mode for annual ratio sparklines inside the same shared fiscal-year context.</div>
+                  </div>
+                  <FinancialQualitySummary
+                    financials={financials}
+                    visibleFinancials={pageFinancials}
+                    selectedFinancial={activeFinancial}
+                    comparisonFinancial={comparisonFinancial}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gap: 12, paddingTop: 16, borderTop: "1px solid color-mix(in srgb, var(--panel-border) 132%, transparent)" }}>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <div className="financials-workflow-eyebrow">Ratio History</div>
+                      <span className="pill">Shared annual range</span>
+                    </div>
+                    <div className="company-data-table-note">Use the same annual window to inspect multi-year ratio history in a horizontally scrollable matrix, with year-over-year cell tones where improvement direction is meaningful.</div>
+                  </div>
+                  <RatioHistoryTable
+                    financials={financials}
+                    visibleFinancials={pageFinancials}
+                    selectedFinancial={activeFinancial}
+                    comparisonFinancial={comparisonFinancial}
+                    showContextChips={false}
+                    showTableNote={false}
+                  />
+                </div>
+              </div>
             </Panel>
 
             <Panel title="Annual Financial Comparison" subtitle="Annual-only side-by-side comparison across core statements. Quarterly focus resolves to the matching fiscal year." aside={<span className="pill tone-gold">Annual only</span>}>

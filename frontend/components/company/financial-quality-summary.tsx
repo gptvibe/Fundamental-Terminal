@@ -7,7 +7,7 @@ import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-sta
 import { difference, formatSignedCompactDelta, formatSignedPointDelta } from "@/lib/financial-chart-state";
 import type { FinancialPayload } from "@/lib/types";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
-import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
+import { dedupeSnapshotSurfaceWarnings, type SnapshotSurfaceCapabilities, type SnapshotSurfaceMode, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const CAPABILITIES: SnapshotSurfaceCapabilities = {
@@ -22,21 +22,31 @@ type QualitySummaryState = {
   selectedLabel: string;
   comparisonLabel: string | null;
   annuals: FinancialPayload[];
-  trendRows: Array<{
-    key: string;
-    label: string;
-    grossMargin: number | null;
-    operatingMargin: number | null;
-    fcfMargin: number | null;
-    debtToAssets: number | null;
-    roa: number | null;
-    revenueGrowth: number | null;
-    sharesOutstanding: number | null;
-  }>;
+  trendRows: TrendRow[];
   usedAnnualFallback: boolean;
 };
 
-type TrendView = "sparklines" | "table";
+type TrendMetric = "grossMargin" | "operatingMargin" | "fcfMargin" | "debtToAssets" | "roa" | "roe" | "currentRatio";
+
+type TrendRow = {
+  key: string;
+  label: string;
+  grossMargin: number | null;
+  operatingMargin: number | null;
+  fcfMargin: number | null;
+  debtToAssets: number | null;
+  roa: number | null;
+  roe: number | null;
+  currentRatio: number | null;
+};
+
+type TrendMetricCard = {
+  key: TrendMetric;
+  label: string;
+  value: string;
+  delta: string;
+  color?: string;
+};
 
 interface FinancialQualitySummaryProps {
   financials: FinancialPayload[];
@@ -51,7 +61,7 @@ export function FinancialQualitySummary({
   comparisonFinancial = null,
   visibleFinancials = [],
 }: FinancialQualitySummaryProps) {
-  const [trendView, setTrendView] = useState<TrendView>("sparklines");
+  const [showTrend, setShowTrend] = useState(false);
   const summary = useMemo(() => buildSummary(financials, visibleFinancials, selectedFinancial, comparisonFinancial), [comparisonFinancial, financials, selectedFinancial, visibleFinancials]);
 
   if (!summary) {
@@ -65,20 +75,18 @@ export function FinancialQualitySummary({
   }
 
   const warnings = buildWarnings(summary, selectedFinancial, comparisonFinancial);
-  const mode = resolveSnapshotSurfaceMode({
-    comparisonAvailable: summary.comparison !== null,
-    trendAvailable: summary.trendRows.length > 1,
-    capabilities: CAPABILITIES,
-  });
+  const trendAvailable = summary.trendRows.length > 0;
+  const mode: SnapshotSurfaceMode = showTrend && summary.trendRows.length > 1 ? "trend" : summary.comparison ? "compare" : "selected";
 
-  const marginDelta = difference(metricValue(summary.selected, "operatingMargin"), metricValue(summary.comparison, "operatingMargin"));
-  const grossMarginDelta = difference(metricValue(summary.selected, "grossMargin"), metricValue(summary.comparison, "grossMargin"));
-  const fcfMarginDelta = difference(metricValue(summary.selected, "fcfMargin"), metricValue(summary.comparison, "fcfMargin"));
-  const debtDelta = difference(metricValue(summary.selected, "debtToAssets"), metricValue(summary.comparison, "debtToAssets"));
-  const roaDelta = difference(metricValue(summary.selected, "roa"), metricValue(summary.comparison, "roa"));
+  const grossMarginDelta = metricDelta(summary.selected, summary.comparison, "grossMargin");
+  const marginDelta = metricDelta(summary.selected, summary.comparison, "operatingMargin");
+  const fcfMarginDelta = metricDelta(summary.selected, summary.comparison, "fcfMargin");
+  const debtDelta = metricDelta(summary.selected, summary.comparison, "debtToAssets");
+  const roaDelta = metricDelta(summary.selected, summary.comparison, "roa");
   const sharesDelta = difference(summary.selected.shares_outstanding, summary.comparison?.shares_outstanding ?? null);
   const selectedKey = buildAnnualKey(summary.selected);
   const comparisonKey = summary.comparison ? buildAnnualKey(summary.comparison) : null;
+  const trendCards = buildTrendMetricCards(summary.selected, summary.comparison, summary.trendRows);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -114,67 +122,41 @@ export function FinancialQualitySummary({
         </div>
       ) : null}
 
-      {summary.trendRows.length ? (
-        <>
+      {trendAvailable ? (
+        <div style={{ display: "grid", gap: 12 }}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <div className="cash-waterfall-toggle-group" role="tablist" aria-label="Financial quality history view">
-              <button type="button" className={`chart-chip${trendView === "sparklines" ? " chart-chip-active" : ""}`} onClick={() => setTrendView("sparklines")}>
-                Sparklines
-              </button>
-              <button type="button" className={`chart-chip${trendView === "table" ? " chart-chip-active" : ""}`} onClick={() => setTrendView("table")}>
-                Trend Table
-              </button>
-            </div>
-            <span className="pill">Annual periods {summary.trendRows.length}</span>
+            <button
+              type="button"
+              className={`chart-chip chart-chip-toggle${showTrend ? " chart-chip-active" : ""}`}
+              aria-pressed={showTrend}
+              onClick={() => setShowTrend((current) => !current)}
+            >
+              {showTrend ? "Hide Trend" : "Show Trend"}
+            </button>
+            {showTrend ? <span className="pill">Annual periods {summary.trendRows.length}</span> : null}
           </div>
 
-          {trendView === "sparklines" ? (
-            <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
-              <HistoricalSparklineCard label="Gross Margin" value={formatPercent(metricValue(summary.selected, "grossMargin"))} delta={formatSignedPointDelta(grossMarginDelta == null ? null : grossMarginDelta * 100)} data={buildTrendSparklineData(summary.trendRows, "grossMargin", selectedKey, comparisonKey)} />
-              <HistoricalSparklineCard label="Operating Margin" value={formatPercent(metricValue(summary.selected, "operatingMargin"))} delta={formatSignedPointDelta(marginDelta == null ? null : marginDelta * 100)} data={buildTrendSparklineData(summary.trendRows, "operatingMargin", selectedKey, comparisonKey)} color="var(--chart-series-2)" />
-              <HistoricalSparklineCard label="FCF Margin" value={formatPercent(metricValue(summary.selected, "fcfMargin"))} delta={formatSignedPointDelta(fcfMarginDelta == null ? null : fcfMarginDelta * 100)} data={buildTrendSparklineData(summary.trendRows, "fcfMargin", selectedKey, comparisonKey)} color="var(--chart-series-3)" />
-              <HistoricalSparklineCard label="Debt / Assets" value={formatPercent(metricValue(summary.selected, "debtToAssets"))} delta={formatSignedPointDelta(debtDelta == null ? null : debtDelta * 100)} data={buildTrendSparklineData(summary.trendRows, "debtToAssets", selectedKey, comparisonKey)} color="var(--chart-series-4)" />
-              <HistoricalSparklineCard label="ROA" value={formatPercent(metricValue(summary.selected, "roa"))} delta={formatSignedPointDelta(roaDelta == null ? null : roaDelta * 100)} data={buildTrendSparklineData(summary.trendRows, "roa", selectedKey, comparisonKey)} color="var(--chart-series-5)" />
-              <HistoricalSparklineCard label="Shares Outstanding" value={formatCompactNumber(summary.selected.shares_outstanding)} delta={formatSignedCompactDelta(sharesDelta)} data={buildTrendSparklineData(summary.trendRows, "sharesOutstanding", selectedKey, comparisonKey)} color="var(--chart-series-6)" />
+          {showTrend ? (
+            <div style={{ display: "grid", gap: 12 }}>
+              <div className="text-muted" style={{ fontSize: 12 }}>
+                Ratios are computed from annual filings inside the current shared range and stay null-safe for incomplete periods.
+              </div>
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                {trendCards.map((card) => (
+                  <HistoricalSparklineCard
+                    key={card.key}
+                    label={card.label}
+                    value={card.value}
+                    delta={card.delta}
+                    data={buildTrendSparklineData(summary.trendRows, card.key, selectedKey, comparisonKey)}
+                    color={card.color}
+                    emptyMessage="Not enough comparable annual periods"
+                  />
+                ))}
+              </div>
             </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table className="company-data-table" style={{ minWidth: 760 }}>
-                <thead>
-                  <tr>
-                    <th align="left">Period</th>
-                    <th align="right">Gross Margin</th>
-                    <th align="right">Op. Margin</th>
-                    <th align="right">FCF Margin</th>
-                    <th align="right">Debt / Assets</th>
-                    <th align="right">ROA</th>
-                    <th align="right">YoY Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.trendRows.map((row) => {
-                    const isSelected = row.key === selectedKey;
-                    const isComparison = comparisonKey ? row.key === comparisonKey : false;
-                    return (
-                      <tr
-                        key={row.key}
-                        style={isSelected ? { background: "color-mix(in srgb, var(--accent) 8%, transparent)" } : isComparison ? { background: "color-mix(in srgb, var(--warning) 8%, transparent)" } : undefined}
-                      >
-                        <td>{row.label}</td>
-                        <td style={{ textAlign: "right" }}>{formatPercent(row.grossMargin)}</td>
-                        <td style={{ textAlign: "right" }}>{formatPercent(row.operatingMargin)}</td>
-                        <td style={{ textAlign: "right" }}>{formatPercent(row.fcfMargin)}</td>
-                        <td style={{ textAlign: "right" }}>{formatPercent(row.debtToAssets)}</td>
-                        <td style={{ textAlign: "right" }}>{formatPercent(row.roa)}</td>
-                        <td style={{ textAlign: "right" }}>{formatPercent(row.revenueGrowth)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -213,7 +195,7 @@ function buildSummary(
     selectedLabel: formatSummaryLabel(selected),
     comparisonLabel: previous ? formatSummaryLabel(previous) : null,
     annuals,
-    trendRows: trendScope.slice(0, 5).map((statement) => ({
+    trendRows: trendScope.map((statement) => ({
       key: buildAnnualKey(statement),
       label: formatSummaryLabel(statement),
       grossMargin: safeDivide(statement.gross_profit, statement.revenue),
@@ -221,8 +203,8 @@ function buildSummary(
       fcfMargin: safeDivide(statement.free_cash_flow, statement.revenue),
       debtToAssets: safeDivide(statement.total_liabilities, statement.total_assets),
       roa: safeDivide(statement.net_income, statement.total_assets),
-      revenueGrowth: growthRate(statement.revenue, nextAnnualRevenue(annuals, statement)),
-      sharesOutstanding: statement.shares_outstanding,
+      roe: safeDivide(statement.net_income, statement.stockholders_equity),
+      currentRatio: safeDivide(statement.current_assets, statement.current_liabilities),
     })),
     usedAnnualFallback: Boolean(selectedFinancial && !ANNUAL_FORMS.has(selectedFinancial.filing_type)),
   };
@@ -284,15 +266,7 @@ function annualTrendScope(
   if (selectedIndex < 0) {
     return annuals;
   }
-  return annuals.slice(selectedIndex, selectedIndex + 5);
-}
-
-function nextAnnualRevenue(annuals: FinancialPayload[], statement: FinancialPayload): number | null {
-  const currentIndex = annuals.findIndex((item) => buildAnnualKey(item) === buildAnnualKey(statement));
-  if (currentIndex < 0) {
-    return null;
-  }
-  return annuals[currentIndex + 1]?.revenue ?? null;
+  return annuals.slice(selectedIndex);
 }
 
 function formatSummaryLabel(statement: FinancialPayload): string {
@@ -304,7 +278,7 @@ function buildAnnualKey(statement: Pick<FinancialPayload, "period_end" | "filing
   return `${statement.period_end}|${statement.filing_type}`;
 }
 
-function metricValue(summary: FinancialPayload | null, metric: "grossMargin" | "operatingMargin" | "fcfMargin" | "debtToAssets" | "roa"): number | null {
+function metricValue(summary: FinancialPayload | null, metric: TrendMetric): number | null {
   if (!summary) {
     return null;
   }
@@ -320,7 +294,17 @@ function metricValue(summary: FinancialPayload | null, metric: "grossMargin" | "
   if (metric === "debtToAssets") {
     return safeDivide(summary.total_liabilities, summary.total_assets);
   }
-  return safeDivide(summary.net_income, summary.total_assets);
+  if (metric === "roa") {
+    return safeDivide(summary.net_income, summary.total_assets);
+  }
+  if (metric === "roe") {
+    return safeDivide(summary.net_income, summary.stockholders_equity);
+  }
+  return safeDivide(summary.current_assets, summary.current_liabilities);
+}
+
+function metricDelta(selected: FinancialPayload | null, comparison: FinancialPayload | null, metric: TrendMetric): number | null {
+  return difference(metricValue(selected, metric), metricValue(comparison, metric));
 }
 
 function buildWarnings(
@@ -349,7 +333,7 @@ function buildWarnings(
     warnings.push({
       code: "quality_trend_sparse",
       label: "Sparse annual history",
-      detail: "Only one comparable annual filing is visible, so the trend table is limited to the selected year.",
+      detail: "Only one comparable annual filing is visible, so the trend view is limited to the selected year.",
       tone: "info",
     });
   }
@@ -371,15 +355,102 @@ function growthRate(current: number | null, previous: number | null): number | n
 }
 
 function buildTrendSparklineData(
-  rows: QualitySummaryState["trendRows"],
-  metric: keyof QualitySummaryState["trendRows"][number],
+  rows: TrendRow[],
+  metric: TrendMetric,
   selectedKey: string,
   comparisonKey: string | null
 ): HistoricalSparklinePoint[] {
   return [...rows].reverse().map((row) => ({
     label: row.label,
-    value: typeof row[metric] === "number" ? (row[metric] as number) : row[metric] == null ? null : Number(row[metric]),
+    value: row[metric],
     isSelected: row.key === selectedKey,
     isComparison: comparisonKey ? row.key === comparisonKey : false,
   }));
+}
+
+function buildTrendMetricCards(selected: FinancialPayload, comparison: FinancialPayload | null, trendRows: TrendRow[]): TrendMetricCard[] {
+  const cards: TrendMetricCard[] = [
+    {
+      key: "grossMargin",
+      label: "Gross Margin",
+      value: formatPercent(metricValue(selected, "grossMargin")),
+      delta: formatMetricDelta("grossMargin", metricDelta(selected, comparison, "grossMargin")),
+    },
+    {
+      key: "operatingMargin",
+      label: "Operating Margin",
+      value: formatPercent(metricValue(selected, "operatingMargin")),
+      delta: formatMetricDelta("operatingMargin", metricDelta(selected, comparison, "operatingMargin")),
+      color: "var(--chart-series-2)",
+    },
+    {
+      key: "fcfMargin",
+      label: "FCF Margin",
+      value: formatPercent(metricValue(selected, "fcfMargin")),
+      delta: formatMetricDelta("fcfMargin", metricDelta(selected, comparison, "fcfMargin")),
+      color: "var(--chart-series-3)",
+    },
+    {
+      key: "debtToAssets",
+      label: "Debt / Assets",
+      value: formatPercent(metricValue(selected, "debtToAssets")),
+      delta: formatMetricDelta("debtToAssets", metricDelta(selected, comparison, "debtToAssets")),
+      color: "var(--chart-series-4)",
+    },
+    {
+      key: "roa",
+      label: "ROA",
+      value: formatPercent(metricValue(selected, "roa")),
+      delta: formatMetricDelta("roa", metricDelta(selected, comparison, "roa")),
+      color: "var(--chart-series-5)",
+    },
+  ];
+
+  if (hasMetricData(trendRows, "roe")) {
+    cards.push({
+      key: "roe",
+      label: "ROE",
+      value: formatPercent(metricValue(selected, "roe")),
+      delta: formatMetricDelta("roe", metricDelta(selected, comparison, "roe")),
+      color: "var(--chart-series-6)",
+    });
+  }
+
+  if (hasMetricData(trendRows, "currentRatio")) {
+    cards.push({
+      key: "currentRatio",
+      label: "Current Ratio",
+      value: formatMultiple(metricValue(selected, "currentRatio")),
+      delta: formatMetricDelta("currentRatio", metricDelta(selected, comparison, "currentRatio")),
+      color: "var(--chart-series-1)",
+    });
+  }
+
+  return cards;
+}
+
+function hasMetricData(rows: TrendRow[], metric: TrendMetric): boolean {
+  return rows.some((row) => row[metric] != null);
+}
+
+function formatMetricDelta(metric: TrendMetric, value: number | null): string {
+  if (metric === "currentRatio") {
+    return formatSignedMultipleDelta(value);
+  }
+  return formatSignedPointDelta(value == null ? null : value * 100);
+}
+
+function formatMultiple(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  return `${value.toFixed(2)}x`;
+}
+
+function formatSignedMultipleDelta(value: number | null): string {
+  if (value === null || Number.isNaN(value)) {
+    return "\u2014";
+  }
+  const prefix = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${prefix}${Math.abs(value).toFixed(2)}x`;
 }

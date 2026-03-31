@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { FinancialQualitySummary } from "@/components/company/financial-quality-summary";
+import { RatioHistoryTable } from "@/components/company/ratio-history-table";
 import type { FinancialPayload } from "@/lib/types";
 
 function makeFinancial(partial: Partial<FinancialPayload>): FinancialPayload {
@@ -58,49 +58,59 @@ function makeFinancial(partial: Partial<FinancialPayload>): FinancialPayload {
   };
 }
 
-describe("FinancialQualitySummary", () => {
-  it("keeps summary cards as the default view and expands into annual ratio trends on demand", () => {
+describe("RatioHistoryTable", () => {
+  it("renders annual ratio history from the visible range with tone-coded cells", () => {
     const annual2025 = makeFinancial({
       period_end: "2025-12-31",
       revenue: 1200,
       gross_profit: 600,
-      operating_income: 320,
-      free_cash_flow: 240,
-      total_liabilities: 900,
-      total_assets: 2400,
+      operating_income: 330,
       net_income: 210,
+      free_cash_flow: 240,
+      total_assets: 2400,
+      total_liabilities: 900,
       stockholders_equity: 1500,
       current_assets: 680,
       current_liabilities: 340,
-      shares_outstanding: 100,
     });
     const annual2024 = makeFinancial({
       period_end: "2024-12-31",
       revenue: 1000,
-      gross_profit: 500,
-      operating_income: 250,
-      free_cash_flow: 180,
-      total_liabilities: 920,
-      total_assets: 2200,
+      gross_profit: 470,
+      operating_income: 240,
       net_income: 180,
+      free_cash_flow: 180,
+      total_assets: 2200,
+      total_liabilities: 920,
       stockholders_equity: 1280,
       current_assets: 620,
       current_liabilities: 310,
-      shares_outstanding: 104,
     });
     const annual2023 = makeFinancial({
       period_end: "2023-12-31",
       revenue: 920,
-      gross_profit: 430,
-      operating_income: 220,
-      free_cash_flow: 160,
-      total_liabilities: 910,
-      total_assets: 2100,
+      gross_profit: 400,
+      operating_income: 210,
       net_income: 160,
-      stockholders_equity: 1190,
+      free_cash_flow: null,
+      total_assets: 2100,
+      total_liabilities: 980,
+      stockholders_equity: 1120,
       current_assets: 570,
-      current_liabilities: 300,
-      shares_outstanding: 106,
+      current_liabilities: 0,
+    });
+    const annual2022 = makeFinancial({
+      period_end: "2022-12-31",
+      revenue: 860,
+      gross_profit: 360,
+      operating_income: 180,
+      net_income: 140,
+      free_cash_flow: 120,
+      total_assets: 1980,
+      total_liabilities: 990,
+      stockholders_equity: 990,
+      current_assets: 500,
+      current_liabilities: 280,
     });
     const quarterly2025 = makeFinancial({
       filing_type: "10-Q",
@@ -109,33 +119,33 @@ describe("FinancialQualitySummary", () => {
       revenue: 320,
     });
 
-    render(
-      React.createElement(FinancialQualitySummary, {
-        financials: [annual2025, annual2024, annual2023, quarterly2025],
+    const { container } = render(
+      React.createElement(RatioHistoryTable, {
+        financials: [annual2025, annual2024, annual2023, annual2022, quarterly2025],
         visibleFinancials: [annual2025, annual2024, annual2023],
         selectedFinancial: quarterly2025,
         comparisonFinancial: annual2024,
       })
     );
 
-    expect(screen.getByText("supports_selected_period")).toBeTruthy();
-    expect(screen.getByText("supports_compare_mode")).toBeTruthy();
-    expect(screen.getByText("supports_trend_mode")).toBeTruthy();
-    expect(screen.getByText(/Annual fallback applied/i)).toBeTruthy();
     expect(screen.getByText(/Focus 10-K 2025/i)).toBeTruthy();
     expect(screen.getByText(/Compare 10-K 2024/i)).toBeTruthy();
-    expect(screen.getByText("Operating Margin Delta")).toBeTruthy();
-    expect(screen.getByText("mode_compare")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Show Trend" })).toBeTruthy();
-    expect(screen.queryByText("Annual periods 3")).toBeNull();
-    expect(screen.queryByText("Current Ratio")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Show Trend" }));
-
-    expect(screen.getByText("mode_trend")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Hide Trend" })).toBeTruthy();
+    expect(screen.getByText(/Annual fallback applied/i)).toBeTruthy();
     expect(screen.getByText("Annual periods 3")).toBeTruthy();
-    expect(screen.getByText("ROE")).toBeTruthy();
+    expect(screen.getByRole("table", { name: "Ratio history table" })).toBeTruthy();
+    expect(screen.getByText("10-K 2023")).toBeTruthy();
+    expect(screen.getByText("10-K 2024")).toBeTruthy();
+    expect(screen.getByText("10-K 2025")).toBeTruthy();
+    expect(screen.queryByText("10-K 2022")).toBeNull();
+    expect(screen.getByText("Revenue Growth YoY")).toBeTruthy();
     expect(screen.getByText("Current Ratio")).toBeTruthy();
+
+    const improvedGrossMarginCell = container.querySelector('[data-ratio-key="grossMargin"] [data-period-key="2024-12-31|10-K"] [data-tone="positive"]');
+    const improvedDebtCell = container.querySelector('[data-ratio-key="debtToAssets"] [data-period-key="2024-12-31|10-K"] [data-tone="positive"]');
+    const unavailableCurrentRatioCell = container.querySelector('[data-ratio-key="currentRatio"] [data-period-key="2023-12-31|10-K"] [data-tone="na"]');
+
+    expect(improvedGrossMarginCell?.textContent).toBe("47.00%");
+    expect(improvedDebtCell?.textContent).toBe("41.82%");
+    expect(unavailableCurrentRatioCell?.textContent).toBe("—");
   });
 });

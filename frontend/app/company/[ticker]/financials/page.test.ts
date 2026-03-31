@@ -251,6 +251,8 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
     expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
     expect(screen.getByText("Period & Comparison")).toBeTruthy();
+    expect(screen.getByText("Financial Quality")).toBeTruthy();
+    expect(screen.getByText("Ratio History")).toBeTruthy();
     expect(screen.getByText("Annual Financial Comparison")).toBeTruthy();
     expect(screen.getAllByText("Point-in-Time Composition").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Period Comparison").length).toBeGreaterThan(0);
