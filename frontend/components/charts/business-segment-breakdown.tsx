@@ -139,11 +139,11 @@ export function BusinessSegmentBreakdown({
   }, [activeKind, availableKinds, preferredKind]);
 
   const localPeriods = useMemo(
-    () => buildLocalPeriods(financials, activeKind, chartState?.cadence),
-    [activeKind, chartState?.cadence, financials]
+    () => buildLocalPeriods(financials, activeKind, chartState?.effectiveCadence ?? chartState?.cadence),
+    [activeKind, chartState?.cadence, chartState?.effectiveCadence, financials]
   );
-  const requestedYears = useMemo(() => Math.min(Math.max(chartState?.visiblePeriodCount ?? localPeriods.length, 2), 10), [chartState?.visiblePeriodCount, localPeriods.length]);
-  const useAnnualHistory = (chartState?.cadence ?? "annual") === "annual";
+  const requestedYears = useMemo(() => Math.max(chartState?.visiblePeriodCount ?? localPeriods.length, 2), [chartState?.visiblePeriodCount, localPeriods.length]);
+  const useAnnualHistory = (chartState?.effectiveCadence ?? chartState?.cadence ?? "annual") === "annual";
 
   useEffect(() => {
     if (!resolvedTicker || !useAnnualHistory) {
@@ -204,10 +204,11 @@ export function BusinessSegmentBreakdown({
     currentPeriod,
     comparisonPeriod: comparisonIsExplicit ? explicitComparisonPeriod : null,
     comparisonRequested: Boolean(chartState?.comparisonFinancial),
+    chartState,
     historyError,
     trendPeriodCount: trendPeriods.length,
     activeKind,
-  }), [activeKind, chartState?.comparisonFinancial, comparisonIsExplicit, currentPeriod, explicitComparisonPeriod, historyError, trendPeriods.length]);
+  }), [activeKind, chartState, comparisonIsExplicit, currentPeriod, explicitComparisonPeriod, historyError, trendPeriods.length]);
 
   const mode = resolveSnapshotSurfaceMode({
     comparisonAvailable: Boolean(chartState?.comparisonFinancial && explicitComparisonPeriod),
@@ -406,7 +407,7 @@ export function BusinessSegmentBreakdown({
           </div>
 
           {marginDeltaRows.length ? (
-            <div style={{ overflowX: "auto" }}>
+            <div className="segment-table-shell">
               <table className="company-data-table" style={{ minWidth: 620 }}>
                 <thead>
                   <tr>
@@ -483,14 +484,14 @@ export function BusinessSegmentBreakdown({
 
 function LensSummary({ lens }: { lens: SegmentLensPayload }) {
   return (
-    <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "grid", gap: 12, marginBottom: 12 }}>
       <div className="segment-chart-card" style={{ display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ display: "grid", gap: 4 }}>
+        <div className="segment-card-header">
+          <div className="segment-card-heading">
             <div className="segment-section-title">What Moved The {titleCase(lens.kind)} Mix</div>
             <div className="segment-section-subtitle">{lens.summary ?? "Recent disclosures are available, but there is not enough comparable history to explain the mix shift yet."}</div>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="segment-card-meta">
             <span className="pill">As of {formatDate(lens.as_of)}</span>
             <span className="pill">Refreshed {formatDate(lens.last_refreshed_at)}</span>
             <span className="pill">Confidence {formatPercent(lens.confidence_score)}</span>
@@ -510,7 +511,7 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
         {lens.top_mix_movers.length ? (
           <div style={{ display: "grid", gap: 8 }}>
             <div className="segment-section-title" style={{ fontSize: 15 }}>Top Mix Movers</div>
-            <div style={{ overflowX: "auto" }}>
+            <div className="segment-table-shell">
               <table className="company-data-table" style={{ minWidth: 620 }}>
                 <thead>
                   <tr>
@@ -542,7 +543,7 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
         {lens.top_margin_contributors.length ? (
           <div style={{ display: "grid", gap: 8 }}>
             <div className="segment-section-title" style={{ fontSize: 15 }}>Margin Contribution</div>
-            <div style={{ overflowX: "auto" }}>
+            <div className="segment-table-shell">
               <table className="company-data-table" style={{ minWidth: 620 }}>
                 <thead>
                   <tr>
@@ -584,7 +585,7 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
   );
 }
 
-function buildLocalPeriods(financials: FinancialPayload[], kind: SegmentKind, cadence: FinancialCadence | undefined): SegmentPeriod[] {
+function buildLocalPeriods(financials: FinancialPayload[], kind: SegmentKind, cadence: FinancialCadence | "reported" | undefined): SegmentPeriod[] {
   const source = selectSegmentStatements(financials, kind, cadence);
   return source.map((statement) => ({
     key: buildFinancialPeriodKey(statement),
@@ -713,7 +714,7 @@ function buildPieChartData(segmentPoints: SegmentPoint[], selectedSegment: Segme
 }
 
 function buildTrendData(periods: SegmentPeriod[], focusSegments: SegmentPoint[], metric: "revenue" | "operatingMargin"): Array<Record<string, number | string | null>> {
-  return [...periods].slice(0, 8).reverse().map((period) => {
+  return [...periods].reverse().map((period) => {
     const row: Record<string, number | string | null> = { period: period.label };
     for (const segment of focusSegments) {
       const matching = period.segments.find((item) => item.id === segment.id) ?? null;
@@ -727,6 +728,7 @@ function buildWarnings({
   currentPeriod,
   comparisonPeriod,
   comparisonRequested,
+  chartState,
   historyError,
   trendPeriodCount,
   activeKind,
@@ -734,12 +736,21 @@ function buildWarnings({
   currentPeriod: SegmentPeriod | null;
   comparisonPeriod: SegmentPeriod | null;
   comparisonRequested: boolean;
+  chartState?: SharedFinancialChartState;
   historyError: string | null;
   trendPeriodCount: number;
   activeKind: SegmentKind;
 }): SnapshotSurfaceWarning[] {
   const warnings: SnapshotSurfaceWarning[] = [];
   const flags = currentPeriod?.comparabilityFlags ?? emptyComparabilityFlags();
+  if (chartState?.requestedCadence && chartState.requestedCadence !== "annual") {
+    warnings.push({
+      code: "segment_history_annual_only",
+      label: "Server-backed segment history is annual-only",
+      detail: "Quarterly and TTM selections keep the selected-period composition and reported-period trend views in sync, but the extended segment history service only runs on annual ranges.",
+      tone: "info",
+    });
+  }
   if (comparisonRequested && !comparisonPeriod) {
     warnings.push({
       code: "comparison_period_missing",
@@ -974,7 +985,7 @@ function normalizeHistorySegments(period: SegmentHistoryPeriodPayload): SegmentP
     }));
 }
 
-function selectSegmentStatements(financials: FinancialPayload[], kind: SegmentKind, cadence: FinancialCadence | undefined): FinancialPayload[] {
+function selectSegmentStatements(financials: FinancialPayload[], kind: SegmentKind, cadence: FinancialCadence | "reported" | undefined): FinancialPayload[] {
   const statementsWithKind = financials.filter((statement) => hasKindSegments(statement, kind));
   if (cadence === "annual") {
     const annual = statementsWithKind.filter((statement) => ANNUAL_FORMS.has(statement.filing_type));

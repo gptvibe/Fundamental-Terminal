@@ -489,6 +489,11 @@ a.filing-link-card.tone-red:hover,
   gap: 8px;
 }
 
+.financial-period-toolbar-chip-row .chart-chip {
+  min-height: 38px;
+  min-width: 0;
+}
+
 .financial-period-toolbar-select {
   display: grid;
   gap: 8px;
@@ -3879,6 +3884,7 @@ select {
   border-radius: var(--radius);
   border: 1px solid var(--panel-border);
   background: var(--panel);
+  min-width: 0;
 }
 
 .metric-label {
@@ -3894,6 +3900,7 @@ select {
   font-size: var(--text-md);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .plain-english-scorecard {
@@ -5237,6 +5244,10 @@ select {
   gap: 10px;
 }
 
+.financial-export-actions > * {
+  min-width: 0;
+}
+
 .financial-export-button {
   padding: 8px 12px;
   font-size: var(--text-sm);
@@ -5254,6 +5265,39 @@ select {
   font-size: var(--text-sm);
   color: var(--text-muted);
   line-height: 1.55;
+}
+
+.financial-inline-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.financial-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.financial-section-stack {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.financial-chart-shell {
+  width: 100%;
+  min-width: 0;
+}
+
+.financial-chart-shell-medium {
+  height: 320px;
+}
+
+.financial-chart-shell-large {
+  height: 340px;
 }
 
 .financial-trend-table-scroll {
@@ -5461,6 +5505,10 @@ select {
   color: var(--text-soft);
   padding: 7px 12px;
   cursor: pointer;
+  min-width: 0;
+  white-space: normal;
+  line-height: 1.35;
+  text-align: center;
   transition: transform 120ms ease, border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
 
@@ -6370,17 +6418,40 @@ select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 36px rgba(0, 0, 0, 0.24);
 }
 
+.segment-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.segment-card-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.segment-card-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .segment-section-title {
   font-size: 0.78rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--accent);
+  line-height: 1.45;
 }
 
 .segment-section-subtitle {
   margin-top: 6px;
   font-size: 0.84rem;
   color: var(--text-muted);
+  line-height: 1.55;
 }
 
 .segment-chart-shell {
@@ -7216,6 +7287,30 @@ select {
   color: #cbd5e1;
 }
 
+.segment-table-shell {
+  overflow-x: auto;
+}
+
+.historical-sparkline-card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.historical-sparkline-card-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.historical-sparkline-card-delta {
+  font-size: 12px;
+  text-align: right;
+  min-width: 0;
+}
+
 @media (max-width: 960px) {
   .content-shell {
     padding: 12px;
@@ -7309,6 +7404,72 @@ select {
 
   .insider-toolbar-meta {
     justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .financial-export-row {
+    align-items: stretch;
+  }
+
+  .financial-export-actions {
+    width: 100%;
+  }
+
+  .financial-export-actions > * {
+    flex: 1 1 150px;
+  }
+
+  .financial-period-toolbar-chip-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .financial-chart-shell-medium {
+    height: 290px;
+  }
+
+  .financial-chart-shell-large,
+  .cash-waterfall-chart-shell {
+    height: 300px;
+  }
+}
+
+@media (max-width: 560px) {
+  .financial-export-actions > * {
+    flex-basis: 100%;
+  }
+
+  .financial-period-toolbar {
+    gap: 14px;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .financial-table thead th,
+  .financial-table td,
+  .company-data-table th,
+  .company-data-table td {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .financial-chart-shell-medium {
+    height: 260px;
+  }
+
+  .financial-chart-shell-large,
+  .cash-waterfall-chart-shell,
+  .segment-chart-shell-treemap,
+  .segment-chart-shell-pie,
+  .segment-chart-shell-bar {
+    height: 260px;
+  }
+
+  .historical-sparkline-card-delta {
+    text-align: left;
   }
 }
 

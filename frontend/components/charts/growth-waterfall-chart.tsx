@@ -5,13 +5,12 @@ import { Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, Respons
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { buildAnnualKey, buildAnnualSurfaceWarnings, formatAnnualLabel, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { difference, formatSignedCompactDelta, formatSignedPointDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
 import type { FinancialPayload } from "@/lib/types";
-
-const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const CAPABILITIES: SnapshotSurfaceCapabilities = {
   supports_selected_period: true,
   supports_compare_mode: true,
@@ -75,25 +74,19 @@ export function GrowthWaterfallChart({
 }: GrowthWaterfallChartProps) {
   const [metricKey, setMetricKey] = useState<MetricKey>("revenue");
 
-  const annualFinancials = useMemo(
-    () =>
-      financials
-        .filter((statement) => ANNUAL_FORMS.has(statement.filing_type))
-        .sort((left, right) => Date.parse(right.period_end) - Date.parse(left.period_end)),
-    [financials]
+  const annualScope = useMemo(
+    () => resolveAnnualFinancialScope({
+      financials,
+      visibleFinancials,
+      selectedFinancial: chartState?.selectedFinancial ?? null,
+      comparisonFinancial: chartState?.comparisonFinancial ?? null,
+    }),
+    [chartState?.comparisonFinancial, chartState?.selectedFinancial, financials, visibleFinancials]
   );
-  const selectedAnnual = useMemo(
-    () => coerceAnnualStatement(chartState?.selectedFinancial ?? null, annualFinancials),
-    [annualFinancials, chartState?.selectedFinancial]
-  );
-  const comparisonAnnual = useMemo(
-    () => resolveComparisonStatement(selectedAnnual, chartState?.comparisonFinancial ?? null, annualFinancials),
-    [annualFinancials, chartState?.comparisonFinancial, selectedAnnual]
-  );
-  const scopedAnnuals = useMemo(
-    () => annualTrendScope(annualFinancials, visibleFinancials, selectedAnnual, comparisonAnnual),
-    [annualFinancials, comparisonAnnual, selectedAnnual, visibleFinancials]
-  );
+  const annualFinancials = annualScope.annuals;
+  const selectedAnnual = annualScope.selectedAnnual;
+  const comparisonAnnual = annualScope.comparisonAnnual;
+  const scopedAnnuals = annualScope.scopedAnnuals;
   const metric = useMemo(
     () => METRIC_OPTIONS.find((option) => option.key === metricKey) ?? METRIC_OPTIONS[0],
     [metricKey]
@@ -109,14 +102,11 @@ export function GrowthWaterfallChart({
   const warnings = useMemo(
     () =>
       buildWarnings({
-        selectedFinancial: chartState?.selectedFinancial ?? null,
-        comparisonFinancial: chartState?.comparisonFinancial ?? null,
-        selectedAnnual,
-        comparisonAnnual,
+        chartState,
+        annualScope,
         trendPointCount: chartData.length,
-        metricLabel: metric.label,
       }),
-    [chartData.length, chartState?.comparisonFinancial, chartState?.selectedFinancial, comparisonAnnual, metric.label, selectedAnnual]
+    [annualScope, chartData.length, chartState]
   );
   const mode = resolveSnapshotSurfaceMode({
     comparisonAvailable: comparisonPoint !== null,
@@ -132,7 +122,7 @@ export function GrowthWaterfallChart({
     <div style={{ display: "grid", gap: 14 }}>
       <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="financial-toggle-row">
         {METRIC_OPTIONS.map((option) => (
           <button
             key={option.key}
@@ -146,7 +136,7 @@ export function GrowthWaterfallChart({
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="financial-inline-pills">
         <span className="pill tone-cyan">Focus {formatAnnualLabel(selectedAnnual)}</span>
         {comparisonAnnual ? <span className="pill tone-gold">Compare {formatAnnualLabel(comparisonAnnual)}</span> : null}
         <span className="pill">Visible annual periods {chartData.length}</span>
@@ -170,7 +160,7 @@ export function GrowthWaterfallChart({
       ) : null}
 
       {hasMetricHistory ? (
-        <div style={{ width: "100%", height: 340 }}>
+        <div className="financial-chart-shell financial-chart-shell-large">
           <ResponsiveContainer>
             <ComposedChart data={chartData} margin={{ top: 10, right: 18, left: 4, bottom: 8 }}>
               <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -259,69 +249,6 @@ function buildChartData(
   });
 }
 
-function buildAnnualKey(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  return `${statement.period_end}|${statement.filing_type}`;
-}
-
-function coerceAnnualStatement(selectedFinancial: FinancialPayload | null, annualFinancials: FinancialPayload[]): FinancialPayload | null {
-  if (!selectedFinancial) {
-    return annualFinancials[0] ?? null;
-  }
-  if (ANNUAL_FORMS.has(selectedFinancial.filing_type)) {
-    return selectedFinancial;
-  }
-  const selectedYear = new Date(selectedFinancial.period_end).getUTCFullYear();
-  return annualFinancials.find((statement) => new Date(statement.period_end).getUTCFullYear() === selectedYear) ?? annualFinancials[0] ?? null;
-}
-
-function resolveComparisonStatement(
-  selectedAnnual: FinancialPayload | null,
-  comparisonFinancial: FinancialPayload | null,
-  annualFinancials: FinancialPayload[]
-): FinancialPayload | null {
-  if (!selectedAnnual) {
-    return null;
-  }
-  if (comparisonFinancial && ANNUAL_FORMS.has(comparisonFinancial.filing_type)) {
-    return comparisonFinancial;
-  }
-  const selectedIndex = annualFinancials.findIndex((statement) => buildAnnualKey(statement) === buildAnnualKey(selectedAnnual));
-  if (selectedIndex < 0) {
-    return annualFinancials[1] ?? null;
-  }
-  return annualFinancials[selectedIndex + 1] ?? null;
-}
-
-function annualTrendScope(
-  annualFinancials: FinancialPayload[],
-  visibleFinancials: FinancialPayload[],
-  selectedAnnual: FinancialPayload | null,
-  comparisonAnnual: FinancialPayload | null
-): FinancialPayload[] {
-  const pinnedYears = new Set<number>();
-  if (selectedAnnual) {
-    pinnedYears.add(new Date(selectedAnnual.period_end).getUTCFullYear());
-  }
-  if (comparisonAnnual) {
-    pinnedYears.add(new Date(comparisonAnnual.period_end).getUTCFullYear());
-  }
-
-  const visibleYears = new Set(
-    visibleFinancials
-      .map((statement) => new Date(statement.period_end).getUTCFullYear())
-      .filter((year) => Number.isFinite(year))
-  );
-
-  const scopedAnnuals = visibleYears.size
-    ? annualFinancials.filter((statement) => {
-        const year = new Date(statement.period_end).getUTCFullYear();
-        return visibleYears.has(year) || pinnedYears.has(year);
-      })
-    : annualFinancials;
-
-  return scopedAnnuals.length ? scopedAnnuals : annualFinancials;
-}
-
 function growthRate(current: number | null | undefined, previous: number | null | undefined): number | null {
   if (current === null || current === undefined || previous === null || previous === undefined || previous === 0) {
     return null;
@@ -345,53 +272,23 @@ function toGrowthPointDelta(current: number | null, previous: number | null): nu
   return delta == null ? null : delta * 100;
 }
 
-function formatAnnualLabel(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  return `${statement.filing_type} ${new Date(statement.period_end).getUTCFullYear()}`;
-}
-
 function buildWarnings({
-  selectedFinancial,
-  comparisonFinancial,
-  selectedAnnual,
-  comparisonAnnual,
+  chartState,
+  annualScope,
   trendPointCount,
-  metricLabel,
 }: {
-  selectedFinancial: FinancialPayload | null;
-  comparisonFinancial: FinancialPayload | null;
-  selectedAnnual: FinancialPayload | null;
-  comparisonAnnual: FinancialPayload | null;
+  chartState?: SharedFinancialChartState;
+  annualScope: ReturnType<typeof resolveAnnualFinancialScope>;
   trendPointCount: number;
-  metricLabel: string;
 }): SnapshotSurfaceWarning[] {
-  const warnings: SnapshotSurfaceWarning[] = [];
-
-  if (selectedFinancial && selectedAnnual && !ANNUAL_FORMS.has(selectedFinancial.filing_type)) {
-    warnings.push({
-      code: "selected_annual_fallback",
-      label: "Annual fallback applied",
-      detail: `The selected ${selectedFinancial.filing_type} filing is mapped to ${formatAnnualLabel(selectedAnnual)} so year-over-year growth stays comparable.`,
-      tone: "info",
-    });
-  }
-
-  if (comparisonFinancial && comparisonAnnual && !ANNUAL_FORMS.has(comparisonFinancial.filing_type)) {
-    warnings.push({
-      code: "comparison_annual_fallback",
-      label: "Comparison fallback applied",
-      detail: `The comparison ${comparisonFinancial.filing_type} filing is mapped to ${formatAnnualLabel(comparisonAnnual)} for a fiscal-year growth baseline.`,
-      tone: "info",
-    });
-  }
-
-  if (trendPointCount < 2) {
-    warnings.push({
-      code: "need_more_annual_history",
-      label: "Need more annual history",
-      detail: `${metricLabel} growth needs at least two annual filings in the current scope before the YoY line becomes meaningful.`,
-      tone: "warning",
-    });
-  }
-
-  return dedupeSnapshotSurfaceWarnings(warnings);
+  return dedupeSnapshotSurfaceWarnings(
+    buildAnnualSurfaceWarnings({
+      chartState,
+      scope: annualScope,
+      selectedFinancial: chartState?.selectedFinancial ?? null,
+      comparisonFinancial: chartState?.comparisonFinancial ?? null,
+      trendPointCount,
+      sparseHistoryDetail: "Only one comparable annual filing is visible, so the growth view falls back to the focused year snapshot.",
+    })
+  );
 }

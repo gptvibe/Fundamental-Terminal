@@ -2,14 +2,16 @@
 
 import * as React from "react";
 import { fireEvent, render, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompanySubnav } from "@/components/layout/company-subnav";
 
 const mockUsePathname = vi.fn();
+const mockPush = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
+  useRouter: () => ({ push: mockPush }),
 }));
 
 vi.mock("next/link", () => ({
@@ -17,6 +19,10 @@ vi.mock("next/link", () => ({
 }));
 
 describe("CompanySubnav", () => {
+  beforeEach(() => {
+    mockPush.mockReset();
+  });
+
   it("includes peers tab and marks it active on peers route", () => {
     mockUsePathname.mockReturnValue("/company/AAPL/peers");
 
@@ -45,9 +51,9 @@ describe("CompanySubnav", () => {
     expect(within(container).getByText("Core views")).toBeTruthy();
     expect(within(container).getByText("Research feeds")).toBeTruthy();
 
-    const overviewTab = within(container).getByRole("link", { name: "Overview" });
-    overviewTab.focus();
-    fireEvent.keyDown(overviewTab, { key: "ArrowRight" });
+    const briefTab = within(container).getByRole("link", { name: "Brief" });
+    briefTab.focus();
+    fireEvent.keyDown(briefTab, { key: "ArrowRight" });
 
     expect(document.activeElement?.textContent).toBe("Financials");
   });

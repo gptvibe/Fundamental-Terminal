@@ -95,7 +95,7 @@ describe("WatchlistPage", () => {
     });
 
     expect(screen.getByText(/Track gross margin trend and services mix/)).toBeTruthy();
-    expect(screen.getByText(/Latest alert:/)).toBeTruthy();
+    expect(screen.getByLabelText(/Alert summary for AAPL/i)).toBeTruthy();
     expect(screen.getByText(/Late filer notice/)).toBeTruthy();
   });
 

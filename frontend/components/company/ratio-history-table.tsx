@@ -4,10 +4,14 @@ import type { CSSProperties } from "react";
 import { useMemo } from "react";
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { buildAnnualKey, buildAnnualSurfaceWarnings, formatAnnualHeader, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
+import { showAppToast } from "@/lib/app-toast";
+import { buildPlainTextTable, copyTextToClipboard, exportRowsToCsv, normalizeExportFileStem, type ExportRow } from "@/lib/export";
+import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatPercent } from "@/lib/format";
+import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities } from "@/lib/snapshot-surface";
 import type { FinancialPayload } from "@/lib/types";
-
-const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
 type RatioMetricKey =
   | "grossMargin"
@@ -39,8 +43,13 @@ type RatioHistoryState = {
   comparison: FinancialPayload | null;
   selectedLabel: string;
   comparisonLabel: string | null;
-  usedAnnualFallback: boolean;
-  comparisonAnnualMissing: boolean;
+  annualScope: ReturnType<typeof resolveAnnualFinancialScope>;
+};
+
+const CAPABILITIES: SnapshotSurfaceCapabilities = {
+  supports_selected_period: true,
+  supports_compare_mode: true,
+  supports_trend_mode: true,
 };
 
 const RATIO_ROWS: RatioMetricConfig[] = [
@@ -126,37 +135,103 @@ const STICKY_COLUMN_STYLE: CSSProperties = {
 interface RatioHistoryTableProps {
   financials: FinancialPayload[];
   visibleFinancials?: FinancialPayload[];
+  chartState?: SharedFinancialChartState;
   selectedFinancial?: FinancialPayload | null;
   comparisonFinancial?: FinancialPayload | null;
   showContextChips?: boolean;
   showTableNote?: boolean;
+  ticker?: string;
 }
 
 export function RatioHistoryTable({
   financials,
   visibleFinancials = [],
+  chartState,
   selectedFinancial = null,
   comparisonFinancial = null,
   showContextChips = true,
   showTableNote = true,
+  ticker,
 }: RatioHistoryTableProps) {
+  const resolvedSelectedFinancial = chartState?.selectedFinancial ?? selectedFinancial;
+  const resolvedComparisonFinancial = chartState?.comparisonFinancial ?? comparisonFinancial;
   const state = useMemo(
-    () => buildRatioHistoryState(financials, visibleFinancials, selectedFinancial, comparisonFinancial),
-    [comparisonFinancial, financials, selectedFinancial, visibleFinancials]
+    () => buildRatioHistoryState(financials, visibleFinancials, resolvedSelectedFinancial, resolvedComparisonFinancial),
+    [financials, resolvedComparisonFinancial, resolvedSelectedFinancial, visibleFinancials]
   );
+  const warnings = useMemo(
+    () => {
+      if (!state) {
+        return [];
+      }
+
+      return dedupeSnapshotSurfaceWarnings(
+        buildAnnualSurfaceWarnings({
+          chartState,
+          scope: state.annualScope,
+          selectedFinancial: resolvedSelectedFinancial,
+          comparisonFinancial: resolvedComparisonFinancial,
+          trendPointCount: state.columns.length,
+          sparseHistoryDetail: "Only one comparable annual filing is visible, so the matrix is limited to a single fiscal-year column.",
+        })
+      );
+    },
+    [chartState, resolvedComparisonFinancial, resolvedSelectedFinancial, state]
+  );
+  const mode = resolveSnapshotSurfaceMode({
+    comparisonAvailable: state?.comparison !== null,
+    trendAvailable: (state?.columns.length ?? 0) > 1,
+    capabilities: CAPABILITIES,
+  });
 
   if (!state) {
     return <PanelEmptyState message="No annual filing history is available yet for multi-year ratio analysis." />;
   }
 
+  const exportStem = normalizeExportFileStem(ticker, "company");
+  const csvRows = buildRatioHistoryExportRows(state);
+  const plainTextPayload = buildRatioHistoryPlainText(state);
+
+  async function handleCopyTable() {
+    try {
+      await copyTextToClipboard(plainTextPayload);
+      showAppToast({ message: "Copied ratio history table.", tone: "info" });
+    } catch (error) {
+      showAppToast({
+        message: error instanceof Error ? error.message : "Unable to copy the ratio history table.",
+        tone: "danger",
+      });
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: 12 }}>
+      <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
+
+      <div className="financial-export-row">
+        <div className="company-data-table-note">Export the currently visible annual ratio matrix for the shared range selection.</div>
+        <div className="financial-export-actions">
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={() => exportRowsToCsv(`${exportStem}-ratio-history.csv`, csvRows)}
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={handleCopyTable}
+          >
+            Copy Table
+          </button>
+        </div>
+      </div>
+
       {showContextChips ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div className="financial-inline-pills">
           <span className="pill tone-cyan">Focus {state.selectedLabel}</span>
           {state.comparisonLabel ? <span className="pill tone-gold">Compare {state.comparisonLabel}</span> : null}
-          {state.usedAnnualFallback ? <span className="pill tone-gold">Annual fallback applied</span> : null}
-          {state.comparisonAnnualMissing ? <span className="pill tone-red">Comparison annual unavailable</span> : null}
           <span className="pill">Annual periods {state.columns.length}</span>
         </div>
       ) : null}
@@ -218,17 +293,20 @@ function buildRatioHistoryState(
   selectedFinancial: FinancialPayload | null,
   comparisonFinancial: FinancialPayload | null
 ): RatioHistoryState | null {
-  const annuals = [...financials]
-    .filter((statement) => ANNUAL_FORMS.has(statement.filing_type))
-    .sort((left, right) => Date.parse(right.period_end) - Date.parse(left.period_end));
-
-  const selected = coerceAnnualStatement(selectedFinancial, annuals);
+  const annualScope = resolveAnnualFinancialScope({
+    financials,
+    visibleFinancials,
+    selectedFinancial,
+    comparisonFinancial,
+  });
+  const annuals = annualScope.annuals;
+  const selected = annualScope.selectedAnnual;
   if (!selected) {
     return null;
   }
 
-  const comparison = resolveComparisonStatement(selected, comparisonFinancial, annuals);
-  const scopedAnnuals = annualTrendScope(annuals, visibleFinancials, selected, comparison);
+  const comparison = annualScope.comparisonAnnual;
+  const scopedAnnuals = annualScope.scopedAnnuals;
 
   return {
     annuals,
@@ -237,73 +315,8 @@ function buildRatioHistoryState(
     comparison,
     selectedLabel: formatAnnualHeader(selected),
     comparisonLabel: comparison ? formatAnnualHeader(comparison) : null,
-    usedAnnualFallback: Boolean(selectedFinancial && !ANNUAL_FORMS.has(selectedFinancial.filing_type)),
-    comparisonAnnualMissing: Boolean(comparisonFinancial && !comparison),
+    annualScope,
   };
-}
-
-function coerceAnnualStatement(selectedFinancial: FinancialPayload | null, annuals: FinancialPayload[]): FinancialPayload | null {
-  if (!selectedFinancial) {
-    return annuals[0] ?? null;
-  }
-  if (ANNUAL_FORMS.has(selectedFinancial.filing_type)) {
-    return selectedFinancial;
-  }
-  const selectedYear = new Date(selectedFinancial.period_end).getUTCFullYear();
-  return annuals.find((statement) => new Date(statement.period_end).getUTCFullYear() === selectedYear) ?? annuals[0] ?? null;
-}
-
-function resolveComparisonStatement(
-  selected: FinancialPayload | null,
-  comparisonFinancial: FinancialPayload | null,
-  annuals: FinancialPayload[]
-): FinancialPayload | null {
-  if (!selected) {
-    return null;
-  }
-  if (comparisonFinancial && ANNUAL_FORMS.has(comparisonFinancial.filing_type)) {
-    return comparisonFinancial;
-  }
-  const selectedIndex = annuals.findIndex((statement) => buildAnnualKey(statement) === buildAnnualKey(selected));
-  if (selectedIndex < 0) {
-    return annuals[1] ?? null;
-  }
-  return annuals[selectedIndex + 1] ?? null;
-}
-
-function annualTrendScope(
-  annuals: FinancialPayload[],
-  visibleFinancials: FinancialPayload[],
-  selected: FinancialPayload,
-  comparison: FinancialPayload | null
-): FinancialPayload[] {
-  const pinnedYears = new Set<number>([new Date(selected.period_end).getUTCFullYear()]);
-  if (comparison) {
-    pinnedYears.add(new Date(comparison.period_end).getUTCFullYear());
-  }
-
-  const visibleYears = new Set(
-    visibleFinancials
-      .map((statement) => new Date(statement.period_end).getUTCFullYear())
-      .filter((year) => Number.isFinite(year))
-  );
-
-  const scopedAnnuals = visibleYears.size
-    ? annuals.filter((statement) => {
-        const year = new Date(statement.period_end).getUTCFullYear();
-        return visibleYears.has(year) || pinnedYears.has(year);
-      })
-    : annuals;
-
-  if (scopedAnnuals.length) {
-    return scopedAnnuals;
-  }
-
-  const selectedIndex = annuals.findIndex((statement) => buildAnnualKey(statement) === buildAnnualKey(selected));
-  if (selectedIndex < 0) {
-    return annuals;
-  }
-  return annuals.slice(selectedIndex);
 }
 
 function previousAnnualMetric(
@@ -322,15 +335,6 @@ const nullStatement = {
   revenue: null,
   net_income: null,
 } as FinancialPayload;
-
-function buildAnnualKey(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  return `${statement.period_end}|${statement.filing_type}`;
-}
-
-function formatAnnualHeader(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  const year = new Date(statement.period_end).getUTCFullYear();
-  return `${statement.filing_type} ${Number.isFinite(year) ? year : statement.period_end}`;
-}
 
 function safeDivide(numerator: number | null, denominator: number | null): number | null {
   if (numerator === null || denominator === null || denominator === 0) {
@@ -451,4 +455,32 @@ function buildToneTitle(
     return `${label}: unchanged versus prior annual value (${formatValue(prior)})`;
   }
   return `${label}: ${tone === "positive" ? "improved" : "deteriorated"} versus prior annual value (${formatValue(prior)})`;
+}
+
+function buildRatioHistoryExportRows(state: RatioHistoryState): ExportRow[] {
+  return RATIO_ROWS.map((row) => {
+    const exportRow: ExportRow = { ratio: row.label };
+
+    for (const statement of state.columns) {
+      exportRow[formatAnnualHeader(statement)] = row.formatValue(row.getValue(statement, state.annuals));
+    }
+
+    return exportRow;
+  });
+}
+
+function buildRatioHistoryPlainText(state: RatioHistoryState): string {
+  const headers = ["Ratio", ...state.columns.map((statement) => formatAnnualHeader(statement))];
+  const rows = RATIO_ROWS.map((row) => [
+    row.label,
+    ...state.columns.map((statement) => row.formatValue(row.getValue(statement, state.annuals))),
+  ]);
+
+  return [
+    "Ratio History",
+    `Focus: ${state.selectedLabel}`,
+    `Compare: ${state.comparisonLabel ?? "Not selected"}`,
+    "",
+    buildPlainTextTable(headers, rows),
+  ].join("\n");
 }

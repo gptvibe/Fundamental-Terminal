@@ -4,12 +4,11 @@ import { useMemo, useState } from "react";
 
 import { HistoricalSparklineCard, type HistoricalSparklinePoint } from "@/components/company/historical-sparkline-card";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
-import { difference, formatSignedCompactDelta, formatSignedPointDelta } from "@/lib/financial-chart-state";
+import { buildAnnualKey, buildAnnualSurfaceWarnings, formatAnnualHeader, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
+import { difference, formatSignedCompactDelta, formatSignedPointDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import type { FinancialPayload } from "@/lib/types";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import { dedupeSnapshotSurfaceWarnings, type SnapshotSurfaceCapabilities, type SnapshotSurfaceMode, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
-
-const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const CAPABILITIES: SnapshotSurfaceCapabilities = {
   supports_selected_period: true,
   supports_compare_mode: true,
@@ -23,7 +22,7 @@ type QualitySummaryState = {
   comparisonLabel: string | null;
   annuals: FinancialPayload[];
   trendRows: TrendRow[];
-  usedAnnualFallback: boolean;
+  annualScope: ReturnType<typeof resolveAnnualFinancialScope>;
 };
 
 type TrendMetric = "grossMargin" | "operatingMargin" | "fcfMargin" | "debtToAssets" | "roa" | "roe" | "currentRatio";
@@ -50,6 +49,7 @@ type TrendMetricCard = {
 
 interface FinancialQualitySummaryProps {
   financials: FinancialPayload[];
+  chartState?: SharedFinancialChartState;
   selectedFinancial?: FinancialPayload | null;
   comparisonFinancial?: FinancialPayload | null;
   visibleFinancials?: FinancialPayload[];
@@ -57,12 +57,18 @@ interface FinancialQualitySummaryProps {
 
 export function FinancialQualitySummary({
   financials,
+  chartState,
   selectedFinancial = null,
   comparisonFinancial = null,
   visibleFinancials = [],
 }: FinancialQualitySummaryProps) {
   const [showTrend, setShowTrend] = useState(false);
-  const summary = useMemo(() => buildSummary(financials, visibleFinancials, selectedFinancial, comparisonFinancial), [comparisonFinancial, financials, selectedFinancial, visibleFinancials]);
+  const resolvedSelectedFinancial = chartState?.selectedFinancial ?? selectedFinancial;
+  const resolvedComparisonFinancial = chartState?.comparisonFinancial ?? comparisonFinancial;
+  const summary = useMemo(
+    () => buildSummary(financials, visibleFinancials, resolvedSelectedFinancial, resolvedComparisonFinancial),
+    [financials, resolvedComparisonFinancial, resolvedSelectedFinancial, visibleFinancials]
+  );
 
   if (!summary) {
     return (
@@ -74,7 +80,7 @@ export function FinancialQualitySummary({
     );
   }
 
-  const warnings = buildWarnings(summary, selectedFinancial, comparisonFinancial);
+  const warnings = buildWarnings(summary, chartState, resolvedSelectedFinancial, resolvedComparisonFinancial);
   const trendAvailable = summary.trendRows.length > 0;
   const mode: SnapshotSurfaceMode = showTrend && summary.trendRows.length > 1 ? "trend" : summary.comparison ? "compare" : "selected";
 
@@ -92,7 +98,7 @@ export function FinancialQualitySummary({
     <div style={{ display: "grid", gap: 14 }}>
       <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="financial-inline-pills">
         <span className="pill tone-cyan">Focus {summary.selectedLabel}</span>
         {summary.comparisonLabel ? <span className="pill tone-gold">Compare {summary.comparisonLabel}</span> : null}
       </div>
@@ -123,8 +129,8 @@ export function FinancialQualitySummary({
       ) : null}
 
       {trendAvailable ? (
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="financial-section-stack">
+          <div className="financial-toggle-row">
             <button
               type="button"
               className={`chart-chip chart-chip-toggle${showTrend ? " chart-chip-active" : ""}`}
@@ -137,7 +143,7 @@ export function FinancialQualitySummary({
           </div>
 
           {showTrend ? (
-            <div style={{ display: "grid", gap: 12 }}>
+            <div className="financial-section-stack">
               <div className="text-muted" style={{ fontSize: 12 }}>
                 Ratios are computed from annual filings inside the current shared range and stay null-safe for incomplete periods.
               </div>
@@ -177,27 +183,30 @@ function buildSummary(
   selectedFinancial: FinancialPayload | null,
   comparisonFinancial: FinancialPayload | null
 ): QualitySummaryState | null {
-  const annuals = financials
-    .filter((item) => ANNUAL_FORMS.has(item.filing_type))
-    .sort((left, right) => Date.parse(right.period_end) - Date.parse(left.period_end));
-
-  const selected = coerceAnnualStatement(selectedFinancial, annuals);
-  const previous = resolveComparisonStatement(selected, comparisonFinancial, annuals);
+  const annualScope = resolveAnnualFinancialScope({
+    financials,
+    visibleFinancials,
+    selectedFinancial,
+    comparisonFinancial,
+  });
+  const annuals = annualScope.annuals;
+  const selected = annualScope.selectedAnnual;
+  const previous = annualScope.comparisonAnnual;
   if (!selected) {
     return null;
   }
 
-  const trendScope = annualTrendScope(annuals, visibleFinancials, selected);
+  const trendScope = annualScope.scopedAnnuals;
 
   return {
     selected,
     comparison: previous,
-    selectedLabel: formatSummaryLabel(selected),
-    comparisonLabel: previous ? formatSummaryLabel(previous) : null,
+    selectedLabel: formatAnnualHeader(selected),
+    comparisonLabel: previous ? formatAnnualHeader(previous) : null,
     annuals,
     trendRows: trendScope.map((statement) => ({
       key: buildAnnualKey(statement),
-      label: formatSummaryLabel(statement),
+      label: formatAnnualHeader(statement),
       grossMargin: safeDivide(statement.gross_profit, statement.revenue),
       operatingMargin: safeDivide(statement.operating_income, statement.revenue),
       fcfMargin: safeDivide(statement.free_cash_flow, statement.revenue),
@@ -206,76 +215,8 @@ function buildSummary(
       roe: safeDivide(statement.net_income, statement.stockholders_equity),
       currentRatio: safeDivide(statement.current_assets, statement.current_liabilities),
     })),
-    usedAnnualFallback: Boolean(selectedFinancial && !ANNUAL_FORMS.has(selectedFinancial.filing_type)),
+    annualScope,
   };
-}
-
-function coerceAnnualStatement(
-  selectedFinancial: FinancialPayload | null,
-  annuals: FinancialPayload[]
-): FinancialPayload | null {
-  if (!selectedFinancial) {
-    return annuals[0] ?? null;
-  }
-  if (ANNUAL_FORMS.has(selectedFinancial.filing_type)) {
-    return selectedFinancial;
-  }
-  const selectedYear = new Date(selectedFinancial.period_end).getUTCFullYear();
-  return annuals.find((item) => new Date(item.period_end).getUTCFullYear() === selectedYear) ?? annuals[0] ?? null;
-}
-
-function resolveComparisonStatement(
-  selected: FinancialPayload | null,
-  comparisonFinancial: FinancialPayload | null,
-  annuals: FinancialPayload[]
-): FinancialPayload | null {
-  if (!selected) {
-    return null;
-  }
-  if (comparisonFinancial && ANNUAL_FORMS.has(comparisonFinancial.filing_type)) {
-    return comparisonFinancial;
-  }
-  const selectedKey = `${selected.period_end}|${selected.filing_type}`;
-  const selectedIndex = annuals.findIndex((item) => `${item.period_end}|${item.filing_type}` === selectedKey);
-  if (selectedIndex < 0) {
-    return annuals[1] ?? null;
-  }
-  return annuals[selectedIndex + 1] ?? null;
-}
-
-function annualTrendScope(
-  annuals: FinancialPayload[],
-  visibleFinancials: FinancialPayload[],
-  selected: FinancialPayload
-): FinancialPayload[] {
-  const visibleYears = new Set(
-    visibleFinancials
-      .map((statement) => new Date(statement.period_end).getUTCFullYear())
-      .filter((year) => Number.isFinite(year))
-  );
-
-  const scopedAnnuals = visibleYears.size
-    ? annuals.filter((statement) => visibleYears.has(new Date(statement.period_end).getUTCFullYear()))
-    : annuals;
-
-  if (scopedAnnuals.length) {
-    return scopedAnnuals;
-  }
-
-  const selectedIndex = annuals.findIndex((statement) => buildAnnualKey(statement) === buildAnnualKey(selected));
-  if (selectedIndex < 0) {
-    return annuals;
-  }
-  return annuals.slice(selectedIndex);
-}
-
-function formatSummaryLabel(statement: FinancialPayload): string {
-  const year = new Date(statement.period_end).getUTCFullYear();
-  return Number.isFinite(year) ? `${statement.filing_type} ${year}` : `${statement.filing_type} ${statement.period_end}`;
-}
-
-function buildAnnualKey(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  return `${statement.period_end}|${statement.filing_type}`;
 }
 
 function metricValue(summary: FinancialPayload | null, metric: TrendMetric): number | null {
@@ -309,35 +250,20 @@ function metricDelta(selected: FinancialPayload | null, comparison: FinancialPay
 
 function buildWarnings(
   summary: QualitySummaryState,
+  chartState: SharedFinancialChartState | undefined,
   selectedFinancial: FinancialPayload | null,
   comparisonFinancial: FinancialPayload | null
 ): SnapshotSurfaceWarning[] {
-  const warnings: SnapshotSurfaceWarning[] = [];
-  if (summary.usedAnnualFallback && selectedFinancial) {
-    warnings.push({
-      code: "annual_only_fallback",
-      label: "Annual fallback applied",
-      detail: `Quality summary uses the annual filing for ${new Date(selectedFinancial.period_end).getUTCFullYear()} because these metrics are normalized on annual statements.`,
-      tone: "info",
-    });
-  }
-  if (comparisonFinancial && !summary.comparison) {
-    warnings.push({
-      code: "comparison_annual_missing",
-      label: "Comparison annual unavailable",
-      detail: "The selected comparison period does not have a comparable annual filing in the current history window.",
-      tone: "warning",
-    });
-  }
-  if (summary.trendRows.length < 2) {
-    warnings.push({
-      code: "quality_trend_sparse",
-      label: "Sparse annual history",
-      detail: "Only one comparable annual filing is visible, so the trend view is limited to the selected year.",
-      tone: "info",
-    });
-  }
-  return dedupeSnapshotSurfaceWarnings(warnings);
+  return dedupeSnapshotSurfaceWarnings(
+    buildAnnualSurfaceWarnings({
+      chartState,
+      scope: summary.annualScope,
+      selectedFinancial,
+      comparisonFinancial,
+      trendPointCount: summary.trendRows.length,
+      sparseHistoryDetail: "Only one comparable annual filing is visible, so the trend view is limited to the selected year.",
+    })
+  );
 }
 
 function safeDivide(numerator: number | null, denominator: number | null): number | null {

@@ -72,11 +72,11 @@ describe("InvestmentSummaryPanel", () => {
       })
     );
 
-    expect(screen.getByText("Valuation Range / Share")).toBeTruthy();
-    expect(screen.getByText("Valuation Midpoint")).toBeTruthy();
-    expect(screen.getByText("Latest Price")).toBeTruthy();
-    expect(screen.getByText("Gap vs Midpoint")).toBeTruthy();
-    expect(screen.getByText("Net Debt")).toBeTruthy();
+    expect(screen.getByText(/^Valuation range \/ share$/i)).toBeTruthy();
+    expect(screen.getByText(/^Valuation midpoint$/i)).toBeTruthy();
+    expect(screen.getByText(/^Latest price$/i)).toBeTruthy();
+    expect(screen.getByText(/^Gap vs midpoint$/i)).toBeTruthy();
+    expect(screen.getByText(/^Net debt$/i)).toBeTruthy();
     expect(screen.getByText("15.00%")).toBeTruthy();
     expect(screen.getByText("$110.00 - $120.00")).toBeTruthy();
   });
@@ -102,7 +102,7 @@ describe("InvestmentSummaryPanel", () => {
     );
 
     expect(screen.getByText("Valuation state unsupported")).toBeTruthy();
-    expect(screen.getByText(/unsupported for this company classification/i)).toBeTruthy();
+    expect(screen.getAllByText(/unsupported for this company classification/i)).toHaveLength(2);
   });
 });
 

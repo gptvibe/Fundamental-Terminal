@@ -65,8 +65,8 @@ export function OperatingCostStructureChart({ financials, chartState }: Operatin
     }
   }, [annualStatements.length, periodView, quarterlyStatements.length, useSharedState]);
 
-  const activeCadence: "annual" | "quarterly" | "ttm" = useSharedState
-    ? chartState?.cadence ?? "annual"
+  const activeCadence: "annual" | "quarterly" | "ttm" | "reported" = useSharedState
+    ? chartState?.effectiveCadence ?? chartState?.cadence ?? "annual"
     : periodView;
   const source = useSharedState ? financials : periodView === "annual" ? annualStatements : quarterlyStatements;
   const data = useMemo(() => buildOperatingCostSeries(source, activeCadence), [activeCadence, source]);

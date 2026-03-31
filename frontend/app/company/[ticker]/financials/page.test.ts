@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CompanyFinancialsTabPage from "@/app/company/[ticker]/financials/page";
 
 const workspaceFixture = vi.hoisted(() => ({ current: null as any }));
+const financialSurfaceFixture = vi.hoisted(() => ({
+  business: null as any,
+  growth: null as any,
+  quality: null as any,
+  ratio: null as any,
+  comparison: null as any,
+  balance: null as any,
+}));
 const navigationFixture = vi.hoisted(() => ({
   pathname: "/company/acme/financials",
   searchParams: new URLSearchParams(),
@@ -238,11 +246,110 @@ vi.mock("@/components/company/capital-structure-intelligence-panel", () => ({
   CapitalStructureIntelligencePanel: () => React.createElement("div", null, "capital-structure-panel"),
 }));
 
+vi.mock("@/components/charts/business-segment-breakdown", () => ({
+  BusinessSegmentBreakdown: (props: any) => {
+    financialSurfaceFixture.business = props;
+    return React.createElement("div", { "data-testid": "business-segment-breakdown" }, `business:${props.financials.length}:${props.chartState?.visiblePeriodCount}`);
+  },
+}));
+
+vi.mock("@/components/charts/growth-waterfall-chart", () => ({
+  GrowthWaterfallChart: (props: any) => {
+    financialSurfaceFixture.growth = props;
+    return React.createElement("div", { "data-testid": "growth-waterfall-chart" }, `growth:${props.visibleFinancials?.length ?? 0}:${props.chartState?.visiblePeriodCount}`);
+  },
+}));
+
+vi.mock("@/components/company/financial-quality-summary", () => ({
+  FinancialQualitySummary: (props: any) => {
+    financialSurfaceFixture.quality = props;
+    return React.createElement("div", { "data-testid": "financial-quality-summary" }, `quality:${props.visibleFinancials?.length ?? 0}:${props.chartState?.visiblePeriodCount}`);
+  },
+}));
+
+vi.mock("@/components/company/ratio-history-table", () => ({
+  RatioHistoryTable: (props: any) => {
+    financialSurfaceFixture.ratio = props;
+    return React.createElement("div", { "data-testid": "ratio-history-table" }, `ratio:${props.visibleFinancials?.length ?? 0}:${props.chartState?.visiblePeriodCount}`);
+  },
+}));
+
+vi.mock("@/components/company/financial-comparison-panel", () => ({
+  FinancialComparisonPanel: (props: any) => {
+    financialSurfaceFixture.comparison = props;
+    return React.createElement("div", { "data-testid": "financial-comparison-panel" }, `comparison:${props.visibleFinancials?.length ?? 0}:${props.chartState?.visiblePeriodCount}`);
+  },
+}));
+
+vi.mock("@/components/charts/balance-sheet-chart", () => ({
+  BalanceSheetChart: (props: any) => {
+    financialSurfaceFixture.balance = props;
+    return React.createElement("div", { "data-testid": "balance-sheet-chart" }, `balance:${props.financials?.length ?? 0}:${props.chartState?.visiblePeriodCount}`);
+  },
+}));
+
+function makeFinancial(periodEnd: string, filingType = "10-K") {
+  return {
+    filing_type: filingType,
+    statement_type: "canonical_xbrl",
+    period_start: `${periodEnd.slice(0, 4)}-01-01`,
+    period_end: periodEnd,
+    source: "https://data.sec.gov/api/xbrl/companyfacts/CIK0000001.json",
+    last_updated: "2026-03-22T00:00:00Z",
+    last_checked: "2026-03-22T00:00:00Z",
+    revenue: 1_000_000_000,
+    gross_profit: 500_000_000,
+    operating_income: 300_000_000,
+    net_income: 200_000_000,
+    total_assets: 2_000_000_000,
+    current_assets: 600_000_000,
+    total_liabilities: 900_000_000,
+    current_liabilities: 300_000_000,
+    retained_earnings: 400_000_000,
+    sga: 100_000_000,
+    research_and_development: 50_000_000,
+    interest_expense: 20_000_000,
+    income_tax_expense: 40_000_000,
+    inventory: 80_000_000,
+    cash_and_cash_equivalents: 120_000_000,
+    short_term_investments: 20_000_000,
+    cash_and_short_term_investments: 140_000_000,
+    accounts_receivable: 110_000_000,
+    accounts_payable: 70_000_000,
+    goodwill_and_intangibles: 150_000_000,
+    current_debt: 30_000_000,
+    long_term_debt: 250_000_000,
+    stockholders_equity: 1_100_000_000,
+    lease_liabilities: 40_000_000,
+    operating_cash_flow: 260_000_000,
+    depreciation_and_amortization: 60_000_000,
+    capex: 80_000_000,
+    acquisitions: 0,
+    debt_changes: 0,
+    dividends: 0,
+    share_buybacks: 0,
+    free_cash_flow: 180_000_000,
+    eps: 2.1,
+    shares_outstanding: 100_000_000,
+    stock_based_compensation: 25_000_000,
+    weighted_average_diluted_shares: 100_000_000,
+    segment_breakdown: [],
+    regulated_bank: null,
+    reconciliation: null,
+  };
+}
+
 describe("CompanyFinancialsTabPage", () => {
   beforeEach(() => {
     workspaceFixture.current = makeWorkspaceFixture();
     navigationFixture.searchParams = new URLSearchParams();
     navigationFixture.replace.mockReset();
+    financialSurfaceFixture.business = null;
+    financialSurfaceFixture.growth = null;
+    financialSurfaceFixture.quality = null;
+    financialSurfaceFixture.ratio = null;
+    financialSurfaceFixture.comparison = null;
+    financialSurfaceFixture.balance = null;
   });
 
   it("renders registry-backed source freshness metadata for financials", () => {
@@ -254,10 +361,6 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getByText("Financial Quality")).toBeTruthy();
     expect(screen.getByText("Ratio History")).toBeTruthy();
     expect(screen.getByText("Annual Financial Comparison")).toBeTruthy();
-    expect(screen.getAllByText("Point-in-Time Composition").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Period Comparison").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Historical Trends").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Annual only").length).toBe(2);
     expect(screen.getByText("Statement Reconciliation")).toBeTruthy();
     expect(screen.getByText(/RevenueFromContractWithCustomerExcludingAssessedTax/i)).toBeTruthy();
     expect(screen.getByText("revenue_reconciliation_disagreement")).toBeTruthy();
@@ -332,5 +435,43 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getByText("FDIC / FR Y-9C + SEC")).toBeTruthy();
     expect(screen.getAllByText("3.80%").length).toBeGreaterThan(0);
     expect(screen.queryByText("Capital Structure Intelligence")).toBeNull();
+  });
+
+  it("keeps range and selected/comparison state synchronized across financial charts and tables", async () => {
+    const annual2025 = makeFinancial("2025-12-31");
+    const annual2024 = makeFinancial("2024-12-31");
+    const annual2023 = makeFinancial("2023-12-31");
+    const annual2022 = makeFinancial("2022-12-31");
+
+    workspaceFixture.current.financials = [annual2025, annual2024, annual2023, annual2022];
+    workspaceFixture.current.annualStatements = [annual2025, annual2024, annual2023, annual2022];
+    workspaceFixture.current.latestFinancial = annual2025;
+    workspaceFixture.current.data.financials = [annual2025, annual2024, annual2023, annual2022];
+    navigationFixture.searchParams = new URLSearchParams(
+      `fin_range=3Y&fin_compare=custom&fin_period=${encodeURIComponent("2024-12-31|10-K")}&fin_compare_period=${encodeURIComponent("2023-12-31|10-K")}`
+    );
+
+    render(React.createElement(CompanyFinancialsTabPage));
+
+    await waitFor(() => expect(financialSurfaceFixture.business).toBeTruthy());
+
+    expect(financialSurfaceFixture.business.financials).toHaveLength(3);
+    expect(financialSurfaceFixture.growth.visibleFinancials).toHaveLength(3);
+    expect(financialSurfaceFixture.quality.visibleFinancials).toHaveLength(3);
+    expect(financialSurfaceFixture.ratio.visibleFinancials).toHaveLength(3);
+    expect(financialSurfaceFixture.comparison.visibleFinancials).toHaveLength(3);
+    expect(financialSurfaceFixture.balance.financials).toHaveLength(3);
+
+    expect(financialSurfaceFixture.business.chartState.visiblePeriodCount).toBe(3);
+    expect(financialSurfaceFixture.growth.chartState.visiblePeriodCount).toBe(3);
+    expect(financialSurfaceFixture.quality.chartState.visiblePeriodCount).toBe(3);
+    expect(financialSurfaceFixture.ratio.chartState.visiblePeriodCount).toBe(3);
+    expect(financialSurfaceFixture.comparison.chartState.visiblePeriodCount).toBe(3);
+    expect(financialSurfaceFixture.balance.chartState.visiblePeriodCount).toBe(3);
+
+    expect(financialSurfaceFixture.growth.chartState.selectedPeriodLabel).toBe("10-K Dec 31, 2024");
+    expect(financialSurfaceFixture.ratio.chartState.selectedPeriodLabel).toBe("10-K Dec 31, 2024");
+    expect(financialSurfaceFixture.comparison.chartState.comparisonPeriodLabel).toBe("10-K Dec 31, 2023");
+    expect(financialSurfaceFixture.business.chartState.comparisonPeriodLabel).toBe("10-K Dec 31, 2023");
   });
 });

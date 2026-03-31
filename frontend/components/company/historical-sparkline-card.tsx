@@ -36,13 +36,13 @@ export function HistoricalSparklineCard({
 
   return (
     <div className="metric-card" style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
-        <div style={{ display: "grid", gap: 4 }}>
+      <div className="historical-sparkline-card-header">
+        <div className="historical-sparkline-card-heading">
           <div className="metric-label">{label}</div>
           <div className="metric-value">{value}</div>
         </div>
         {delta ? (
-          <div className="text-muted" style={{ fontSize: 12, textAlign: "right", whiteSpace: "nowrap" }}>
+          <div className="text-muted historical-sparkline-card-delta">
             {delta}
           </div>
         ) : null}

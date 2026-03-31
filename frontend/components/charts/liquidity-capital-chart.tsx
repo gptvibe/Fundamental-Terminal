@@ -51,7 +51,7 @@ export function LiquidityCapitalChart({ financials, chartState }: LiquidityCapit
     () => selectLiquidityStatements(financials, !chartState),
     [chartState, financials]
   );
-  const data = useMemo(() => buildLiquiditySeries(statements, chartState?.cadence), [chartState?.cadence, statements]);
+  const data = useMemo(() => buildLiquiditySeries(statements, chartState?.effectiveCadence ?? chartState?.cadence), [chartState?.cadence, chartState?.effectiveCadence, statements]);
   const focusPoint = useMemo(() => findPointForStatement(data, selectedFinancial), [data, selectedFinancial]);
   const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);
   const latest = data.length ? data[data.length - 1] : null;
@@ -211,7 +211,7 @@ function selectLiquidityStatements(financials: FinancialPayload[], preferAnnual:
 
 function buildLiquiditySeries(
   statements: LiquidityStatement[],
-  cadence?: "annual" | "quarterly" | "ttm"
+  cadence?: "annual" | "quarterly" | "ttm" | "reported"
 ): LiquidityDatum[] {
   return [...statements]
     .sort((left, right) => Date.parse(left.period_end) - Date.parse(right.period_end))

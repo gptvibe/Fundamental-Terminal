@@ -39,7 +39,7 @@ function pct(num: number | null, denom: number | null): number | null {
   return Math.round((num / denom) * 10000) / 100; // two-decimal percent
 }
 
-function buildMarginSeries(statements: FinancialPayload[], cadence: "annual" | "quarterly" | "ttm"): MarginDatum[] {
+function buildMarginSeries(statements: FinancialPayload[], cadence: "annual" | "quarterly" | "ttm" | "reported"): MarginDatum[] {
   return [...statements]
     .sort((a, b) => a.period_end.localeCompare(b.period_end))
     .map((s) => ({
@@ -86,8 +86,8 @@ export function MarginTrendChart({ financials, chartState }: MarginTrendChartPro
     if (quarterlyStatements.length > 0) setPeriodView("quarterly");
   }, [annualStatements.length, periodView, quarterlyStatements.length, useSharedState]);
 
-  const activeCadence: "annual" | "quarterly" | "ttm" = useSharedState
-    ? chartState?.cadence ?? "annual"
+  const activeCadence: "annual" | "quarterly" | "ttm" | "reported" = useSharedState
+    ? chartState?.effectiveCadence ?? chartState?.cadence ?? "annual"
     : periodView;
   const source = useSharedState ? financials : periodView === "annual" ? annualStatements : quarterlyStatements;
   const data = useMemo(() => buildMarginSeries(source, activeCadence), [activeCadence, source]);

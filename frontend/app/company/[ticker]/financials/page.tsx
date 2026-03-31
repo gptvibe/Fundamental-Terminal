@@ -20,6 +20,7 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { StatusPill } from "@/components/ui/status-pill";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { usePeriodSelection } from "@/hooks/use-period-selection";
+import { resolveFilingChartCadence } from "@/lib/annual-financial-scope";
 import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 
@@ -117,15 +118,20 @@ export default function CompanyFinancialsTabPage() {
   const sharedChartState = useMemo<SharedFinancialChartState>(
     () => ({
       cadence: periodSelection.cadence,
+      effectiveCadence: resolveFilingChartCadence(periodSelection.cadence, periodSelection.effectiveStatementCadence),
+      requestedCadence: periodSelection.cadence,
       visiblePeriodCount: pageFinancials.length,
       selectedFinancial: activeFinancial,
       comparisonFinancial,
       selectedPeriodLabel: periodSelection.selectedPeriodLabel,
       comparisonPeriodLabel: periodSelection.comparisonPeriodLabel,
+      cadenceNote: periodSelection.cadenceNote,
     }),
     [
       activeFinancial,
       comparisonFinancial,
+      periodSelection.cadenceNote,
+      periodSelection.effectiveStatementCadence,
       pageFinancials.length,
       periodSelection.cadence,
       periodSelection.comparisonPeriodLabel,
@@ -383,8 +389,7 @@ export default function CompanyFinancialsTabPage() {
                   <FinancialQualitySummary
                     financials={financials}
                     visibleFinancials={pageFinancials}
-                    selectedFinancial={activeFinancial}
-                    comparisonFinancial={comparisonFinancial}
+                    chartState={sharedChartState}
                   />
                 </div>
 
@@ -399,10 +404,10 @@ export default function CompanyFinancialsTabPage() {
                   <RatioHistoryTable
                     financials={financials}
                     visibleFinancials={pageFinancials}
-                    selectedFinancial={activeFinancial}
-                    comparisonFinancial={comparisonFinancial}
+                    chartState={sharedChartState}
                     showContextChips={false}
                     showTableNote={false}
+                    ticker={ticker}
                   />
                 </div>
               </div>
@@ -412,8 +417,8 @@ export default function CompanyFinancialsTabPage() {
               <FinancialComparisonPanel
                 financials={financials}
                 visibleFinancials={pageFinancials}
-                selectedFinancial={activeFinancial}
-                comparisonFinancial={comparisonFinancial}
+                chartState={sharedChartState}
+                ticker={ticker}
               />
             </Panel>
 

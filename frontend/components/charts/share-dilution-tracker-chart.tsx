@@ -25,7 +25,7 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
     () => history.map((statement, index) => {
       const previous = history[index - 1] ?? null;
       return {
-        period: formatStatementAxisLabel(statement, chartState?.cadence),
+        period: formatStatementAxisLabel(statement, chartState?.effectiveCadence ?? chartState?.cadence),
         periodEnd: statement.period_end,
         filingType: statement.filing_type,
         shares: statement.shares_outstanding,
@@ -34,7 +34,7 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
         dividends: statement.dividends,
       };
     }),
-    [chartState?.cadence, history]
+    [chartState?.cadence, chartState?.effectiveCadence, history]
   );
   const focusPoint = useMemo(() => findPointForStatement(data, selectedFinancial), [data, selectedFinancial]);
   const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);

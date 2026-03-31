@@ -118,11 +118,14 @@ describe("GrowthWaterfallChart", () => {
         visibleFinancials: [annual2025, annual2024, annual2023],
         chartState: {
           cadence: "quarterly",
+          effectiveCadence: "annual",
+          requestedCadence: "quarterly",
           visiblePeriodCount: 3,
           selectedFinancial: quarterly2025,
           comparisonFinancial: annual2024,
           selectedPeriodLabel: "10-Q Dec 31, 2025",
           comparisonPeriodLabel: "10-K Dec 31, 2024",
+          cadenceNote: "Quarterly selection is unavailable for this issuer's cached statements, so filing-based panels fall back to annual history.",
         },
       })
     );
@@ -131,8 +134,8 @@ describe("GrowthWaterfallChart", () => {
     expect(screen.getByText("supports_compare_mode")).toBeTruthy();
     expect(screen.getByText("supports_trend_mode")).toBeTruthy();
     expect(screen.getByText(/Annual fallback applied/i)).toBeTruthy();
-    expect(screen.getByText(/Focus 10-K 2025/i)).toBeTruthy();
-    expect(screen.getByText(/Compare 10-K 2024/i)).toBeTruthy();
+    expect(screen.getByText(/Focus 10-K Dec 31, 2025/i)).toBeTruthy();
+    expect(screen.getByText(/Compare 10-K Dec 31, 2024/i)).toBeTruthy();
     expect(screen.getByText("Visible annual periods 3")).toBeTruthy();
     expect(screen.getByText("Metric Revenue")).toBeTruthy();
 

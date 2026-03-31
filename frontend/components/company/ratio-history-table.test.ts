@@ -148,4 +148,78 @@ describe("RatioHistoryTable", () => {
     expect(improvedDebtCell?.textContent).toBe("41.82%");
     expect(unavailableCurrentRatioCell?.textContent).toBe("—");
   });
+
+  it("maps quarterly selections into annual ratio math and keeps the visible annual range", () => {
+    const annual2025 = makeFinancial({
+      period_end: "2025-12-31",
+      revenue: 1200,
+      gross_profit: 600,
+      operating_income: 330,
+      net_income: 210,
+      free_cash_flow: 240,
+      total_assets: 2400,
+      total_liabilities: 900,
+      stockholders_equity: 1500,
+      current_assets: 680,
+      current_liabilities: 340,
+    });
+    const annual2024 = makeFinancial({
+      period_end: "2024-12-31",
+      revenue: 1000,
+      gross_profit: 470,
+      operating_income: 240,
+      net_income: 180,
+      free_cash_flow: 180,
+      total_assets: 2200,
+      total_liabilities: 920,
+      stockholders_equity: 1280,
+      current_assets: 620,
+      current_liabilities: 310,
+    });
+    const annual2023 = makeFinancial({
+      period_end: "2023-12-31",
+      revenue: 920,
+      gross_profit: 400,
+      operating_income: 210,
+      net_income: 160,
+      free_cash_flow: 140,
+      total_assets: 2100,
+      total_liabilities: 980,
+      stockholders_equity: 1120,
+      current_assets: 570,
+      current_liabilities: 300,
+    });
+    const quarterly2025 = makeFinancial({
+      filing_type: "10-Q",
+      period_start: "2025-10-01",
+      period_end: "2025-12-31",
+      revenue: 320,
+    });
+    const quarterly2024 = makeFinancial({
+      filing_type: "10-Q",
+      period_start: "2024-10-01",
+      period_end: "2024-12-31",
+      revenue: 280,
+    });
+
+    const { container } = render(
+      React.createElement(RatioHistoryTable, {
+        financials: [annual2025, annual2024, annual2023, quarterly2025, quarterly2024],
+        visibleFinancials: [annual2025, annual2024, annual2023],
+        selectedFinancial: quarterly2025,
+        comparisonFinancial: quarterly2024,
+      })
+    );
+
+    expect(screen.getByText(/Annual fallback applied/i)).toBeTruthy();
+    expect(screen.getByText(/Comparison mapped to fiscal year/i)).toBeTruthy();
+
+    const debtToAssets2025Cell = container.querySelector('[data-ratio-key="debtToAssets"] [data-period-key="2025-12-31|10-K"]');
+    const currentRatio2025Cell = container.querySelector('[data-ratio-key="currentRatio"] [data-period-key="2025-12-31|10-K"]');
+    const revenueGrowth2025Cell = container.querySelector('[data-ratio-key="revenueGrowth"] [data-period-key="2025-12-31|10-K"]');
+
+    expect(debtToAssets2025Cell?.textContent).toBe("37.50%");
+    expect(currentRatio2025Cell?.textContent).toBe("2.00x");
+    expect(revenueGrowth2025Cell?.textContent).toBe("20.00%");
+  });
 });

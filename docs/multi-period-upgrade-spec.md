@@ -2,262 +2,189 @@
 
 ## Status
 
-Audit-only document. No product behavior changes are included here.
+Implemented on the dedicated financials workspace.
 
-## Goal
+The financials page now uses a shared period-selection model so charts and tables react to the same cadence, visible range, focused period, and comparison period. The upgrade reuses existing statement, metrics, and capital-structure history where possible and adds one backend segment-history path where the existing pairwise payload was too narrow.
 
-Upgrade the dedicated financials surface from a mix of snapshot panels and partial trend panels into a consistent multi-period workspace without adding new product behavior yet and without introducing new public endpoints unless reuse clearly fails.
+## Delivered Scope
 
-The working assumption for implementation is:
+The upgrade standardizes three ideas across the financials page:
 
-- reuse existing history-capable backend endpoints first
-- keep bank-mode and regulated-entity behavior intact
-- distinguish true SEC disclosure sparsity from frontend presentation limits
+- one shared selection model for cadence, range, focus, and comparison
+- explicit requested-versus-effective cadence so annual-only surfaces can explain fallbacks instead of silently changing behavior
+- consistent handling of sparse or non-comparable SEC disclosures, especially for segment history
 
-## Current Reusable History Endpoints
+Implemented frontend pieces:
 
-These are the existing backend routes that already expose reusable historical or periodized financial data.
+- `frontend/hooks/use-period-selection.ts` drives URL-backed shared state for cadence, range, compare mode, focused period, comparison period, and derived visibility limits
+- `frontend/lib/financial-chart-state.ts` passes a normalized chart-state contract into filing-based charts and annual-only panels
+- `frontend/lib/annual-financial-scope.ts` centralizes annual fallback, annual-range resolution, annual comparison mapping, and warning generation for annual-only surfaces
+- `frontend/app/company/[ticker]/financials/page.tsx` builds one `sharedChartState` object and passes it through to charts and tables that need synchronized behavior
 
-| Route | Current support | Why it matters for the upgrade | Recommendation |
-|-------|-----------------|--------------------------------|----------------|
-| `GET /api/companies/{ticker}/financials` | Full normalized statement history in descending period order, plus `price_history`, `segment_analysis`, provenance, diagnostics, and `as_of` point-in-time filtering | This is the main reusable statement-history endpoint for the dedicated financials page | Primary source of truth for raw annual and quarterly statement history |
-| `GET /api/companies/{ticker}/capital-structure` | Persisted `latest` plus `history[]`, supports `max_periods` and `as_of` | Already covers multi-period debt, payout, and dilution history | Reuse as-is for capital-structure panels |
-| `GET /api/companies/{ticker}/metrics-timeseries` | Multi-period derived series with `cadence=quarterly|annual|ttm`, `max_points`, `as_of` | Already solves quarterly, annual, and TTM time-series needs for derived metrics | Reuse as-is for TTM-aware charts and selectors |
-| `GET /api/companies/{ticker}/metrics` | Periodized derived metrics with `period_type=quarterly|annual|ttm`, `max_periods`, `as_of` | Better source than raw statements when the UI needs TTM or normalized derived values per period | Reuse before considering any new TTM route |
-| `GET /api/companies/{ticker}/metrics/summary` | Summary for latest selected `period_type`, supports `as_of` | Useful for snapshot cards but not a full history source | Keep as summary-only; not enough for the core multi-period upgrade by itself |
-| `GET /api/companies/{ticker}/financial-history` | Raw SEC companyfacts payload keyed by ticker or CIK | Already exists for long-run annual history, but the current frontend parser narrows it to 10 annual fiscal years and four metrics | Reuse only for a separate long-horizon annual history module |
-| `GET /api/companies/{ticker}/financial-restatements` | Historical restatement list with `as_of` filtering | Useful for multi-period audit context and confidence signaling | Optional supporting history surface |
-| `GET /api/companies/{ticker}/changes-since-last-filing` | Latest-vs-previous comparable filing pair, supports `as_of` | Helpful comparison endpoint, but intentionally pairwise rather than full-history | Do not use as the main multi-period source |
-| `GET /api/companies/{ticker}/filing-insights` | Recent filing-parser-derived statement rows, limited set | Supplemental recent filing context | Not the main source for a multi-period financial workspace |
+Implemented annual-only or annual-preferred surfaces now using the shared model:
 
-### Route Registration Note
+- `frontend/components/company/financial-comparison-panel.tsx`
+- `frontend/components/company/ratio-history-table.tsx`
+- `frontend/components/company/financial-quality-summary.tsx`
+- `frontend/components/charts/growth-waterfall-chart.tsx`
 
-Financial routes are registered in `app/api/routers/financials.py`, including `capital-structure`, `metrics-timeseries`, `metrics`, `metrics/summary`, `financial-history`, and `financial-restatements`.
+Implemented filing-history surfaces now respecting effective cadence and shared visible ranges:
 
-This matters because the repo already has a clean financials router surface. The upgrade does not need a new public route in its first pass.
+- `frontend/components/charts/balance-sheet-chart.tsx`
+- `frontend/components/charts/liquidity-capital-chart.tsx`
+- `frontend/components/charts/share-dilution-tracker-chart.tsx`
+- `frontend/components/charts/margin-trend-chart.tsx`
+- `frontend/components/charts/operating-cost-structure-chart.tsx`
+- `frontend/components/charts/cash-flow-waterfall-chart.tsx`
 
-## Current Reusable Service Layer
+Implemented segment upgrade:
 
-These existing service functions already support historical retrieval or history-aware filtering.
+- `frontend/components/charts/business-segment-breakdown.tsx` now follows shared period state, removes internal period caps, and warns when the requested cadence or comparison cannot be supported by comparable disclosures
 
-| File | Service | Current behavior |
-|------|---------|------------------|
-| `app/services/cache_queries.py` | `get_company_financials` | Returns full canonical SEC statement history ordered by `period_end desc` |
-| `app/services/cache_queries.py` | `get_company_regulated_bank_financials` | Returns full regulated-bank statement history ordered by `period_end desc` |
-| `app/services/cache_queries.py` | `select_point_in_time_financials` | Applies `as_of` visibility rules and deduplicates visible statement versions |
-| `app/services/cache_queries.py` | `get_company_derived_metric_points` | Returns multi-period derived metric rows for selected `period_type` |
-| `app/services/cache_queries.py` | `get_company_capital_structure_snapshots` | Returns historical capital-structure snapshots |
-| `app/services/sec_edgar.py` | Canonical statement normalization pipeline | Refreshes and normalizes multi-form SEC statement history across `10-K`, `10-Q`, `20-F`, `40-F`, and `6-K` |
-| `app/services/sec_edgar.py` | Segment extraction and backfill | Populates `segment_breakdown` from companyfacts and filing HTML for a limited recent statement set |
-| `app/services/segment_analysis.py` | `build_segment_analysis` | Builds a latest-vs-previous segment lens from the cached history |
-| `app/services/regulated_financials.py` | `select_preferred_financials` | Swaps SEC statement history for regulated-bank history when a regulated entity has bank data |
+## What Reuses Existing History
 
-## Existing Financial History Behavior By Surface
+Most of the upgrade does not require new public financial-history endpoints.
 
-### Dedicated Financials Page
+Existing routes reused directly:
 
-`frontend/app/company/[ticker]/financials/page.tsx` is a composition layer around `useCompanyWorkspace(ticker)`.
+| Route | Current use in the upgrade |
+|-------|----------------------------|
+| `GET /api/companies/{ticker}/financials` | Primary source for annual and quarterly filing history on the financials page |
+| `GET /api/companies/{ticker}/metrics-timeseries` | Derived metrics charts, including TTM where appropriate |
+| `GET /api/companies/{ticker}/metrics` | Periodized derived metrics when the UI needs normalized per-period values |
+| `GET /api/companies/{ticker}/capital-structure` | Historical capital-structure, debt, payout, and dilution snapshots |
 
-That hook already provides:
+Existing service behavior reused directly:
 
-- `financials`: full statement history returned by `GET /api/companies/{ticker}/financials`
-- `annualStatements`: annual subset computed client-side
-- `latestFinancial`: first statement in the descending history array
-- `priceHistory`: full cached price series returned by the same endpoint
+- `app/services/cache_queries.py:get_company_financials`
+- `app/services/cache_queries.py:get_company_regulated_bank_financials`
+- `app/services/cache_queries.py:select_point_in_time_financials`
+- `app/services/cache_queries.py:get_company_derived_metric_points`
+- `app/services/cache_queries.py:get_company_capital_structure_snapshots`
+- `app/services/regulated_financials.py:select_preferred_financials`
 
-Important implication:
+The key design choice is that the page reuses the full statement array it already had instead of letting individual components re-derive their own truncated or pairwise state.
 
-- the page already has the main raw history it needs for annual and quarterly statement views
-- the page does not currently fetch `financial-history`, `metrics`, or `metrics-timeseries` through the workspace hook
-- the page relies on child components to decide whether to show full history, latest-only, or latest-vs-previous behavior
+## What Required New Backend Work
 
-### Existing Secondary History Module
+The main new backend work for this upgrade is segment history.
 
-`frontend/components/company/financial-history-section.tsx` already consumes `GET /api/companies/{ticker}/financial-history` through `getCompanyFinancialHistory`.
+Why new work was needed:
 
-Current limitations of that path are frontend-side, not endpoint-side:
+- the pre-existing `segment_analysis` payload is intentionally latest-versus-previous and is not a general historical segment API
+- raw `segment_breakdown` attached to recent statements is useful but not complete enough for a consistent multi-period segment view
+- segment disclosures often need additional provenance and comparability signaling beyond what pairwise UI logic can infer locally
 
-- it only parses four metrics: revenue, net income, EPS, and operating cash flow
-- it only keeps annual forms (`10-K`, `20-F`, `40-F`) with `fp=FY`
-- it hard-caps the display to the last 10 fiscal years
-- it is not wired into the dedicated financials page today
+Backend pieces added or expanded for that work:
 
-This is a reusable annual-history module, but it is not a replacement for the normalized financials workspace endpoint.
+- `GET /api/companies/{ticker}/segment-history`
+- `app/services/segment_history.py`
+- route wiring in `app/api/routers/financials.py` and `app/main.py`
+- backend coverage in `tests/test_segment_history.py`
 
-## Snapshot-Only Or Latest-Vs-Previous Frontend Components
+This route is intentionally annual-first. The frontend does not pretend that all issuers provide quarter-by-quarter comparable segment disclosures.
 
-The dedicated financials page already mixes true history components with components that flatten that history back down.
+## Shared State Model
 
-### Components That Already Support Multi-Period Behavior
+The page-level contract separates user intent from what the underlying data can actually support.
 
-| File | Current behavior |
-|------|------------------|
-| `frontend/components/charts/margin-trend-chart.tsx` | Annual/quarterly toggle over historical statements |
-| `frontend/components/charts/operating-cost-structure-chart.tsx` | Annual/quarterly toggle over historical statements |
-| `frontend/components/charts/share-dilution-tracker-chart.tsx` | Historical shares-outstanding trend over annual history with fallback |
-| `frontend/components/charts/balance-sheet-chart.tsx` | Full statement-history chart |
-| `frontend/components/charts/liquidity-capital-chart.tsx` | Multi-period liquidity and retained-earnings history |
-| `frontend/components/charts/derived-metrics-panel.tsx` | Quarterly, annual, and TTM series from `metrics-timeseries` |
-| `frontend/components/company/capital-structure-intelligence-panel.tsx` | Multi-period `history[]` already exists, though the UI emphasizes the latest snapshot |
+Important fields in `SharedFinancialChartState`:
 
-### Components Still Flattening History
+- `requestedCadence`: what the user asked for
+- `effectiveCadence`: what the current filing-backed surface can actually render
+- `visiblePeriodCount`: how many filings are in the shared visible range
+- `selectedFinancial` and `comparisonFinancial`: focused statements after shared resolution
+- `selectedPeriodLabel` and `comparisonPeriodLabel`: display labels derived from the resolved statements
+- `cadenceNote`: explicit explanation when the rendered cadence differs from the requested cadence
 
-| File | Current behavior | Limiting factor |
-|------|------------------|-----------------|
-| `frontend/app/company/[ticker]/financials/page.tsx` | Header summaries and top-level bank summaries use a selected-or-latest single snapshot only | UI-level snapshot choice |
-| `frontend/components/charts/business-segment-breakdown.tsx` | Uses `latestStatement` and `previousStatement` only; charts show latest mix and one-period growth comparison | Both UI and summary-payload shape |
-| `frontend/components/company/financial-quality-summary.tsx` | Computes annual quality metrics from latest annual and prior annual only | UI-level latest-vs-previous summary |
-| `frontend/components/charts/cash-flow-waterfall-chart.tsx` | Lets the user pick annual vs quarterly, but still shows only the latest statement in that cadence | UI-level snapshot choice |
-| `frontend/components/company/financial-comparison-panel.tsx` | Compares exactly two annual periods at a time | UI-level pairwise comparison |
-| `frontend/components/company/financial-statements-table.tsx` | Sparkline strip shows history, but the main table and exports collapse to selected period plus optional comparison period | Table and export collapse to pairwise view |
-| `frontend/components/company/bank-financial-statements-table.tsx` | Regulated-bank table and exports collapse to selected period plus optional comparison period | Table and export collapse to pairwise view |
-| `frontend/components/company/capital-structure-intelligence-panel.tsx` | Latest snapshot dominates, and the trend table is truncated to five rows | UI-level emphasis and truncation |
-| `frontend/components/company/bank-regulatory-overview.tsx` | Latest regulated-bank snapshot only | UI-level snapshot choice |
+This matters because annual-only panels now explain their fallback instead of silently replacing a quarterly request with annual data.
 
-### Snapshot-bound Surfaces To Upgrade
+## Annual-Only Surface Rules
 
-This expands the high-level component list above into a concrete implementation backlog. It includes sub-surfaces inside otherwise history-capable panels when those sub-surfaces still collapse to a latest-only, latest-plus-previous, or single-selected-period view.
+Several surfaces are annual by construction because their calculations or table shape depend on fiscal-year comparability.
 
-| Surface | File path | Current behavior | Desired behavior | Existing frontend data enough? | Backend/history work required? | Priority |
-|---------|-----------|------------------|------------------|-------------------------------|--------------------------------|----------|
-| Financials header summary cards | `frontend/app/company/[ticker]/financials/page.tsx` | `CompanyResearchHeader` summaries show only the active snapshot. In standard mode that means selected-or-latest revenue, operating income, and free cash flow. In bank mode that means selected-or-latest NIM, CET1, deposits, and TCE. There is no multi-period delta, trend, or visible-range context in the cards themselves. | Convert the header cards into period-aware summary cards that can show trend, delta versus the comparison period, or a compact visible-range summary without falling back to a pure snapshot. | Yes. `financials[]`, annual subsets, and comparison selection are already on the page. | No for a first pass. | medium |
-| Segment charts and lens summary | `frontend/components/charts/business-segment-breakdown.tsx` | The treemap and revenue-share chart are built from `latestStatement`; the growth bars compare only against `previousStatement`; the margin chart is still a single-period view; `LensSummary` depends on pairwise `segmentAnalysis` output. The surface stays bound to one disclosure snapshot plus one prior comparison. | Replace the pairwise view with a multi-period segment explorer: period selector, compare-any-two-periods, segment/geography trend views, and movers calculated across more than one pair. Keep single-period disclosure fallbacks only when history is genuinely sparse. | Partial. Raw `financials[].segment_breakdown` is enough for a first pass on disclosed periods, but not for every desired historical summary. | Yes for deeper backfill coverage and any non-pairwise replacement for `segmentAnalysis`. | high |
-| Cash flow waterfall | `frontend/components/charts/cash-flow-waterfall-chart.tsx` | The chart renders `buildWaterfallData(focusStatement)` for one selected statement only. Comparison mode adds delta pills against one other statement, but the chart itself is still a single-snapshot bridge. | Add a true multi-period workflow: period stepping from the shared selector, compare mode that can render side-by-side bridges or a period-to-period bridge trend, and clear visible-range navigation. | Yes. The page already passes the visible filing set plus selected and comparison statements. | No for a first pass. | high |
-| Financial quality summary cards | `frontend/components/company/financial-quality-summary.tsx` | The panel computes one annual summary for the selected annual filing and one resolved prior annual filing. Growth metrics are always pairwise, and the card grid never shows more than one period at a time. | Rework the panel into a multi-period quality surface: visible annual trend cards, rolling deltas, and an at-a-glance history of quality metrics rather than one selected-period snapshot. | Yes. Full annual history is already available in `financials[]`. | No for a first pass. | high |
-| Annual financial comparison table | `frontend/components/company/financial-comparison-panel.tsx` | The table compares exactly two annual filings at a time, defaulting to latest and prior annual. It is pairwise by construction even when longer annual history is loaded. | Expand to a true multi-period annual comparison matrix or trend-oriented comparison surface that can show more than two annual periods at once. | Yes. The component already receives the full annual history. | No for a first pass. | medium |
-| Financial statements table and export scope | `frontend/components/company/financial-statements-table.tsx` | The sparkline strip summarizes latest values with history, but the main table collapses to selected period plus optional comparison period. Export actions also only emit those focused statements instead of the whole visible range. | Restore a true multi-period statement table across the visible range, with comparison as an overlay rather than a replacement for history, and let exports include the full visible period set. | Yes. The visible filing history is already passed in. | No for a first pass. | high |
-| Derived metrics summary cards | `frontend/components/charts/derived-metrics-panel.tsx` | The chart plots a full time series, but the summary card grid underneath is bound to `latest` only. The cards do not follow focus, hover, selected point, or comparison mode. | Make the cards period-aware so they reflect the focused or compared point on the chart, with optional visible-range deltas instead of hard-coded latest-only readouts. | Yes. `series[]` already contains the needed period values. | No for a first pass. | low |
-| Capital structure snapshot cards, bucket tables, and truncated trend table | `frontend/components/company/capital-structure-intelligence-panel.tsx` | The top summary pills, metric cards, debt ladder, lease table, and debt/dilution bridge are all tied to one `activeSnapshot`. The only visible history is a table truncated to `history.slice(0, 5)`. | Promote the panel into a multi-period capital-structure workspace: full visible history table, compare mode across snapshots, and per-section history views for maturities, leases, payouts, and dilution. | Yes for the periods already returned by `history[]`. | No for a first pass, unless product later wants more history than the current `maxPeriods` window. | medium |
-| Regulated bank snapshot cards | `frontend/components/company/bank-regulatory-overview.tsx` | The bank overview renders one regulated-bank snapshot only, even when multiple regulated-bank filings are already available on the page. | Add period-aware bank ratio and funding views that respect the shared selector and comparison mode, while keeping bank-mode semantics intact. | Yes. Regulated-bank statement history is already returned through `financials[]`. | No for a first pass. | medium |
-| Regulated bank statements table and export scope | `frontend/components/company/bank-financial-statements-table.tsx` | The bank table now shows selected period plus optional comparison period only. Like the general statements table, exports are limited to the focused statements rather than the full visible bank history. | Restore a multi-column bank history table across visible filings and reserve comparison mode for highlighting, not replacing, the full history view. | Yes. The visible bank filing set is already passed in. | No for a first pass. | high |
-| Workspace latest selector | `frontend/hooks/use-company-workspace.ts` | The hook exposes `latestFinancial = financials[0]` as a first-class primitive, which encourages downstream surfaces to stay snapshot-oriented even after a visible-range selector exists. | Keep `latestFinancial` as a fallback only, and push consumers toward explicit focus/comparison state derived from page-level period selection. | Yes. No additional data is needed. | No. | medium |
-| Period selection fallback and pairwise comparison selector | `frontend/hooks/use-period-selection.ts` | `findFinancialByKey` falls back to the first visible period, and `resolveComparisonFinancial` only supports off, previous, or one custom comparison. The hook does not expose richer period sets for components that need more than one or two periods. | Extend the selection model so components can opt into explicit focus, visible-range access, and richer compare semantics without implicit latest-period collapse. | Yes. The visible filing array is already computed here. | No. | medium |
+The shared annual resolver in `frontend/lib/annual-financial-scope.ts` applies these rules:
 
-### Adjacent Repo-Wide Pairwise Financial Consumers
+- map the selected filing to its fiscal year when the user is browsing quarterly statements
+- map the comparison filing to a distinct annual filing when possible
+- keep the annual visible range aligned with the page-level range instead of using local caps
+- show warnings when a quarterly comparison collapses onto the same annual filing or when only one comparable annual filing exists
 
-These are outside the dedicated financials page, but they still rely on latest or latest-vs-previous financial logic and should be considered follow-on work if the product later wants a repo-wide multi-period standard.
+Current annual-only consumers:
 
-| File | Current behavior |
-|------|------------------|
-| `frontend/components/models/financial-health-score.tsx` | Uses current and previous annuals, with fallback to `financials[0]` and `financials[1]` |
-| `frontend/components/models/dcf-scenario-analysis.tsx` | Uses latest annual and previous annual to derive defaults |
-| `frontend/components/models/investment-summary-panel.tsx` | Uses current and previous annuals to build the summary layer |
-| `frontend/components/models/valuation-scenario-workbench.tsx` | Uses latest annual and previous annual to seed scenario defaults |
-| `frontend/components/alerts/risk-red-flag-panel.tsx` | Uses latest annual-or-latest filing values for fallback risk signals |
+- financial comparison panel
+- ratio history table
+- financial quality summary trend mode
+- growth waterfall chart
 
-These components are not the recommended first-pass targets for the dedicated financials page upgrade, but they are part of the broader repo audit.
+## Segment History And Comparability Rules
 
-### Existing Pairwise Summary Service That Mirrors The UI Limitation
+Segment disclosures are the least uniform part of the upgrade, so the UI must treat missing or inconsistent history as a first-class state rather than as an error to hide.
 
-`app/services/segment_analysis.py` intentionally builds a latest-vs-previous comparable segment lens.
+Known sparse or non-comparable SEC cases:
 
-That means:
+- many issuers disclose full business segments annually but not quarterly
+- some issuers disclose geography only, or revenue without segment operating income
+- segment names, axes, or grouping logic can change between filings
+- segments can be added, removed, or merged between periods
+- foreign issuer forms and non-standard quarter boundaries can reduce comparability
 
-- the raw `financials[].segment_breakdown` array is more historical than the summary payload
-- the backend summary is not wrong, but it is intentionally narrower than a multi-period segment workspace
-- the first upgrade pass should consume raw per-statement segment history before considering a new endpoint
+Frontend handling rules:
 
-## Annual Vs Quarterly Vs TTM Considerations
+- annual-only server-backed segment history is labeled as annual-only when the user requests quarterly cadence
+- sparse visible histories show explicit warnings instead of manufacturing trends from one filing
+- unavailable comparison periods stay unavailable; the frontend does not silently substitute another segment period
+- warnings are rendered through `SnapshotSurfaceStatus` so the user can see the comparability limitation directly in the panel
 
-### Raw Statements
-
-`GET /api/companies/{ticker}/financials` already returns annual and quarterly statement history where filings exist.
-
-Use cases:
-
-- annual views: long-horizon quality, segment stability, capital retention, dilution trend
-- quarterly views: recent operating turns, margin compression/recovery, working-capital behavior
-
-Constraints:
-
-- annual and quarterly rows should not be mixed in one comparison view without an explicit cadence choice
-- `6-K` periods may exist for foreign issuers and are not always as comparable as `10-Q`
-
-### TTM
-
-TTM does not exist as a first-class raw statement row in the financials endpoint.
-
-Current correct source:
-
-- `GET /api/companies/{ticker}/metrics-timeseries?cadence=ttm`
-- `GET /api/companies/{ticker}/metrics?period_type=ttm`
-
-Implication:
-
-- do not synthesize TTM client-side from raw statements if the existing derived-metrics endpoints already provide it
-
-### Balance Sheet And Capital Structure
-
-TTM is generally not the correct mode for balance-sheet and capital-structure fields because those are point-in-time balances rather than flow metrics.
-
-Recommended handling:
-
-- annual or quarterly for balance-sheet tables and charts
-- TTM only for derived flow metrics where the backend already computes it
-
-### Segment Data
-
-Segment history is not naturally TTM-friendly in the same way as derived metrics.
-
-Recommended handling:
-
-- support annual and quarterly per-filing segment views where disclosures exist
-- do not introduce TTM segment mix as a first-pass requirement
-
-## SEC Sparse By Nature Vs UI-Limited
-
-### Sparse By Nature
-
-These are genuine disclosure limits rather than missing product work.
-
-| Area | Why it is sparse |
-|------|------------------|
-| Segment disclosures | Many issuers only disclose segment detail annually, only disclose geography, or only disclose revenue without segment operating income |
-| Segment comparability | Axis names and reported segment sets can change period to period |
-| Geographic margins | Often not disclosed at all; geography is frequently revenue-only |
-| TTM raw statements | TTM is derived, not reported as a standalone SEC statement row |
-| Regulated-bank segment views | Bank regulatory statements do not map cleanly to the segment workflow |
-
-`app/services/segment_analysis.py` already exposes some of this sparsity through confidence flags such as:
+Backend comparability signals that can affect UI interpretation include:
 
 - no prior comparable disclosure
+- segment axis changed
+- partial operating-income disclosure
 - new or removed segments
-- changed segment axis
-- business margin missing or partial
-- geography revenue-only
 
-`app/services/sec_edgar.py` also limits segment HTML backfill to a recent target set, preferring recent annual statements first.
+The product requirement here is explicit: no hidden assumptions around segment comparability.
 
-### UI-Limited
+## Annual, Quarterly, And TTM Boundaries
 
-These are current product choices, not hard data constraints.
+The upgrade keeps cadence boundaries strict.
 
-| Area | Why it is UI-limited |
-|------|----------------------|
-| Financial header summaries | The page already has full history but surfaces only latest values |
-| Financial quality summary | Uses only latest annual and previous annual, even though longer annual history is already loaded |
-| Cash flow waterfall | Chooses the latest statement in a cadence instead of allowing period selection across the loaded history |
-| Business segment breakdown | Renders latest mix and one comparison even though per-statement `segment_breakdown` history is present on recent statements |
-| Companyfacts history module | Frontend parser narrows raw companyfacts to annual-only, four metrics, and 10 fiscal years |
-| Capital structure panel | Fetches historical snapshots but foregrounds latest and truncates the visible trend |
+- raw statement surfaces use annual or quarterly filings from `GET /api/companies/{ticker}/financials`
+- TTM remains a derived-metrics concept and should come from `metrics-timeseries` or `metrics`, not from client-side reconstruction of raw statements
+- balance-sheet and capital-structure panels do not use TTM because they are point-in-time values rather than flows
+- segment history is not treated as TTM-capable in this upgrade
 
-## Bank-Mode Caveats
+## Bank-Mode Constraint
 
-This branch must remain intact.
+Bank mode remains intact.
 
-### How Bank Mode Is Chosen
+The financials page still relies on the existing bank-selection path:
 
-`app/main.py` calls `_visible_financials_for_company`, which does this:
+- canonical SEC financials and regulated-bank financials are loaded
+- `select_preferred_financials` decides which history set is primary for the company
+- the shared range, cadence, and comparison model sits on top of that chosen history instead of bypassing it
 
-- load canonical SEC financials
-- load regulated-bank financials
-- pass both into `select_preferred_financials`
+The upgrade does not collapse bank-mode behavior into the standard SEC workflow.
 
-`select_preferred_financials` prefers regulated-bank statements whenever the company is classified as a regulated entity and regulatory financials exist.
+## Test Coverage Added For The Upgrade
 
-Implication:
+The verification strategy covers state, panel behavior, and page-level synchronization.
 
-- `financials[]` on the financials page is not always SEC canonical history
+- `frontend/hooks/use-period-selection.test.ts` covers shared period-selection state, cadence fallback, comparison resolution, and URL updates
+- `frontend/components/company/financial-comparison-panel.test.ts` covers same-fiscal-year comparison collapse without silent fallback
+- `frontend/components/company/ratio-history-table.test.ts` covers annual ratio calculations and quarterly-to-annual mapping behavior
+- `frontend/components/charts/business-segment-breakdown.test.ts` covers sparse-history and comparison-unavailable warnings
+- `frontend/app/company/[ticker]/financials/page.test.ts` covers range and selected/comparison synchronization across major charts and tables
+
+## Remaining Follow-On Work
+
+This upgrade standardizes the financials page, not every financial consumer in the repo.
+
+Potential future follow-ons:
+
+- repo-wide replacement of latest-versus-previous assumptions in model and alert panels
+- richer multi-period bank-only summary surfaces
+- longer-horizon annual history reuse from `financial-history` where that view adds value beyond the main financials workspace
 - any new multi-period UI must tolerate `financials[]` being a regulated-bank history instead
 
 ### Existing Bank-Specific UI Assumptions

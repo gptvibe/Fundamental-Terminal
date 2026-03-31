@@ -6,12 +6,13 @@ import { CartesianGrid, Line, LineChart, ReferenceDot, ResponsiveContainer, Tool
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
-import { difference, formatSignedCompactDelta } from "@/lib/financial-chart-state";
-import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import { buildAnnualSurfaceWarnings, formatAnnualHeader, formatAnnualLabel, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
+import { buildPlainTextTable, copyTextToClipboard, exportRowsToCsv, normalizeExportFileStem, type ExportRow } from "@/lib/export";
+import { difference, formatSignedCompactDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
+import { formatCompactNumber, formatPercent } from "@/lib/format";
+import { showAppToast } from "@/lib/app-toast";
 import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
 import type { FinancialPayload } from "@/lib/types";
-
-const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
 type MetricRowConfig = {
   key: string;
@@ -42,8 +43,10 @@ const METRIC_ROWS: MetricRowConfig[] = [
 interface FinancialComparisonPanelProps {
   financials: FinancialPayload[];
   visibleFinancials?: FinancialPayload[];
+  chartState?: SharedFinancialChartState;
   selectedFinancial?: FinancialPayload | null;
   comparisonFinancial?: FinancialPayload | null;
+  ticker?: string;
 }
 
 const CAPABILITIES: SnapshotSurfaceCapabilities = {
@@ -55,24 +58,27 @@ const CAPABILITIES: SnapshotSurfaceCapabilities = {
 export function FinancialComparisonPanel({
   financials,
   visibleFinancials = [],
+  chartState,
   selectedFinancial = null,
   comparisonFinancial = null,
+  ticker,
 }: FinancialComparisonPanelProps) {
-  const annualFinancials = useMemo(
-    () =>
-      financials
-        .filter((statement) => ANNUAL_FORMS.has(statement.filing_type))
-        .sort((left, right) => Date.parse(right.period_end) - Date.parse(left.period_end)),
-    [financials]
-  );
-
   const [metricKey, setMetricKey] = useState<string>(METRIC_ROWS[0]?.key ?? "revenue");
-  const leftFinancial = useMemo(() => coerceAnnualStatement(selectedFinancial, annualFinancials), [annualFinancials, selectedFinancial]);
-  const rightFinancial = useMemo(() => resolveComparisonStatement(leftFinancial, comparisonFinancial, annualFinancials), [annualFinancials, comparisonFinancial, leftFinancial]);
-  const trendFinancials = useMemo(
-    () => annualTrendScope(annualFinancials, visibleFinancials, leftFinancial, rightFinancial),
-    [annualFinancials, leftFinancial, rightFinancial, visibleFinancials]
+  const resolvedSelectedFinancial = chartState?.selectedFinancial ?? selectedFinancial;
+  const resolvedComparisonFinancial = chartState?.comparisonFinancial ?? comparisonFinancial;
+  const annualScope = useMemo(
+    () => resolveAnnualFinancialScope({
+      financials,
+      visibleFinancials,
+      selectedFinancial: resolvedSelectedFinancial,
+      comparisonFinancial: resolvedComparisonFinancial,
+    }),
+    [financials, resolvedComparisonFinancial, resolvedSelectedFinancial, visibleFinancials]
   );
+  const annualFinancials = annualScope.annuals;
+  const leftFinancial = annualScope.selectedAnnual;
+  const rightFinancial = annualScope.comparisonAnnual;
+  const trendFinancials = annualScope.scopedAnnuals;
   const metric = useMemo(
     () => METRIC_ROWS.find((row) => row.key === metricKey) ?? METRIC_ROWS[0],
     [metricKey]
@@ -83,10 +89,10 @@ export function FinancialComparisonPanel({
   }
 
   const warnings = buildWarnings({
-    selectedFinancial,
-    comparisonFinancial,
-    selectedAnnual: leftFinancial,
-    comparisonAnnual: rightFinancial,
+    chartState,
+    selectedFinancial: resolvedSelectedFinancial,
+    comparisonFinancial: resolvedComparisonFinancial,
+    annualScope,
     trendFinancials,
   });
   const mode = resolveSnapshotSurfaceMode({
@@ -106,12 +112,47 @@ export function FinancialComparisonPanel({
     }));
   const selectedPoint = chartData.find((point): point is (typeof chartData)[number] & { value: number } => point.isSelected && point.value != null) ?? null;
   const comparisonPoint = chartData.find((point): point is (typeof chartData)[number] & { value: number } => point.isComparison && point.value != null) ?? null;
+  const exportStem = normalizeExportFileStem(ticker, "company");
+  const csvRows = buildFinancialComparisonExportRows(chartData, metric, leftFinancial, rightFinancial);
+  const plainTextPayload = buildFinancialComparisonPlainText(chartData, metric, leftFinancial, rightFinancial);
+
+  async function handleCopyTable() {
+    try {
+      await copyTextToClipboard(plainTextPayload);
+      showAppToast({ message: "Copied annual financial comparison data.", tone: "info" });
+    } catch (error) {
+      showAppToast({
+        message: error instanceof Error ? error.message : "Unable to copy annual financial comparison data.",
+        tone: "danger",
+      });
+    }
+  }
 
   return (
     <div className="financial-statements-stack">
       <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="financial-export-row">
+        <div className="financial-trend-table-note">Export the current annual comparison table and the visible metric trend for the selected range.</div>
+        <div className="financial-export-actions">
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={() => exportRowsToCsv(`${exportStem}-annual-financial-comparison.csv`, csvRows)}
+          >
+            Export CSV
+          </button>
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={handleCopyTable}
+          >
+            Copy Table
+          </button>
+        </div>
+      </div>
+
+      <div className="financial-inline-pills">
         <span className="pill tone-cyan">Focus {formatAnnualLabel(leftFinancial)}</span>
         {rightFinancial ? <span className="pill tone-gold">Compare {formatAnnualLabel(rightFinancial)}</span> : <span className="pill tone-red">Need a second annual filing for full deltas</span>}
       </div>
@@ -128,13 +169,13 @@ export function FinancialComparisonPanel({
           </select>
         </label>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div className="financial-inline-pills">
           <span className="pill">Annual periods {trendFinancials.length}</span>
           <span className="pill">Chart {metric.label}</span>
         </div>
       </div>
 
-      <div style={{ width: "100%", height: 320 }}>
+      <div className="financial-chart-shell financial-chart-shell-medium">
         <ResponsiveContainer>
           <LineChart data={chartData} margin={{ top: 8, right: 12, left: 4, bottom: 8 }}>
             <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -192,112 +233,29 @@ function buildPeriodKey(statement: Pick<FinancialPayload, "period_end" | "filing
   return `${statement.period_end}|${statement.filing_type}`;
 }
 
-function coerceAnnualStatement(selectedFinancial: FinancialPayload | null, annualFinancials: FinancialPayload[]): FinancialPayload | null {
-  if (!selectedFinancial) {
-    return annualFinancials[0] ?? null;
-  }
-  if (ANNUAL_FORMS.has(selectedFinancial.filing_type)) {
-    return selectedFinancial;
-  }
-  const year = new Date(selectedFinancial.period_end).getUTCFullYear();
-  return annualFinancials.find((statement) => new Date(statement.period_end).getUTCFullYear() === year) ?? annualFinancials[0] ?? null;
-}
-
-function resolveComparisonStatement(
-  selectedAnnual: FinancialPayload | null,
-  comparisonFinancial: FinancialPayload | null,
-  annualFinancials: FinancialPayload[]
-): FinancialPayload | null {
-  if (!selectedAnnual) {
-    return null;
-  }
-  if (comparisonFinancial && ANNUAL_FORMS.has(comparisonFinancial.filing_type)) {
-    return comparisonFinancial;
-  }
-  const selectedIndex = annualFinancials.findIndex((statement) => buildPeriodKey(statement) === buildPeriodKey(selectedAnnual));
-  if (selectedIndex < 0) {
-    return annualFinancials[1] ?? null;
-  }
-  return annualFinancials[selectedIndex + 1] ?? null;
-}
-
-function annualTrendScope(
-  annualFinancials: FinancialPayload[],
-  visibleFinancials: FinancialPayload[],
-  selectedAnnual: FinancialPayload | null,
-  comparisonAnnual: FinancialPayload | null
-): FinancialPayload[] {
-  const pinnedYears = new Set<number>();
-  if (selectedAnnual) {
-    pinnedYears.add(new Date(selectedAnnual.period_end).getUTCFullYear());
-  }
-  if (comparisonAnnual) {
-    pinnedYears.add(new Date(comparisonAnnual.period_end).getUTCFullYear());
-  }
-
-  const visibleYears = new Set(
-    visibleFinancials
-      .map((statement) => new Date(statement.period_end).getUTCFullYear())
-      .filter((year) => Number.isFinite(year))
-  );
-
-  const scoped = visibleYears.size
-    ? annualFinancials.filter((statement) => {
-        const year = new Date(statement.period_end).getUTCFullYear();
-        return visibleYears.has(year) || pinnedYears.has(year);
-      })
-    : annualFinancials.slice(0, 6);
-
-  return scoped.length ? scoped.slice(0, 6) : annualFinancials.slice(0, 6);
-}
-
-function formatAnnualLabel(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  return `${statement.filing_type} ${formatDate(statement.period_end)}`;
-}
-
-function formatAnnualHeader(statement: Pick<FinancialPayload, "period_end" | "filing_type">): string {
-  return `${statement.filing_type} ${new Date(statement.period_end).getUTCFullYear()}`;
-}
-
 function buildWarnings({
+  chartState,
   selectedFinancial,
   comparisonFinancial,
-  selectedAnnual,
-  comparisonAnnual,
+  annualScope,
   trendFinancials,
 }: {
+  chartState?: SharedFinancialChartState;
   selectedFinancial: FinancialPayload | null;
   comparisonFinancial: FinancialPayload | null;
-  selectedAnnual: FinancialPayload | null;
-  comparisonAnnual: FinancialPayload | null;
+  annualScope: ReturnType<typeof resolveAnnualFinancialScope>;
   trendFinancials: FinancialPayload[];
 }): SnapshotSurfaceWarning[] {
-  const warnings: SnapshotSurfaceWarning[] = [];
-  if (selectedFinancial && selectedAnnual && !ANNUAL_FORMS.has(selectedFinancial.filing_type)) {
-    warnings.push({
-      code: "comparison_annual_fallback",
-      label: "Annual fallback applied",
-      detail: `Annual comparison uses ${formatAnnualLabel(selectedAnnual)} because this surface compares normalized fiscal years.`,
-      tone: "info",
-    });
-  }
-  if (comparisonFinancial && !comparisonAnnual) {
-    warnings.push({
-      code: "comparison_period_missing",
-      label: "Comparison annual unavailable",
-      detail: "The selected comparison period does not have a matching annual filing in the current history window.",
-      tone: "warning",
-    });
-  }
-  if (trendFinancials.length < 2) {
-    warnings.push({
-      code: "comparison_history_sparse",
-      label: "Sparse annual history",
-      detail: "Only one comparable annual filing is visible, so the chart falls back to the focused year snapshot.",
-      tone: "info",
-    });
-  }
-  return dedupeSnapshotSurfaceWarnings(warnings);
+  return dedupeSnapshotSurfaceWarnings(
+    buildAnnualSurfaceWarnings({
+      chartState,
+      scope: annualScope,
+      selectedFinancial,
+      comparisonFinancial,
+      trendPointCount: trendFinancials.length,
+      sparseHistoryDetail: "Only one comparable annual filing is visible, so the chart falls back to the focused year snapshot.",
+    })
+  );
 }
 
 function formatPerShareValue(value: number | null | undefined): string {
@@ -338,4 +296,117 @@ function getChangeTone(value: number | null): { style: React.CSSProperties } {
       fontWeight: 700,
     },
   };
+}
+
+function buildFinancialComparisonExportRows(
+  chartData: Array<{
+    label: string;
+    periodEnd: string;
+    filingType: string;
+    value: number | null;
+    isSelected: boolean;
+    isComparison: boolean;
+  }>,
+  metric: MetricRowConfig,
+  leftFinancial: FinancialPayload,
+  rightFinancial: FinancialPayload | null
+): ExportRow[] {
+  const focusLabel = formatAnnualHeader(leftFinancial);
+  const compareLabel = rightFinancial ? formatAnnualHeader(rightFinancial) : "Period B";
+  const trendRows: ExportRow[] = chartData.map((point) => ({
+    section: "trend",
+    metric: metric.label,
+    period: point.label,
+    period_end: point.periodEnd,
+    filing_type: point.filingType,
+    focus_period: focusLabel,
+    compare_period: compareLabel,
+    focus_value: "",
+    compare_value: "",
+    value: metric.formatValue(point.value),
+    absolute_change: "",
+    percent_change: "",
+    is_focus: point.isSelected ? "yes" : "",
+    is_compare: point.isComparison ? "yes" : "",
+  }));
+  const comparisonRows: ExportRow[] = METRIC_ROWS.map((row) => {
+    const leftValue = row.getValue(leftFinancial);
+    const rightValue = rightFinancial ? row.getValue(rightFinancial) : null;
+    const delta = difference(leftValue, rightValue);
+    const relativeChange = calculateRelativeChange(leftValue, rightValue);
+
+    return {
+      section: "comparison",
+      metric: row.label,
+      period: "",
+      period_end: "",
+      filing_type: "",
+      focus_period: focusLabel,
+      compare_period: compareLabel,
+      focus_value: row.formatValue(leftValue),
+      compare_value: row.formatValue(rightValue),
+      value: "",
+      absolute_change: formatMetricDelta(row, delta),
+      percent_change: formatPercent(relativeChange),
+      is_focus: "",
+      is_compare: "",
+    } satisfies ExportRow;
+  });
+
+  return [...comparisonRows, ...trendRows];
+}
+
+function buildFinancialComparisonPlainText(
+  chartData: Array<{
+    label: string;
+    periodEnd: string;
+    value: number | null;
+    isSelected: boolean;
+    isComparison: boolean;
+  }>,
+  metric: MetricRowConfig,
+  leftFinancial: FinancialPayload,
+  rightFinancial: FinancialPayload | null
+): string {
+  const focusLabel = formatAnnualHeader(leftFinancial);
+  const compareLabel = rightFinancial ? formatAnnualHeader(rightFinancial) : "Period B";
+  const trendTable = buildPlainTextTable(
+    ["Period", "Period End", metric.label, "Focus", "Compare"],
+    chartData.map((point) => [
+      point.label,
+      point.periodEnd,
+      metric.formatValue(point.value),
+      point.isSelected ? "Yes" : "",
+      point.isComparison ? "Yes" : "",
+    ])
+  );
+  const comparisonTable = buildPlainTextTable(
+    ["Metric", focusLabel, compareLabel, "Absolute Change", "Percent Change"],
+    METRIC_ROWS.map((row) => {
+      const leftValue = row.getValue(leftFinancial);
+      const rightValue = rightFinancial ? row.getValue(rightFinancial) : null;
+      const delta = difference(leftValue, rightValue);
+      const relativeChange = calculateRelativeChange(leftValue, rightValue);
+
+      return [
+        row.label,
+        row.formatValue(leftValue),
+        row.formatValue(rightValue),
+        formatMetricDelta(row, delta),
+        formatPercent(relativeChange),
+      ];
+    })
+  );
+
+  return [
+    "Annual Financial Comparison",
+    `Focus: ${focusLabel}`,
+    `Compare: ${compareLabel}`,
+    "",
+    `Metric Trend (${metric.label})`,
+    trendTable,
+    "",
+    "Selected vs Compare",
+    comparisonTable,
+  ].join("\n");
 }

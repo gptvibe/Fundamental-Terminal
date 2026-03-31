@@ -23,7 +23,7 @@ export function BalanceSheetChart({ financials, chartState }: BalanceSheetChartP
       [...financials]
         .reverse()
         .map((item) => ({
-          period: formatStatementAxisLabel(item, chartState?.cadence),
+          period: formatStatementAxisLabel(item, chartState?.effectiveCadence ?? chartState?.cadence),
           periodEnd: item.period_end,
           filingType: item.filing_type,
           assets: item.total_assets,
@@ -33,7 +33,7 @@ export function BalanceSheetChart({ financials, chartState }: BalanceSheetChartP
               ? item.total_assets - item.total_liabilities
               : null,
         })),
-    [chartState?.cadence, financials]
+    [chartState?.cadence, chartState?.effectiveCadence, financials]
   );
   const focusPoint = useMemo(() => findPointForStatement(data, selectedFinancial), [data, selectedFinancial]);
   const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);

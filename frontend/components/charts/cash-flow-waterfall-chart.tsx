@@ -357,7 +357,6 @@ function formatSignedCompact(value: number): string {
 
 function buildTrendData(financials: FinancialPayload[]) {
   return [...financials]
-    .slice(0, 8)
     .reverse()
     .map((statement) => ({
       period: `${statement.filing_type} ${formatDate(statement.period_end)}`,

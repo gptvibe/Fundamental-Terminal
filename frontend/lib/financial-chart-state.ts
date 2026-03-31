@@ -16,11 +16,14 @@ export interface FinancialPeriodPoint {
 
 export interface SharedFinancialChartState {
   cadence: FinancialCadence;
+  effectiveCadence: "annual" | "quarterly" | "reported";
+  requestedCadence: FinancialCadence;
   visiblePeriodCount: number;
   selectedFinancial: FinancialPayload | null;
   comparisonFinancial: FinancialPayload | null;
   selectedPeriodLabel: string | null;
   comparisonPeriodLabel: string | null;
+  cadenceNote: string | null;
 }
 
 export function formatFinancialCadenceLabel(cadence: FinancialCadence): string {
@@ -28,6 +31,13 @@ export function formatFinancialCadenceLabel(cadence: FinancialCadence): string {
     return "TTM";
   }
   return cadence === "annual" ? "Annual" : "Quarterly";
+}
+
+export function formatRenderedFinancialCadenceLabel(cadence: FinancialCadence | "reported"): string {
+  if (cadence === "reported") {
+    return "Reported";
+  }
+  return formatFinancialCadenceLabel(cadence);
 }
 
 export function formatStatementAxisLabel(

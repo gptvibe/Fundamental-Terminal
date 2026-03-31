@@ -216,7 +216,7 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 - `/` for the research launcher, SEC-backed resolution, and direct company/model handoff
 - `/watchlist` — browser-local watchlist workspace for saved companies, note coverage, freshness, and triage filters
 - `/company/[ticker]` — company overview workspace with grouped core views, research feeds, priority alerts, and quick peer context
-- `/company/[ticker]/financials` — dedicated financial workspace with statements, derived metrics, provenance/quality diagnostics, and a bank-specific regulated-financial view for banks and bank holding companies
+- `/company/[ticker]/financials` — dedicated financial workspace with synchronized cadence/range/comparison state across statements, annual comparison tables, filing-based charts, derived metrics, provenance/quality diagnostics, explicit annual-fallback messaging where needed, and a bank-specific regulated-financial view for banks and bank holding companies
 - `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
 - `/company/[ticker]/earnings` — earnings workspace with release trends, guidance and capital-return signals, and linked filing context
 - `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views

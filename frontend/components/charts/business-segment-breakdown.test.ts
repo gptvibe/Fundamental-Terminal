@@ -2,9 +2,10 @@
 
 import * as React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
+import { getCompanySegmentHistory } from "@/lib/api";
 import type { FinancialPayload, SegmentAnalysisPayload } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
@@ -126,7 +127,61 @@ function financialPayload(periodEnd: string, revenue: number, operatingIncome: n
   };
 }
 
+const getCompanySegmentHistoryMock = vi.mocked(getCompanySegmentHistory);
+
+function defaultSegmentHistoryResponse() {
+  return {
+    company: null,
+    kind: "business",
+    years: 3,
+    periods: [
+      {
+        period_end: "2025-12-31",
+        fiscal_year: 2025,
+        kind: "business",
+        segments: [
+          { name: "Cloud", revenue: 520, operating_income: 170, operating_margin: 0.3269, share_of_revenue: 0.52 },
+          { name: "Devices", revenue: 300, operating_income: 45, operating_margin: 0.15, share_of_revenue: 0.3 },
+        ],
+        comparability_flags: {
+          no_prior_comparable_disclosure: false,
+          segment_axis_changed: false,
+          partial_operating_income_disclosure: false,
+          new_or_removed_segments: false,
+        },
+      },
+      {
+        period_end: "2024-12-31",
+        fiscal_year: 2024,
+        kind: "business",
+        segments: [
+          { name: "Cloud", revenue: 410, operating_income: 125, operating_margin: 0.3049, share_of_revenue: 0.4556 },
+          { name: "Devices", revenue: 340, operating_income: 55, operating_margin: 0.1618, share_of_revenue: 0.3778 },
+        ],
+        comparability_flags: {
+          no_prior_comparable_disclosure: false,
+          segment_axis_changed: false,
+          partial_operating_income_disclosure: false,
+          new_or_removed_segments: false,
+        },
+      },
+    ],
+    provenance: [],
+    as_of: null,
+    last_refreshed_at: null,
+    source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+    confidence_flags: [],
+    refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+  };
+}
+
 describe("BusinessSegmentBreakdown", () => {
+  beforeEach(() => {
+    getCompanySegmentHistoryMock.mockReset();
+    getCompanySegmentHistoryMock.mockResolvedValue(defaultSegmentHistoryResponse());
+  });
+
   it("renders summary-led business and geography insights before the charts", () => {
     const financials: FinancialPayload[] = [
       financialPayload("2025-12-31", 1000, 260, [
@@ -227,11 +282,14 @@ describe("BusinessSegmentBreakdown", () => {
         financials,
         chartState: {
           cadence: "annual",
+          effectiveCadence: "annual",
+          requestedCadence: "annual",
           visiblePeriodCount: 3,
           selectedFinancial: financials[1],
           comparisonFinancial: financials[2],
           selectedPeriodLabel: "10-K Dec 31, 2024",
           comparisonPeriodLabel: "10-K Dec 31, 2023",
+          cadenceNote: null,
         },
       })
     );
@@ -240,5 +298,64 @@ describe("BusinessSegmentBreakdown", () => {
     expect(screen.getByText(/Compare 10-K Dec 31, 2023/i)).toBeTruthy();
     expect(screen.getByText("Business Revenue Trend")).toBeTruthy();
     expect(screen.getByText("Business Margin Trend")).toBeTruthy();
+  });
+
+  it("surfaces sparse and non-comparable segment history warnings instead of assuming comparability", async () => {
+    getCompanySegmentHistoryMock.mockResolvedValue({
+      ...defaultSegmentHistoryResponse(),
+      periods: [
+        {
+          period_end: "2025-12-31",
+          fiscal_year: 2025,
+          kind: "business",
+          segments: [
+            { name: "Cloud", revenue: 520, operating_income: 170, operating_margin: 0.3269, share_of_revenue: 0.52 },
+            { name: "Devices", revenue: 300, operating_income: null, operating_margin: null, share_of_revenue: 0.3 },
+          ],
+          comparability_flags: {
+            no_prior_comparable_disclosure: true,
+            segment_axis_changed: false,
+            partial_operating_income_disclosure: true,
+            new_or_removed_segments: false,
+          },
+        },
+      ],
+      diagnostics: {
+        coverage_ratio: 0.5,
+        fallback_ratio: 0,
+        stale_flags: [],
+        parser_confidence: 0.4,
+        missing_field_flags: ["segment_operating_income_partial"],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
+    });
+
+    const current = financialPayload("2025-12-31", 1000, 260, [
+      { segment_id: "cloud", segment_name: "Cloud", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 520, share_of_revenue: 0.52, operating_income: 170, assets: null },
+      { segment_id: "devices", segment_name: "Devices", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 300, share_of_revenue: 0.30, operating_income: 45, assets: null },
+    ]);
+
+    render(
+      React.createElement(BusinessSegmentBreakdown, {
+        financials: [current],
+        chartState: {
+          cadence: "quarterly",
+          effectiveCadence: "annual",
+          requestedCadence: "quarterly",
+          visiblePeriodCount: 1,
+          selectedFinancial: current,
+          comparisonFinancial: null,
+          selectedPeriodLabel: "10-K Dec 31, 2025",
+          comparisonPeriodLabel: null,
+          cadenceNote: "Quarterly selection is unavailable for this issuer's cached statements, so filing-based panels fall back to annual history.",
+        },
+      })
+    );
+
+    expect(await screen.findByText("Server-backed segment history is annual-only")).toBeTruthy();
+    expect(screen.getByText("Sparse visible history")).toBeTruthy();
+    expect(screen.getByText("No prior comparable disclosure")).toBeTruthy();
+    expect(screen.getByText("Partial operating income disclosure")).toBeTruthy();
   });
 });

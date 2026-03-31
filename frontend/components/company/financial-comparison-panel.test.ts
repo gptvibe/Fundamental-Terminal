@@ -116,4 +116,23 @@ describe("FinancialComparisonPanel", () => {
     expect(within(epsRow as HTMLTableRowElement).getByText("+0.50")).toBeTruthy();
     expect(within(epsRow as HTMLTableRowElement).getByText("26.32%")).toBeTruthy();
   });
+
+  it("does not silently fall back to a different annual when custom compare collapses to the same fiscal year", () => {
+    const annual2025 = makeFinancial({ period_end: "2025-12-31", revenue: 1_200_000_000 });
+    const annual2024 = makeFinancial({ period_end: "2024-12-31", revenue: 1_000_000_000 });
+    const quarterly2025 = makeFinancial({ filing_type: "10-Q", period_start: "2025-10-01", period_end: "2025-12-31", revenue: 320_000_000 });
+
+    render(
+      React.createElement(FinancialComparisonPanel, {
+        financials: [annual2025, annual2024, quarterly2025],
+        visibleFinancials: [annual2025, annual2024, quarterly2025],
+        selectedFinancial: quarterly2025,
+        comparisonFinancial: annual2025,
+      })
+    );
+
+    expect(screen.getByText(/Comparison resolves to the same fiscal year/i)).toBeTruthy();
+    expect(screen.getByText(/Need a second annual filing for full deltas/i)).toBeTruthy();
+    expect(screen.queryByText(/Compare 10-K Dec 31, 2024/i)).toBeNull();
+  });
 });
