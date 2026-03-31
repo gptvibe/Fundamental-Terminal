@@ -27,7 +27,7 @@ describe("getCompanyMetricsTimeseries", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=12",
-      expect.objectContaining({ cache: "force-cache" })
+      expect.objectContaining({ cache: "no-store" })
     );
   });
 
@@ -50,7 +50,7 @@ describe("getCompanyMetricsTimeseries", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=12&as_of=2025-02-01",
-      expect.objectContaining({ cache: "force-cache" })
+      expect.objectContaining({ cache: "no-store" })
     );
   });
 });

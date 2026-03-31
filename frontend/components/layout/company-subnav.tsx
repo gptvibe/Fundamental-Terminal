@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 
 interface CompanySubnavProps {
@@ -54,7 +54,6 @@ const tabs: CompanySubnavTab[] = [
 
 export function CompanySubnav({ ticker }: CompanySubnavProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const moreRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -200,29 +199,24 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
         <span className="company-subnav-kicker">{ticker}</span>
         <span className="company-subnav-copy">Company workspace</span>
       </div>
-      <div className="company-subnav-mobile-picker">
-        <label className="company-subnav-select-label" htmlFor="company-subnav-select">
-          Section
-        </label>
-        <select
-          id="company-subnav-select"
-          className="company-subnav-select"
-          value={activeTab.key}
-          onChange={(event) => {
-            const nextTab = tabLinks.find((tab) => tab.key === event.target.value);
-            if (nextTab) {
-              router.push(nextTab.href);
-            }
-          }}
-        >
-          {tabLinks.map((tab) => (
-            <option key={tab.key} value={tab.key}>
-              {tab.section === "more" ? `More · ${tab.label}` : tab.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <nav className="company-subnav-track" aria-label="Company workspace sections">
+      <nav className="company-subnav-track company-subnav-track-desktop" aria-label="Company workspace sections">
+        {tabLinks.map((tab) => {
+          const isActive = isTabActive(pathname, baseHref, tab);
+
+          return (
+            <Link
+              key={tab.key}
+              href={tab.href}
+              className={clsx("company-subnav-link", isActive && "is-active")}
+              aria-current={isActive ? "page" : undefined}
+              onKeyDown={handleTrackKeyDown}
+            >
+              {tab.label}
+            </Link>
+          );
+        })}
+      </nav>
+      <nav className="company-subnav-track company-subnav-track-mobile" aria-label="Company workspace quick sections">
         <div className="company-subnav-primary-links">
           {primaryTabs.map((tab) => {
             const isActive = isTabActive(pathname, baseHref, tab);

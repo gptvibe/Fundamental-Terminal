@@ -31,7 +31,7 @@ describe("api read cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/financials",
-      expect.objectContaining({ cache: "force-cache" })
+      expect.objectContaining({ cache: "no-store" })
     );
   });
 

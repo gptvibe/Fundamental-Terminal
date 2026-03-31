@@ -76,7 +76,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/watchlist\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
 ];
 
-const CACHE_STORAGE_PREFIX = "ft:api-cache:v1:";
+const CACHE_STORAGE_PREFIX = "ft:api-cache:v2:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
 
 const readCache = new Map<string, CacheEntry>();
@@ -293,7 +293,7 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
 }
 
 async function revalidateRead<T>(path: string, cacheKey: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
-  const request = fetchAndParse<T>(path, { ...init, cache: "force-cache" })
+  const request = fetchAndParse<T>(path, { ...init, cache: "no-store" })
     .then((payload) => {
       cacheValue(cacheKey, payload);
       return payload;

@@ -2653,15 +2653,26 @@ select {
 }
 
 .company-subnav-track {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 0;
   padding: 0 4px;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.company-subnav-track-desktop {
+  display: flex;
+}
+
+.company-subnav-track-mobile {
+  display: none;
+  width: 100%;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .company-subnav-primary-links {
@@ -2772,46 +2783,6 @@ select {
 
 .company-subnav-more-link:focus-visible {
   outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-.company-subnav-mobile-picker {
-  display: none;
-  gap: 6px;
-  padding: 6px 4px;
-}
-
-.company-subnav-select-label {
-  color: var(--text-muted);
-  font-family: var(--mono);
-  font-size: var(--text-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.company-subnav-select {
-  width: 100%;
-  min-height: 40px;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  border: 1px solid var(--panel-border);
-  background: var(--panel);
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  letter-spacing: 0.02em;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717a' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 12px;
-  cursor: pointer;
-  transition: border-color 120ms ease;
-}
-
-.company-subnav-select:focus {
-  outline: none;
-  border-color: var(--accent);
   box-shadow: var(--focus-ring);
 }
 
@@ -8104,12 +8075,13 @@ select {
     gap: 8px;
   }
 
-  .company-subnav-track {
+  .company-subnav-track-desktop {
     display: none;
   }
 
-  .company-subnav-mobile-picker {
+  .company-subnav-track-mobile {
     display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .company-research-header {
