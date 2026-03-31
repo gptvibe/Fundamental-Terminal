@@ -31,6 +31,10 @@ const CashFlowWaterfallChart = dynamic(
   () => import("@/components/charts/cash-flow-waterfall-chart").then((module) => module.CashFlowWaterfallChart),
   { ssr: false, loading: () => <div className="text-muted">Loading cash flow chart...</div> }
 );
+const GrowthWaterfallChart = dynamic(
+  () => import("@/components/charts/growth-waterfall-chart").then((module) => module.GrowthWaterfallChart),
+  { ssr: false, loading: () => <div className="text-muted">Loading growth chart...</div> }
+);
 const MarginTrendChart = dynamic(
   () => import("@/components/charts/margin-trend-chart").then((module) => module.MarginTrendChart),
   { ssr: false, loading: () => <div className="text-muted">Loading margin trend...</div> }
@@ -360,10 +364,14 @@ export default function CompanyFinancialsTabPage() {
 
           <div className="financials-workflow-group">
             <FinancialWorkflowSection
-              eyebrow="2. Compare Periods"
-              title="Period Comparison"
-              description="Use shared compare mode to inspect what changed between periods. Annual-only surfaces call out their fiscal-year fallback explicitly when a quarterly period is selected."
+              eyebrow="2. Chart-First Analysis"
+              title="Growth & Quality Lens"
+              description="Start with the annual growth view to frame revenue, earnings, and free cash flow momentum inside the shared range. Then move into quality and side-by-side comparison panels, with raw statement tables last."
             />
+
+            <Panel title="Growth Waterfall" subtitle="Annual-only value bars with a YoY growth overlay for revenue, net income, and free cash flow across the shared range." aside={<span className="pill tone-gold">Annual only</span>}>
+              <GrowthWaterfallChart financials={financials} visibleFinancials={pageFinancials} chartState={sharedChartState} />
+            </Panel>
 
             <Panel title="Financial Quality" subtitle="Annual-only summary cards, expandable ratio trends, and multi-year ratio history aligned to the same shared range and comparison state." aside={<span className="pill tone-gold">Annual only</span>}>
               <div style={{ display: "grid", gap: 18 }}>
@@ -432,7 +440,7 @@ export default function CompanyFinancialsTabPage() {
             <FinancialWorkflowSection
               eyebrow="3. Follow History"
               title="Historical Trends"
-              description="After reading the selected filing and its comparison, step back into the longer-run trend surfaces to see how margins, balance sheet, liquidity, cost structure, dilution, and derived metrics evolve over time."
+              description="After using the primary growth lens, step back into the longer-run trend surfaces to see how margins, balance sheet, liquidity, cost structure, dilution, and derived metrics evolve over time."
             />
 
             <Panel title="Margin Trends" subtitle="Historical gross, operating, net, and free cash flow margins across the visible period range.">

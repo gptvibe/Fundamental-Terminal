@@ -16,6 +16,7 @@ ROUTER_ALLOWED_PREFIXES = (
     "fastapi",
     "starlette",
     "app.api.schemas",
+    "app.api.source_contracts",
     "app.api.routers",
 )
 SERVICE_FORBIDDEN_PREFIXES = (
