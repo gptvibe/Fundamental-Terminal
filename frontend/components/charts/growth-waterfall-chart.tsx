@@ -3,10 +3,13 @@
 import { useMemo, useState } from "react";
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
 import { buildAnnualKey, buildAnnualSurfaceWarnings, formatAnnualLabel, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { difference, formatSignedCompactDelta, formatSignedPointDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
@@ -113,112 +116,168 @@ export function GrowthWaterfallChart({
     trendAvailable: chartData.length > 1,
     capabilities: CAPABILITIES,
   });
-
-  if (!annualFinancials.length || !selectedAnnual) {
-    return <PanelEmptyState message="No annual filing history is available yet for value-plus-growth comparison." />;
-  }
+  const badgeArea = annualFinancials.length && selectedAnnual ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Metric", value: metric.label },
+        { label: "Focus", value: formatAnnualLabel(selectedAnnual) },
+        { label: "Source", value: "Annual filing history" },
+      ]}
+    />
+  ) : null;
+  const exportRows = useMemo(
+    () => chartData.map((row) => ({ period: row.period, period_end: row.periodEnd, filing_type: row.filingType, value: row.value, growth_rate: row.growthRate, selected: row.isSelected ? "yes" : "no", comparison: row.isComparison ? "yes" : "no" })),
+    [chartData]
+  );
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
-
-      <div className="financial-toggle-row">
-        {METRIC_OPTIONS.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            className={`chart-chip${metric.key === option.key ? " chart-chip-active" : ""}`}
-            aria-pressed={metric.key === option.key}
-            onClick={() => setMetricKey(option.key)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="financial-inline-pills">
-        <span className="pill tone-cyan">Focus {formatAnnualLabel(selectedAnnual)}</span>
-        {comparisonAnnual ? <span className="pill tone-gold">Compare {formatAnnualLabel(comparisonAnnual)}</span> : null}
-        <span className="pill">Visible annual periods {chartData.length}</span>
-        <span className="pill">Metric {metric.label}</span>
-      </div>
-
-      {summaryPoint ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill">Period {summaryPoint.period}</span>
-          <span className="pill">{metric.label} {formatCompactNumber(summaryPoint.value)}</span>
-          <span className="pill">YoY Growth {formatPercent(summaryPoint.growthRate)}</span>
-          <span className="pill">Filed {formatDate(summaryPoint.periodEnd)}</span>
+    <InteractiveChartFrame
+      title="Growth waterfall"
+      subtitle={annualFinancials.length ? `${chartData.length} annual periods of value-plus-growth history.` : "Awaiting annual filing history"}
+      inspectorTitle="Growth waterfall"
+      inspectorSubtitle="Annual value bars with a YoY growth overlay across the current visible annual range."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "time_series" }}
+      annotations={[
+        { label: metric.label, color: metric.barColor },
+        { label: "YoY Growth", color: metric.lineColor },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Visible annual periods {chartData.length}</span>
+            <span className="pill">Metric {metric.label}</span>
+            <span className="pill">Source: annual filing history</span>
+          </div>
         </div>
-      ) : null}
-
-      {summaryPoint && comparisonPoint ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill tone-gold">{metric.label} Δ {formatSignedCompactDelta(difference(summaryPoint.value, comparisonPoint.value))}</span>
-          <span className="pill tone-gold">YoY Δ {formatSignedPointDelta(toGrowthPointDelta(summaryPoint.growthRate, comparisonPoint.growthRate))}</span>
-        </div>
-      ) : null}
-
-      {hasMetricHistory ? (
-        <div className="financial-chart-shell financial-chart-shell-large">
-          <ResponsiveContainer>
-            <ComposedChart data={chartData} margin={{ top: 10, right: 18, left: 4, bottom: 8 }}>
-              <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-              <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-              <YAxis
-                yAxisId="value"
-                stroke={CHART_AXIS_COLOR}
-                tick={chartTick()}
-                tickFormatter={(value) => formatCompactNumber(Number(value))}
-                width={78}
-              />
-              <YAxis
-                yAxisId="growth"
-                orientation="right"
-                stroke={CHART_AXIS_COLOR}
-                tick={chartTick()}
-                tickFormatter={(value) => formatPercent(Number(value))}
-                width={64}
-              />
-              <ReferenceLine yAxisId="value" y={0} stroke="var(--panel-border)" />
-              {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} yAxisId="value" stroke="var(--warning)" strokeDasharray="4 3" /> : null}
-              {focusPoint ? <ReferenceLine x={focusPoint.period} yAxisId="value" stroke="var(--accent)" strokeDasharray="4 3" /> : null}
-              <Tooltip
-                {...RECHARTS_TOOLTIP_PROPS}
-                formatter={(value, name) => {
-                  const numericValue = coerceTooltipNumber(value);
-                  if (name === "YoY Growth") {
-                    return formatPercent(numericValue);
-                  }
-                  return formatCompactNumber(numericValue);
-                }}
-              />
-              <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-              <Bar yAxisId="value" dataKey="value" name={metric.label} fill={metric.barColor} radius={[4, 4, 0, 0]} />
-              <Line
-                yAxisId="growth"
-                type="monotone"
-                dataKey="growthRate"
-                name="YoY Growth"
-                stroke={metric.lineColor}
-                strokeWidth={2.4}
-                dot={{ r: 3, fill: metric.lineColor, strokeWidth: 0 }}
-                activeDot={{ r: 5, fill: metric.lineColor, stroke: "var(--panel)", strokeWidth: 2 }}
-                connectNulls
-                isAnimationActive={false}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      ) : (
-        <PanelEmptyState
-          message={`No annual ${metric.label.toLowerCase()} history is available in the current shared range yet.`}
-          kicker="Selected metric"
-          title="Nothing to chart"
-          minHeight={280}
-        />
       )}
-    </div>
+      resetState={{
+        onReset: () => setMetricKey("revenue"),
+        disabled: metricKey === "revenue",
+      }}
+      stageState={
+        annualFinancials.length && selectedAnnual
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Growth waterfall",
+              title: "No annual filing history is available yet",
+              message: "This chart appears once cached annual filings are available for value-plus-growth comparison.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("growth-waterfall", "financials")}.png`,
+        csvFileName: `${normalizeExportFileStem("growth-waterfall", "financials")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        annualFinancials.length && selectedAnnual ? (
+          <div style={{ display: "grid", gap: 14 }}>
+            <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
+
+            <div className="financial-toggle-row">
+              {METRIC_OPTIONS.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  className={`chart-chip${metric.key === option.key ? " chart-chip-active" : ""}`}
+                  aria-pressed={metric.key === option.key}
+                  onClick={() => setMetricKey(option.key)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="financial-inline-pills">
+              <span className="pill tone-cyan">Focus {formatAnnualLabel(selectedAnnual)}</span>
+              {comparisonAnnual ? <span className="pill tone-gold">Compare {formatAnnualLabel(comparisonAnnual)}</span> : null}
+              <span className="pill">Visible annual periods {chartData.length}</span>
+              <span className="pill">Metric {metric.label}</span>
+            </div>
+
+            {summaryPoint ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill">Period {summaryPoint.period}</span>
+                <span className="pill">{metric.label} {formatCompactNumber(summaryPoint.value)}</span>
+                <span className="pill">YoY Growth {formatPercent(summaryPoint.growthRate)}</span>
+                <span className="pill">Filed {formatDate(summaryPoint.periodEnd)}</span>
+              </div>
+            ) : null}
+
+            {summaryPoint && comparisonPoint ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill tone-gold">{metric.label} Δ {formatSignedCompactDelta(difference(summaryPoint.value, comparisonPoint.value))}</span>
+                <span className="pill tone-gold">YoY Δ {formatSignedPointDelta(toGrowthPointDelta(summaryPoint.growthRate, comparisonPoint.growthRate))}</span>
+              </div>
+            ) : null}
+
+            {hasMetricHistory ? (
+              <div className="financial-chart-shell financial-chart-shell-large" style={{ height: expanded ? 420 : undefined }}>
+                <ResponsiveContainer>
+                  <ComposedChart data={chartData} margin={{ top: 10, right: expanded ? 24 : 18, left: 4, bottom: 8 }}>
+                    <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                    <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                    <YAxis
+                      yAxisId="value"
+                      stroke={CHART_AXIS_COLOR}
+                      tick={chartTick(expanded ? 11 : 10)}
+                      tickFormatter={(value) => formatCompactNumber(Number(value))}
+                      width={78}
+                    />
+                    <YAxis
+                      yAxisId="growth"
+                      orientation="right"
+                      stroke={CHART_AXIS_COLOR}
+                      tick={chartTick(expanded ? 11 : 10)}
+                      tickFormatter={(value) => formatPercent(Number(value))}
+                      width={64}
+                    />
+                    <ReferenceLine yAxisId="value" y={0} stroke="var(--panel-border)" />
+                    {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} yAxisId="value" stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                    {focusPoint ? <ReferenceLine x={focusPoint.period} yAxisId="value" stroke="var(--accent)" strokeDasharray="4 3" /> : null}
+                    <Tooltip
+                      {...RECHARTS_TOOLTIP_PROPS}
+                      formatter={(value, name) => {
+                        const numericValue = coerceTooltipNumber(value);
+                        if (name === "YoY Growth") {
+                          return formatPercent(numericValue);
+                        }
+                        return formatCompactNumber(numericValue);
+                      }}
+                    />
+                    <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                    <Bar yAxisId="value" dataKey="value" name={metric.label} fill={metric.barColor} radius={[4, 4, 0, 0]} />
+                    <Line
+                      yAxisId="growth"
+                      type="monotone"
+                      dataKey="growthRate"
+                      name="YoY Growth"
+                      stroke={metric.lineColor}
+                      strokeWidth={expanded ? 2.8 : 2.4}
+                      dot={{ r: expanded ? 4 : 3, fill: metric.lineColor, strokeWidth: 0 }}
+                      activeDot={{ r: expanded ? 6 : 5, fill: metric.lineColor, stroke: "var(--panel)", strokeWidth: 2 }}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <PanelEmptyState
+                message={`No annual ${metric.label.toLowerCase()} history is available in the current shared range yet.`}
+                kicker="Selected metric"
+                title="Nothing to chart"
+                minHeight={280}
+              />
+            )}
+          </div>
+        ) : (
+          <PanelEmptyState message="No annual filing history is available yet for value-plus-growth comparison." />
+        )
+      }
+    />
   );
 }
 

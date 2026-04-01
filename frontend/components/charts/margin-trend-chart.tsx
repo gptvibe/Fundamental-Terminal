@@ -13,9 +13,12 @@ import {
   YAxis,
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { difference, findPointForStatement, formatSignedPointDelta, formatStatementAxisLabel, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import type { FinancialPayload } from "@/lib/types";
 
@@ -95,85 +98,139 @@ export function MarginTrendChart({ financials, chartState }: MarginTrendChartPro
   const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);
   const latest = data.at(-1) ?? null;
   const summaryPoint = focusPoint ?? latest;
-
-  if (!data.length) {
-    return <PanelEmptyState message="No revenue data is available yet to compute margin trends." />;
-  }
+  const exportRows = useMemo(
+    () => data.map((row) => ({ period: row.period, period_end: row.periodEnd, gross_margin: row.grossMargin, operating_margin: row.operatingMargin, net_margin: row.netMargin, fcf_margin: row.fcfMargin })),
+    [data]
+  );
+  const badgeArea = data.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Periods", value: String(data.length) },
+        { label: "Cadence", value: activeCadence.toUpperCase() },
+        { label: "Source", value: "Cached filing history" },
+      ]}
+    />
+  ) : null;
 
   return (
-    <div className="cash-waterfall-shell">
-      {chartState ? (
-        <FinancialChartStateBar state={chartState} />
-      ) : (
-        <div className="cash-waterfall-toolbar">
-          <div className="cash-waterfall-toggle-group">
-            <button
-              type="button"
-              className={`chart-chip${periodView === "annual" ? " chart-chip-active" : ""}`}
-              onClick={() => setPeriodView("annual")}
-              disabled={!annualStatements.length}
-            >
-              Annual
-            </button>
-            <button
-              type="button"
-              className={`chart-chip${periodView === "quarterly" ? " chart-chip-active" : ""}`}
-              onClick={() => setPeriodView("quarterly")}
-              disabled={!quarterlyStatements.length}
-            >
-              Quarterly
-            </button>
+    <InteractiveChartFrame
+      title="Margin trends"
+      subtitle={data.length ? `${data.length} visible periods of margin history.` : "Awaiting margin history"}
+      inspectorTitle="Margin trends"
+      inspectorSubtitle="Gross, operating, net, and free-cash-flow margins across the visible filing history."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "time_series" }}
+      annotations={[
+        { label: "Gross Margin", color: "var(--positive)" },
+        { label: "Operating Margin", color: "var(--accent)" },
+        { label: "Net Margin", color: "var(--warning)" },
+        { label: "FCF Margin", color: "#A855F7" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Visible periods {data.length}</span>
+            <span className="pill">Cadence {activeCadence.toUpperCase()}</span>
+            <span className="pill">Source: cached filing history</span>
           </div>
-          <span className="pill">{source.length} cached {periodView} filings</span>
         </div>
       )}
+      stageState={
+        data.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Margin trends",
+              title: "No revenue data is available yet to compute margin trends",
+              message: "Margin trend charts appear once cached filings include revenue and the relevant margin components.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("margin-trends", "financials")}.png`,
+        csvFileName: `${normalizeExportFileStem("margin-trends", "financials")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        data.length ? (
+          <div className="cash-waterfall-shell">
+            {chartState ? (
+              <FinancialChartStateBar state={chartState} />
+            ) : (
+              <div className="cash-waterfall-toolbar">
+                <div className="cash-waterfall-toggle-group">
+                  <button
+                    type="button"
+                    className={`chart-chip${periodView === "annual" ? " chart-chip-active" : ""}`}
+                    onClick={() => setPeriodView("annual")}
+                    disabled={!annualStatements.length}
+                  >
+                    Annual
+                  </button>
+                  <button
+                    type="button"
+                    className={`chart-chip${periodView === "quarterly" ? " chart-chip-active" : ""}`}
+                    onClick={() => setPeriodView("quarterly")}
+                    disabled={!quarterlyStatements.length}
+                  >
+                    Quarterly
+                  </button>
+                </div>
+                <span className="pill">{source.length} cached {periodView} filings</span>
+              </div>
+            )}
 
-      {summaryPoint ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill">Period {summaryPoint.period}</span>
-          <span className="pill">Gross {formatMargin(summaryPoint.grossMargin)}</span>
-          <span className="pill">Operating {formatMargin(summaryPoint.operatingMargin)}</span>
-          <span className="pill">Net {formatMargin(summaryPoint.netMargin)}</span>
-          <span className="pill">FCF {formatMargin(summaryPoint.fcfMargin)}</span>
-        </div>
-      ) : null}
+            {summaryPoint ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill">Period {summaryPoint.period}</span>
+                <span className="pill">Gross {formatMargin(summaryPoint.grossMargin)}</span>
+                <span className="pill">Operating {formatMargin(summaryPoint.operatingMargin)}</span>
+                <span className="pill">Net {formatMargin(summaryPoint.netMargin)}</span>
+                <span className="pill">FCF {formatMargin(summaryPoint.fcfMargin)}</span>
+              </div>
+            ) : null}
 
-      {summaryPoint && comparisonPoint ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill tone-gold">Gross Δ {formatSignedPointDelta(difference(summaryPoint.grossMargin, comparisonPoint.grossMargin))}</span>
-          <span className="pill tone-gold">Operating Δ {formatSignedPointDelta(difference(summaryPoint.operatingMargin, comparisonPoint.operatingMargin))}</span>
-          <span className="pill tone-gold">Net Δ {formatSignedPointDelta(difference(summaryPoint.netMargin, comparisonPoint.netMargin))}</span>
-          <span className="pill tone-gold">FCF Δ {formatSignedPointDelta(difference(summaryPoint.fcfMargin, comparisonPoint.fcfMargin))}</span>
-        </div>
-      ) : null}
+            {summaryPoint && comparisonPoint ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill tone-gold">Gross Δ {formatSignedPointDelta(difference(summaryPoint.grossMargin, comparisonPoint.grossMargin))}</span>
+                <span className="pill tone-gold">Operating Δ {formatSignedPointDelta(difference(summaryPoint.operatingMargin, comparisonPoint.operatingMargin))}</span>
+                <span className="pill tone-gold">Net Δ {formatSignedPointDelta(difference(summaryPoint.netMargin, comparisonPoint.netMargin))}</span>
+                <span className="pill tone-gold">FCF Δ {formatSignedPointDelta(difference(summaryPoint.fcfMargin, comparisonPoint.fcfMargin))}</span>
+              </div>
+            ) : null}
 
-      <div style={{ width: "100%", height: 340 }}>
-        <ResponsiveContainer>
-          <LineChart data={data} margin={{ top: 10, right: 14, left: 4, bottom: 8 }}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-            <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-            <YAxis
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-              tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
-              width={52}
-            />
-            <ReferenceLine y={0} stroke={CHART_AXIS_COLOR} strokeDasharray="4 2" />
-            {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
-            {focusPoint ? <ReferenceLine x={focusPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
-            <Tooltip
-              {...RECHARTS_TOOLTIP_PROPS}
-              formatter={(value: number) => `${value.toFixed(1)}%`}
-            />
-            <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-            <Line type="monotone" dataKey="grossMargin" name="Gross Margin" stroke="var(--positive)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="operatingMargin" name="Operating Margin" stroke="var(--accent)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="netMargin" name="Net Margin" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="fcfMargin" name="FCF Margin" stroke="#A855F7" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+            <div style={{ width: "100%", height: expanded ? 420 : 340 }}>
+              <ResponsiveContainer>
+                <LineChart data={data} margin={{ top: 10, right: expanded ? 20 : 14, left: 4, bottom: 8 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                  <YAxis
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                    tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                    width={52}
+                  />
+                  <ReferenceLine y={0} stroke={CHART_AXIS_COLOR} strokeDasharray="4 2" />
+                  {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                  {focusPoint ? <ReferenceLine x={focusPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
+                  <Tooltip
+                    {...RECHARTS_TOOLTIP_PROPS}
+                    formatter={(value: number) => `${value.toFixed(1)}%`}
+                  />
+                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                  <Line type="monotone" dataKey="grossMargin" name="Gross Margin" stroke="var(--positive)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="operatingMargin" name="Operating Margin" stroke="var(--accent)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="netMargin" name="Net Margin" stroke="var(--warning)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="fcfMargin" name="FCF Margin" stroke="#A855F7" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <PanelEmptyState message="No revenue data is available yet to compute margin trends." />
+        )
+      }
+    />
   );
 }
 

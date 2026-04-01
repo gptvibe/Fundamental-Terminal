@@ -3,35 +3,91 @@
 import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import type { BeneficialOwnershipFilingPayload } from "@/lib/types";
 
 export function BeneficialOwnershipFormChart({ filings }: { filings: BeneficialOwnershipFilingPayload[] }) {
   const data = useMemo(() => buildChartData(filings), [filings]);
-
-  if (!data.length) {
-    return (
-      <div className="grid-empty-state" style={{ minHeight: 220 }}>
-        <div className="grid-empty-kicker">Beneficial ownership</div>
-        <div className="grid-empty-title">No 13D or 13G filings yet</div>
-        <div className="grid-empty-copy">This chart fills in once SEC submissions include major beneficial ownership disclosures for the company.</div>
-      </div>
-    );
-  }
+  const exportRows = useMemo(
+    () => data.map((row) => ({ form: row.label, initial_filings: row.initial, amendments: row.amendments })),
+    [data]
+  );
+  const badgeArea = data.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Forms", value: String(data.length) },
+        { label: "Filings", value: String(filings.length) },
+        { label: "Source", value: "SEC Schedules 13D/13G" },
+      ]}
+    />
+  ) : null;
 
   return (
-    <div style={{ width: "100%", height: 280 }}>
-      <ResponsiveContainer>
-        <BarChart data={data} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-          <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-          <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-          <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} allowDecimals={false} width={48} />
-          <Tooltip {...RECHARTS_TOOLTIP_PROPS} />
-          <Bar dataKey="initial" name="Initial filings" fill="var(--accent)" radius={[2, 2, 0, 0]} />
-          <Bar dataKey="amendments" name="Amendments" fill="var(--warning)" radius={[2, 2, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <InteractiveChartFrame
+      title="Beneficial ownership form mix"
+      subtitle={data.length ? `${filings.length} filings across ${data.length} base forms.` : "Awaiting beneficial ownership disclosures"}
+      inspectorTitle="Beneficial ownership form mix"
+      inspectorSubtitle="Initial 13D/13G filings and amendments across the currently cached ownership record."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "categorical_snapshot" }}
+      annotations={[
+        { label: "Initial filings", color: "var(--accent)" },
+        { label: "Amendments", color: "var(--warning)" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Source: SEC beneficial ownership filings</span>
+            <span className="pill">Visible forms {data.length}</span>
+            <span className="pill">Visible filings {filings.length}</span>
+          </div>
+          <div className="chart-inspector-footer-copy">
+            Expanded exports include the currently visible initial-versus-amendment counts only.
+          </div>
+        </div>
+      )}
+      stageState={
+        data.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Beneficial ownership",
+              title: "No 13D or 13G filings yet",
+              message: "This chart fills in once SEC submissions include major beneficial ownership disclosures for the company.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("beneficial-ownership-form-mix", "ownership")}.png`,
+        csvFileName: `${normalizeExportFileStem("beneficial-ownership-form-mix", "ownership")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        data.length ? (
+          <div style={{ width: "100%", height: expanded ? 360 : 280 }}>
+            <ResponsiveContainer>
+              <BarChart data={data} margin={{ top: 8, right: expanded ? 24 : 16, left: 0, bottom: 8 }}>
+                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} allowDecimals={false} width={48} />
+                <Tooltip {...RECHARTS_TOOLTIP_PROPS} />
+                <Bar dataKey="initial" name="Initial filings" fill="var(--accent)" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="amendments" name="Amendments" fill="var(--warning)" radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 220 }}>
+            <div className="grid-empty-kicker">Beneficial ownership</div>
+            <div className="grid-empty-title">No 13D or 13G filings yet</div>
+            <div className="grid-empty-copy">This chart fills in once SEC submissions include major beneficial ownership disclosures for the company.</div>
+          </div>
+        )
+      }
+    />
   );
 }
 

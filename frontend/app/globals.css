@@ -5749,6 +5749,11 @@ select {
   min-width: 0;
 }
 
+.interactive-chart-frame.is-inline-compact .interactive-chart-expand-button {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .interactive-chart-expand-button {
   position: absolute;
   top: 12px;
@@ -5768,6 +5773,13 @@ select {
 .interactive-chart-frame:focus-within .interactive-chart-expand-button {
   opacity: 1;
   transform: translateY(0);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .interactive-chart-expand-button {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .chart-inspector-dialog {

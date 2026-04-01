@@ -13,10 +13,13 @@ import {
   YAxis,
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import type { FinancialPayload } from "@/lib/types";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { difference, findPointForStatement, formatSignedCompactDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { buildOperatingCostSeries } from "@/lib/financial-chart-transforms";
 import { formatCompactNumber, formatDate } from "@/lib/format";
@@ -74,79 +77,134 @@ export function OperatingCostStructureChart({ financials, chartState }: Operatin
   const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);
   const latest = data.at(-1) ?? null;
   const summaryPoint = focusPoint ?? latest;
-
-  if (!data.length) {
-    return <PanelEmptyState message="No SG&A, R&D, stock-based compensation, interest, or tax expense history is available yet." />;
-  }
+  const exportRows = useMemo(
+    () => data.map((row) => ({ period: row.period, period_end: row.periodEnd, sga: row.sga, research_and_development: row.researchAndDevelopment, stock_based_compensation: row.stockBasedCompensation, interest_expense: row.interestExpense, income_tax_expense: row.incomeTaxExpense })),
+    [data]
+  );
+  const badgeArea = data.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Periods", value: String(data.length) },
+        { label: "Cadence", value: activeCadence.toUpperCase() },
+        { label: "Source", value: "Cached filing history" },
+      ]}
+    />
+  ) : null;
 
   return (
-    <div className="cash-waterfall-shell">
-      {chartState ? (
-        <FinancialChartStateBar state={chartState} />
-      ) : (
-        <div className="cash-waterfall-toolbar">
-          <div className="cash-waterfall-toggle-group">
-            <button
-              type="button"
-              className={`chart-chip${periodView === "annual" ? " chart-chip-active" : ""}`}
-              onClick={() => setPeriodView("annual")}
-              disabled={!annualStatements.length}
-            >
-              Annual
-            </button>
-            <button
-              type="button"
-              className={`chart-chip${periodView === "quarterly" ? " chart-chip-active" : ""}`}
-              onClick={() => setPeriodView("quarterly")}
-              disabled={!quarterlyStatements.length}
-            >
-              Quarterly
-            </button>
+    <InteractiveChartFrame
+      title="Operating cost structure"
+      subtitle={data.length ? `${data.length} visible periods of operating cost history.` : "Awaiting cost structure history"}
+      inspectorTitle="Operating cost structure"
+      inspectorSubtitle="SG&A, R&D, stock-based compensation, interest expense, and tax expense across the visible filing history."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "stacked_time_series" }}
+      annotations={[
+        { label: "SG&A", color: "var(--accent)" },
+        { label: "R&D", color: "var(--warning)" },
+        { label: "Stock-Based Comp", color: "var(--positive)" },
+        { label: "Interest Expense", color: "var(--negative)" },
+        { label: "Income Tax Expense", color: "#A855F7" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Visible periods {data.length}</span>
+            <span className="pill">Cadence {activeCadence.toUpperCase()}</span>
+            <span className="pill">Source: cached filing history</span>
           </div>
-          <span className="pill">{source.length} cached {periodView} filings</span>
         </div>
       )}
+      stageState={
+        data.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Operating cost structure",
+              title: "No operating cost history yet",
+              message: "This chart appears once cached filings include SG&A, R&D, stock-based compensation, interest expense, or tax expense history.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("operating-cost-structure", "financials")}.png`,
+        csvFileName: `${normalizeExportFileStem("operating-cost-structure", "financials")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        data.length ? (
+          <div className="cash-waterfall-shell">
+            {chartState ? (
+              <FinancialChartStateBar state={chartState} />
+            ) : (
+              <div className="cash-waterfall-toolbar">
+                <div className="cash-waterfall-toggle-group">
+                  <button
+                    type="button"
+                    className={`chart-chip${periodView === "annual" ? " chart-chip-active" : ""}`}
+                    onClick={() => setPeriodView("annual")}
+                    disabled={!annualStatements.length}
+                  >
+                    Annual
+                  </button>
+                  <button
+                    type="button"
+                    className={`chart-chip${periodView === "quarterly" ? " chart-chip-active" : ""}`}
+                    onClick={() => setPeriodView("quarterly")}
+                    disabled={!quarterlyStatements.length}
+                  >
+                    Quarterly
+                  </button>
+                </div>
+                <span className="pill">{source.length} cached {periodView} filings</span>
+              </div>
+            )}
 
-      {summaryPoint ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill">Period {formatDate(summaryPoint.periodEnd)}</span>
-          <span className="pill">SG&A {formatCompactNumber(summaryPoint.sga)}</span>
-          <span className="pill">R&D {formatCompactNumber(summaryPoint.researchAndDevelopment)}</span>
-          <span className="pill">SBC {formatCompactNumber(summaryPoint.stockBasedCompensation)}</span>
-          <span className="pill">Interest {formatCompactNumber(summaryPoint.interestExpense)}</span>
-          <span className="pill">Tax {formatCompactNumber(summaryPoint.incomeTaxExpense)}</span>
-        </div>
-      ) : null}
+            {summaryPoint ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill">Period {formatDate(summaryPoint.periodEnd)}</span>
+                <span className="pill">SG&A {formatCompactNumber(summaryPoint.sga)}</span>
+                <span className="pill">R&D {formatCompactNumber(summaryPoint.researchAndDevelopment)}</span>
+                <span className="pill">SBC {formatCompactNumber(summaryPoint.stockBasedCompensation)}</span>
+                <span className="pill">Interest {formatCompactNumber(summaryPoint.interestExpense)}</span>
+                <span className="pill">Tax {formatCompactNumber(summaryPoint.incomeTaxExpense)}</span>
+              </div>
+            ) : null}
 
-      {summaryPoint && comparisonPoint ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill tone-gold">SG&A Δ {formatSignedCompactDelta(difference(summaryPoint.sga, comparisonPoint.sga))}</span>
-          <span className="pill tone-gold">R&D Δ {formatSignedCompactDelta(difference(summaryPoint.researchAndDevelopment, comparisonPoint.researchAndDevelopment))}</span>
-          <span className="pill tone-gold">SBC Δ {formatSignedCompactDelta(difference(summaryPoint.stockBasedCompensation, comparisonPoint.stockBasedCompensation))}</span>
-          <span className="pill tone-gold">Interest Δ {formatSignedCompactDelta(difference(summaryPoint.interestExpense, comparisonPoint.interestExpense))}</span>
-          <span className="pill tone-gold">Tax Δ {formatSignedCompactDelta(difference(summaryPoint.incomeTaxExpense, comparisonPoint.incomeTaxExpense))}</span>
-        </div>
-      ) : null}
+            {summaryPoint && comparisonPoint ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill tone-gold">SG&A Δ {formatSignedCompactDelta(difference(summaryPoint.sga, comparisonPoint.sga))}</span>
+                <span className="pill tone-gold">R&D Δ {formatSignedCompactDelta(difference(summaryPoint.researchAndDevelopment, comparisonPoint.researchAndDevelopment))}</span>
+                <span className="pill tone-gold">SBC Δ {formatSignedCompactDelta(difference(summaryPoint.stockBasedCompensation, comparisonPoint.stockBasedCompensation))}</span>
+                <span className="pill tone-gold">Interest Δ {formatSignedCompactDelta(difference(summaryPoint.interestExpense, comparisonPoint.interestExpense))}</span>
+                <span className="pill tone-gold">Tax Δ {formatSignedCompactDelta(difference(summaryPoint.incomeTaxExpense, comparisonPoint.incomeTaxExpense))}</span>
+              </div>
+            ) : null}
 
-      <div style={{ width: "100%", height: 340 }}>
-        <ResponsiveContainer>
-          <LineChart data={data} margin={{ top: 10, right: 14, left: 4, bottom: 8 }}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-            <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-            <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} width={82} />
-            {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
-            {focusPoint ? <ReferenceLine x={focusPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
-            <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
-            <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-            <Line type="monotone" dataKey="sga" name="SG&A" stroke="var(--accent)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="researchAndDevelopment" name="R&D" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="stockBasedCompensation" name="Stock-Based Comp" stroke="var(--positive)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="interestExpense" name="Interest Expense" stroke="var(--negative)" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-            <Line type="monotone" dataKey="incomeTaxExpense" name="Income Tax Expense" stroke="#A855F7" strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+            <div style={{ width: "100%", height: expanded ? 420 : 340 }}>
+              <ResponsiveContainer>
+                <LineChart data={data} margin={{ top: 10, right: expanded ? 20 : 14, left: 4, bottom: 8 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                  <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={(value) => formatCompactNumber(Number(value))} width={82} />
+                  {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                  {focusPoint ? <ReferenceLine x={focusPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
+                  <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
+                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                  <Line type="monotone" dataKey="sga" name="SG&A" stroke="var(--accent)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="researchAndDevelopment" name="R&D" stroke="var(--warning)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="stockBasedCompensation" name="Stock-Based Comp" stroke="var(--positive)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="interestExpense" name="Interest Expense" stroke="var(--negative)" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                  <Line type="monotone" dataKey="incomeTaxExpense" name="Income Tax Expense" stroke="#A855F7" strokeWidth={expanded ? 2.6 : 2.2} dot={false} connectNulls isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <PanelEmptyState message="No SG&A, R&D, stock-based compensation, interest, or tax expense history is available yet." />
+        )
+      }
+    />
   );
 }
 

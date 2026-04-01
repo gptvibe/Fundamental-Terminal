@@ -13,9 +13,12 @@ import {
   YAxis
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { difference, formatSignedCompactDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
@@ -98,103 +101,152 @@ export function CashFlowWaterfallChart({ financials, chartState }: CashFlowWater
     trendAvailable: trendData.length > 1,
     capabilities: CAPABILITIES,
   });
-
-  if (!focusStatement || chartData.length === 0) {
-    return (
-      <div className="grid-empty-state" style={{ minHeight: 280 }}>
-        <div className="grid-empty-kicker">Cash flow bridge</div>
-        <div className="grid-empty-title">No cash flow waterfall available</div>
-        <div className="grid-empty-copy">Refresh cached filings to load operating cash flow, capex, and capital allocation inputs.</div>
-      </div>
-    );
-  }
+  const badgeArea = focusStatement && chartData.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Focus", value: formatDate(focusStatement.period_end) },
+        { label: "Form", value: focusStatement.filing_type },
+        { label: "Source", value: "Cached filing history" },
+      ]}
+    />
+  ) : null;
+  const exportRows = useMemo(
+    () => chartData.map((row) => ({ label: row.label, kind: row.kind, start: row.start, end: row.end, delta: row.delta, span: row.span })),
+    [chartData]
+  );
 
   return (
-    <div className="cash-waterfall-shell">
-      <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
-
-      {chartState ? (
-        <FinancialChartStateBar state={chartState} />
-      ) : (
-        <div className="cash-waterfall-toolbar">
-          <div className="cash-waterfall-toggle-group">
-            <button
-              type="button"
-              className={`chart-chip${periodView === "annual" ? " chart-chip-active" : ""}`}
-              onClick={() => setPeriodView("annual")}
-              disabled={!annualStatements.length}
-            >
-              Annual
-            </button>
-            <button
-              type="button"
-              className={`chart-chip${periodView === "quarterly" ? " chart-chip-active" : ""}`}
-              onClick={() => setPeriodView("quarterly")}
-              disabled={!quarterlyStatements.length}
-            >
-              Quarterly
-            </button>
+    <InteractiveChartFrame
+      title="Cash flow bridge"
+      subtitle={focusStatement && chartData.length ? `${chartData.length} bridge steps for ${formatDate(focusStatement.period_end)}.` : "Awaiting cash-flow bridge data"}
+      inspectorTitle="Cash flow bridge"
+      inspectorSubtitle="Selected-period bridge from revenue to free cash flow, with compare context and trend history where available."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "waterfall" }}
+      annotations={[
+        { label: "Positive bridge steps", color: POSITIVE_COLOR },
+        { label: "Negative bridge steps", color: NEGATIVE_COLOR },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Trend periods {trendData.length}</span>
+            <span className="pill">Source: cached filing history</span>
           </div>
-          <span className="pill">{periodView === "annual" ? annualStatements.length : quarterlyStatements.length} cached {periodView} filings</span>
         </div>
       )}
+      stageState={
+        focusStatement && chartData.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Cash flow bridge",
+              title: "No cash flow waterfall available",
+              message: "Refresh cached filings to load operating cash flow, capex, and capital allocation inputs.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("cash-flow-waterfall", "financials")}.png`,
+        csvFileName: `${normalizeExportFileStem("cash-flow-waterfall", "financials")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        focusStatement && chartData.length ? (
+          <div className="cash-waterfall-shell">
+            <SnapshotSurfaceStatus capabilities={CAPABILITIES} mode={mode} warnings={warnings} />
 
-      <div className="cash-waterfall-meta">
-        <span className="pill">Period {formatDate(focusStatement.period_end)}</span>
-        <span className="pill">Form {focusStatement.filing_type}</span>
-        <span className="pill">Revenue {formatCompactNumber(focusStatement.revenue)}</span>
-        <span className="pill">Operating CF {formatCompactNumber(focusStatement.operating_cash_flow)}</span>
-        <span className="pill">FCF {formatCompactNumber(focusStatement.free_cash_flow)}</span>
-      </div>
+            {chartState ? (
+              <FinancialChartStateBar state={chartState} />
+            ) : (
+              <div className="cash-waterfall-toolbar">
+                <div className="cash-waterfall-toggle-group">
+                  <button
+                    type="button"
+                    className={`chart-chip${periodView === "annual" ? " chart-chip-active" : ""}`}
+                    onClick={() => setPeriodView("annual")}
+                    disabled={!annualStatements.length}
+                  >
+                    Annual
+                  </button>
+                  <button
+                    type="button"
+                    className={`chart-chip${periodView === "quarterly" ? " chart-chip-active" : ""}`}
+                    onClick={() => setPeriodView("quarterly")}
+                    disabled={!quarterlyStatements.length}
+                  >
+                    Quarterly
+                  </button>
+                </div>
+                <span className="pill">{periodView === "annual" ? annualStatements.length : quarterlyStatements.length} cached {periodView} filings</span>
+              </div>
+            )}
 
-      {comparisonStatement ? (
-        <div className="cash-waterfall-meta">
-          <span className="pill tone-gold">Revenue Δ {formatSignedCompactDelta(difference(focusStatement.revenue, comparisonStatement.revenue))}</span>
-          <span className="pill tone-gold">Operating CF Δ {formatSignedCompactDelta(difference(focusStatement.operating_cash_flow, comparisonStatement.operating_cash_flow))}</span>
-          <span className="pill tone-gold">FCF Δ {formatSignedCompactDelta(difference(focusStatement.free_cash_flow, comparisonStatement.free_cash_flow))}</span>
-          <span className="pill tone-gold">Buybacks Δ {formatSignedCompactDelta(difference(focusStatement.share_buybacks, comparisonStatement.share_buybacks))}</span>
-          <span className="pill tone-gold">Dividends Δ {formatSignedCompactDelta(difference(focusStatement.dividends, comparisonStatement.dividends))}</span>
-        </div>
-      ) : null}
+            <div className="cash-waterfall-meta">
+              <span className="pill">Period {formatDate(focusStatement.period_end)}</span>
+              <span className="pill">Form {focusStatement.filing_type}</span>
+              <span className="pill">Revenue {formatCompactNumber(focusStatement.revenue)}</span>
+              <span className="pill">Operating CF {formatCompactNumber(focusStatement.operating_cash_flow)}</span>
+              <span className="pill">FCF {formatCompactNumber(focusStatement.free_cash_flow)}</span>
+            </div>
 
-      <div className="cash-waterfall-chart-shell">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 12, right: 24, left: 4, bottom: 26 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
-            <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick()} angle={-14} textAnchor="end" height={58} />
-            <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatAxisNumber} width={74} />
-            <ReferenceLine y={0} stroke="var(--panel-border)" />
-            <Tooltip content={<WaterfallTooltip />} />
-            <Bar dataKey="base" stackId="waterfall" fill="transparent" stroke="transparent" />
-            <Bar dataKey="span" stackId="waterfall" radius={[2, 2, 0, 0]}>
-              {chartData.map((entry) => (
-                <Cell key={entry.label} fill={entry.fill} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+            {comparisonStatement ? (
+              <div className="cash-waterfall-meta">
+                <span className="pill tone-gold">Revenue Δ {formatSignedCompactDelta(difference(focusStatement.revenue, comparisonStatement.revenue))}</span>
+                <span className="pill tone-gold">Operating CF Δ {formatSignedCompactDelta(difference(focusStatement.operating_cash_flow, comparisonStatement.operating_cash_flow))}</span>
+                <span className="pill tone-gold">FCF Δ {formatSignedCompactDelta(difference(focusStatement.free_cash_flow, comparisonStatement.free_cash_flow))}</span>
+                <span className="pill tone-gold">Buybacks Δ {formatSignedCompactDelta(difference(focusStatement.share_buybacks, comparisonStatement.share_buybacks))}</span>
+                <span className="pill tone-gold">Dividends Δ {formatSignedCompactDelta(difference(focusStatement.dividends, comparisonStatement.dividends))}</span>
+              </div>
+            ) : null}
 
-      {trendData.length > 1 ? (
-        <div className="segment-chart-card" style={{ display: "grid", gap: 10 }}>
-          <div className="segment-section-title">Cash Flow Trend</div>
-          <div className="segment-section-subtitle">Trend mode shows revenue, operating cash flow, and free cash flow across the visible filing window.</div>
-          <div style={{ width: "100%", height: 260 }}>
-            <ResponsiveContainer>
-              <BarChart data={trendData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
-                <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} interval={0} angle={-12} textAnchor="end" height={56} />
-                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatAxisNumber} width={74} />
-                <Tooltip />
-                <Bar dataKey="revenue" name="Revenue" fill="var(--accent)" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="operatingCashFlow" name="Operating CF" fill="var(--positive)" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="freeCashFlow" name="Free Cash Flow" fill="var(--warning)" radius={[2, 2, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="cash-waterfall-chart-shell" style={expanded ? { minHeight: 380 } : undefined}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 12, right: 24, left: 4, bottom: 26 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} angle={-14} textAnchor="end" height={58} />
+                  <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={formatAxisNumber} width={74} />
+                  <ReferenceLine y={0} stroke="var(--panel-border)" />
+                  <Tooltip content={<WaterfallTooltip />} />
+                  <Bar dataKey="base" stackId="waterfall" fill="transparent" stroke="transparent" />
+                  <Bar dataKey="span" stackId="waterfall" radius={[2, 2, 0, 0]}>
+                    {chartData.map((entry) => (
+                      <Cell key={entry.label} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {trendData.length > 1 ? (
+              <div className="segment-chart-card" style={{ display: "grid", gap: 10 }}>
+                <div className="segment-section-title">Cash Flow Trend</div>
+                <div className="segment-section-subtitle">Trend mode shows revenue, operating cash flow, and free cash flow across the visible filing window.</div>
+                <div style={{ width: "100%", height: expanded ? 320 : 260 }}>
+                  <ResponsiveContainer>
+                    <BarChart data={trendData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} interval={0} angle={-12} textAnchor="end" height={56} />
+                      <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={formatAxisNumber} width={74} />
+                      <Tooltip />
+                      <Bar dataKey="revenue" name="Revenue" fill="var(--accent)" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="operatingCashFlow" name="Operating CF" fill="var(--positive)" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="freeCashFlow" name="Free Cash Flow" fill="var(--warning)" radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            ) : null}
           </div>
-        </div>
-      ) : null}
-    </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 280 }}>
+            <div className="grid-empty-kicker">Cash flow bridge</div>
+            <div className="grid-empty-title">No cash flow waterfall available</div>
+            <div className="grid-empty-copy">Refresh cached filings to load operating cash flow, capex, and capital allocation inputs.</div>
+          </div>
+        )
+      }
+    />
   );
 }
 

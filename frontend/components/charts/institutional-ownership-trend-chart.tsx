@@ -13,7 +13,10 @@ import {
   YAxis
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartLegendStyle, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { formatDate, formatPercent } from "@/lib/format";
 import type { FinancialPayload, InstitutionalHoldingPayload } from "@/lib/types";
 
@@ -42,102 +45,159 @@ interface InstitutionalOwnershipTrendChartProps {
 
 export function InstitutionalOwnershipTrendChart({ holdings, financials }: InstitutionalOwnershipTrendChartProps) {
   const data = useMemo(() => buildOwnershipTrend(holdings, financials), [holdings, financials]);
-
-  if (!data.length) {
-    return (
-      <div className="grid-empty-state" style={{ minHeight: 260 }}>
-        <div className="grid-empty-kicker">Institutional trend</div>
-        <div className="grid-empty-title">No quarterly ownership history yet</div>
-        <div className="grid-empty-copy">This chart appears when cached 13F filings contain at least one reported quarter of institutional positions.</div>
-      </div>
-    );
-  }
-
   const peakShares = data.reduce((max, item) => Math.max(max, item.totalSharesHeld), 0);
   const peakOwnership = data.reduce((max, item) => Math.max(max, item.trackedOwnershipPercent ?? 0), 0);
+  const exportRows = useMemo(
+    () =>
+      data.map((row) => ({
+        quarter: row.quarterLabel,
+        quarter_date: row.quarterDate,
+        total_shares_held: row.totalSharesHeld,
+        top10_shares_held: row.top10SharesHeld,
+        tracked_ownership_percent: row.trackedOwnershipPercent,
+        fund_count: row.fundCount,
+      })),
+    [data]
+  );
+  const badgeArea = data.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Quarters", value: String(data.length) },
+        { label: "Peak tracked ownership", value: formatPercent(peakOwnership) },
+        { label: "Source", value: "Cached 13F positions" },
+      ]}
+    />
+  ) : null;
 
   return (
-    <div className="institutional-trend-shell">
-      <div className="institutional-trend-meta">
-        <span>{data.length} quarters</span>
-        <span>{formatShareCompact(peakShares)} peak tracked shares</span>
-        <span>{formatPercent(peakOwnership)} peak tracked ownership</span>
-        <span>Brush to zoom</span>
-      </div>
+    <InteractiveChartFrame
+      title="Institutional ownership trend"
+      subtitle={data.length ? `${data.length} quarters of tracked 13F ownership history.` : "Awaiting quarterly ownership history"}
+      inspectorTitle="Institutional ownership trend"
+      inspectorSubtitle="Tracked institutional shares, top-ten concentration, and estimated tracked ownership across cached 13F quarters."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "time_series" }}
+      annotations={[
+        { label: "Tracked Institutional Shares", color: "var(--positive)" },
+        { label: "Top 10 Funds Combined", color: "var(--warning)" },
+        { label: "Tracked Ownership %", color: "var(--accent)" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Source: cached 13F positions</span>
+            <span className="pill">Peak tracked shares {formatShareCompact(peakShares)}</span>
+            <span className="pill">Peak tracked ownership {formatPercent(peakOwnership)}</span>
+          </div>
+          <div className="chart-inspector-footer-copy">
+            Total ownership percent uses cached shares outstanding when available and reflects tracked 13F funds in the current cache.
+          </div>
+        </div>
+      )}
+      stageState={
+        data.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Institutional trend",
+              title: "No quarterly ownership history yet",
+              message: "This chart appears when cached 13F filings contain at least one reported quarter of institutional positions.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("institutional-ownership-trend", "ownership")}.png`,
+        csvFileName: `${normalizeExportFileStem("institutional-ownership-trend", "ownership")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        data.length ? (
+          <div className="institutional-trend-shell">
+            <div className="institutional-trend-meta">
+              <span>{data.length} quarters</span>
+              <span>{formatShareCompact(peakShares)} peak tracked shares</span>
+              <span>{formatPercent(peakOwnership)} peak tracked ownership</span>
+              <span>Brush to zoom</span>
+            </div>
 
-      <div className="institutional-trend-chart-shell">
-        <ResponsiveContainer>
-          <LineChart data={data} margin={{ top: 8, right: 16, left: 4, bottom: 12 }}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-            <XAxis dataKey="quarterLabel" minTickGap={18} stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-            <YAxis
-              yAxisId="shares"
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-              tickFormatter={(value) => formatShareCompact(Number(value))}
-            />
-            <YAxis
-              yAxisId="percent"
-              orientation="right"
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-              tickFormatter={(value) => formatPercent(Number(value))}
-            />
-            <Tooltip
-              cursor={{ stroke: "var(--accent)", strokeWidth: 1 }}
-              content={({ active, payload, label }) => (
-                <InstitutionalOwnershipTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
-              )}
-            />
-            <Legend wrapperStyle={chartLegendStyle()} />
-            <Line
-              yAxisId="shares"
-              type="monotone"
-              dataKey="totalSharesHeld"
-              name="Tracked Institutional Shares"
-              stroke="var(--positive)"
-              strokeWidth={2.6}
-              dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--positive)" }}
-            />
-            <Line
-              yAxisId="shares"
-              type="monotone"
-              dataKey="top10SharesHeld"
-              name="Top 10 Funds Combined"
-              stroke="var(--warning)"
-              strokeWidth={2.2}
-              strokeDasharray="7 4"
-              dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--warning)" }}
-            />
-            <Line
-              yAxisId="percent"
-              type="monotone"
-              dataKey="trackedOwnershipPercent"
-              name="Tracked Ownership %"
-              stroke="var(--accent)"
-              strokeWidth={2.2}
-              dot={false}
-              connectNulls
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
-            />
-            <Brush
-              dataKey="quarterLabel"
-              height={24}
-              stroke="var(--accent)"
-              travellerWidth={10}
-              fill="var(--accent)"
-              tickFormatter={(value) => String(value)}
-            />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="institutional-trend-note">
-        Total ownership percent uses cached shares outstanding when available and reflects tracked 13F funds in the current cache.
-      </div>
-    </div>
+            <div className="institutional-trend-chart-shell" style={{ height: expanded ? 420 : undefined }}>
+              <ResponsiveContainer>
+                <LineChart data={data} margin={{ top: 8, right: expanded ? 24 : 16, left: 4, bottom: 12 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="quarterLabel" minTickGap={18} stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                  <YAxis
+                    yAxisId="shares"
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                    tickFormatter={(value) => formatShareCompact(Number(value))}
+                  />
+                  <YAxis
+                    yAxisId="percent"
+                    orientation="right"
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                    tickFormatter={(value) => formatPercent(Number(value))}
+                  />
+                  <Tooltip
+                    cursor={{ stroke: "var(--accent)", strokeWidth: 1 }}
+                    content={({ active, payload, label }) => (
+                      <InstitutionalOwnershipTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
+                    )}
+                  />
+                  <Legend wrapperStyle={chartLegendStyle()} />
+                  <Line
+                    yAxisId="shares"
+                    type="monotone"
+                    dataKey="totalSharesHeld"
+                    name="Tracked Institutional Shares"
+                    stroke="var(--positive)"
+                    strokeWidth={expanded ? 2.8 : 2.6}
+                    dot={false}
+                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--positive)" }}
+                  />
+                  <Line
+                    yAxisId="shares"
+                    type="monotone"
+                    dataKey="top10SharesHeld"
+                    name="Top 10 Funds Combined"
+                    stroke="var(--warning)"
+                    strokeWidth={expanded ? 2.4 : 2.2}
+                    strokeDasharray="7 4"
+                    dot={false}
+                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--warning)" }}
+                  />
+                  <Line
+                    yAxisId="percent"
+                    type="monotone"
+                    dataKey="trackedOwnershipPercent"
+                    name="Tracked Ownership %"
+                    stroke="var(--accent)"
+                    strokeWidth={expanded ? 2.4 : 2.2}
+                    dot={false}
+                    connectNulls
+                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+                  />
+                  <Brush
+                    dataKey="quarterLabel"
+                    height={24}
+                    stroke="var(--accent)"
+                    travellerWidth={10}
+                    fill="var(--accent)"
+                    tickFormatter={(value) => String(value)}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 260 }}>
+            <div className="grid-empty-kicker">Institutional trend</div>
+            <div className="grid-empty-title">No quarterly ownership history yet</div>
+            <div className="grid-empty-copy">This chart appears when cached 13F filings contain at least one reported quarter of institutional positions.</div>
+          </div>
+        )
+      }
+    />
   );
 }
 

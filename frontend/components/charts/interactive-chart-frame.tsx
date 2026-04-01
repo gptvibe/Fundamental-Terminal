@@ -47,6 +47,7 @@ interface InteractiveChartFrameProps {
   inspectorTitle?: string;
   inspectorSubtitle?: string;
   expandLabel?: string;
+  hideInlineHeader?: boolean;
 }
 
 export function InteractiveChartFrame({
@@ -70,6 +71,7 @@ export function InteractiveChartFrame({
   inspectorTitle,
   inspectorSubtitle,
   expandLabel = "Expand",
+  hideInlineHeader = false,
 }: InteractiveChartFrameProps) {
   const [open, setOpen] = useState(false);
 
@@ -81,13 +83,15 @@ export function InteractiveChartFrame({
   }
 
   return (
-    <section className={clsx("interactive-chart-frame", className)} onClick={handleCardClick}>
-      <div className={clsx("interactive-chart-frame-header", headerClassName)}>
-        <div className="interactive-chart-frame-heading">
-          <div className={clsx("interactive-chart-frame-title", titleClassName)}>{title}</div>
-          {subtitle ? <div className={clsx("interactive-chart-frame-subtitle", subtitleClassName)}>{subtitle}</div> : null}
+    <section className={clsx("interactive-chart-frame", hideInlineHeader && "is-inline-compact", className)} onClick={handleCardClick}>
+      {hideInlineHeader ? null : (
+        <div className={clsx("interactive-chart-frame-header", headerClassName)}>
+          <div className="interactive-chart-frame-heading">
+            <div className={clsx("interactive-chart-frame-title", titleClassName)}>{title}</div>
+            {subtitle ? <div className={clsx("interactive-chart-frame-subtitle", subtitleClassName)}>{subtitle}</div> : null}
+          </div>
         </div>
-      </div>
+      )}
 
       <button
         type="button"

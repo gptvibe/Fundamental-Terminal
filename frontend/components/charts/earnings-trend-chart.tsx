@@ -13,8 +13,11 @@ import {
   YAxis
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 import type { EarningsReleasePayload } from "@/lib/types";
 
@@ -39,59 +42,120 @@ export function EarningsTrendChart({ earnings = [], points, sourceLabel }: Earni
   const latest = data.at(-1) ?? null;
   const omittedRows = allRows.length - data.length;
   const isFallbackSeries = points != null;
-
-  if (!data.length) {
-    return <PanelEmptyState message="No releases with reported revenue or diluted EPS are available yet for this company." />;
-  }
+  const badgeArea = data.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Points", value: String(data.length) },
+        { label: "Latest", value: latest?.label ?? "Unavailable" },
+        { label: "Source", value: sourceLabel ?? (isFallbackSeries ? "Provided series" : "Cached earnings releases") },
+      ]}
+    />
+  ) : null;
+  const exportRows = useMemo(
+    () =>
+      data.map((row) => ({
+        label: row.label,
+        filing_date: row.filingDate,
+        reported_period_end: row.reportedPeriodEnd,
+        revenue: row.revenue,
+        diluted_eps: row.dilutedEps,
+        parse_state: row.parseState,
+      })),
+    [data]
+  );
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <span className="pill">{data.length} points plotted</span>
-        {sourceLabel ? <span className="pill">Source: {sourceLabel}</span> : null}
-        {!isFallbackSeries && omittedRows > 0 ? <span className="pill">{omittedRows} metadata-only releases omitted</span> : null}
-        {latest?.label ? <span className="pill">Latest period {latest.label}</span> : null}
-        {latest?.parseState ? <span className="pill">{latest.parseState.replace(/_/g, " ")}</span> : null}
-      </div>
+    <InteractiveChartFrame
+      title="Earnings trend"
+      subtitle={data.length ? `${data.length} releases with reported revenue or diluted EPS.` : "Awaiting parsed earnings releases"}
+      inspectorTitle="Earnings trend"
+      inspectorSubtitle="Reported revenue and diluted EPS by earnings release, using only rows with parsed numeric values."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "time_series" }}
+      annotations={[
+        { label: "Reported Revenue", color: "var(--positive)" },
+        { label: "Diluted EPS", color: "var(--accent)" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Visible releases {data.length}</span>
+            {sourceLabel ? <span className="pill">Source: {sourceLabel}</span> : null}
+            {!isFallbackSeries && omittedRows > 0 ? <span className="pill">Metadata-only releases omitted {omittedRows}</span> : null}
+            {latest?.parseState ? <span className="pill">Latest state {latest.parseState.replace(/_/g, " ")}</span> : null}
+          </div>
+        </div>
+      )}
+      stageState={
+        data.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Earnings trend",
+              title: "No releases with reported revenue or diluted EPS yet",
+              message: "This chart fills in once parsed releases include reported revenue or diluted EPS values.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("earnings-trend", "earnings")}.png`,
+        csvFileName: `${normalizeExportFileStem("earnings-trend", "earnings")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        data.length ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span className="pill">{data.length} points plotted</span>
+              {sourceLabel ? <span className="pill">Source: {sourceLabel}</span> : null}
+              {!isFallbackSeries && omittedRows > 0 ? <span className="pill">{omittedRows} metadata-only releases omitted</span> : null}
+              {latest?.label ? <span className="pill">Latest period {latest.label}</span> : null}
+              {latest?.parseState ? <span className="pill">{latest.parseState.replace(/_/g, " ")}</span> : null}
+            </div>
 
-      <div style={{ width: "100%", height: 340 }}>
-        <ResponsiveContainer>
-          <ComposedChart data={data} margin={{ top: 10, right: 18, left: 4, bottom: 8 }}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-            <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-            <YAxis
-              yAxisId="revenue"
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-              tickFormatter={(value) => formatCompactNumber(Number(value))}
-              width={72}
-            />
-            <YAxis
-              yAxisId="eps"
-              orientation="right"
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-              tickFormatter={(value) => formatEps(Number(value))}
-              width={64}
-            />
-            <Tooltip content={<EarningsTooltip />} {...RECHARTS_TOOLTIP_PROPS} />
-            <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
-            <Bar yAxisId="revenue" dataKey="revenue" name="Reported Revenue" fill="var(--positive)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
-            <Line
-              yAxisId="eps"
-              type="monotone"
-              dataKey="dilutedEps"
-              name="Diluted EPS"
-              stroke="var(--accent)"
-              strokeWidth={2.4}
-              dot={{ r: 3 }}
-              activeDot={{ r: 5 }}
-              isAnimationActive={false}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+            <div style={{ width: "100%", height: expanded ? 420 : 340 }}>
+              <ResponsiveContainer>
+                <ComposedChart data={data} margin={{ top: 10, right: expanded ? 24 : 18, left: 4, bottom: 8 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="label" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                  <YAxis
+                    yAxisId="revenue"
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                    tickFormatter={(value) => formatCompactNumber(Number(value))}
+                    width={72}
+                  />
+                  <YAxis
+                    yAxisId="eps"
+                    orientation="right"
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                    tickFormatter={(value) => formatEps(Number(value))}
+                    width={64}
+                  />
+                  <Tooltip content={<EarningsTooltip />} {...RECHARTS_TOOLTIP_PROPS} />
+                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                  <Bar yAxisId="revenue" dataKey="revenue" name="Reported Revenue" fill="var(--positive)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                  <Line
+                    yAxisId="eps"
+                    type="monotone"
+                    dataKey="dilutedEps"
+                    name="Diluted EPS"
+                    stroke="var(--accent)"
+                    strokeWidth={expanded ? 2.8 : 2.4}
+                    dot={{ r: expanded ? 4 : 3 }}
+                    activeDot={{ r: expanded ? 6 : 5 }}
+                    isAnimationActive={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <PanelEmptyState message="No releases with reported revenue or diluted EPS are available yet for this company." />
+        )
+      }
+    />
   );
 }
 

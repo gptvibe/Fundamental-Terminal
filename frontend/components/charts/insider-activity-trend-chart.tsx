@@ -13,7 +13,10 @@ import {
   YAxis
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import type { InsiderTradePayload } from "@/lib/types";
 
 type InsiderTrendDatum = {
@@ -45,63 +48,124 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
   const activeMonths = data.filter((month) => month.buys !== 0 || month.sells !== 0).length;
   const totalBuys = data.reduce((sum, month) => sum + month.buys, 0);
   const totalSells = data.reduce((sum, month) => sum + Math.abs(month.sells), 0);
-
-  if (!activeMonths) {
-    return (
-      <div className="grid-empty-state" style={{ minHeight: 260 }}>
-        <div className="grid-empty-kicker">Insider trend</div>
-        <div className="grid-empty-title">No open-market insider activity in the last 12 months</div>
-        <div className="grid-empty-copy">This chart tracks open-market Form 4 signals only, excluding grants and option exercises.</div>
-      </div>
-    );
-  }
+  const exportRows = useMemo(
+    () =>
+      data.map((row) => ({
+        month: row.monthLabel,
+        buys: row.buys,
+        sells: row.sells,
+        net: row.net,
+        insider_count: row.insiderCount,
+        total_shares: row.totalShares,
+        buy_shares: row.buyShares,
+        sell_shares: row.sellShares,
+      })),
+    [data]
+  );
+  const badgeArea = activeMonths ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Window", value: "12M" },
+        { label: "Active months", value: String(activeMonths) },
+        { label: "Source", value: "Form 4 open-market signals" },
+      ]}
+    />
+  ) : null;
 
   return (
-    <div className="insider-trend-shell">
-      <div className="insider-trend-meta">
-        <span>{activeMonths} active months</span>
-        <span>{formatCurrencyCompact(totalBuys)} buys</span>
-        <span>{formatCurrencyCompact(totalSells)} sells</span>
-        <span>Open-market signal only</span>
-      </div>
+    <InteractiveChartFrame
+      title="Insider activity trend"
+      subtitle={activeMonths ? `${activeMonths} active months across the last 12 months.` : "Awaiting open-market insider activity"}
+      inspectorTitle="Insider activity trend"
+      inspectorSubtitle="Monthly insider buys, sells, and net open-market activity from Form 4 filings."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      controlState={{ datasetKind: "time_series" }}
+      annotations={[
+        { label: "Insider Buys", color: "var(--positive)" },
+        { label: "Insider Sells", color: "var(--negative)" },
+        { label: "Net Insider Activity", color: "var(--accent)" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Window: last 12 months</span>
+            <span className="pill">Open-market signal only</span>
+            <span className="pill">Source: Form 4 filings</span>
+          </div>
+        </div>
+      )}
+      stageState={
+        activeMonths
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Insider trend",
+              title: "No open-market insider activity in the last 12 months",
+              message: "This chart tracks open-market Form 4 signals only, excluding grants and option exercises.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("insider-activity-trend", "insiders")}.png`,
+        csvFileName: `${normalizeExportFileStem("insider-activity-trend", "insiders")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        activeMonths ? (
+          <div className="insider-trend-shell">
+            <div className="insider-trend-meta">
+              <span>{activeMonths} active months</span>
+              <span>{formatCurrencyCompact(totalBuys)} buys</span>
+              <span>{formatCurrencyCompact(totalSells)} sells</span>
+              <span>Open-market signal only</span>
+            </div>
 
-      <div className="insider-trend-chart-shell">
-        <ResponsiveContainer>
-          <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-            <XAxis
-              dataKey="monthLabel"
-              minTickGap={18}
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-            />
-            <YAxis
-              stroke={CHART_AXIS_COLOR}
-              tick={chartTick()}
-              tickFormatter={(value) => formatSignedAxisCurrency(Number(value))}
-            />
-            <Tooltip
-              cursor={{ fill: "var(--ag-row-hover)" }}
-              content={({ active, payload, label }) => (
-                <InsiderTrendTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
-              )}
-            />
-            <ReferenceLine y={0} stroke="var(--panel-border)" />
-            <Bar dataKey="buys" name="Insider Buys" stackId="insider-activity" fill="var(--positive)" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="sells" name="Insider Sells" stackId="insider-activity" fill="var(--negative)" radius={[4, 4, 0, 0]} />
-            <Line
-              type="monotone"
-              dataKey="net"
-              name="Net Insider Activity"
-              stroke="var(--accent)"
-              strokeWidth={2.4}
-              dot={false}
-              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
+            <div className="insider-trend-chart-shell" style={{ height: expanded ? 380 : undefined }}>
+              <ResponsiveContainer>
+                <ComposedChart data={data} margin={{ top: 8, right: expanded ? 20 : 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis
+                    dataKey="monthLabel"
+                    minTickGap={18}
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                  />
+                  <YAxis
+                    stroke={CHART_AXIS_COLOR}
+                    tick={chartTick(expanded ? 11 : 10)}
+                    tickFormatter={(value) => formatSignedAxisCurrency(Number(value))}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "var(--ag-row-hover)" }}
+                    content={({ active, payload, label }) => (
+                      <InsiderTrendTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
+                    )}
+                  />
+                  <ReferenceLine y={0} stroke="var(--panel-border)" />
+                  <Bar dataKey="buys" name="Insider Buys" stackId="insider-activity" fill="var(--positive)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="sells" name="Insider Sells" stackId="insider-activity" fill="var(--negative)" radius={[4, 4, 0, 0]} />
+                  <Line
+                    type="monotone"
+                    dataKey="net"
+                    name="Net Insider Activity"
+                    stroke="var(--accent)"
+                    strokeWidth={expanded ? 2.8 : 2.4}
+                    dot={false}
+                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 260 }}>
+            <div className="grid-empty-kicker">Insider trend</div>
+            <div className="grid-empty-title">No open-market insider activity in the last 12 months</div>
+            <div className="grid-empty-copy">This chart tracks open-market Form 4 signals only, excluding grants and option exercises.</div>
+          </div>
+        )
+      }
+    />
   );
 }
 

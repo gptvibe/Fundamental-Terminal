@@ -159,6 +159,63 @@ describe("InteractiveChartFrame", () => {
     expect(screen.queryByRole("button", { name: "Donut" })).toBeNull();
   });
 
+  it("supports headerless inline cards while preserving the inspector title", async () => {
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(InteractiveChartFrame, {
+        title: "Hidden header chart",
+        subtitle: "Inline header stays hidden but the inspector still needs a title.",
+        hideInlineHeader: true,
+        renderChart: ({ expanded }: { expanded: boolean }) =>
+          React.createElement(
+            "div",
+            {
+              "data-testid": expanded ? "expanded-hidden-header" : "compact-hidden-header",
+              style: { width: "100%", height: expanded ? 420 : 220 },
+            },
+            expanded ? "Expanded hidden header" : "Compact hidden header"
+          ),
+      })
+    );
+
+    expect(screen.queryByText("Hidden header chart")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /expand hidden header chart/i }));
+
+    expect(screen.getByRole("heading", { name: "Hidden header chart" })).toBeTruthy();
+  });
+
+  it("only shows timeframe controls when the dataset supports them", async () => {
+    const user = userEvent.setup();
+
+    render(
+      React.createElement(InteractiveChartFrame, {
+        title: "Snapshot mix",
+        subtitle: "Snapshot datasets should not expose time windows.",
+        controlState: {
+          datasetKind: "categorical_snapshot",
+          timeframeMode: "snapshot",
+          timeframeModeOptions: ["snapshot", "1y", "3y"],
+          onTimeframeModeChange: vi.fn(),
+        },
+        renderChart: ({ expanded }: { expanded: boolean }) =>
+          React.createElement(
+            "div",
+            {
+              "data-testid": expanded ? "expanded-snapshot-mix" : "compact-snapshot-mix",
+              style: { width: "100%", height: expanded ? 420 : 220 },
+            },
+            expanded ? "Expanded snapshot mix" : "Compact snapshot mix"
+          ),
+      })
+    );
+
+    await user.click(screen.getByRole("button", { name: /expand snapshot mix/i }));
+
+    expect(screen.queryByRole("group", { name: "Window" })).toBeNull();
+  });
+
   it("shows reset and shared export actions when export state is configured", async () => {
     const user = userEvent.setup();
     const { onReset } = renderPolishedFrame();

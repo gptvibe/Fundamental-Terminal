@@ -13,10 +13,13 @@ import {
   YAxis
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import type { FinancialPayload } from "@/lib/types";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem } from "@/lib/export";
 import { difference, findPointForStatement, formatSignedCompactDelta, formatSignedMultipleDelta, formatStatementAxisLabel, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 
@@ -63,133 +66,185 @@ export function LiquidityCapitalChart({ financials, chartState }: LiquidityCapit
     [comparisonFinancial, retainedSeries]
   );
   const hasRetainedSeries = retainedSeries.length >= 2;
-
-  if (!data.length) {
-    return <PanelEmptyState message="No liquidity or retained earnings history is available in cached filings yet." />;
-  }
+  const exportRows = useMemo(
+    () => data.map((row) => ({ period: row.period, period_end: row.periodEnd, current_assets: row.currentAssets, current_liabilities: row.currentLiabilities, current_ratio: row.currentRatio, working_capital: row.workingCapital, retained_earnings: row.retainedEarnings })),
+    [data]
+  );
+  const badgeArea = data.length ? (
+    <ChartSourceBadges
+      badges={[
+        { label: "Periods", value: String(data.length) },
+        { label: "Focus", value: summaryPoint ? formatDate(summaryPoint.periodEnd) : "Latest" },
+        { label: "Source", value: "Cached filing history" },
+      ]}
+    />
+  ) : null;
 
   return (
-    <div className="liquidity-shell">
-      {chartState ? <FinancialChartStateBar state={chartState} /> : null}
-
-      {summaryPoint ? (
-        <div className="liquidity-meta">
-          <span>Period {formatDate(summaryPoint.periodEnd)}</span>
-          <span>Current ratio {formatRatio(summaryPoint.currentRatio)}</span>
-          <span>Working capital {formatCompactNumber(summaryPoint.workingCapital)}</span>
-          <span>Retained earnings {formatCompactNumber(summaryPoint.retainedEarnings)}</span>
-        </div>
-      ) : null}
-
-      {summaryPoint && comparisonPoint ? (
-        <div className="liquidity-meta">
-          <span>Current ratio Δ {formatSignedMultipleDelta(difference(summaryPoint.currentRatio, comparisonPoint.currentRatio))}</span>
-          <span>Working capital Δ {formatSignedCompactDelta(difference(summaryPoint.workingCapital, comparisonPoint.workingCapital))}</span>
-          <span>Retained earnings Δ {formatSignedCompactDelta(difference(summaryPoint.retainedEarnings, comparisonPoint.retainedEarnings))}</span>
-        </div>
-      ) : null}
-
-      <div className="liquidity-grid">
-        <div className="liquidity-chart-card">
-          <div className="liquidity-chart-title">Current Assets vs Current Liabilities</div>
-          <div className="liquidity-chart-subtitle">Liquidity coverage with current ratio overlay.</div>
-          <div className="liquidity-chart-shell">
-            <ResponsiveContainer>
-              <ComposedChart data={data} margin={{ top: 10, right: 18, left: 4, bottom: 8 }}>
-                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-                <YAxis
-                  yAxisId="values"
-                  stroke={CHART_AXIS_COLOR}
-                  tick={chartTick()}
-                  tickFormatter={(value) => formatCompactNumber(Number(value))}
-                  width={74}
-                />
-                <YAxis
-                  yAxisId="ratio"
-                  orientation="right"
-                  stroke={CHART_AXIS_COLOR}
-                  tick={chartTick()}
-                  tickFormatter={(value) => formatRatio(Number(value))}
-                  width={66}
-                />
-                {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} yAxisId="values" stroke="var(--warning)" strokeDasharray="4 3" /> : null}
-                {focusPoint ? <ReferenceLine x={focusPoint.period} yAxisId="values" stroke="var(--accent)" strokeDasharray="4 3" /> : null}
-                <Tooltip
-                  {...RECHARTS_TOOLTIP_PROPS}
-                  formatter={(value: number, name: string) => {
-                    if (name === "Current Ratio") {
-                      return formatRatio(value);
-                    }
-                    return formatCompactNumber(value);
-                  }}
-                />
-                <Bar yAxisId="values" dataKey="currentAssets" name="Current Assets" fill="var(--accent)" radius={[2, 2, 0, 0]} />
-                <Bar
-                  yAxisId="values"
-                  dataKey="currentLiabilities"
-                  name="Current Liabilities"
-                  fill="var(--warning)"
-                  radius={[2, 2, 0, 0]}
-                />
-                <Line
-                  yAxisId="ratio"
-                  type="monotone"
-                  dataKey="currentRatio"
-                  name="Current Ratio"
-                  stroke="var(--positive)"
-                  strokeWidth={2.4}
-                  dot={{ r: 3, fill: "var(--positive)" }}
-                  activeDot={{ r: 5, fill: "var(--positive)", stroke: "var(--panel)", strokeWidth: 2 }}
-                  connectNulls
-                  isAnimationActive={false}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+    <InteractiveChartFrame
+      title="Liquidity and capital"
+      subtitle={data.length ? `${data.length} periods of liquidity and retained-earnings history.` : "Awaiting liquidity history"}
+      inspectorTitle="Liquidity and capital"
+      inspectorSubtitle="Current assets, current liabilities, current ratio, working capital, and retained earnings across the visible filing history."
+      hideInlineHeader
+      badgeArea={badgeArea}
+      annotations={[
+        { label: "Current Assets", color: "var(--accent)" },
+        { label: "Current Liabilities", color: "var(--warning)" },
+        { label: "Current Ratio", color: "var(--positive)" },
+        { label: "Retained Earnings", color: "#64D2FF" },
+      ]}
+      footer={(
+        <div className="chart-inspector-footer-stack">
+          <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Visible periods {data.length}</span>
+            <span className="pill">Source: cached filing history</span>
           </div>
         </div>
+      )}
+      stageState={
+        data.length
+          ? undefined
+          : {
+              kind: "empty",
+              kicker: "Liquidity and capital",
+              title: "No liquidity or retained earnings history yet",
+              message: "This chart appears once cached filings include liquidity and retained-earnings fields.",
+            }
+      }
+      exportState={{
+        pngFileName: `${normalizeExportFileStem("liquidity-capital", "financials")}.png`,
+        csvFileName: `${normalizeExportFileStem("liquidity-capital", "financials")}.csv`,
+        csvRows: exportRows,
+      }}
+      renderChart={({ expanded }) =>
+        data.length ? (
+          <div className="liquidity-shell">
+            {chartState ? <FinancialChartStateBar state={chartState} /> : null}
 
-        <div className="liquidity-chart-card">
-          <div className="liquidity-chart-title">Retained Earnings Trend</div>
-          <div className="liquidity-chart-subtitle">Capital retention across reported periods.</div>
-          <div className="liquidity-chart-shell">
-            {hasRetainedSeries ? (
-              <ResponsiveContainer>
-                <ComposedChart data={retainedSeries} margin={{ top: 10, right: 12, left: 4, bottom: 8 }}>
-                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                  <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
-                  <YAxis
-                    stroke={CHART_AXIS_COLOR}
-                    tick={chartTick()}
-                    tickFormatter={(value) => formatCompactNumber(Number(value))}
-                    width={78}
-                  />
-                  {comparisonRetainedPoint ? <ReferenceLine x={comparisonRetainedPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
-                  {focusRetainedPoint ? <ReferenceLine x={focusRetainedPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
-                  <Tooltip
-                    {...RECHARTS_TOOLTIP_PROPS}
-                    formatter={(value: number) => formatCompactNumber(value)}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="retainedEarnings"
-                    name="Retained Earnings"
-                    stroke="#64D2FF"
-                    strokeWidth={2.4}
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#64D2FF", stroke: "var(--panel)", strokeWidth: 2 }}
-                    connectNulls
-                    isAnimationActive={false}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="liquidity-chart-empty">Retained earnings data is limited for this issuer.</div>
-            )}
+            {summaryPoint ? (
+              <div className="liquidity-meta">
+                <span>Period {formatDate(summaryPoint.periodEnd)}</span>
+                <span>Current ratio {formatRatio(summaryPoint.currentRatio)}</span>
+                <span>Working capital {formatCompactNumber(summaryPoint.workingCapital)}</span>
+                <span>Retained earnings {formatCompactNumber(summaryPoint.retainedEarnings)}</span>
+              </div>
+            ) : null}
+
+            {summaryPoint && comparisonPoint ? (
+              <div className="liquidity-meta">
+                <span>Current ratio Δ {formatSignedMultipleDelta(difference(summaryPoint.currentRatio, comparisonPoint.currentRatio))}</span>
+                <span>Working capital Δ {formatSignedCompactDelta(difference(summaryPoint.workingCapital, comparisonPoint.workingCapital))}</span>
+                <span>Retained earnings Δ {formatSignedCompactDelta(difference(summaryPoint.retainedEarnings, comparisonPoint.retainedEarnings))}</span>
+              </div>
+            ) : null}
+
+            <div className="liquidity-grid">
+              <div className="liquidity-chart-card">
+                <div className="liquidity-chart-title">Current Assets vs Current Liabilities</div>
+                <div className="liquidity-chart-subtitle">Liquidity coverage with current ratio overlay.</div>
+                <div className="liquidity-chart-shell" style={expanded ? { minHeight: 360 } : undefined}>
+                  <ResponsiveContainer>
+                    <ComposedChart data={data} margin={{ top: 10, right: 18, left: 4, bottom: 8 }}>
+                      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                      <YAxis
+                        yAxisId="values"
+                        stroke={CHART_AXIS_COLOR}
+                        tick={chartTick(expanded ? 11 : 10)}
+                        tickFormatter={(value) => formatCompactNumber(Number(value))}
+                        width={74}
+                      />
+                      <YAxis
+                        yAxisId="ratio"
+                        orientation="right"
+                        stroke={CHART_AXIS_COLOR}
+                        tick={chartTick(expanded ? 11 : 10)}
+                        tickFormatter={(value) => formatRatio(Number(value))}
+                        width={66}
+                      />
+                      {comparisonPoint ? <ReferenceLine x={comparisonPoint.period} yAxisId="values" stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                      {focusPoint ? <ReferenceLine x={focusPoint.period} yAxisId="values" stroke="var(--accent)" strokeDasharray="4 3" /> : null}
+                      <Tooltip
+                        {...RECHARTS_TOOLTIP_PROPS}
+                        formatter={(value: number, name: string) => {
+                          if (name === "Current Ratio") {
+                            return formatRatio(value);
+                          }
+                          return formatCompactNumber(value);
+                        }}
+                      />
+                      <Bar yAxisId="values" dataKey="currentAssets" name="Current Assets" fill="var(--accent)" radius={[2, 2, 0, 0]} />
+                      <Bar
+                        yAxisId="values"
+                        dataKey="currentLiabilities"
+                        name="Current Liabilities"
+                        fill="var(--warning)"
+                        radius={[2, 2, 0, 0]}
+                      />
+                      <Line
+                        yAxisId="ratio"
+                        type="monotone"
+                        dataKey="currentRatio"
+                        name="Current Ratio"
+                        stroke="var(--positive)"
+                        strokeWidth={expanded ? 2.8 : 2.4}
+                        dot={{ r: expanded ? 4 : 3, fill: "var(--positive)" }}
+                        activeDot={{ r: 5, fill: "var(--positive)", stroke: "var(--panel)", strokeWidth: 2 }}
+                        connectNulls
+                        isAnimationActive={false}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="liquidity-chart-card">
+                <div className="liquidity-chart-title">Retained Earnings Trend</div>
+                <div className="liquidity-chart-subtitle">Capital retention across reported periods.</div>
+                <div className="liquidity-chart-shell" style={expanded ? { minHeight: 320 } : undefined}>
+                  {hasRetainedSeries ? (
+                    <ResponsiveContainer>
+                      <ComposedChart data={retainedSeries} margin={{ top: 10, right: 12, left: 4, bottom: 8 }}>
+                        <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                        <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+                        <YAxis
+                          stroke={CHART_AXIS_COLOR}
+                          tick={chartTick(expanded ? 11 : 10)}
+                          tickFormatter={(value) => formatCompactNumber(Number(value))}
+                          width={78}
+                        />
+                        {comparisonRetainedPoint ? <ReferenceLine x={comparisonRetainedPoint.period} stroke="var(--warning)" strokeDasharray="4 3" /> : null}
+                        {focusRetainedPoint ? <ReferenceLine x={focusRetainedPoint.period} stroke="var(--accent)" strokeDasharray="4 3" /> : null}
+                        <Tooltip
+                          {...RECHARTS_TOOLTIP_PROPS}
+                          formatter={(value: number) => formatCompactNumber(value)}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="retainedEarnings"
+                          name="Retained Earnings"
+                          stroke="#64D2FF"
+                          strokeWidth={expanded ? 2.8 : 2.4}
+                          dot={false}
+                          activeDot={{ r: 4, fill: "#64D2FF", stroke: "var(--panel)", strokeWidth: 2 }}
+                          connectNulls
+                          isAnimationActive={false}
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="liquidity-chart-empty">Retained earnings data is limited for this issuer.</div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
+        ) : (
+          <PanelEmptyState message="No liquidity or retained earnings history is available in cached filings yet." />
+        )
+      }
+    />
   );
 }
 
