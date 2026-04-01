@@ -5686,6 +5686,421 @@ select {
   gap: 14px;
 }
 
+.app-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background:
+    radial-gradient(circle at top, rgba(126, 184, 218, 0.14), transparent 34%),
+    rgba(6, 8, 10, 0.82);
+  backdrop-filter: blur(16px);
+}
+
+.app-dialog-panel {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  outline: none;
+}
+
+.interactive-chart-frame {
+  position: relative;
+  min-width: 0;
+  isolation: isolate;
+}
+
+.interactive-chart-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid transparent;
+  pointer-events: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.interactive-chart-frame:hover::after,
+.interactive-chart-frame:focus-within::after {
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.interactive-chart-frame-header {
+  position: relative;
+  z-index: 1;
+}
+
+.interactive-chart-frame-heading {
+  min-width: 0;
+}
+
+.interactive-chart-frame-title {
+  color: var(--text);
+}
+
+.interactive-chart-frame-subtitle {
+  color: var(--text-muted);
+}
+
+.interactive-chart-frame-body {
+  min-width: 0;
+}
+
+.interactive-chart-expand-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+.interactive-chart-frame:hover .interactive-chart-expand-button,
+.interactive-chart-frame:focus-within .interactive-chart-expand-button {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.chart-inspector-dialog {
+  width: min(1320px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 140%, transparent);
+  background:
+    linear-gradient(180deg, rgba(126, 184, 218, 0.06), transparent 22%),
+    color-mix(in srgb, var(--panel) 96%, black 4%);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.chart-inspector-shell {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  min-height: min(820px, calc(100dvh - 56px));
+}
+
+.chart-inspector-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.chart-inspector-title-block {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.chart-inspector-kicker {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.chart-inspector-title {
+  margin: 0;
+  font-size: clamp(1.25rem, 1rem + 1.2vw, 2rem);
+  line-height: 1.1;
+  color: var(--surface-strong-text);
+}
+
+.chart-inspector-subtitle {
+  margin: 0;
+  max-width: 76ch;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.chart-inspector-close-button {
+  min-width: 108px;
+}
+
+.chart-inspector-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chart-inspector-badge-row .viz-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chart-inspector-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 88%, transparent);
+}
+
+.chart-inspector-controls {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.chart-inspector-controls .viz-control-group,
+.chart-inspector-control-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.chart-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chart-inspector-action-button {
+  min-height: 36px;
+  padding: 7px 12px;
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.chart-inspector-action-button-primary {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.chart-inspector-action-button-primary:hover {
+  border-color: color-mix(in srgb, var(--accent) 64%, transparent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+}
+
+.chart-inspector-action-button-secondary {
+  background: color-mix(in srgb, var(--panel-alt) 88%, transparent);
+}
+
+.chart-inspector-stage {
+  min-width: 0;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 16%),
+    color-mix(in srgb, var(--bg) 50%, var(--panel));
+  padding: 18px;
+}
+
+.chart-inspector-stage-content {
+  min-height: 320px;
+}
+
+.chart-inspector-stage > * {
+  min-width: 0;
+}
+
+.chart-inspector-status {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  color: var(--surface-strong-text);
+  font-size: var(--text-sm);
+}
+
+.chart-inspector-annotation-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chart-inspector-annotation-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 88%, transparent);
+  color: var(--surface-muted-text);
+  font-size: var(--text-xs);
+  letter-spacing: 0.03em;
+}
+
+.chart-inspector-annotation-pill.is-accent {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--panel-border));
+  color: color-mix(in srgb, var(--accent) 85%, var(--surface-strong-text));
+}
+
+.chart-inspector-annotation-pill.is-positive {
+  border-color: color-mix(in srgb, var(--positive) 34%, var(--panel-border));
+  color: color-mix(in srgb, var(--positive) 85%, var(--surface-strong-text));
+}
+
+.chart-inspector-annotation-pill.is-warning {
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--panel-border));
+  color: color-mix(in srgb, var(--warning) 88%, var(--surface-strong-text));
+}
+
+.chart-inspector-annotation-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, black 24%, transparent);
+}
+
+.chart-inspector-footer {
+  padding-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 110%, transparent);
+}
+
+.chart-inspector-footer-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.chart-inspector-footer-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chart-inspector-footer-copy {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.chart-inspector-stage-block {
+  display: grid;
+  gap: 12px;
+}
+
+.chart-inspector-stage-block-action-row {
+  display: flex;
+  justify-content: center;
+}
+
+.chart-inspector-stage-skeleton {
+  display: grid;
+  gap: 14px;
+  padding: 0 18px 18px;
+}
+
+.chart-inspector-stage-skeleton-header {
+  min-height: 12px;
+  width: min(180px, 40%);
+}
+
+.chart-inspector-stage-skeleton-body {
+  min-height: 180px;
+  border-radius: 14px;
+}
+
+.chart-inspector-stage-skeleton-body.is-short {
+  min-height: 72px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .interactive-chart-expand-button {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 960px) {
+  .chart-inspector-shell {
+    min-height: auto;
+  }
+
+  .chart-inspector-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chart-inspector-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 960px), (hover: none) and (pointer: coarse) {
+  .app-dialog-backdrop {
+    padding: 0;
+  }
+
+  .app-dialog-panel.chart-inspector-dialog {
+    width: 100%;
+    max-width: none;
+  }
+
+  .chart-inspector-dialog {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .chart-inspector-shell {
+    padding: 16px;
+    gap: 14px;
+    min-height: 100%;
+  }
+
+  .chart-inspector-stage {
+    padding: 14px;
+    flex: 1 1 auto;
+  }
+
+  .chart-inspector-stage-content {
+    min-height: 240px;
+  }
+
+  .chart-inspector-header {
+    gap: 12px;
+  }
+
+  .chart-inspector-close-button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .chart-inspector-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .chart-inspector-action-button {
+    width: 100%;
+  }
+
+  .chart-inspector-footer-pill-row,
+  .chart-inspector-annotation-row,
+  .chart-inspector-badge-row {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 720px) {
+  .chart-inspector-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .financial-history-chart-shell {
   display: grid;
   gap: 10px;

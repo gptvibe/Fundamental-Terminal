@@ -665,6 +665,24 @@ async function installCompanyWorkspaceMocks(page: Page) {
       });
     }
 
+    if (path.endsWith(`/companies/${ticker}/segment-history`)) {
+      const kind = url.searchParams.get("kind") === "geographic" ? "geographic" : "business";
+      const years = Number(url.searchParams.get("years") ?? "2");
+      return json(route, {
+        company,
+        kind,
+        years,
+        periods: [],
+        provenance: [],
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+      });
+    }
+
     if (path.endsWith(`/companies/${ticker}/activity-overview`)) {
       return json(route, {
         company,
@@ -1206,4 +1224,63 @@ test("earnings workspace smoke", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Hide metadata-only releases" })).toBeVisible();
   await page.getByRole("cell", { name: "Q1 2026" }).click();
   await expect(page.getByText("Metadata only capture; open the SEC filing to inspect the full release narrative.")).toBeVisible();
+});
+
+test("chart inspector smoke", async ({ page }, testInfo) => {
+  await page.goto(`/company/${ticker.toLowerCase()}`);
+
+  await expect(page.getByRole("button", { name: "Refresh Brief Data" })).toBeVisible();
+
+  const priceChartTitle = page.getByText("Price Chart", { exact: true }).first();
+  await priceChartTitle.scrollIntoViewIfNeeded();
+  await expect(priceChartTitle).toBeVisible();
+  const priceChartFrame = priceChartTitle.locator(
+    "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' price-chart-card ')][1]"
+  );
+  await expect(priceChartFrame).toBeVisible();
+  await page.waitForFunction(() => Boolean(document.querySelector('button[aria-label="Expand Price Chart"]')));
+  await page.evaluate(() => {
+    const expandButton = document.querySelector('button[aria-label="Expand Price Chart"]');
+    if (!(expandButton instanceof HTMLButtonElement)) {
+      throw new Error("Expand Price Chart button is missing.");
+    }
+    expandButton.click();
+  });
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Reset view" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Export PNG" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Export CSV" })).toBeVisible();
+  await expect(dialog.getByText(/Source: Price cache \+ filing history/)).toBeVisible();
+
+  const dialogBox = await dialog.boundingBox();
+  const viewport = page.viewportSize();
+  expect(dialogBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+
+  if (!dialogBox || !viewport) {
+    return;
+  }
+
+  if (testInfo.project.name.includes("mobile")) {
+    const dialogMetrics = await dialog.evaluate((element) => {
+      const styles = window.getComputedStyle(element);
+      return {
+        innerWidth: window.innerWidth,
+        width: styles.width,
+        maxHeight: styles.maxHeight,
+        height: styles.height,
+        backdropPadding: window.getComputedStyle(element.parentElement as Element).padding,
+        mobile720: window.matchMedia("(max-width: 720px)").matches,
+        mobile960: window.matchMedia("(max-width: 960px)").matches,
+        coarse: window.matchMedia("(hover: none) and (pointer: coarse)").matches,
+      };
+    });
+
+    expect(dialogBox.x).toBeLessThanOrEqual(2);
+    expect(Math.abs(dialogBox.width - dialogMetrics.innerWidth)).toBeLessThanOrEqual(4);
+  } else {
+    expect(dialogBox.width).toBeLessThan(viewport.width);
+  }
 });

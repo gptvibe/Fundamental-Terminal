@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -16,9 +17,15 @@ import {
   YAxis,
 } from "recharts";
 
+import { ChartSourceBadges } from "@/components/charts/chart-framework";
+import type { ChartInspectorControlState } from "@/components/charts/chart-inspector";
+import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { useChartPreferences } from "@/hooks/use-chart-preferences";
 import { getCompanySegmentHistory } from "@/lib/api";
+import { getDefaultChartType, type ChartType } from "@/lib/chart-capabilities";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
+import { normalizeExportFileStem, type ExportRow } from "@/lib/export";
 import { buildFinancialPeriodKey, type FinancialCadence } from "@/hooks/use-period-selection";
 import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -40,6 +47,8 @@ import type {
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 const SEGMENT_COLORS = ["var(--positive)", "var(--accent)", "var(--warning)", "var(--negative)", "#A855F7", "#64D2FF", "#0EA5E9"];
+const SEGMENT_COMPOSITION_CHART_TYPE_OPTIONS = ["donut", "pie", "stacked_bar"] as const satisfies readonly ChartType[];
+const DEFAULT_SEGMENT_COMPOSITION_CHART_TYPE: SegmentCompositionChartType = "donut";
 const CAPABILITIES: SnapshotSurfaceCapabilities = {
   supports_selected_period: true,
   supports_compare_mode: true,
@@ -110,6 +119,11 @@ export function BusinessSegmentBreakdown({
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [historyPeriods, setHistoryPeriods] = useState<SegmentHistoryPeriodPayload[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const { chartType: segmentCompositionChartType, setChartType: setSegmentCompositionChartType } = useChartPreferences({
+    chartFamily: "segment-breakdown-composition",
+    defaultChartType: DEFAULT_SEGMENT_COMPOSITION_CHART_TYPE,
+    allowedChartTypes: SEGMENT_COMPOSITION_CHART_TYPE_OPTIONS,
+  });
 
   const availableKinds = useMemo(() => {
     const kinds = new Set<SegmentKind>();
@@ -192,6 +206,25 @@ export function BusinessSegmentBreakdown({
 
   const selectedSegment = useMemo(() => segmentPoints.find((segment) => segment.id === selectedSegmentId) ?? null, [segmentPoints, selectedSegmentId]);
   const pieChartData = useMemo(() => buildPieChartData(segmentPoints, selectedSegment), [segmentPoints, selectedSegment]);
+  const selectedCompositionChartType: SegmentCompositionChartType = isSegmentCompositionChartType(segmentCompositionChartType)
+    ? segmentCompositionChartType
+    : DEFAULT_SEGMENT_COMPOSITION_CHART_TYPE;
+  const compositionControlState = useMemo<ChartInspectorControlState>(
+    () => ({
+      datasetKind: "segment_mix",
+      chartType: selectedCompositionChartType,
+      chartTypeOptions: SEGMENT_COMPOSITION_CHART_TYPE_OPTIONS,
+      onChartTypeChange: setSegmentCompositionChartType,
+    }),
+    [selectedCompositionChartType, setSegmentCompositionChartType]
+  );
+  const resetSegmentView = () => {
+    setActiveKind(preferredKind);
+    setSelectedSegmentId(null);
+    setSegmentCompositionChartType(DEFAULT_SEGMENT_COMPOSITION_CHART_TYPE);
+  };
+  const resetSegmentViewDisabled =
+    activeKind === preferredKind && selectedSegmentId === null && selectedCompositionChartType === DEFAULT_SEGMENT_COMPOSITION_CHART_TYPE;
   const revenueComparisonRows = useMemo(() => (selectedSegment ? [selectedSegment] : segmentPoints), [segmentPoints, selectedSegment]);
   const marginComparisonRows = useMemo(() => revenueComparisonRows.filter((segment) => segment.operatingMargin !== null), [revenueComparisonRows]);
   const marginDeltaRows = useMemo(() => marginComparisonRows.filter((segment) => segment.comparisonOperatingMargin !== null), [marginComparisonRows]);
@@ -216,8 +249,136 @@ export function BusinessSegmentBreakdown({
     capabilities: CAPABILITIES,
   });
 
+  const exportStem = useMemo(
+    () => normalizeExportFileStem(resolvedTicker ? `${resolvedTicker}-${activeKind}` : `${activeKind}-segments`, "segments"),
+    [activeKind, resolvedTicker]
+  );
+
+  const segmentSnapshotRows = useMemo(
+    () =>
+      segmentPoints.map((segment) => ({
+        segment: segment.name,
+        kind: segment.kind,
+        revenue: segment.revenue,
+        share: segment.share,
+        operating_income: segment.operatingIncome,
+        operating_margin: segment.operatingMargin,
+        revenue_growth: segment.growth,
+        share_delta: segment.shareDelta,
+        operating_margin_delta: segment.operatingMarginDelta,
+      })),
+    [segmentPoints]
+  );
+
+  const revenueComparisonExportRows = useMemo(
+    () =>
+      revenueComparisonRows.map((segment) => ({
+        segment: segment.name,
+        current_revenue: segment.revenue,
+        compare_revenue: segment.comparisonRevenue,
+        revenue_growth: segment.growth,
+        current_share: segment.share,
+        compare_share: segment.comparisonShare,
+      })),
+    [revenueComparisonRows]
+  );
+
+  const marginComparisonExportRows = useMemo(
+    () =>
+      marginComparisonRows.map((segment) => ({
+        segment: segment.name,
+        current_operating_margin: segment.operatingMargin,
+        compare_operating_margin: segment.comparisonOperatingMargin,
+        margin_delta: segment.operatingMarginDelta,
+      })),
+    [marginComparisonRows]
+  );
+
+  const revenueTrendExportRows = useMemo(() => buildTrendExportRows(revenueTrendData, trendFocusSegments), [revenueTrendData, trendFocusSegments]);
+  const marginTrendExportRows = useMemo(() => buildTrendExportRows(marginTrendData, trendFocusSegments), [marginTrendData, trendFocusSegments]);
+  const currentPeriodLabel = currentPeriod?.label ?? "Reported segments";
+  const currentPeriodAsOf = activeLens?.as_of ?? currentPeriod?.periodEnd ?? null;
+  const segmentFooter = (
+    <div className="chart-inspector-footer-stack">
+      <div className="chart-inspector-footer-pill-row">
+        <span className="pill">Kind: {activeKind === "business" ? "Business" : "Geography"}</span>
+        <span className="pill">Focus: {currentPeriodLabel}</span>
+        <span className="pill">As of {formatDate(currentPeriodAsOf)}</span>
+        <span className="pill">Sources: {(activeLens?.provenance_sources.length ?? 0) || 1}</span>
+      </div>
+      <div className="chart-inspector-footer-copy">
+        Provenance reflects cached SEC segment disclosures{activeLens?.last_refreshed_at ? `, refreshed ${formatDate(activeLens.last_refreshed_at)}` : ""}.
+      </div>
+    </div>
+  );
+  const segmentAnnotations = [
+    { label: activeKind === "business" ? "Business segments" : "Geography segments", tone: "accent" as const },
+    { label: selectedSegment?.name ?? "All segments", color: selectedSegment?.color ?? "var(--accent)" },
+  ];
+
   function toggleSegment(segmentId: string) {
     setSelectedSegmentId((current) => (current === segmentId ? null : segmentId));
+  }
+
+  function renderSegmentBadgeArea() {
+    const sourceValue = activeLens?.provenance_sources.length
+      ? activeLens.provenance_sources.join(", ")
+      : formatSourceLabel(financials[0]?.source ?? "reported filings");
+
+    return (
+      <ChartSourceBadges
+        badges={[
+          { label: "Focus", value: currentPeriodLabel },
+          { label: chartState?.comparisonFinancial && explicitComparisonPeriod ? "Compare" : "Baseline", value: comparisonPeriod?.label ?? "None" },
+          { label: "Segment", value: selectedSegment?.name ?? "All segments" },
+          { label: "As of", value: formatDate(currentPeriodAsOf) },
+          { label: "Source", value: sourceValue },
+        ]}
+      />
+    );
+  }
+
+  function renderSegmentInspectorControls() {
+    return (
+      <div className="chart-inspector-control-stack">
+        <div className="segment-filter-row">
+          {[...availableKinds].map((kind) => (
+            <button
+              key={`inspector-kind-${kind}`}
+              type="button"
+              className={`chart-chip ${activeKind === kind ? "chart-chip-active" : ""}`}
+              onClick={() => {
+                setActiveKind(kind);
+                setSelectedSegmentId(null);
+              }}
+            >
+              {kind === "business" ? "Business" : "Geography"}
+            </button>
+          ))}
+        </div>
+
+        <div className="segment-filter-row">
+          <button
+            type="button"
+            className={`chart-chip ${selectedSegmentId === null ? "chart-chip-active" : ""}`}
+            onClick={() => setSelectedSegmentId(null)}
+          >
+            All Segments
+          </button>
+          {segmentPoints.map((segment) => (
+            <button
+              key={`inspector-segment-${segment.id}`}
+              type="button"
+              className={`chart-chip ${selectedSegmentId === segment.id ? "chart-chip-active" : ""}`}
+              onClick={() => toggleSegment(segment.id)}
+              style={{ borderColor: `${segment.color}55`, color: selectedSegmentId === segment.id ? "var(--bg)" : segment.color }}
+            >
+              {segment.name}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (noFinancials) {
@@ -294,117 +455,144 @@ export function BusinessSegmentBreakdown({
       {activeLens ? <LensSummary lens={activeLens} /> : null}
 
       <div className="segment-breakdown-top-grid">
-        <div className="segment-chart-card">
-          <div className="segment-section-title">Revenue Treemap</div>
-          <div className="segment-section-subtitle">Selected period revenue mix. Click a tile to focus the compare and trend views.</div>
-          <div className="segment-chart-shell segment-chart-shell-treemap">
-            <ResponsiveContainer>
-              <Treemap
-                data={segmentPoints}
-                dataKey="revenue"
-                stroke="var(--panel-border)"
-                isAnimationActive
-                content={<SegmentTreemapNode selectedSegmentId={selectedSegmentId} onSelect={toggleSegment} />}
-              >
-                <Tooltip content={<SegmentTooltip />} />
-              </Treemap>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="segment-chart-card">
-          <div className="segment-section-title">Revenue Share</div>
-          <div className="segment-section-subtitle">Selected period share of revenue, with compare deltas surfaced in the detail bars below.</div>
-          <div className="segment-chart-shell segment-chart-shell-pie">
-            <ResponsiveContainer>
-              <PieChart>
-                <Pie
-                  data={pieChartData}
+        <SegmentChartFrame
+          title="Revenue Treemap"
+          subtitle="Selected period revenue mix. Click a tile to focus the compare and trend views."
+          badgeArea={renderSegmentBadgeArea()}
+          controls={renderSegmentInspectorControls()}
+          annotations={segmentAnnotations}
+          footer={segmentFooter}
+          resetState={{ onReset: resetSegmentView, disabled: resetSegmentViewDisabled }}
+          exportFileName={`${exportStem}-treemap.csv`}
+          exportRows={segmentSnapshotRows}
+          renderChart={({ expanded }) => (
+            <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-treemap" style={expanded ? { height: 460 } : undefined}>
+              <ResponsiveContainer>
+                <Treemap
+                  data={segmentPoints}
                   dataKey="revenue"
-                  nameKey="name"
-                  innerRadius="48%"
-                  outerRadius="82%"
-                  paddingAngle={2}
-                  stroke="var(--panel)"
-                  strokeWidth={2}
-                  onClick={(entry) => {
-                    if (entry && typeof entry === "object" && "id" in entry && typeof entry.id === "string" && entry.id !== "other") {
-                      toggleSegment(entry.id);
-                    }
-                  }}
+                  stroke="var(--panel-border)"
+                  isAnimationActive
+                  content={<SegmentTreemapNode selectedSegmentId={selectedSegmentId} onSelect={toggleSegment} />}
                 >
-                  {pieChartData.map((segment) => (
-                    <Cell key={segment.id} fill={segment.color} opacity={selectedSegmentId && selectedSegmentId !== segment.id ? 0.55 : 1} />
-                  ))}
-                </Pie>
-                <Tooltip content={<SegmentTooltip />} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+                  <Tooltip content={<SegmentTooltip />} />
+                </Treemap>
+              </ResponsiveContainer>
+            </div>
+          )}
+        />
+
+        <SegmentChartFrame
+          title="Revenue Share"
+          subtitle="Selected period share of revenue, with compare deltas surfaced in the detail bars below."
+          badgeArea={renderSegmentBadgeArea()}
+          controls={renderSegmentInspectorControls()}
+          controlState={compositionControlState}
+          annotations={segmentAnnotations}
+          footer={segmentFooter}
+          resetState={{ onReset: resetSegmentView, disabled: resetSegmentViewDisabled }}
+          stageState={
+            pieChartData.length
+              ? undefined
+              : {
+                  kind: "empty",
+                  kicker: "Revenue share",
+                  title: "No segment composition in view",
+                  message: "Select a different segment set or period once the company exposes comparable segment revenue.",
+                }
+          }
+          exportFileName={`${exportStem}-revenue-share.csv`}
+          exportRows={segmentSnapshotRows}
+          renderChart={({ expanded }) =>
+            renderSegmentCompositionChart({
+              chartType: expanded ? selectedCompositionChartType : "donut",
+              data: pieChartData,
+              currentPeriodLabel: currentPeriod.label,
+              expanded,
+              selectedSegmentId,
+              onSelectSegment: toggleSegment,
+            })
+          }
+        />
       </div>
 
-      <div className="segment-chart-card">
-        <div className="segment-section-title">{comparisonPeriod ? `${titleCase(activeKind)} Revenue Change` : `${titleCase(activeKind)} Revenue By Segment`}</div>
-        <div className="segment-section-subtitle">
-          {comparisonPeriod
-            ? `${currentPeriod.label} versus ${comparisonPeriod.label}.`
-            : `Only one comparable ${activeKind} disclosure is visible, so this view falls back to the selected-period revenue mix.`}
-        </div>
-        <div className="segment-chart-shell segment-chart-shell-bar">
-          <ResponsiveContainer>
-            <BarChart data={revenueComparisonRows} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
-              <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-              <XAxis
-                dataKey="name"
-                stroke={CHART_AXIS_COLOR}
-                tick={chartTick()}
-                interval={0}
-                angle={revenueComparisonRows.length > 3 ? -12 : 0}
-                textAnchor={revenueComparisonRows.length > 3 ? "end" : "middle"}
-                height={revenueComparisonRows.length > 3 ? 56 : 32}
-              />
-              <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => comparisonPeriod ? formatPercent(Number(value)) : formatCompactNumber(Number(value))} />
-              <Tooltip content={<SegmentTooltip />} />
-              <Bar dataKey={comparisonPeriod ? "growth" : "revenue"} radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
-                {revenueComparisonRows.map((segment) => (
-                  <Cell key={segment.id} fill={comparisonPeriod && segment.growth != null && segment.growth < 0 ? "var(--negative)" : segment.color} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {marginComparisonRows.length ? (
-        <div className="segment-chart-card">
-          <div className="segment-section-title">{titleCase(activeKind)} Operating Margin</div>
-          <div className="segment-section-subtitle">
-            Selected-period margin is always shown. Compare deltas appear whenever the baseline period reports operating income for the same segments.
-          </div>
-          <div className="segment-chart-shell segment-chart-shell-bar">
+      <SegmentChartFrame
+        title={comparisonPeriod ? `${titleCase(activeKind)} Revenue Change` : `${titleCase(activeKind)} Revenue By Segment`}
+        subtitle={comparisonPeriod
+          ? `${currentPeriod.label} versus ${comparisonPeriod.label}.`
+          : `Only one comparable ${activeKind} disclosure is visible, so this view falls back to the selected-period revenue mix.`}
+        badgeArea={renderSegmentBadgeArea()}
+        controls={renderSegmentInspectorControls()}
+        annotations={segmentAnnotations}
+        footer={segmentFooter}
+        resetState={{ onReset: resetSegmentView, disabled: resetSegmentViewDisabled }}
+        exportFileName={`${exportStem}-revenue-comparison.csv`}
+        exportRows={revenueComparisonExportRows}
+        renderChart={({ expanded }) => (
+          <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-bar" style={expanded ? { height: 440 } : undefined}>
             <ResponsiveContainer>
-              <BarChart data={marginComparisonRows} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
+              <BarChart data={revenueComparisonRows} margin={{ top: 12, right: expanded ? 24 : 18, left: 6, bottom: 4 }}>
                 <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
                 <XAxis
                   dataKey="name"
                   stroke={CHART_AXIS_COLOR}
-                  tick={chartTick()}
+                  tick={chartTick(expanded ? 11 : 10)}
                   interval={0}
-                  angle={marginComparisonRows.length > 3 ? -12 : 0}
-                  textAnchor={marginComparisonRows.length > 3 ? "end" : "middle"}
-                  height={marginComparisonRows.length > 3 ? 56 : 32}
+                  angle={revenueComparisonRows.length > 3 ? -12 : 0}
+                  textAnchor={revenueComparisonRows.length > 3 ? "end" : "middle"}
+                  height={revenueComparisonRows.length > 3 ? 56 : 32}
                 />
-                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} />
+                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={(value) => comparisonPeriod ? formatPercent(Number(value)) : formatCompactNumber(Number(value))} />
                 <Tooltip content={<SegmentTooltip />} />
-                <Bar dataKey="operatingMargin" name="Op. Margin" radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
-                  {marginComparisonRows.map((segment) => (
-                    <Cell key={segment.id} fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "var(--negative)" : segment.color} />
+                <Bar dataKey={comparisonPeriod ? "growth" : "revenue"} radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
+                  {revenueComparisonRows.map((segment) => (
+                    <Cell key={segment.id} fill={comparisonPeriod && segment.growth != null && segment.growth < 0 ? "var(--negative)" : segment.color} />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
+        )}
+      />
+
+      {marginComparisonRows.length ? (
+        <div>
+          <SegmentChartFrame
+            title={`${titleCase(activeKind)} Operating Margin`}
+            subtitle="Selected-period margin is always shown. Compare deltas appear whenever the baseline period reports operating income for the same segments."
+            badgeArea={renderSegmentBadgeArea()}
+            controls={renderSegmentInspectorControls()}
+            annotations={segmentAnnotations}
+            footer={segmentFooter}
+            resetState={{ onReset: resetSegmentView, disabled: resetSegmentViewDisabled }}
+            exportFileName={`${exportStem}-margin-comparison.csv`}
+            exportRows={marginComparisonExportRows}
+            renderChart={({ expanded }) => (
+              <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-bar" style={expanded ? { height: 440 } : undefined}>
+                <ResponsiveContainer>
+                  <BarChart data={marginComparisonRows} margin={{ top: 12, right: expanded ? 24 : 18, left: 6, bottom: 4 }}>
+                    <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                    <XAxis
+                      dataKey="name"
+                      stroke={CHART_AXIS_COLOR}
+                      tick={chartTick(expanded ? 11 : 10)}
+                      interval={0}
+                      angle={marginComparisonRows.length > 3 ? -12 : 0}
+                      textAnchor={marginComparisonRows.length > 3 ? "end" : "middle"}
+                      height={marginComparisonRows.length > 3 ? 56 : 32}
+                    />
+                    <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={(value) => formatPercent(Number(value))} />
+                    <Tooltip content={<SegmentTooltip />} />
+                    <Bar dataKey="operatingMargin" name="Op. Margin" radius={[2, 2, 0, 0]} onClick={(entry) => entry?.id && toggleSegment(String(entry.id))}>
+                      {marginComparisonRows.map((segment) => (
+                        <Cell key={segment.id} fill={segment.operatingMargin != null && segment.operatingMargin < 0 ? "var(--negative)" : segment.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          />
 
           {marginDeltaRows.length ? (
             <div className="segment-table-shell">
@@ -436,47 +624,61 @@ export function BusinessSegmentBreakdown({
       ) : null}
 
       {revenueTrendData.length > 1 ? (
-        <div className="segment-chart-card">
-          <div className="segment-section-title">{titleCase(activeKind)} Revenue Trend</div>
-          <div className="segment-section-subtitle">
-            {selectedSegment ? `${selectedSegment.name} across visible periods.` : "Top segments across the visible history window."}
-          </div>
-          <div className="segment-chart-shell segment-chart-shell-bar">
-            <ResponsiveContainer>
-              <BarChart data={revenueTrendData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
-                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} interval={0} angle={-12} textAnchor="end" height={56} />
-                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} />
-                <Tooltip />
-                {trendFocusSegments.map((segment) => (
-                  <Bar key={segment.id} dataKey={segment.id} name={segment.name} fill={segment.color} radius={[2, 2, 0, 0]} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <SegmentChartFrame
+          title={`${titleCase(activeKind)} Revenue Trend`}
+          subtitle={selectedSegment ? `${selectedSegment.name} across visible periods.` : "Top segments across the visible history window."}
+          badgeArea={renderSegmentBadgeArea()}
+          controls={renderSegmentInspectorControls()}
+          annotations={segmentAnnotations}
+          footer={segmentFooter}
+          resetState={{ onReset: resetSegmentView, disabled: resetSegmentViewDisabled }}
+          exportFileName={`${exportStem}-revenue-trend.csv`}
+          exportRows={revenueTrendExportRows}
+          renderChart={({ expanded }) => (
+            <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-bar" style={expanded ? { height: 440 } : undefined}>
+              <ResponsiveContainer>
+                <BarChart data={revenueTrendData} margin={{ top: 12, right: expanded ? 24 : 18, left: 6, bottom: 4 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} interval={0} angle={-12} textAnchor="end" height={56} />
+                  <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={(value) => formatCompactNumber(Number(value))} />
+                  <Tooltip />
+                  {trendFocusSegments.map((segment) => (
+                    <Bar key={segment.id} dataKey={segment.id} name={segment.name} fill={segment.color} radius={[2, 2, 0, 0]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        />
       ) : null}
 
       {marginTrendData.length > 1 ? (
-        <div className="segment-chart-card">
-          <div className="segment-section-title">{titleCase(activeKind)} Margin Trend</div>
-          <div className="segment-section-subtitle">
-            {selectedSegment ? `${selectedSegment.name} operating margin across visible periods.` : "Operating margin trend for the current focus set."}
-          </div>
-          <div className="segment-chart-shell segment-chart-shell-bar">
-            <ResponsiveContainer>
-              <BarChart data={marginTrendData} margin={{ top: 12, right: 18, left: 6, bottom: 4 }}>
-                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} interval={0} angle={-12} textAnchor="end" height={56} />
-                <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} />
-                <Tooltip />
-                {trendFocusSegments.map((segment) => (
-                  <Bar key={segment.id} dataKey={segment.id} name={segment.name} fill={segment.color} radius={[2, 2, 0, 0]} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <SegmentChartFrame
+          title={`${titleCase(activeKind)} Margin Trend`}
+          subtitle={selectedSegment ? `${selectedSegment.name} operating margin across visible periods.` : "Operating margin trend for the current focus set."}
+          badgeArea={renderSegmentBadgeArea()}
+          controls={renderSegmentInspectorControls()}
+          annotations={segmentAnnotations}
+          footer={segmentFooter}
+          resetState={{ onReset: resetSegmentView, disabled: resetSegmentViewDisabled }}
+          exportFileName={`${exportStem}-margin-trend.csv`}
+          exportRows={marginTrendExportRows}
+          renderChart={({ expanded }) => (
+            <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-bar" style={expanded ? { height: 440 } : undefined}>
+              <ResponsiveContainer>
+                <BarChart data={marginTrendData} margin={{ top: 12, right: expanded ? 24 : 18, left: 6, bottom: 4 }}>
+                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+                  <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} interval={0} angle={-12} textAnchor="end" height={56} />
+                  <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={(value) => formatPercent(Number(value))} />
+                  <Tooltip />
+                  {trendFocusSegments.map((segment) => (
+                    <Bar key={segment.id} dataKey={segment.id} name={segment.name} fill={segment.color} radius={[2, 2, 0, 0]} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        />
       ) : null}
     </div>
   );
@@ -582,6 +784,58 @@ function LensSummary({ lens }: { lens: SegmentLensPayload }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function SegmentChartFrame({
+  title,
+  subtitle,
+  badgeArea,
+  controls,
+  controlState,
+  annotations,
+  footer,
+  resetState,
+  stageState,
+  exportFileName,
+  exportRows,
+  renderChart,
+}: {
+  title: string;
+  subtitle: string;
+  badgeArea: ReactNode;
+  controls: ReactNode;
+  controlState?: ChartInspectorControlState;
+  annotations?: Array<{ label: string; tone?: "neutral" | "accent" | "positive" | "warning"; color?: string }>;
+  footer?: ReactNode;
+  resetState?: { onReset: () => void; disabled?: boolean };
+  stageState?: { kind: "ready" | "loading" | "empty" | "error"; kicker?: string; title?: string; message: string; actionLabel?: string; onAction?: () => void };
+  exportFileName: string;
+  exportRows: ExportRow[];
+  renderChart: (context: { expanded: boolean }) => ReactNode;
+}) {
+  return (
+    <InteractiveChartFrame
+      title={title}
+      subtitle={subtitle}
+      className="segment-chart-card"
+      headerClassName="segment-card-heading"
+      titleClassName="segment-section-title"
+      subtitleClassName="segment-section-subtitle"
+      badgeArea={badgeArea}
+      controls={controls}
+      controlState={controlState}
+      annotations={annotations}
+      footer={footer}
+      resetState={resetState}
+      stageState={stageState}
+      exportState={{
+        pngFileName: exportFileName.replace(/\.csv$/i, ".png"),
+        csvFileName: exportFileName,
+        csvRows: exportRows,
+      }}
+      renderChart={renderChart}
+    />
   );
 }
 
@@ -713,6 +967,14 @@ function buildPieChartData(segmentPoints: SegmentPoint[], selectedSegment: Segme
   ];
 }
 
+function buildStackedCompositionRow(periodLabel: string, segmentPoints: SegmentPoint[]): Record<string, number | string> {
+  const row: Record<string, number | string> = { period: periodLabel };
+  for (const segment of segmentPoints) {
+    row[segment.id] = segment.share ?? 0;
+  }
+  return row;
+}
+
 function buildTrendData(periods: SegmentPeriod[], focusSegments: SegmentPoint[], metric: "revenue" | "operatingMargin"): Array<Record<string, number | string | null>> {
   return [...periods].reverse().map((period) => {
     const row: Record<string, number | string | null> = { period: period.label };
@@ -721,6 +983,16 @@ function buildTrendData(periods: SegmentPeriod[], focusSegments: SegmentPoint[],
       row[segment.id] = metric === "revenue" ? matching?.revenue ?? null : matching?.operatingMargin ?? null;
     }
     return row;
+  });
+}
+
+function buildTrendExportRows(rows: Array<Record<string, number | string | null>>, focusSegments: SegmentPoint[]): ExportRow[] {
+  return rows.map((row) => {
+    const exportRow: ExportRow = { period: row.period as string | number | null | undefined };
+    for (const segment of focusSegments) {
+      exportRow[segment.name] = row[segment.id] as string | number | null | undefined;
+    }
+    return exportRow;
   });
 }
 
@@ -949,6 +1221,125 @@ function SegmentTooltip({ active, payload }: { active?: boolean; payload?: Toolt
   );
 }
 
+function SegmentCompositionTooltip({
+  active,
+  payload,
+  segments,
+}: {
+  active?: boolean;
+  payload?: Array<{ dataKey?: string | number; value?: number | string | null }>;
+  segments: SegmentPoint[];
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const segmentMap = new Map(segments.map((segment) => [segment.id, segment]));
+  const visibleRows = payload
+    .map((entry) => {
+      const segmentId = typeof entry.dataKey === "string" ? entry.dataKey : null;
+      const segment = segmentId ? segmentMap.get(segmentId) ?? null : null;
+      if (!segment) {
+        return null;
+      }
+      return {
+        segment,
+        share: typeof entry.value === "number" ? entry.value : segment.share,
+      };
+    })
+    .filter((entry): entry is { segment: SegmentPoint; share: number | null } => entry !== null)
+    .sort((left, right) => (right.share ?? 0) - (left.share ?? 0));
+
+  if (!visibleRows.length) {
+    return null;
+  }
+
+  return (
+    <div className="segment-tooltip-card">
+      <div className="segment-tooltip-title">Revenue mix</div>
+      {visibleRows.map(({ segment, share }) => (
+        <div key={segment.id} className="segment-tooltip-row">
+          <span>{segment.name}</span>
+          <strong>{formatPercent(share)} | {formatCompactNumber(segment.revenue)}</strong>
+        </div>
+      ))}
+      <div className="segment-tooltip-footnote">Selected period composition</div>
+    </div>
+  );
+}
+
+function renderSegmentCompositionChart({
+  chartType,
+  data,
+  currentPeriodLabel,
+  expanded,
+  selectedSegmentId,
+  onSelectSegment,
+}: {
+  chartType: SegmentCompositionChartType;
+  data: SegmentPoint[];
+  currentPeriodLabel: string;
+  expanded: boolean;
+  selectedSegmentId: string | null;
+  onSelectSegment: (segmentId: string) => void;
+}) {
+  if (chartType === "stacked_bar") {
+    const stackedRow = buildStackedCompositionRow(currentPeriodLabel, data);
+
+    return (
+      <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-bar" style={expanded ? { height: 420 } : undefined}>
+        <ResponsiveContainer>
+          <BarChart data={[stackedRow]} layout="vertical" margin={{ top: 16, right: expanded ? 30 : 18, left: 18, bottom: 12 }}>
+            <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+            <XAxis type="number" domain={[0, 1]} stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} tickFormatter={(value) => formatPercent(Number(value))} />
+            <YAxis type="category" dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} width={expanded ? 120 : 96} />
+            <Tooltip content={<SegmentCompositionTooltip segments={data} />} />
+            {data.map((segment, index) => (
+              <Bar
+                key={segment.id}
+                dataKey={segment.id}
+                stackId="share"
+                fill={segment.color}
+                radius={index === data.length - 1 ? [0, 4, 4, 0] : index === 0 ? [4, 0, 0, 4] : [0, 0, 0, 0]}
+                onClick={() => segment.id !== "other" && onSelectSegment(segment.id)}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  return (
+    <div data-chart-frame-ignore-open className="segment-chart-shell segment-chart-shell-pie" style={expanded ? { height: 460 } : undefined}>
+      <ResponsiveContainer>
+        <PieChart>
+          <Pie
+            data={data}
+            dataKey="revenue"
+            nameKey="name"
+            innerRadius={chartType === "donut" ? "48%" : 0}
+            outerRadius={expanded ? "84%" : "82%"}
+            paddingAngle={2}
+            stroke="var(--panel)"
+            strokeWidth={2}
+            onClick={(entry) => {
+              if (entry && typeof entry === "object" && "id" in entry && typeof entry.id === "string" && entry.id !== "other") {
+                onSelectSegment(entry.id);
+              }
+            }}
+          >
+            {data.map((segment) => (
+              <Cell key={segment.id} fill={segment.color} opacity={selectedSegmentId && selectedSegmentId !== segment.id ? 0.55 : 1} />
+            ))}
+          </Pie>
+          <Tooltip content={<SegmentTooltip />} />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 function normalizeSegments(segments: FinancialSegmentPayload[], kind: SegmentKind, statementRevenue: number | null): SegmentPeriod["segments"] {
   const totalRevenue = statementRevenue ?? segments.reduce((sum, segment) => sum + (segment.revenue ?? 0), 0);
   return [...segments]
@@ -1051,11 +1442,25 @@ function formatSignedCompactNumber(value: number | null | undefined): string {
   return `${sign}${formatCompactNumber(value)}`;
 }
 
+function formatSourceLabel(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return value;
+  }
+}
+
 function formatHhi(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) {
     return "-";
   }
   return value.toFixed(2);
+}
+
+type SegmentCompositionChartType = (typeof SEGMENT_COMPOSITION_CHART_TYPE_OPTIONS)[number];
+
+function isSegmentCompositionChartType(value: ChartType | null | undefined): value is SegmentCompositionChartType {
+  return value != null && SEGMENT_COMPOSITION_CHART_TYPE_OPTIONS.includes(value as SegmentCompositionChartType);
 }
 
 function trimLabel(value: string, maxLength: number) {
