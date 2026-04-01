@@ -63,6 +63,173 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("CompanyModelsPage", () => {
+  it("keeps model surfaces available when market context fails", async () => {
+    vi.mocked(getCompanyModels).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Corp",
+        sector: "Technology",
+        market_sector: "Technology",
+        market_industry: "Software",
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      requested_models: MODEL_NAMES,
+      models: [
+        {
+          schema_version: "2.0",
+          model_name: "dcf",
+          model_version: "2.2.0",
+          created_at: "2026-03-22T00:00:00Z",
+          input_periods: {},
+          result: { model_status: "supported", enterprise_value_proxy: 12500000000 },
+        },
+      ],
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-22T00:00:00Z",
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: false,
+      },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: {
+        coverage_ratio: 1,
+        fallback_ratio: 0,
+        stale_flags: [],
+        parser_confidence: 1,
+        missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
+    });
+    vi.mocked(getCompanyFinancials).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Corp",
+        sector: "Technology",
+        market_sector: "Technology",
+        market_industry: "Software",
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      financials: [],
+      price_history: [{ date: "2026-03-21", close: 123.45 }],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: false,
+      },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: {
+        coverage_ratio: 1,
+        fallback_ratio: 0,
+        stale_flags: [],
+        parser_confidence: 1,
+        missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
+    });
+    vi.mocked(getCompanyMarketContext).mockRejectedValue(new Error("API request failed: 500 Internal Server Error"));
+    vi.mocked(getCompanySectorContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      matched_plugin_ids: [],
+      plugins: [],
+      fetched_at: "2026-03-22T00:00:00Z",
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
+      company: null,
+      latest: null,
+      history: [],
+      last_capital_structure_check: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: ["capital_structure_missing"],
+      refresh: { triggered: false, reason: "missing", ticker: "ACME", job_id: null },
+      diagnostics: {
+        coverage_ratio: null,
+        fallback_ratio: null,
+        stale_flags: [],
+        parser_confidence: null,
+        missing_field_flags: ["capital_structure_missing"],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
+    });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({
+      run: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: false,
+      },
+      confidence_flags: [],
+    });
+
+    render(React.createElement(CompanyModelsPage));
+
+    await waitFor(() => {
+      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, { dupontMode: "auto" });
+    });
+
+    expect(screen.getByText("Investment Summary")).toBeTruthy();
+    expect(screen.getByText("Model Analytics")).toBeTruthy();
+    expect(screen.queryByText("Macro Exposure Context")).toBeNull();
+    expect(screen.queryByText("market-context-panel")).toBeNull();
+    expect(screen.queryByText(/API request failed: 500/i)).toBeNull();
+  });
+
   it("renders registry-backed source freshness metadata for model outputs", async () => {
     vi.mocked(getCompanyModels).mockResolvedValue({
       company: {

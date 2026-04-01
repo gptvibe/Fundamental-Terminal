@@ -6,6 +6,7 @@ from copy import deepcopy
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import threading
@@ -1699,65 +1700,95 @@ def _v2_dict_to_response(
 ) -> "CompanyMarketContextResponse":
     """Convert a v2 macro payload dict to CompanyMarketContextResponse."""
     # Legacy curve_points
-    curve_points = [
-        MarketCurvePointPayload(
-            tenor=p["tenor"],
-            rate=p["rate"],
-            observation_date=p["observation_date"],
+    curve_points: list[MarketCurvePointPayload] = []
+    for point in payload.get("curve_points") or []:
+        if not isinstance(point, dict):
+            continue
+
+        tenor = str(point.get("tenor") or "").strip()
+        rate = _coerce_market_context_number(point.get("rate"))
+        observation_date = point.get("observation_date")
+        if not tenor or rate is None or observation_date is None:
+            continue
+
+        curve_points.append(
+            MarketCurvePointPayload(
+                tenor=tenor,
+                rate=rate,
+                observation_date=observation_date,
+            )
         )
-        for p in (payload.get("curve_points") or [])
-    ]
+
     s2 = payload.get("slope_2s10s") or {}
     s3 = payload.get("slope_3m10y") or {}
     slope_2s10s = MarketSlopePayload(
         label=str(s2.get("label") or "2s10s"),
-        value=s2.get("value"),
+        value=_coerce_market_context_number(s2.get("value")),
         short_tenor=str(s2.get("short_tenor") or "2y"),
         long_tenor=str(s2.get("long_tenor") or "10y"),
         observation_date=s2.get("observation_date"),
     )
     slope_3m10y = MarketSlopePayload(
         label=str(s3.get("label") or "3m10y"),
-        value=s3.get("value"),
+        value=_coerce_market_context_number(s3.get("value")),
         short_tenor=str(s3.get("short_tenor") or "3m"),
         long_tenor=str(s3.get("long_tenor") or "10y"),
         observation_date=s3.get("observation_date"),
     )
-    fred_series = [
-        MarketFredSeriesPayload(
-            series_id=str(item.get("series_id", "")),
-            label=str(item.get("label", "")),
-            category=str(item.get("category", "")),
-            units=str(item.get("units", "")),
-            value=item.get("value"),
-            observation_date=item.get("observation_date"),
-            state=str(item.get("state", "ok")),
+    fred_series: list[MarketFredSeriesPayload] = []
+    for item in payload.get("fred_series") or []:
+        if not isinstance(item, dict):
+            continue
+        fred_series.append(
+            MarketFredSeriesPayload(
+                series_id=str(item.get("series_id", "")),
+                label=str(item.get("label", "")),
+                category=str(item.get("category", "")),
+                units=str(item.get("units", "")),
+                value=_coerce_market_context_number(item.get("value")),
+                observation_date=item.get("observation_date"),
+                state=str(item.get("state", "ok")),
+            )
         )
-        for item in (payload.get("fred_series") or [])
-    ]
+
     # v2 grouped sections
     def _items(section_key: str) -> list[MacroSeriesItemPayload]:
-        return [
-            MacroSeriesItemPayload(
-                series_id=str(d.get("series_id", "")),
-                label=str(d.get("label", "")),
-                source_name=str(d.get("source_name", "")),
-                source_url=str(d.get("source_url", "")),
-                units=str(d.get("units", "")),
-                value=d.get("value"),
-                previous_value=d.get("previous_value"),
-                change=d.get("change"),
-                change_percent=d.get("change_percent"),
-                observation_date=d.get("observation_date"),
-                release_date=d.get("release_date"),
-                history=[
-                    MacroHistoryPointPayload(date=h["date"], value=h["value"])
-                    for h in (d.get("history") or [])
-                ],
-                status=str(d.get("status", "ok")),
+        items: list[MacroSeriesItemPayload] = []
+        for raw_item in payload.get(section_key) or []:
+            if not isinstance(raw_item, dict):
+                continue
+
+            history: list[MacroHistoryPointPayload] = []
+            for raw_history_point in raw_item.get("history") or []:
+                if not isinstance(raw_history_point, dict):
+                    continue
+
+                history_date = str(raw_history_point.get("date") or "").strip()
+                history_value = _coerce_market_context_number(raw_history_point.get("value"))
+                if not history_date or history_value is None:
+                    continue
+
+                history.append(MacroHistoryPointPayload(date=history_date, value=history_value))
+
+            items.append(
+                MacroSeriesItemPayload(
+                    series_id=str(raw_item.get("series_id", "")),
+                    label=str(raw_item.get("label", "")),
+                    source_name=str(raw_item.get("source_name", "")),
+                    source_url=str(raw_item.get("source_url", "")),
+                    units=str(raw_item.get("units", "")),
+                    value=_coerce_market_context_number(raw_item.get("value")),
+                    previous_value=_coerce_market_context_number(raw_item.get("previous_value")),
+                    change=_coerce_market_context_number(raw_item.get("change")),
+                    change_percent=_coerce_market_context_number(raw_item.get("change_percent")),
+                    observation_date=raw_item.get("observation_date"),
+                    release_date=raw_item.get("release_date"),
+                    history=history,
+                    status=str(raw_item.get("status", "ok")),
+                )
             )
-            for d in (payload.get(section_key) or [])
-        ]
+
+        return items
 
     fetched_raw = payload.get("fetched_at") or ""
     try:
@@ -1780,12 +1811,32 @@ def _v2_dict_to_response(
         growth_activity=_items("growth_activity"),
         cyclical_demand=_items("cyclical_demand"),
         cyclical_costs=_items("cyclical_costs"),
-        relevant_series=list(payload.get("relevant_series") or []),
+        relevant_series=[str(item) for item in (payload.get("relevant_series") or []) if isinstance(item, str)],
         relevant_indicators=_items("relevant_indicators"),
-        sector_exposure=list(payload.get("sector_exposure") or []),
-        hqm_snapshot=payload.get("hqm_snapshot"),
+        sector_exposure=[str(item) for item in (payload.get("sector_exposure") or []) if isinstance(item, str)],
+        hqm_snapshot=payload.get("hqm_snapshot") if isinstance(payload.get("hqm_snapshot"), dict) else None,
         **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
     )
+
+
+def _coerce_market_context_number(value: Any) -> float | None:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+
+    if isinstance(value, (int, float)):
+        numeric_value = float(value)
+    elif isinstance(value, str):
+        try:
+            numeric_value = float(value)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if not math.isfinite(numeric_value):
+        return None
+
+    return numeric_value
 
 
 @app.get("/api/market-context", response_model=CompanyMarketContextResponse)

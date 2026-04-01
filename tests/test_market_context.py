@@ -298,6 +298,127 @@ def test_company_market_context_route_returns_payload(monkeypatch):
     assert payload["relevant_indicators"][0]["series_id"] == "census_m3_new_orders_total"
 
 
+def test_company_market_context_route_skips_malformed_cached_sections(monkeypatch):
+    from app.db import get_db_session
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_serialize_company",
+        lambda *_args, **_kwargs: {
+            "ticker": "AAPL",
+            "cik": "0000320193",
+            "name": "Apple Inc.",
+            "sector": "Technology",
+            "market_sector": "Technology",
+            "market_industry": "Consumer Electronics",
+            "last_checked": datetime.now(timezone.utc).isoformat(),
+            "last_checked_financials": None,
+            "last_checked_prices": None,
+            "last_checked_insiders": None,
+            "last_checked_institutional": None,
+            "last_checked_filings": None,
+            "cache_state": "fresh",
+        },
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_market_context_v2",
+        lambda *_args, **_kwargs: {
+            "status": "partial",
+            "curve_points": [
+                {"tenor": "10y", "rate": "0.0425", "observation_date": "2026-03-21"},
+                None,
+                {"tenor": "", "rate": 0.04, "observation_date": "2026-03-21"},
+            ],
+            "slope_2s10s": {"label": "2s10s", "value": "0.0025", "short_tenor": "2y", "long_tenor": "10y", "observation_date": "2026-03-21"},
+            "slope_3m10y": {"label": "3m10y", "value": None, "short_tenor": "3m", "long_tenor": "10y", "observation_date": "2026-03-21"},
+            "fred_series": [
+                {"series_id": "UNRATE", "label": "Unemployment Rate", "category": "labor", "units": "percent", "value": "0.041", "observation_date": "2026-03-01", "state": "ok"},
+                "bad-entry",
+            ],
+            "provenance": {"treasury": {"status": "ok"}, "fred": {"enabled": True, "status": "ok"}},
+            "fetched_at": "2026-03-22T00:00:00+00:00",
+            "rates_credit": [
+                {
+                    "series_id": "baa_10y_spread",
+                    "label": "BAA Spread",
+                    "source_name": "FRED",
+                    "source_url": "https://fred.stlouisfed.org/series/BAA10Y",
+                    "units": "percent",
+                    "value": "0.018",
+                    "previous_value": None,
+                    "change": None,
+                    "change_percent": None,
+                    "observation_date": "2026-03-01",
+                    "release_date": None,
+                    "history": [
+                        {"date": "2026-02-01", "value": "0.017"},
+                        {"date": None, "value": 0.018},
+                        "bad-history",
+                    ],
+                    "status": "ok",
+                },
+                "bad-section-entry",
+            ],
+            "inflation_labor": [],
+            "growth_activity": [],
+            "cyclical_demand": [],
+            "cyclical_costs": [],
+            "relevant_series": ["baa_10y_spread", None],
+            "relevant_indicators": [
+                {
+                    "series_id": "baa_10y_spread",
+                    "label": "BAA Spread",
+                    "source_name": "FRED",
+                    "source_url": "https://fred.stlouisfed.org/series/BAA10Y",
+                    "units": "percent",
+                    "value": 0.018,
+                    "previous_value": None,
+                    "change": None,
+                    "change_percent": None,
+                    "observation_date": "2026-03-01",
+                    "release_date": None,
+                    "history": [],
+                    "status": "ok",
+                },
+                7,
+            ],
+            "sector_exposure": ["semiconductors", None],
+            "hqm_snapshot": "invalid",
+        },
+    )
+
+    app.dependency_overrides[get_db_session] = lambda: None
+    try:
+        client = TestClient(app)
+        response = client.get("/api/companies/AAPL/market-context")
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["curve_points"] == [{"tenor": "10y", "rate": 0.0425, "observation_date": "2026-03-21"}]
+    assert payload["fred_series"] == [{
+        "series_id": "UNRATE",
+        "label": "Unemployment Rate",
+        "category": "labor",
+        "units": "percent",
+        "value": 0.041,
+        "observation_date": "2026-03-01",
+        "state": "ok",
+    }]
+    assert payload["rates_credit"][0]["history"] == [{"date": "2026-02-01", "value": 0.017}]
+    assert payload["relevant_series"] == ["baa_10y_spread"]
+    assert payload["sector_exposure"] == ["semiconductors"]
+    assert payload["hqm_snapshot"] is None
+
+
 def test_parse_treasury_curve_textview_extracts_2m_and_4m():
         html_payload = """
         <table>

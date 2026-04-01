@@ -28,10 +28,10 @@ import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, Compan
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
-  marketContextData: CompanyMarketContextResponse;
-  sectorContextData: CompanySectorContextResponse;
-  capitalStructureData: CompanyCapitalStructureResponse;
-  evaluationData: ModelEvaluationResponse;
+  marketContextData: CompanyMarketContextResponse | null;
+  sectorContextData: CompanySectorContextResponse | null;
+  capitalStructureData: CompanyCapitalStructureResponse | null;
+  evaluationData: ModelEvaluationResponse | null;
   activeJobId: string | null;
 }
 
@@ -554,7 +554,7 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelData, financialData, marketContextData, sectorContextData, capitalStructureData, evaluationData] = await Promise.all([
+  const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, evaluationResult] = await Promise.allSettled([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
     getCompanyMarketContext(ticker),
@@ -562,6 +562,13 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
     getLatestModelEvaluation(),
   ]);
+
+  const modelData = requireModelsWorkspacePayload(modelResult, "Unable to load models");
+  const financialData = requireModelsWorkspacePayload(financialResult, "Unable to load company financials");
+  const marketContextData = optionalModelsWorkspacePayload(marketContextResult);
+  const sectorContextData = optionalModelsWorkspacePayload(sectorContextResult);
+  const capitalStructureData = optionalModelsWorkspacePayload(capitalStructureResult);
+  const evaluationData = optionalModelsWorkspacePayload(evaluationResult);
 
   return {
     modelData,
@@ -573,10 +580,23 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     activeJobId:
       modelData.refresh.job_id ??
       financialData.refresh.job_id ??
-      capitalStructureData.refresh.job_id ??
-      marketContextData.refresh.job_id ??
-      sectorContextData.refresh.job_id
+      capitalStructureData?.refresh.job_id ??
+      marketContextData?.refresh.job_id ??
+      sectorContextData?.refresh.job_id ??
+      evaluationData?.run?.id?.toString() ?? null
   };
+}
+
+function requireModelsWorkspacePayload<T>(result: PromiseSettledResult<T>, fallback: string): T {
+  if (result.status === "fulfilled") {
+    return result.value;
+  }
+
+  throw result.reason instanceof Error ? result.reason : new Error(fallback);
+}
+
+function optionalModelsWorkspacePayload<T>(result: PromiseSettledResult<T>): T | null {
+  return result.status === "fulfilled" ? result.value : null;
 }
 
 function hasMeaningfulMarketContext(context: CompanyMarketContextResponse | null): boolean {
