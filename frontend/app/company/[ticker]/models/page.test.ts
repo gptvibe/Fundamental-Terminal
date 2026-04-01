@@ -132,7 +132,7 @@ describe("CompanyModelsPage", () => {
         cache_state: "fresh",
       },
       financials: [],
-      price_history: [{ date: "2026-03-21", close: 123.45 }],
+      price_history: [{ date: "2026-03-21", close: 123.45, volume: 1000 }],
       provenance: [],
       as_of: null,
       last_refreshed_at: null,
@@ -686,7 +686,7 @@ describe("CompanyModelsPage", () => {
 
     expect(getCompanyMarketContext).toHaveBeenCalledWith("ACME");
 
-    expect(screen.getByText(/Strict official mode disables commercial equity price inputs/i)).toBeTruthy();
+    expect(screen.getByText(/Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured\./i)).toBeTruthy();
     expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Price Layer");
     expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Disabled");
   });
