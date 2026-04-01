@@ -3,6 +3,8 @@
 import { useMemo } from "react";
 import {
   Bar,
+  BarChart,
+  Brush,
   CartesianGrid,
   ComposedChart,
   Line,
@@ -15,11 +17,16 @@ import {
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { useChartPreferences } from "@/hooks/use-chart-preferences";
+import { formatChartTimeframeLabel, type ChartType } from "@/lib/chart-capabilities";
+import { MIXED_TIME_SERIES_CHART_TYPE_OPTIONS, RANGE_TIMEFRAME_OPTIONS } from "@/lib/chart-expansion-presets";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
 import { normalizeExportFileStem } from "@/lib/export";
+import { buildWindowedSeries } from "@/lib/chart-windowing";
 import type { InsiderTradePayload } from "@/lib/types";
 
 type InsiderTrendDatum = {
+  monthStart: string;
   monthKey: string;
   monthLabel: string;
   buys: number;
@@ -44,7 +51,24 @@ interface InsiderActivityTrendChartProps {
 }
 
 export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartProps) {
-  const data = useMemo(() => buildMonthlyTrend(trades), [trades]);
+  const { chartType, timeframeMode, setChartType, setTimeframeMode } = useChartPreferences({
+    chartFamily: "insider-activity-trend",
+    defaultChartType: "composed",
+    defaultTimeframeMode: "1y",
+    allowedChartTypes: MIXED_TIME_SERIES_CHART_TYPE_OPTIONS,
+    allowedTimeframeModes: RANGE_TIMEFRAME_OPTIONS,
+  });
+  const selectedChartType = (chartType ?? "composed") as Extract<ChartType, "bar" | "composed">;
+  const selectedTimeframeMode = timeframeMode ?? "1y";
+  const insiderTrend = useMemo(() => buildMonthlyTrend(trades), [trades]);
+  const data = useMemo(
+    () =>
+      buildWindowedSeries(insiderTrend, {
+        timeframeMode: selectedTimeframeMode,
+        getDate: (point) => point.monthStart,
+      }),
+    [insiderTrend, selectedTimeframeMode]
+  );
   const activeMonths = data.filter((month) => month.buys !== 0 || month.sells !== 0).length;
   const totalBuys = data.reduce((sum, month) => sum + month.buys, 0);
   const totalSells = data.reduce((sum, month) => sum + Math.abs(month.sells), 0);
@@ -65,22 +89,31 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
   const badgeArea = activeMonths ? (
     <ChartSourceBadges
       badges={[
-        { label: "Window", value: "12M" },
+        { label: "Window", value: formatChartTimeframeLabel(selectedTimeframeMode) },
         { label: "Active months", value: String(activeMonths) },
         { label: "Source", value: "Form 4 open-market signals" },
       ]}
     />
   ) : null;
+  const resetDisabled = selectedChartType === "composed" && selectedTimeframeMode === "1y";
 
   return (
     <InteractiveChartFrame
       title="Insider activity trend"
-      subtitle={activeMonths ? `${activeMonths} active months across the last 12 months.` : "Awaiting open-market insider activity"}
+      subtitle={activeMonths ? `${activeMonths} active months across the ${formatChartTimeframeLabel(selectedTimeframeMode).toLowerCase()} window.` : "Awaiting open-market insider activity"}
       inspectorTitle="Insider activity trend"
       inspectorSubtitle="Monthly insider buys, sells, and net open-market activity from Form 4 filings."
       hideInlineHeader
       badgeArea={badgeArea}
-      controlState={{ datasetKind: "time_series" }}
+      controlState={{
+        datasetKind: "time_series",
+        chartType: selectedChartType,
+        chartTypeOptions: MIXED_TIME_SERIES_CHART_TYPE_OPTIONS,
+        onChartTypeChange: (nextChartType) => setChartType(nextChartType as Extract<ChartType, "bar" | "composed">),
+        timeframeMode: selectedTimeframeMode,
+        timeframeModeOptions: RANGE_TIMEFRAME_OPTIONS,
+        onTimeframeModeChange: setTimeframeMode,
+      }}
       annotations={[
         { label: "Insider Buys", color: "var(--positive)" },
         { label: "Insider Sells", color: "var(--negative)" },
@@ -89,7 +122,7 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
       footer={(
         <div className="chart-inspector-footer-stack">
           <div className="chart-inspector-footer-pill-row">
-            <span className="pill">Window: last 12 months</span>
+            <span className="pill">Window: {formatChartTimeframeLabel(selectedTimeframeMode)}</span>
             <span className="pill">Open-market signal only</span>
             <span className="pill">Source: Form 4 filings</span>
           </div>
@@ -101,7 +134,7 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
           : {
               kind: "empty",
               kicker: "Insider trend",
-              title: "No open-market insider activity in the last 12 months",
+              title: "No open-market insider activity in the selected window",
               message: "This chart tracks open-market Form 4 signals only, excluding grants and option exercises.",
             }
       }
@@ -110,6 +143,13 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
         csvFileName: `${normalizeExportFileStem("insider-activity-trend", "insiders")}.csv`,
         csvRows: exportRows,
       }}
+      resetState={{
+        onReset: () => {
+          setChartType("composed");
+          setTimeframeMode("1y");
+        },
+        disabled: resetDisabled,
+      }}
       renderChart={({ expanded }) =>
         activeMonths ? (
           <div className="insider-trend-shell">
@@ -117,56 +157,98 @@ export function InsiderActivityTrendChart({ trades }: InsiderActivityTrendChartP
               <span>{activeMonths} active months</span>
               <span>{formatCurrencyCompact(totalBuys)} buys</span>
               <span>{formatCurrencyCompact(totalSells)} sells</span>
-              <span>Open-market signal only</span>
+              <span>{formatChartTimeframeLabel(selectedTimeframeMode)} window</span>
             </div>
 
-            <div className="insider-trend-chart-shell" style={{ height: expanded ? 380 : undefined }}>
-              <ResponsiveContainer>
-                <ComposedChart data={data} margin={{ top: 8, right: expanded ? 20 : 12, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                  <XAxis
-                    dataKey="monthLabel"
-                    minTickGap={18}
-                    stroke={CHART_AXIS_COLOR}
-                    tick={chartTick(expanded ? 11 : 10)}
-                  />
-                  <YAxis
-                    stroke={CHART_AXIS_COLOR}
-                    tick={chartTick(expanded ? 11 : 10)}
-                    tickFormatter={(value) => formatSignedAxisCurrency(Number(value))}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "var(--ag-row-hover)" }}
-                    content={({ active, payload, label }) => (
-                      <InsiderTrendTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
-                    )}
-                  />
-                  <ReferenceLine y={0} stroke="var(--panel-border)" />
-                  <Bar dataKey="buys" name="Insider Buys" stackId="insider-activity" fill="var(--positive)" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="sells" name="Insider Sells" stackId="insider-activity" fill="var(--negative)" radius={[4, 4, 0, 0]} />
-                  <Line
-                    type="monotone"
-                    dataKey="net"
-                    name="Net Insider Activity"
-                    stroke="var(--accent)"
-                    strokeWidth={expanded ? 2.8 : 2.4}
-                    dot={false}
-                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
+            {renderInsiderTrendChart({ chartType: selectedChartType, data, expanded })}
           </div>
         ) : (
-          <div className="grid-empty-state" style={{ minHeight: 260 }}>
+          <div className="grid-empty-state grid-empty-state-tall">
             <div className="grid-empty-kicker">Insider trend</div>
-            <div className="grid-empty-title">No open-market insider activity in the last 12 months</div>
+            <div className="grid-empty-title">No open-market insider activity in the selected window</div>
             <div className="grid-empty-copy">This chart tracks open-market Form 4 signals only, excluding grants and option exercises.</div>
           </div>
         )
       }
     />
   );
+}
+
+function renderInsiderTrendChart({
+  chartType,
+  data,
+  expanded,
+}: {
+  chartType: Extract<ChartType, "bar" | "composed">;
+  data: InsiderTrendDatum[];
+  expanded: boolean;
+}) {
+  const margin = { top: 8, right: expanded ? 20 : 12, left: 0, bottom: 0 };
+  const shouldShowBrush = data.length > (expanded ? 10 : 14);
+  const chartShellClassName = expanded ? "insider-trend-chart-shell is-expanded" : "insider-trend-chart-shell";
+
+  return (
+    <div className={chartShellClassName}>
+      <ResponsiveContainer>
+        {chartType === "bar" ? (
+          <BarChart data={data} margin={margin}>
+            <SharedInsiderTrendChrome expanded={expanded} />
+            <Bar dataKey="buys" name="Insider Buys" fill="var(--positive)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar dataKey="sells" name="Insider Sells" fill="var(--negative)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar dataKey="net" name="Net Insider Activity" fill="var(--accent)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            {shouldShowBrush ? <SharedInsiderTrendBrush /> : null}
+          </BarChart>
+        ) : (
+          <ComposedChart data={data} margin={margin}>
+            <SharedInsiderTrendChrome expanded={expanded} />
+            <Bar dataKey="buys" name="Insider Buys" stackId="insider-activity" fill="var(--positive)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar dataKey="sells" name="Insider Sells" stackId="insider-activity" fill="var(--negative)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Line
+              type="monotone"
+              dataKey="net"
+              name="Net Insider Activity"
+              stroke="var(--accent)"
+              strokeWidth={expanded ? 2.8 : 2.4}
+              dot={false}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+              isAnimationActive={false}
+            />
+            {shouldShowBrush ? <SharedInsiderTrendBrush /> : null}
+          </ComposedChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function SharedInsiderTrendChrome({ expanded }: { expanded: boolean }) {
+  return (
+    <>
+      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+      <XAxis
+        dataKey="monthLabel"
+        minTickGap={18}
+        stroke={CHART_AXIS_COLOR}
+        tick={chartTick(expanded ? 11 : 10)}
+      />
+      <YAxis
+        stroke={CHART_AXIS_COLOR}
+        tick={chartTick(expanded ? 11 : 10)}
+        tickFormatter={(value) => formatSignedAxisCurrency(Number(value))}
+      />
+      <Tooltip
+        cursor={{ fill: "var(--ag-row-hover)" }}
+        content={({ active, payload, label }) => (
+          <InsiderTrendTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
+        )}
+      />
+      <ReferenceLine y={0} stroke="var(--panel-border)" />
+    </>
+  );
+}
+
+function SharedInsiderTrendBrush() {
+  return <Brush dataKey="monthLabel" height={24} stroke="var(--accent)" travellerWidth={10} fill="var(--accent)" tickFormatter={(value) => String(value)} />;
 }
 
 function InsiderTrendTooltip({
@@ -190,20 +272,20 @@ function InsiderTrendTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label ?? "Month"}</div>
-      <TooltipRow label="Insider Buys" value={formatCurrencyCompact(point.buys)} color="var(--positive)" />
-      <TooltipRow label="Insider Sells" value={formatCurrencyCompact(Math.abs(point.sells))} color="var(--negative)" />
-      <TooltipRow label="Net Activity" value={formatSignedCurrencyCompact(point.net)} color="var(--accent)" />
-      <TooltipRow label="Unique Insiders" value={formatInteger(point.insiderCount)} color="var(--warning)" />
-      <TooltipRow label="Total Shares" value={formatShareCompact(point.totalShares)} color="#94A3B8" />
+      <TooltipRow label="Insider Buys" value={formatCurrencyCompact(point.buys)} tone="positive" />
+      <TooltipRow label="Insider Sells" value={formatCurrencyCompact(Math.abs(point.sells))} tone="negative" />
+      <TooltipRow label="Net Activity" value={formatSignedCurrencyCompact(point.net)} tone="accent" />
+      <TooltipRow label="Unique Insiders" value={formatInteger(point.insiderCount)} tone="warning" />
+      <TooltipRow label="Total Shares" value={formatShareCompact(point.totalShares)} tone="slate" />
     </div>
   );
 }
 
-function TooltipRow({ label, value, color }: { label: string; value: string; color: string }) {
+function TooltipRow({ label, value, tone }: { label: string; value: string; tone: "positive" | "negative" | "accent" | "warning" | "slate" }) {
   return (
     <div className="chart-tooltip-row">
       <span className="chart-tooltip-key">
-        <span className="chart-tooltip-dot" style={{ background: color }} />
+        <span className={`chart-tooltip-dot is-${tone}`} />
         {label}
       </span>
       <span className="chart-tooltip-value">{value}</span>
@@ -213,7 +295,17 @@ function TooltipRow({ label, value, color }: { label: string; value: string; col
 
 function buildMonthlyTrend(trades: InsiderTradePayload[]): InsiderTrendDatum[] {
   const end = startOfMonth(new Date());
-  const months = Array.from({ length: 12 }, (_, index) => addMonths(end, index - 11));
+  const signalTrades = trades.filter(isDatedSignalTrade);
+  const earliestTradeMonth = signalTrades.reduce<Date | null>((earliest, trade) => {
+    const current = startOfMonth(new Date(trade.date));
+    if (!earliest || current < earliest) {
+      return current;
+    }
+    return earliest;
+  }, null);
+  const start = earliestTradeMonth ?? addMonths(end, -11);
+  const monthCount = Math.max(1, differenceInMonths(start, end) + 1);
+  const months = Array.from({ length: monthCount }, (_, index) => addMonths(start, index));
   const buckets = new Map<string, { buys: number; sells: number; insiders: Set<string>; totalShares: number; buyShares: number; sellShares: number }>();
 
   for (const month of months) {
@@ -227,11 +319,7 @@ function buildMonthlyTrend(trades: InsiderTradePayload[]): InsiderTrendDatum[] {
     });
   }
 
-  for (const trade of trades) {
-    if (!trade.date) {
-      continue;
-    }
-
+  for (const trade of signalTrades) {
     const tradeDate = startOfMonth(new Date(trade.date));
     const key = monthKey(tradeDate);
     const bucket = buckets.get(key);
@@ -274,6 +362,7 @@ function buildMonthlyTrend(trades: InsiderTradePayload[]): InsiderTrendDatum[] {
       sellShares: 0
     };
     return {
+      monthStart: `${key}-01`,
       monthKey: key,
       monthLabel: new Intl.DateTimeFormat("en-US", { month: "short", year: "2-digit" }).format(month),
       buys: roundValue(bucket.buys),
@@ -313,12 +402,20 @@ function resolveTransactionValue(trade: InsiderTradePayload) {
   return 0;
 }
 
+function isDatedSignalTrade(trade: InsiderTradePayload): trade is InsiderTradePayload & { date: string } {
+  return Boolean(trade.date) && (isSignalBuy(trade) || isSignalSell(trade));
+}
+
 function startOfMonth(value: Date) {
   return new Date(value.getFullYear(), value.getMonth(), 1);
 }
 
 function addMonths(value: Date, delta: number) {
   return new Date(value.getFullYear(), value.getMonth() + delta, 1);
+}
+
+function differenceInMonths(start: Date, end: Date) {
+  return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
 }
 
 function monthKey(value: Date) {

@@ -235,10 +235,15 @@ describe("CompanyEarningsPage", () => {
     expect(screen.getByText("Quality score regime shift")).toBeTruthy();
     expect(screen.getByText(/Formulas:/)).toBeTruthy();
 
-    fireEvent.click(screen.getByText("Q1 2026"));
+    const q1Row = screen.getAllByText("Q1 2026").find((element) => element.closest("tr"))?.closest("tr");
+    expect(q1Row).toBeTruthy();
 
-    expect(screen.getByText("Metadata only capture; open the SEC filing to inspect the full release narrative.")).toBeTruthy();
-    expect(screen.getByText("No guidance disclosed")).toBeTruthy();
+    fireEvent.click(q1Row as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText("Metadata only capture; open the SEC filing to inspect the full release narrative.")).toBeTruthy();
+      expect(screen.getByText("No guidance disclosed")).toBeTruthy();
+    });
   });
 
   it("supports workspace panel interactions and metadata toggle", async () => {

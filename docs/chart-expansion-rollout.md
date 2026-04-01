@@ -38,15 +38,15 @@ Inline cards should stay visually stable. Expanded mode should add controls, ric
 | `financial-trend-chart.tsx` | already migrated | `time_series` | yes | `line`, `area`, `bar`, `composed` | `1y`, `3y`, `5y`, `10y`, `max` | Already uses shared frame, preferences, exports, and stage states. |
 | `governance-filing-chart.tsx` | migrated in rollout | `categorical_snapshot` | yes | `bar` | none | Snapshot counts by proxy form. |
 | `growth-waterfall-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `composed` | none | Annual value-plus-growth view. Metric toggle remains the primary control. |
-| `insider-activity-trend-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `composed` | none | Fixed 12-month rolling trend; preserve buy/sell/net semantics. |
+| `insider-activity-trend-chart.tsx` | migrated in rollout | `time_series` | yes | `bar`, `composed` | `1y`, `3y`, `5y`, `10y`, `max` | Monthly insider signal trend now supports investor-selected windowing while preserving buy/sell/net semantics. |
 | `insider-role-activity-chart.tsx` | migrated in rollout | `categorical_snapshot` | yes | fixed categorical composed view | none | Role buckets are categorical; inspector avoids exposing line-only variants. |
-| `institutional-ownership-trend-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `line` | none | Quarterly ownership series; keep brush in expanded mode. |
+| `institutional-ownership-trend-chart.tsx` | migrated in rollout | `time_series` | yes | `line`, `area`, `bar`, `composed` | `1y`, `3y`, `5y`, `10y`, `max` | Quarterly ownership series now supports comparative views while keeping the expanded brush. |
 | `interactive-chart-frame.tsx` | non-expandable | utility | no | n/a | n/a | Shared expandable frame wrapper. |
 | `liquidity-capital-chart.tsx` | migrated in rollout | specialized multi-panel time series | yes | fixed multi-panel layout | none | Two linked visuals in one card. Inspector expands both panels without forcing a fake chart-type switch. |
-| `margin-trend-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `line` | none | Preserve annual/quarterly/TTM semantics from the existing inline view. |
-| `operating-cost-structure-chart.tsx` | migrated in rollout | `stacked_time_series` | yes | fixed multi-series line view | none | Cost component mix stays stack-friendly at the capability level while preserving the established inline line treatment. |
+| `margin-trend-chart.tsx` | migrated in rollout | `time_series` | yes | `line`, `area`, `bar`, `composed` | `1y`, `3y`, `5y`, `10y`, `max` | Preserve annual/quarterly semantics while letting investors switch between trend and comparison views. |
+| `operating-cost-structure-chart.tsx` | migrated in rollout | `stacked_time_series` | yes | `line`, `area`, `stacked_bar`, `composed` | `3y`, `5y`, `10y`, `max` | Cost component mix remains stack-friendly, with line mode retained as the default investor view. |
 | `price-fundamentals-module.tsx` | already migrated | `time_series` | yes | `line`, `area`, `composed` | `1y`, `3y`, `5y`, `10y`, `max` | Already uses shared frame for both subcharts. |
-| `share-dilution-tracker-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `composed` | none | Share-count plus dilution-rate dual-axis chart. |
+| `share-dilution-tracker-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `composed` | `1y`, `3y`, `5y`, `10y`, `max` | Share-count plus dilution-rate dual-axis chart keeps a fixed composition but now supports timeframe windowing. |
 | `smart-money-flow-chart.tsx` | migrated in rollout | `time_series` | yes | fixed `composed` | none | Supports loading/error/refresh-aware expanded states; keep brush in expanded mode. |
 
 ## Migration Groups

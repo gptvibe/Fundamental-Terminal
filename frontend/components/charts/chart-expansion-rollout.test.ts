@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
@@ -180,6 +180,43 @@ describe("chart expansion rollout", () => {
 
     await user.click(screen.getByRole("button", { name: /expand revenue history/i }));
 
+    expect(screen.getByRole("group", { name: "Window" })).toBeTruthy();
+  });
+
+  it("shows chart type and timeframe controls for margin trend", async () => {
+    const user = userEvent.setup();
+
+    render(React.createElement(MarginTrendChart, { financials }));
+
+    await user.click(screen.getByRole("button", { name: /expand margin trend/i }));
+
+    expect(screen.getByRole("group", { name: "Chart type" })).toBeTruthy();
+    const windowGroup = screen.getByRole("group", { name: "Window" });
+    expect(windowGroup).toBeTruthy();
+    expect(within(windowGroup).getByRole("button", { name: "MAX" })).toBeTruthy();
+  });
+
+  it("filters timeframe options for stacked operating cost charts", async () => {
+    const user = userEvent.setup();
+
+    render(React.createElement(OperatingCostStructureChart, { financials }));
+
+    await user.click(screen.getByRole("button", { name: /expand operating cost structure/i }));
+
+    expect(screen.getByRole("group", { name: "Chart type" })).toBeTruthy();
+    const windowGroup = screen.getByRole("group", { name: "Window" });
+    expect(within(windowGroup).queryByRole("button", { name: "1Y" })).toBeNull();
+    expect(within(windowGroup).getByRole("button", { name: "3Y" })).toBeTruthy();
+  });
+
+  it("keeps share dilution on timeframe-only controls", async () => {
+    const user = userEvent.setup();
+
+    render(React.createElement(ShareDilutionTrackerChart, { financials }));
+
+    await user.click(screen.getByRole("button", { name: /expand share dilution tracker/i }));
+
+    expect(screen.queryByRole("group", { name: "Chart type" })).toBeNull();
     expect(screen.getByRole("group", { name: "Window" })).toBeTruthy();
   });
 });

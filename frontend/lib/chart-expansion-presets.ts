@@ -5,7 +5,7 @@ import type { FinancialPayload } from "@/lib/types";
 export const RANGE_TIMEFRAME_OPTIONS = ["1y", "3y", "5y", "10y", "max"] as const satisfies readonly ChartTimeframeMode[];
 export const TIME_SERIES_CHART_TYPE_OPTIONS = ["line", "area", "bar", "composed"] as const satisfies readonly ChartType[];
 export const MIXED_TIME_SERIES_CHART_TYPE_OPTIONS = ["bar", "composed"] as const satisfies readonly ChartType[];
-export const STACKED_TIME_SERIES_CHART_TYPE_OPTIONS = ["area", "stacked_bar", "composed"] as const satisfies readonly ChartType[];
+export const STACKED_TIME_SERIES_CHART_TYPE_OPTIONS = ["line", "area", "stacked_bar", "composed"] as const satisfies readonly ChartType[];
 export const SNAPSHOT_BAR_CHART_TYPE_OPTIONS = ["bar"] as const satisfies readonly ChartType[];
 export const WATERFALL_CHART_TYPE_OPTIONS = ["bar"] as const satisfies readonly ChartType[];
 export const OWNERSHIP_MIX_CHART_TYPE_OPTIONS = ["donut", "pie", "bar"] as const satisfies readonly ChartType[];

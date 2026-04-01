@@ -7,11 +7,15 @@ import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { useChartPreferences } from "@/hooks/use-chart-preferences";
+import { formatChartTimeframeLabel } from "@/lib/chart-capabilities";
+import { RANGE_TIMEFRAME_OPTIONS } from "@/lib/chart-expansion-presets";
 import type { FinancialPayload } from "@/lib/types";
-import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
+import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import { difference, findPointForStatement, formatSignedCompactDelta, formatSignedPointDelta, formatStatementAxisLabel, type SharedFinancialChartState } from "@/lib/financial-chart-state";
+import { buildWindowedSeries } from "@/lib/chart-windowing";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
@@ -21,10 +25,16 @@ interface ShareDilutionTrackerChartProps {
 }
 
 export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilutionTrackerChartProps) {
+  const { timeframeMode, setTimeframeMode } = useChartPreferences({
+    chartFamily: "share-dilution-tracker",
+    defaultTimeframeMode: "max",
+    allowedTimeframeModes: RANGE_TIMEFRAME_OPTIONS,
+  });
   const selectedFinancial = chartState?.selectedFinancial ?? null;
   const comparisonFinancial = chartState?.comparisonFinancial ?? null;
+  const selectedTimeframeMode = timeframeMode ?? "max";
   const history = useMemo(() => selectShareHistory(financials, !chartState), [chartState, financials]);
-  const data = useMemo(
+  const dilutionSeries = useMemo(
     () => history.map((statement, index) => {
       const previous = history[index - 1] ?? null;
       return {
@@ -39,6 +49,14 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
     }),
     [chartState?.cadence, chartState?.effectiveCadence, history]
   );
+  const data = useMemo(
+    () =>
+      buildWindowedSeries(dilutionSeries, {
+        timeframeMode: selectedTimeframeMode,
+        getDate: (point) => point.periodEnd,
+      }),
+    [dilutionSeries, selectedTimeframeMode]
+  );
   const focusPoint = useMemo(() => findPointForStatement(data, selectedFinancial), [data, selectedFinancial]);
   const comparisonPoint = useMemo(() => findPointForStatement(data, comparisonFinancial), [comparisonFinancial, data]);
   const summaryPoint = focusPoint ?? data.at(-1) ?? null;
@@ -50,11 +68,13 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
     <ChartSourceBadges
       badges={[
         { label: "Periods", value: String(data.length) },
+        { label: "Window", value: formatChartTimeframeLabel(selectedTimeframeMode) },
         { label: "Focus", value: summaryPoint?.period ?? "Latest" },
         { label: "Source", value: "Cached filing history" },
       ]}
     />
   ) : null;
+  const resetDisabled = selectedTimeframeMode === "max";
 
   return (
     <InteractiveChartFrame
@@ -64,7 +84,12 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
       inspectorSubtitle="Shares outstanding, dilution rate, buybacks, and dividends across cached filing history."
       hideInlineHeader
       badgeArea={badgeArea}
-      controlState={{ datasetKind: "time_series" }}
+      controlState={{
+        datasetKind: "time_series",
+        timeframeMode: selectedTimeframeMode,
+        timeframeModeOptions: RANGE_TIMEFRAME_OPTIONS,
+        onTimeframeModeChange: setTimeframeMode,
+      }}
       annotations={[
         { label: "Shares Outstanding", color: "var(--accent)" },
         { label: "Dilution Rate", color: "var(--warning)" },
@@ -73,6 +98,7 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
         <div className="chart-inspector-footer-stack">
           <div className="chart-inspector-footer-pill-row">
             <span className="pill">Visible periods {data.length}</span>
+            <span className="pill">Window {formatChartTimeframeLabel(selectedTimeframeMode)}</span>
             <span className="pill">Source: cached filing history</span>
           </div>
         </div>
@@ -91,6 +117,10 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
         pngFileName: `${normalizeExportFileStem("share-dilution-tracker", "capital-markets")}.png`,
         csvFileName: `${normalizeExportFileStem("share-dilution-tracker", "capital-markets")}.csv`,
         csvRows: exportRows,
+      }}
+      resetState={{
+        onReset: () => setTimeframeMode("max"),
+        disabled: resetDisabled,
       }}
       renderChart={({ expanded }) =>
         history.length ? (
@@ -115,7 +145,7 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
               </div>
             ) : null}
 
-            <div style={{ width: "100%", height: expanded ? 420 : 340 }}>
+            <div className={expanded ? "financial-chart-shell financial-chart-shell-expanded" : "financial-chart-shell financial-chart-shell-large"}>
               <ResponsiveContainer>
                 <ComposedChart data={data} margin={{ top: 10, right: expanded ? 20 : 14, left: 4, bottom: 0 }}>
                   <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -146,7 +176,7 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
                       return formatPercent(value);
                     }}
                   />
-                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                  <Legend formatter={(value) => <span className="chart-legend-label">{value}</span>} />
                   <Bar yAxisId="shares" dataKey="shares" name="Shares Outstanding" fill="var(--accent)" radius={[2, 2, 0, 0]} />
                   <Line
                     yAxisId="dilution"

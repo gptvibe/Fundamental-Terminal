@@ -5536,6 +5536,10 @@ select {
   height: 340px;
 }
 
+.financial-chart-shell-expanded {
+  height: 420px;
+}
+
 .financial-trend-table-scroll {
   overflow-x: auto;
   overflow-y: visible;
@@ -6292,11 +6296,41 @@ select {
   border-radius: var(--radius);
   box-shadow: 0 0 12px currentColor;
 }
+.chart-tooltip-dot.is-positive {
+  background: var(--positive);
+  color: var(--positive);
+}
+.chart-tooltip-dot.is-warning {
+  background: var(--warning);
+  color: var(--warning);
+}
+.chart-tooltip-dot.is-accent {
+  background: var(--accent);
+  color: var(--accent);
+}
+.chart-tooltip-dot.is-negative {
+  background: var(--negative);
+  color: var(--negative);
+}
+.chart-tooltip-dot.is-slate {
+  background: #94a3b8;
+  color: #94a3b8;
+}
+.chart-tooltip-dot.is-light {
+  background: #cbd5e1;
+  color: #cbd5e1;
+}
 
 .chart-tooltip-value {
   color: var(--tooltip-text);
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
+}
+.chart-legend-label {
+  color: var(--text-secondary, var(--text-muted));
+}
+.grid-empty-state-tall {
+  min-height: 260px;
 }
 
 .peer-dashboard-shell {
@@ -7583,6 +7617,9 @@ select {
   border: 1px solid var(--surface-pill-border);
   background: var(--panel);
 }
+.insider-trend-chart-shell.is-expanded {
+  height: 380px;
+}
 
 .insider-transactions-shell {
   display: grid;
@@ -8096,6 +8133,18 @@ select {
   .cash-waterfall-chart-shell {
     height: 300px;
   }
+
+  .financial-chart-shell-expanded {
+    height: 340px;
+  }
+
+  .institutional-trend-chart-shell {
+    height: 320px;
+  }
+
+  .institutional-trend-chart-shell.is-expanded {
+    height: 360px;
+  }
 }
 
 @media (max-width: 560px) {
@@ -8129,6 +8178,18 @@ select {
   .segment-chart-shell-pie,
   .segment-chart-shell-bar {
     height: 260px;
+  }
+
+  .financial-chart-shell-expanded {
+    height: 300px;
+  }
+
+  .institutional-trend-chart-shell {
+    height: 280px;
+  }
+
+  .institutional-trend-chart-shell.is-expanded {
+    height: 320px;
   }
 
   .historical-sparkline-card-delta {
@@ -8376,6 +8437,10 @@ select {
   border-radius: var(--radius);
   border: 1px solid var(--surface-pill-border);
   background: var(--panel);
+}
+
+.institutional-trend-chart-shell.is-expanded {
+  height: 420px;
 }
 
 .institutional-trend-note {

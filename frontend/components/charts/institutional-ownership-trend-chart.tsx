@@ -2,7 +2,10 @@
 
 import { useMemo } from "react";
 import {
+  Area,
   Brush,
+  ComposedChart,
+  Bar,
   CartesianGrid,
   Legend,
   Line,
@@ -15,9 +18,13 @@ import {
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { useChartPreferences } from "@/hooks/use-chart-preferences";
+import { formatChartTimeframeLabel, getDefaultChartType, type ChartType } from "@/lib/chart-capabilities";
+import { RANGE_TIMEFRAME_OPTIONS, TIME_SERIES_CHART_TYPE_OPTIONS } from "@/lib/chart-expansion-presets";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartLegendStyle, chartTick } from "@/lib/chart-theme";
 import { normalizeExportFileStem } from "@/lib/export";
 import { formatDate, formatPercent } from "@/lib/format";
+import { buildWindowedSeries } from "@/lib/chart-windowing";
 import type { FinancialPayload, InstitutionalHoldingPayload } from "@/lib/types";
 
 type OwnershipTrendDatum = {
@@ -44,7 +51,24 @@ interface InstitutionalOwnershipTrendChartProps {
 }
 
 export function InstitutionalOwnershipTrendChart({ holdings, financials }: InstitutionalOwnershipTrendChartProps) {
-  const data = useMemo(() => buildOwnershipTrend(holdings, financials), [holdings, financials]);
+  const { chartType, timeframeMode, setChartType, setTimeframeMode } = useChartPreferences({
+    chartFamily: "institutional-ownership-trend",
+    defaultChartType: getDefaultChartType("time_series"),
+    defaultTimeframeMode: "max",
+    allowedChartTypes: TIME_SERIES_CHART_TYPE_OPTIONS,
+    allowedTimeframeModes: RANGE_TIMEFRAME_OPTIONS,
+  });
+  const selectedChartType = chartType ?? getDefaultChartType("time_series");
+  const selectedTimeframeMode = timeframeMode ?? "max";
+  const ownershipTrend = useMemo(() => buildOwnershipTrend(holdings, financials), [holdings, financials]);
+  const data = useMemo(
+    () =>
+      buildWindowedSeries(ownershipTrend, {
+        timeframeMode: selectedTimeframeMode,
+        getDate: (point) => point.quarterDate,
+      }),
+    [ownershipTrend, selectedTimeframeMode]
+  );
   const peakShares = data.reduce((max, item) => Math.max(max, item.totalSharesHeld), 0);
   const peakOwnership = data.reduce((max, item) => Math.max(max, item.trackedOwnershipPercent ?? 0), 0);
   const exportRows = useMemo(
@@ -63,11 +87,13 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
     <ChartSourceBadges
       badges={[
         { label: "Quarters", value: String(data.length) },
+        { label: "Window", value: formatChartTimeframeLabel(selectedTimeframeMode) },
         { label: "Peak tracked ownership", value: formatPercent(peakOwnership) },
         { label: "Source", value: "Cached 13F positions" },
       ]}
     />
   ) : null;
+  const resetDisabled = selectedChartType === getDefaultChartType("time_series") && selectedTimeframeMode === "max";
 
   return (
     <InteractiveChartFrame
@@ -77,7 +103,15 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
       inspectorSubtitle="Tracked institutional shares, top-ten concentration, and estimated tracked ownership across cached 13F quarters."
       hideInlineHeader
       badgeArea={badgeArea}
-      controlState={{ datasetKind: "time_series" }}
+      controlState={{
+        datasetKind: "time_series",
+        chartType: selectedChartType,
+        chartTypeOptions: TIME_SERIES_CHART_TYPE_OPTIONS,
+        onChartTypeChange: setChartType,
+        timeframeMode: selectedTimeframeMode,
+        timeframeModeOptions: RANGE_TIMEFRAME_OPTIONS,
+        onTimeframeModeChange: setTimeframeMode,
+      }}
       annotations={[
         { label: "Tracked Institutional Shares", color: "var(--positive)" },
         { label: "Top 10 Funds Combined", color: "var(--warning)" },
@@ -86,6 +120,7 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
       footer={(
         <div className="chart-inspector-footer-stack">
           <div className="chart-inspector-footer-pill-row">
+            <span className="pill">Window {formatChartTimeframeLabel(selectedTimeframeMode)}</span>
             <span className="pill">Source: cached 13F positions</span>
             <span className="pill">Peak tracked shares {formatShareCompact(peakShares)}</span>
             <span className="pill">Peak tracked ownership {formatPercent(peakOwnership)}</span>
@@ -110,6 +145,13 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
         csvFileName: `${normalizeExportFileStem("institutional-ownership-trend", "ownership")}.csv`,
         csvRows: exportRows,
       }}
+      resetState={{
+        onReset: () => {
+          setChartType(getDefaultChartType("time_series"));
+          setTimeframeMode("max");
+        },
+        disabled: resetDisabled,
+      }}
       renderChart={({ expanded }) =>
         data.length ? (
           <div className="institutional-trend-shell">
@@ -117,86 +159,203 @@ export function InstitutionalOwnershipTrendChart({ holdings, financials }: Insti
               <span>{data.length} quarters</span>
               <span>{formatShareCompact(peakShares)} peak tracked shares</span>
               <span>{formatPercent(peakOwnership)} peak tracked ownership</span>
-              <span>Brush to zoom</span>
+              <span>Window {formatChartTimeframeLabel(selectedTimeframeMode)}</span>
             </div>
 
-            <div className="institutional-trend-chart-shell" style={{ height: expanded ? 420 : undefined }}>
-              <ResponsiveContainer>
-                <LineChart data={data} margin={{ top: 8, right: expanded ? 24 : 16, left: 4, bottom: 12 }}>
-                  <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                  <XAxis dataKey="quarterLabel" minTickGap={18} stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
-                  <YAxis
-                    yAxisId="shares"
-                    stroke={CHART_AXIS_COLOR}
-                    tick={chartTick(expanded ? 11 : 10)}
-                    tickFormatter={(value) => formatShareCompact(Number(value))}
-                  />
-                  <YAxis
-                    yAxisId="percent"
-                    orientation="right"
-                    stroke={CHART_AXIS_COLOR}
-                    tick={chartTick(expanded ? 11 : 10)}
-                    tickFormatter={(value) => formatPercent(Number(value))}
-                  />
-                  <Tooltip
-                    cursor={{ stroke: "var(--accent)", strokeWidth: 1 }}
-                    content={({ active, payload, label }) => (
-                      <InstitutionalOwnershipTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
-                    )}
-                  />
-                  <Legend wrapperStyle={chartLegendStyle()} />
-                  <Line
-                    yAxisId="shares"
-                    type="monotone"
-                    dataKey="totalSharesHeld"
-                    name="Tracked Institutional Shares"
-                    stroke="var(--positive)"
-                    strokeWidth={expanded ? 2.8 : 2.6}
-                    dot={false}
-                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--positive)" }}
-                  />
-                  <Line
-                    yAxisId="shares"
-                    type="monotone"
-                    dataKey="top10SharesHeld"
-                    name="Top 10 Funds Combined"
-                    stroke="var(--warning)"
-                    strokeWidth={expanded ? 2.4 : 2.2}
-                    strokeDasharray="7 4"
-                    dot={false}
-                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--warning)" }}
-                  />
-                  <Line
-                    yAxisId="percent"
-                    type="monotone"
-                    dataKey="trackedOwnershipPercent"
-                    name="Tracked Ownership %"
-                    stroke="var(--accent)"
-                    strokeWidth={expanded ? 2.4 : 2.2}
-                    dot={false}
-                    connectNulls
-                    activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
-                  />
-                  <Brush
-                    dataKey="quarterLabel"
-                    height={24}
-                    stroke="var(--accent)"
-                    travellerWidth={10}
-                    fill="var(--accent)"
-                    tickFormatter={(value) => String(value)}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
+            {renderInstitutionalTrendChart({ chartType: selectedChartType, data, expanded })}
           </div>
         ) : (
-          <div className="grid-empty-state" style={{ minHeight: 260 }}>
+                  <div className="grid-empty-state grid-empty-state-tall">
             <div className="grid-empty-kicker">Institutional trend</div>
             <div className="grid-empty-title">No quarterly ownership history yet</div>
             <div className="grid-empty-copy">This chart appears when cached 13F filings contain at least one reported quarter of institutional positions.</div>
           </div>
         )
       }
+    />
+  );
+}
+
+function renderInstitutionalTrendChart({
+  chartType,
+  data,
+  expanded,
+}: {
+  chartType: ChartType;
+  data: OwnershipTrendDatum[];
+  expanded: boolean;
+}) {
+  const margin = { top: 8, right: expanded ? 24 : 16, left: 4, bottom: 12 };
+  const lineStroke = expanded ? 2.8 : 2.6;
+  const percentStroke = expanded ? 2.4 : 2.2;
+  const shouldShowBrush = data.length > (expanded ? 8 : 12);
+  const chartShellClassName = expanded ? "institutional-trend-chart-shell is-expanded" : "institutional-trend-chart-shell";
+
+  return (
+    <div className={chartShellClassName}>
+      <ResponsiveContainer>
+        {chartType === "line" ? (
+          <LineChart data={data} margin={margin}>
+            <SharedInstitutionalTrendChrome expanded={expanded} />
+            <Line
+              yAxisId="shares"
+              type="monotone"
+              dataKey="totalSharesHeld"
+              name="Tracked Institutional Shares"
+              stroke="var(--positive)"
+              strokeWidth={lineStroke}
+              dot={false}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--positive)" }}
+            />
+            <Line
+              yAxisId="shares"
+              type="monotone"
+              dataKey="top10SharesHeld"
+              name="Top 10 Funds Combined"
+              stroke="var(--warning)"
+              strokeWidth={percentStroke}
+              strokeDasharray="7 4"
+              dot={false}
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--warning)" }}
+            />
+            <Line
+              yAxisId="percent"
+              type="monotone"
+              dataKey="trackedOwnershipPercent"
+              name="Tracked Ownership %"
+              stroke="var(--accent)"
+              strokeWidth={percentStroke}
+              dot={false}
+              connectNulls
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+            />
+            {shouldShowBrush ? <SharedInstitutionalTrendBrush /> : null}
+          </LineChart>
+        ) : chartType === "area" ? (
+          <ComposedChart data={data} margin={margin}>
+            <SharedInstitutionalTrendChrome expanded={expanded} />
+            <Area
+              yAxisId="shares"
+              type="monotone"
+              dataKey="totalSharesHeld"
+              name="Tracked Institutional Shares"
+              stroke="var(--positive)"
+              fill="color-mix(in srgb, var(--positive) 18%, transparent)"
+              strokeWidth={lineStroke}
+              isAnimationActive={false}
+            />
+            <Area
+              yAxisId="shares"
+              type="monotone"
+              dataKey="top10SharesHeld"
+              name="Top 10 Funds Combined"
+              stroke="var(--warning)"
+              fill="color-mix(in srgb, var(--warning) 14%, transparent)"
+              strokeWidth={percentStroke}
+              isAnimationActive={false}
+            />
+            <Line
+              yAxisId="percent"
+              type="monotone"
+              dataKey="trackedOwnershipPercent"
+              name="Tracked Ownership %"
+              stroke="var(--accent)"
+              strokeWidth={percentStroke}
+              dot={false}
+              connectNulls
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+            />
+            {shouldShowBrush ? <SharedInstitutionalTrendBrush /> : null}
+          </ComposedChart>
+        ) : chartType === "bar" ? (
+          <ComposedChart data={data} margin={margin}>
+            <SharedInstitutionalTrendChrome expanded={expanded} />
+            <Bar yAxisId="shares" dataKey="totalSharesHeld" name="Tracked Institutional Shares" fill="var(--positive)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+            <Bar yAxisId="shares" dataKey="top10SharesHeld" name="Top 10 Funds Combined" fill="var(--warning)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+            <Line
+              yAxisId="percent"
+              type="monotone"
+              dataKey="trackedOwnershipPercent"
+              name="Tracked Ownership %"
+              stroke="var(--accent)"
+              strokeWidth={percentStroke}
+              dot={false}
+              connectNulls
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+            />
+            {shouldShowBrush ? <SharedInstitutionalTrendBrush /> : null}
+          </ComposedChart>
+        ) : (
+          <ComposedChart data={data} margin={margin}>
+            <SharedInstitutionalTrendChrome expanded={expanded} />
+            <Area
+              yAxisId="shares"
+              type="monotone"
+              dataKey="totalSharesHeld"
+              name="Tracked Institutional Shares"
+              stroke="var(--positive)"
+              fill="color-mix(in srgb, var(--positive) 16%, transparent)"
+              strokeWidth={lineStroke}
+              isAnimationActive={false}
+            />
+            <Bar yAxisId="shares" dataKey="top10SharesHeld" name="Top 10 Funds Combined" fill="color-mix(in srgb, var(--warning) 78%, transparent)" radius={[3, 3, 0, 0]} isAnimationActive={false} />
+            <Line
+              yAxisId="percent"
+              type="monotone"
+              dataKey="trackedOwnershipPercent"
+              name="Tracked Ownership %"
+              stroke="var(--accent)"
+              strokeWidth={percentStroke}
+              dot={false}
+              connectNulls
+              activeDot={{ r: 4, stroke: "var(--panel)", strokeWidth: 2, fill: "var(--accent)" }}
+            />
+            {shouldShowBrush ? <SharedInstitutionalTrendBrush /> : null}
+          </ComposedChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function SharedInstitutionalTrendChrome({ expanded }: { expanded: boolean }) {
+  return (
+    <>
+      <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
+      <XAxis dataKey="quarterLabel" minTickGap={18} stroke={CHART_AXIS_COLOR} tick={chartTick(expanded ? 11 : 10)} />
+      <YAxis
+        yAxisId="shares"
+        stroke={CHART_AXIS_COLOR}
+        tick={chartTick(expanded ? 11 : 10)}
+        tickFormatter={(value) => formatShareCompact(Number(value))}
+      />
+      <YAxis
+        yAxisId="percent"
+        orientation="right"
+        stroke={CHART_AXIS_COLOR}
+        tick={chartTick(expanded ? 11 : 10)}
+        tickFormatter={(value) => formatPercent(Number(value))}
+      />
+      <Tooltip
+        cursor={{ stroke: "var(--accent)", strokeWidth: 1 }}
+        content={({ active, payload, label }) => (
+          <InstitutionalOwnershipTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
+        )}
+      />
+      <Legend wrapperStyle={chartLegendStyle()} />
+    </>
+  );
+}
+
+function SharedInstitutionalTrendBrush() {
+  return (
+    <Brush
+      dataKey="quarterLabel"
+      height={24}
+      stroke="var(--accent)"
+      travellerWidth={10}
+      fill="var(--accent)"
+      tickFormatter={(value) => String(value)}
     />
   );
 }
@@ -222,20 +381,20 @@ function InstitutionalOwnershipTooltip({
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip-label">{label ?? point.quarterLabel}</div>
-      <TooltipRow label="Tracked Shares" value={formatShareCompact(point.totalSharesHeld)} color="var(--positive)" />
-      <TooltipRow label="Top 10 Combined" value={formatShareCompact(point.top10SharesHeld)} color="var(--warning)" />
-      <TooltipRow label="Tracked Ownership" value={point.trackedOwnershipPercent == null ? "—" : formatPercent(point.trackedOwnershipPercent)} color="var(--accent)" />
-      <TooltipRow label="Funds Reporting" value={formatInteger(point.fundCount)} color="#94A3B8" />
-      <TooltipRow label="Quarter End" value={formatDate(point.quarterDate)} color="#CBD5E1" />
+      <TooltipRow label="Tracked Shares" value={formatShareCompact(point.totalSharesHeld)} tone="positive" />
+      <TooltipRow label="Top 10 Combined" value={formatShareCompact(point.top10SharesHeld)} tone="warning" />
+      <TooltipRow label="Tracked Ownership" value={point.trackedOwnershipPercent == null ? "—" : formatPercent(point.trackedOwnershipPercent)} tone="accent" />
+      <TooltipRow label="Funds Reporting" value={formatInteger(point.fundCount)} tone="slate" />
+      <TooltipRow label="Quarter End" value={formatDate(point.quarterDate)} tone="light" />
     </div>
   );
 }
 
-function TooltipRow({ label, value, color }: { label: string; value: string; color: string }) {
+function TooltipRow({ label, value, tone }: { label: string; value: string; tone: "positive" | "warning" | "accent" | "slate" | "light" }) {
   return (
     <div className="chart-tooltip-row">
       <span className="chart-tooltip-key">
-        <span className="chart-tooltip-dot" style={{ background: color }} />
+        <span className={`chart-tooltip-dot is-${tone}`} />
         {label}
       </span>
       <span className="chart-tooltip-value">{value}</span>

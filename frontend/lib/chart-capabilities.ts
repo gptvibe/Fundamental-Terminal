@@ -48,7 +48,7 @@ const CHART_CAPABILITIES = {
   }),
   stacked_time_series: defineChartCapability({
     datasetKind: "stacked_time_series",
-    allowedChartTypes: ["area", "stacked_bar", "composed"],
+    allowedChartTypes: ["line", "area", "stacked_bar", "composed"],
     allowedTimeframeModes: ["3y", "5y", "10y", "max"],
     allowedCadenceModes: ["quarterly", "annual", "ttm"],
     defaultChartType: "area",
