@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
+import { ResearchBriefPlainEnglishPanel } from "@/components/company/research-brief-plain-english-panel";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -544,6 +545,19 @@ export default function CompanyResearchBriefPage() {
           )}
         </EvidenceCard>
       </ResearchBriefSection>
+
+      <ResearchBriefPlainEnglishPanel
+        ticker={ticker}
+        models={briefData.models.data?.models ?? []}
+        modelsLoading={briefData.models.loading}
+        modelsError={briefData.models.error}
+        latestFinancial={latestFinancial}
+        previousAnnual={previousAnnual}
+        diagnostics={data?.diagnostics ?? null}
+        confidenceFlags={data?.confidence_flags ?? null}
+        strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
+        reloadKey={reloadKey}
+      />
 
       <ResearchBriefSectionNav activeSectionId={activeSectionId} />
 

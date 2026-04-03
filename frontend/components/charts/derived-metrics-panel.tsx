@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { getCompanyMetricsTimeseries } from "@/lib/api";
@@ -284,7 +285,7 @@ export function DerivedMetricsPanel({
       {latest ? (
         <div className="metric-grid">
           <MetricCard label="Latest Period" value={formatDate(latest.period_end)} />
-          <MetricCard label={selectedOption.label} value={formatMetric(latest.metrics[metric], selectedOption.isPercent)} />
+          <MetricCard label={selectedOption.label} metricKey={selectedOption.key} value={formatMetric(latest.metrics[metric], selectedOption.isPercent)} />
           <MetricCard label="Coverage" value={`${Math.round(latest.quality.coverage_ratio * 100)}%`} />
           <MetricCard label="Financials Check" value={payload.last_financials_check ? formatDate(payload.last_financials_check) : "?"} />
           <MetricCard label="Price Check" value={strictOfficialMode ? "Disabled in strict mode" : payload.last_price_check ? formatDate(payload.last_price_check) : "?"} />
@@ -348,10 +349,12 @@ function formatMetric(value: number | null, isPercent: boolean): string {
   return value.toFixed(2);
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({ label, metricKey, value }: { label: string; metricKey?: string; value: string }) {
   return (
     <div className="metric-card">
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} metricKey={metricKey} />
+      </div>
       <div className="metric-value">{value}</div>
     </div>
   );

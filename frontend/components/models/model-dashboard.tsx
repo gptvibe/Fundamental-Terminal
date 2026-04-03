@@ -17,6 +17,7 @@ import {
   YAxis
 } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import {
   CHART_AXIS_COLOR,
   CHART_GRID_COLOR,
@@ -166,7 +167,7 @@ function DcfModelView({ model }: { model: ModelPayload }) {
                 return value;
               }}
             />
-            <Legend wrapperStyle={chartLegendStyle()} />
+            <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
             <Line type="monotone" dataKey="historicalFcf" name="Historical FCF" stroke="var(--accent)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
             <Line type="monotone" dataKey="projectedFcf" name="Projected FCF" stroke="var(--positive)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
             <Line type="monotone" dataKey="presentValue" name="Discounted PV" stroke="var(--warning)" strokeWidth={2} dot={false} connectNulls={false} />
@@ -361,7 +362,7 @@ function RoicModelView({ model }: { model: ModelPayload }) {
             <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
             <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(v) => formatPercent(Number(v))} />
             <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? formatPercent(value) : value} />
-            <Legend wrapperStyle={chartLegendStyle()} />
+            <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
             <Line dataKey="roic" name="ROIC" stroke="var(--positive)" strokeWidth={2} dot={{ r: 2 }} />
             <Line dataKey="reinvestment" name="Reinvestment" stroke="var(--accent)" strokeWidth={2} dot={{ r: 2 }} />
             <Line dataKey="spread" name="Spread" stroke="var(--warning)" strokeWidth={2} dot={{ r: 2 }} />
@@ -402,7 +403,7 @@ function CapitalAllocationModelView({ model }: { model: ModelPayload }) {
             <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
             <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(v) => formatCompactNumber(Number(v))} />
             <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number | string) => typeof value === "number" ? formatCompactNumber(value) : value} />
-            <Legend wrapperStyle={chartLegendStyle()} />
+            <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
             <Bar dataKey="dividends" stackId="cap" name="Dividends" fill="var(--positive)" />
             <Bar dataKey="buybacks" stackId="cap" name="Buybacks" fill="var(--accent)" />
             <Bar dataKey="sbc" stackId="cap" name="SBC" fill="var(--negative)" />
@@ -730,12 +731,14 @@ function AssumptionProvenanceTable({ provenance }: { provenance: Record<string, 
   );
 }
 
-function MetricStrip({ metrics }: { metrics: Array<{ label: string; value: string }> }) {
+function MetricStrip({ metrics }: { metrics: Array<{ label: string; value: ReactNode; metricKey?: string }> }) {
   return (
     <div className="metric-grid">
       {metrics.map((metric) => (
         <div key={metric.label} className="metric-card">
-          <div className="metric-label">{metric.label}</div>
+          <div className="metric-label">
+            <MetricLabel label={metric.label} metricKey={metric.metricKey} />
+          </div>
           <div className="metric-value">{metric.value}</div>
         </div>
       ))}
@@ -762,7 +765,7 @@ function ChartShell({ title, children }: { title: string; children: ReactNode })
   );
 }
 
-type TableColumn = { key: string; label: string; align?: "left" | "right" };
+type TableColumn = { key: string; label: string; align?: "left" | "right"; metricKey?: string };
 
 function CompactTable({
   title,
@@ -771,7 +774,7 @@ function CompactTable({
 }: {
   title: string;
   columns: TableColumn[];
-  rows: Array<Record<string, string>>;
+  rows: Array<Record<string, ReactNode>>;
 }) {
   return (
     <div
@@ -800,7 +803,7 @@ function CompactTable({
                   fontWeight: 600
                 }}
               >
-                {column.label}
+                <MetricLabel label={column.label} metricKey={column.metricKey} />
               </th>
             ))}
           </tr>

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { difference, formatSignedCompactDelta } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { FinancialPayload } from "@/lib/types";
@@ -107,7 +108,9 @@ export function BankFinancialStatementsTable({
 
               return (
                 <tr key={metric.key}>
-                  <td>{metric.label}</td>
+                  <td>
+                    <MetricLabel label={metric.label} metricKey={metric.key} />
+                  </td>
                   <td>{metric.formatValue(activeValue)}</td>
                   {activeComparisonFinancial ? <td>{metric.formatValue(comparisonValue)}</td> : null}
                   {activeComparisonFinancial ? <td style={toneStyle}>{formatSignedCompactDelta(absoluteChange)}</td> : null}

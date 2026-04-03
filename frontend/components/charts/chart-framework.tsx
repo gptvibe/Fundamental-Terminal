@@ -2,6 +2,8 @@
 
 import { useId } from "react";
 
+import { MetricLabel } from "@/components/ui/metric-label";
+
 export type ControlOption = {
   key: string;
   label: string;
@@ -32,8 +34,9 @@ export function ChartControlGroup({ label, value, options, onChange }: ChartCont
             className={`chart-chip${value === option.key ? " chart-chip-active" : ""}`}
             onClick={() => onChange(option.key)}
             disabled={option.disabled}
+            aria-label={option.label}
           >
-            {option.label}
+            <MetricLabel label={option.label} metricKey={option.key} />
           </button>
         ))}
       </div>
@@ -66,8 +69,9 @@ export function ChartComparePicker({ label, options, selectedKeys, onToggle, max
               onClick={() => onToggle(option.key)}
               disabled={option.disabled || maxedOut}
               title={maxedOut ? `Select up to ${maxSelections} metrics` : undefined}
+              aria-label={option.label}
             >
-              {option.label}
+              <MetricLabel label={option.label} metricKey={option.key} />
             </button>
           );
         })}

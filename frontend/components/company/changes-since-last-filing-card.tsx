@@ -2,6 +2,7 @@
 
 import { Children, useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { getCompanyChangesSinceLastFiling } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
@@ -148,7 +149,9 @@ function Section({ title, emptyMessage, children }: { title: string; emptyMessag
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric-card">
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="metric-value">{value}</div>
     </div>
   );

@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import type { EarningsModelPointPayload } from "@/lib/types";
@@ -65,7 +66,9 @@ export function SecHeavyModelsPanel({
       </div>
 
       <div className="metric-card" style={{ display: "grid", gap: 8 }}>
-        <div className="metric-label">How To Read This (Plain English)</div>
+        <div className="metric-label">
+          <MetricLabel label="How To Read This (Plain English)" />
+        </div>
         <div className="text-muted" style={{ fontSize: 14 }}>
           Earnings quality score: higher means free cash flow conversion is stronger and accrual noise is lower versus reported earnings.
         </div>
@@ -79,7 +82,9 @@ export function SecHeavyModelsPanel({
 
       <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
         <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-          <div className="metric-label">Earnings Quality Score Trend</div>
+          <div className="metric-label">
+            <MetricLabel label="Earnings Quality Score Trend" />
+          </div>
           <div className="text-muted" style={{ fontSize: 13 }}>Blend of FCF margin, cash conversion, and accrual discipline.</div>
           <div style={{ width: "100%", height: 260 }}>
             <ResponsiveContainer>
@@ -104,7 +109,9 @@ export function SecHeavyModelsPanel({
         </div>
 
         <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-          <div className="metric-label">EPS Drift (Period-over-Period)</div>
+          <div className="metric-label">
+            <MetricLabel label="EPS Drift (Period-over-Period)" />
+          </div>
           <div className="text-muted" style={{ fontSize: 13 }}>Shows whether diluted EPS is accelerating or decelerating each period.</div>
           <div style={{ width: "100%", height: 260 }}>
             <ResponsiveContainer>
@@ -142,7 +149,9 @@ export function SecHeavyModelsPanel({
       </div>
 
       <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-        <div className="metric-label">Segment Contribution Delta</div>
+        <div className="metric-label">
+          <MetricLabel label="Segment Contribution Delta" />
+        </div>
         <div className="text-muted" style={{ fontSize: 13 }}>
           Share-of-revenue change by segment versus previous statement with segment disclosures.
         </div>

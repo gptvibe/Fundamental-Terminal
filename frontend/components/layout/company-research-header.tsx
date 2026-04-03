@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { clsx } from "clsx";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { formatDate } from "@/lib/format";
 import type { CacheState, RefreshState } from "@/lib/types";
 
@@ -131,10 +132,12 @@ export function CompanyResearchHeader({
 
 export function CompanyMetricGrid({ items, loading = false }: { items: CompanyFactItem[]; loading?: boolean }) {
   return (
-    <div className="metric-grid" aria-busy={loading}>
+    <div className="metric-grid" aria-busy={loading ? "true" : undefined}>
       {items.map((item, index) => (
         <div key={item.label} className={clsx("metric-card", loading && "metric-card-loading")}>
-          <div className="metric-label">{item.label}</div>
+          <div className="metric-label">
+            <MetricLabel label={item.label} />
+          </div>
           <div className="metric-value">
             {loading ? (
               <span
@@ -157,7 +160,9 @@ export function CompanySummaryStrip({ items, className, loading = false }: { ite
     <div className={clsx("company-summary-strip", className)}>
       {items.map((item, index) => (
         <div key={item.label} className={clsx("summary-card", `accent-${item.accent ?? "cyan"}`, loading && "summary-card-loading")}>
-          <div className="summary-card-label">{item.label}</div>
+          <div className="summary-card-label">
+            <MetricLabel label={item.label} />
+          </div>
           <div className="summary-card-value">
             {loading ? (
               <span

@@ -25,6 +25,7 @@ import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, chartLegendStyl
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyPeersResponse, PeerMetricsPayload, PeerRevenuePoint } from "@/lib/types";
 import { Panel } from "@/components/ui/panel";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { StatusPill } from "@/components/ui/status-pill";
 
@@ -237,7 +238,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                   <PolarAngleAxis dataKey="metric" tick={{ fill: CHART_LEGEND_COLOR, fontSize: 12 }} />
                   <PolarRadiusAxis tick={false} axisLine={false} domain={[0, 100]} />
                   <Tooltip content={<RadarTooltip />} />
-                  <Legend wrapperStyle={chartLegendStyle()} />
+                  <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                   {peers.map((peer, index) => (
                     <Radar
                       key={peer.ticker}
@@ -264,7 +265,7 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
                   <XAxis type="number" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={formatPercentAxis} />
                   <YAxis dataKey="ticker" type="category" width={64} tick={{ fill: CHART_LEGEND_COLOR, fontSize: 12 }} />
                   <Tooltip content={<BarTooltip />} />
-                  <Legend wrapperStyle={chartLegendStyle()} />
+                  <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                   <Bar dataKey="fairValueGap" name="Fair Value Gap" radius={[0, 8, 8, 0]}>
                     {barData.map((entry) => (
                       <Cell key={`${entry.ticker}-fvg`} fill={entry.is_focus ? "var(--positive)" : "var(--positive)"} />

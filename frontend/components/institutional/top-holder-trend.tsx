@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatDate } from "@/lib/format";
 import type { InstitutionalHoldingPayload } from "@/lib/types";
@@ -46,7 +47,7 @@ export function TopHolderTrend({ holdings }: { holdings: InstitutionalHoldingPay
             }}
             formatter={(value: number) => formatShares(value)}
           />
-          <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+          <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
           {series.map((fund, index) => (
             <Line
               key={fund}

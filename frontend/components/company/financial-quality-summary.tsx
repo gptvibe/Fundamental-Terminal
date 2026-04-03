@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { HistoricalSparklineCard, type HistoricalSparklinePoint } from "@/components/company/historical-sparkline-card";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { buildAnnualKey, buildAnnualSurfaceWarnings, formatAnnualHeader, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
 import { difference, formatSignedCompactDelta, formatSignedPointDelta, type SharedFinancialChartState } from "@/lib/financial-chart-state";
 import type { FinancialPayload } from "@/lib/types";
@@ -171,7 +172,9 @@ export function FinancialQualitySummary({
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric-card">
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="metric-value">{value}</div>
     </div>
   );

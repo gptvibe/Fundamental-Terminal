@@ -116,6 +116,10 @@ vi.mock("@/components/company/capital-structure-intelligence-panel", () => ({
   CapitalStructureIntelligencePanel: () => React.createElement("div", null, "capital-structure-panel"),
 }));
 
+vi.mock("@/components/company/research-brief-plain-english-panel", () => ({
+  ResearchBriefPlainEnglishPanel: () => React.createElement("div", null, "plain-english-brief-panel"),
+}));
+
 vi.mock("@/components/models/investment-summary-panel", () => ({
   InvestmentSummaryPanel: () => React.createElement("div", null, "investment-summary-panel"),
 }));
@@ -217,6 +221,7 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByText("Insider watch").closest(".research-brief-checklist-card")?.className).toContain("tone-green");
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
+    expect(screen.getByText("plain-english-brief-panel")).toBeTruthy();
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
   });

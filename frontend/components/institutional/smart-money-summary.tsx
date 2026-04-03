@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { buildSmartMoneySummary } from "@/lib/smart-money";
 import type { InstitutionalHoldingPayload, RefreshState } from "@/lib/types";
 
@@ -81,7 +82,9 @@ export function SmartMoneySummary({
 function MetricCard({ label, value, tone }: { label: string; value: string; tone: "bullish" | "bearish" | "neutral" }) {
   return (
     <div className={`smart-money-metric-card smart-money-metric-card-${tone}`}>
-      <div className="smart-money-metric-label">{label}</div>
+      <div className="smart-money-metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="smart-money-metric-value">{value}</div>
     </div>
   );

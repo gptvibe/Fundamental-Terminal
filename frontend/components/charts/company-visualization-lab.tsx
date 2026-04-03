@@ -26,6 +26,7 @@ import {
   type SourceBadge,
 } from "@/components/charts/chart-framework";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { getCompanyBeneficialOwnership, getCompanyCapitalMarkets, getCompanyEarnings, getCompanyFilingEvents, getCompanyInsiderTrades, getCompanyMetricsTimeseries } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick, chartLegendStyle } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
@@ -455,7 +456,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                   return formatModeValue(Number.isFinite(numeric) ? numeric : null, valueMode);
                 }}
               />
-              <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+              <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
               {activeMetricSeries.map((metric) => (
                 <Line
                   key={metric.key}
@@ -514,7 +515,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <XAxis dataKey="periodEnd" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatDate(String(value))} />
                 <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={74} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatPercent(value)} labelFormatter={(value) => formatDate(String(value))} />
-                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                 <Area type="monotone" dataKey="grossMargin" name="Gross" stroke="var(--positive)" fill="var(--positive)" stackId="1" connectNulls />
                 <Area type="monotone" dataKey="operatingMargin" name="Operating" stroke="var(--accent)" fill="var(--accent)" stackId="1" connectNulls />
                 <Area type="monotone" dataKey="netMargin" name="Net" stroke="var(--warning)" fill="var(--warning)" stackId="1" connectNulls />
@@ -547,7 +548,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <XAxis dataKey="periodEnd" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatDate(String(value))} />
                 <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} width={74} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} formatter={(value: number) => Number(value).toFixed(2)} />
-                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                 <Line type="monotone" dataKey="cashConversion" name="Cash Conversion" stroke="var(--accent)" strokeWidth={2.3} dot={false} connectNulls />
                 <Bar dataKey="accrualRatio" name="Accrual Ratio" fill="var(--negative)" radius={[2, 2, 0, 0]} />
               </ComposedChart>
@@ -581,7 +582,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <YAxis yAxisId="left" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} width={76} />
                 <YAxis yAxisId="right" orientation="right" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={68} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} />
-                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                 <Bar yAxisId="left" dataKey="shares" name="Shares" fill="var(--accent)" radius={[2, 2, 0, 0]} />
                 <Line yAxisId="left" type="monotone" dataKey="stockBasedComp" name="SBC" stroke="#A855F7" strokeWidth={2.2} dot={false} connectNulls />
                 <Line yAxisId="right" type="monotone" dataKey="dilution" name="Dilution" stroke="var(--warning)" strokeWidth={2.2} dot={false} connectNulls />
@@ -614,7 +615,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
                 <YAxis yAxisId="alloc" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} width={76} />
                 <YAxis yAxisId="yield" orientation="right" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={68} />
                 <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} />
-                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                 <Bar yAxisId="alloc" dataKey="buybacks" name="Buybacks" fill="var(--accent)" radius={[2, 2, 0, 0]} />
                 <Bar yAxisId="alloc" dataKey="dividends" name="Dividends" fill="var(--positive)" radius={[2, 2, 0, 0]} />
                 <Line yAxisId="alloc" type="monotone" dataKey="debtChanges" name="Debt Changes" stroke="var(--negative)" strokeWidth={2.2} dot={false} connectNulls />
@@ -737,7 +738,7 @@ function SegmentStackChart({ rows, emptyMessage }: { rows: SegmentMixRow[]; empt
           <XAxis dataKey="periodEnd" stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatDate(String(value))} />
           <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatPercent(Number(value))} width={74} />
           <Tooltip {...RECHARTS_TOOLTIP_PROPS} labelFormatter={(value) => formatDate(String(value))} formatter={(value: number) => formatPercent(value)} />
-          <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+          <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
           {segmentNames.map((segment, index) => (
             <Area
               key={segment}

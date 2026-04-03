@@ -5,6 +5,7 @@ import { useMemo } from "react";
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { buildAnnualKey, buildAnnualSurfaceWarnings, formatAnnualHeader, resolveAnnualFinancialScope } from "@/lib/annual-financial-scope";
 import { showAppToast } from "@/lib/app-toast";
 import { buildPlainTextTable, copyTextToClipboard, exportRowsToCsv, normalizeExportFileStem, type ExportRow } from "@/lib/export";
@@ -258,7 +259,9 @@ export function RatioHistoryTable({
             {RATIO_ROWS.map((row, rowIndex) => (
               <tr key={row.key} data-ratio-key={row.key}>
                 <td style={buildStickyMetricCellStyle(rowIndex)}>
-                  <span className="company-data-cell-strong">{row.label}</span>
+                  <span className="company-data-cell-strong">
+                    <MetricLabel label={row.label} metricKey={row.key} />
+                  </span>
                 </td>
                 {state.columns.map((statement, columnIndex) => {
                   const value = row.getValue(statement, state.annuals);

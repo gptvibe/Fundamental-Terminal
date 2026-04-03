@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { useMemo } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { difference, formatSignedCompactDelta } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { FinancialPayload } from "@/lib/types";
@@ -105,7 +106,9 @@ export function FinancialStatementsTable({
               {metricTrends.map((metric) => (
                 <tr key={metric.key}>
                   <td>
-                    <div className="financial-trend-label">{metric.label}</div>
+                    <div className="financial-trend-label">
+                      <MetricLabel label={metric.label} metricKey={metric.key} />
+                    </div>
                     <div className="financial-trend-subtitle">{metric.historyLabel}</div>
                   </td>
                   <td>
@@ -147,7 +150,9 @@ export function FinancialStatementsTable({
 
               return (
                 <tr key={metric.key}>
-                  <td>{metric.label}</td>
+                  <td>
+                    <MetricLabel label={metric.label} metricKey={metric.key} />
+                  </td>
                   <td>{metric.formatValue(activeValue)}</td>
                   {activeComparisonFinancial ? <td>{metric.formatValue(comparisonValue)}</td> : null}
                   {activeComparisonFinancial ? <td style={toneStyle}>{formatMetricDelta(metric, absoluteChange)}</td> : null}

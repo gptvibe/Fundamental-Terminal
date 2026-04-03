@@ -6,6 +6,7 @@ import { Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceLine, Respons
 
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { getCompanyCapitalStructure, invalidateApiReadCacheForTicker } from "@/lib/api";
@@ -179,7 +180,9 @@ export function CapitalStructureIntelligencePanel({
 
       {trendChartData.length > 1 ? (
         <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-          <div className="metric-label">Funding, Maturities, and Payout Trend</div>
+          <div className="metric-label">
+            <MetricLabel label="Funding, Maturities, and Payout Trend" />
+          </div>
           <div className="text-muted" style={{ fontSize: 13 }}>
             Compare total debt, next-twelve-month maturities, gross payout load, and net dilution across the visible filing history.
           </div>
@@ -200,7 +203,7 @@ export function CapitalStructureIntelligencePanel({
                     return formatCompactNumber(value);
                   }}
                 />
-                <Legend wrapperStyle={chartLegendStyle()} />
+                <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
                 <Bar yAxisId="amount" dataKey="totalDebt" name="Total Debt" fill="var(--chart-series-1)" radius={[4, 4, 0, 0]} />
                 <Bar yAxisId="amount" dataKey="nextTwelveMonths" name="12m Maturities" fill="var(--chart-series-2)" radius={[4, 4, 0, 0]} />
                 <Bar yAxisId="amount" dataKey="grossPayout" name="Gross Payout" fill="var(--chart-series-3)" radius={[4, 4, 0, 0]} />
@@ -248,7 +251,9 @@ export function CapitalStructureIntelligencePanel({
       </div>
 
       <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-        <div className="metric-label">Debt Rollforward & Net Dilution Bridge</div>
+        <div className="metric-label">
+          <MetricLabel label="Debt Rollforward & Net Dilution Bridge" />
+        </div>
         <div className="text-muted" style={{ fontSize: 13 }}>
           Debt issuance and repayment are paired with the latest share issuance / repurchase bridge so we can separate funding, payouts, and dilution effects.
         </div>
@@ -265,7 +270,9 @@ export function CapitalStructureIntelligencePanel({
       </div>
 
       <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-        <div className="metric-label">Interest, Payout, and Dilution Trend</div>
+        <div className="metric-label">
+          <MetricLabel label="Interest, Payout, and Dilution Trend" />
+        </div>
         <div className="text-muted" style={{ fontSize: 13 }}>
           Recent filing history for interest burden, payout mix, SBC offset, and share-count change.
         </div>
@@ -320,7 +327,9 @@ function BucketTable({
 }) {
   return (
     <div className="metric-card" style={{ display: "grid", gap: 10 }}>
-      <div className="metric-label">{title}</div>
+      <div className="metric-label">
+        <MetricLabel label={title} />
+      </div>
       <div className="text-muted" style={{ fontSize: 13 }}>{subtitle}</div>
       {buckets.length ? (
         <div style={{ overflowX: "auto" }}>
@@ -371,7 +380,9 @@ function SectionMeta({ meta }: { meta: CapitalStructureSectionMetaPayload }) {
 function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="metric-card" style={{ display: "grid", gap: 6 }}>
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="metric-value">{value}</div>
       {hint ? <div className="text-muted" style={{ fontSize: 12 }}>{hint}</div> : null}
     </div>

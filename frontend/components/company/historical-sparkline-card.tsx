@@ -2,6 +2,7 @@
 
 import { CartesianGrid, Line, LineChart, ReferenceDot, ResponsiveContainer, XAxis, YAxis } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_GRID_COLOR, chartSeriesColor } from "@/lib/chart-theme";
 
 export interface HistoricalSparklinePoint {
@@ -38,7 +39,9 @@ export function HistoricalSparklineCard({
     <div className="metric-card" style={{ display: "grid", gap: 8 }}>
       <div className="historical-sparkline-card-header">
         <div className="historical-sparkline-card-heading">
-          <div className="metric-label">{label}</div>
+          <div className="metric-label">
+            <MetricLabel label={label} />
+          </div>
           <div className="metric-value">{value}</div>
         </div>
         {delta ? (

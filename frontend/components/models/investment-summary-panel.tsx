@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { PolarAngleAxis, RadialBar, RadialBarChart, ResponsiveContainer } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { formatPercent } from "@/lib/format";
 import { formatPiotroskiDisplay as formatResolvedPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { FinancialPayload, ModelPayload, PriceHistoryPoint } from "@/lib/types";
@@ -43,33 +44,45 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
       ) : null}
       <div className="investment-summary-lead">
         <div className="investment-summary-lead-copy">
-          <div className="metric-label">Valuation conclusion</div>
+          <div className="metric-label">
+            <MetricLabel label="Valuation conclusion" />
+          </div>
           <div className="investment-summary-lead-title">{summary.valuationLabel}</div>
           <div className="investment-summary-lead-text">{summary.notes[0]?.copy}</div>
         </div>
         <div className="investment-summary-stat-grid">
           <div className="investment-summary-stat">
-            <div className="investment-summary-stat-label">Valuation range / share</div>
+            <div className="investment-summary-stat-label">
+              <MetricLabel label="Valuation range / share" />
+            </div>
             <div className="investment-summary-stat-value">{formatCurrencyRange(summary.valuationRange)}</div>
             <div className="investment-summary-stat-detail">{summary.valuationRangeBasis}</div>
           </div>
           <div className="investment-summary-stat">
-            <div className="investment-summary-stat-label">Valuation midpoint</div>
+            <div className="investment-summary-stat-label">
+              <MetricLabel label="Valuation midpoint" />
+            </div>
             <div className="investment-summary-stat-value">{formatCurrency(summary.valuationMidpoint)}</div>
             <div className="investment-summary-stat-detail">Primary anchor {summary.primaryValuationLabel}</div>
           </div>
           <div className="investment-summary-stat">
-            <div className="investment-summary-stat-label">Latest price</div>
+            <div className="investment-summary-stat-label">
+              <MetricLabel label="Latest price" />
+            </div>
             <div className="investment-summary-stat-value">{formatCurrency(summary.latestPrice)}</div>
             <div className="investment-summary-stat-detail">{summary.priceDateLabel}</div>
           </div>
           <div className="investment-summary-stat">
-            <div className="investment-summary-stat-label">Gap vs midpoint</div>
+            <div className="investment-summary-stat-label">
+              <MetricLabel label="Gap vs midpoint" />
+            </div>
             <div className="investment-summary-stat-value">{formatPercent(summary.marginOfSafety)}</div>
             <div className="investment-summary-stat-detail">{summary.marginBand}</div>
           </div>
           <div className="investment-summary-stat is-quiet">
-            <div className="investment-summary-stat-label">Net debt</div>
+            <div className="investment-summary-stat-label">
+              <MetricLabel label="Net debt" />
+            </div>
             <div className="investment-summary-stat-value">{formatCurrency(summary.netDebt)}</div>
             <div className="investment-summary-stat-detail">{summary.netDebtLabel}</div>
           </div>
@@ -112,7 +125,9 @@ function GaugeCard({ label, score, detail }: { label: string; score: number; det
 
   return (
     <div className="investment-gauge-card">
-      <div className="investment-gauge-title">{label}</div>
+      <div className="investment-gauge-title">
+        <MetricLabel label={label} />
+      </div>
       <div className="investment-gauge-shell">
         <ResponsiveContainer width="100%" height="100%">
           <RadialBarChart data={chartData} innerRadius="72%" outerRadius="100%" startAngle={90} endAngle={-270} barSize={14}>

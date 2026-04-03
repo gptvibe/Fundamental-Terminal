@@ -18,6 +18,7 @@ import {
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { useChartPreferences } from "@/hooks/use-chart-preferences";
 import { formatChartTimeframeLabel, getDefaultChartType, type ChartType } from "@/lib/chart-capabilities";
 import { RANGE_TIMEFRAME_OPTIONS, TIME_SERIES_CHART_TYPE_OPTIONS } from "@/lib/chart-expansion-presets";
@@ -342,7 +343,7 @@ function SharedInstitutionalTrendChrome({ expanded }: { expanded: boolean }) {
           <InstitutionalOwnershipTooltip active={active} label={label} payload={payload as TooltipPayloadEntry[] | undefined} />
         )}
       />
-      <Legend wrapperStyle={chartLegendStyle()} />
+      <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
     </>
   );
 }

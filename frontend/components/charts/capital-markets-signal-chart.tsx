@@ -5,6 +5,7 @@ import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, T
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { buildCapitalMarketsSignalSeries } from "@/lib/financial-chart-transforms";
 import { normalizeExportFileStem } from "@/lib/export";
@@ -77,7 +78,7 @@ export function CapitalMarketsSignalChart({ financials, events }: { financials: 
                   {...RECHARTS_TOOLTIP_PROPS}
                   formatter={(value: number, name: string) => (name === "Financing Events" ? String(value) : formatCompactNumber(value))}
                 />
-                <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                 <Bar yAxisId="events" dataKey="financingEvents" name="Financing Events" fill="var(--warning)" radius={[2, 2, 0, 0]} />
                 <Line yAxisId="debt" type="monotone" dataKey="debtChanges" name="Debt Changes" stroke="var(--accent)" strokeWidth={expanded ? 2.8 : 2.4} dot={{ r: expanded ? 4 : 3, fill: "var(--accent)" }} connectNulls isAnimationActive={false} />
               </ComposedChart>

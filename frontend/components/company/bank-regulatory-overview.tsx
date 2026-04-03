@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { HistoricalSparklineCard } from "@/components/company/historical-sparkline-card";
 import { SnapshotSurfaceStatus } from "@/components/company/snapshot-surface-status";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { difference, formatSignedCompactDelta, formatSignedPointDelta } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import { dedupeSnapshotSurfaceWarnings, resolveSnapshotSurfaceMode, type SnapshotSurfaceCapabilities, type SnapshotSurfaceWarning } from "@/lib/snapshot-surface";
@@ -174,7 +175,9 @@ export function BankRegulatoryOverview({
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric-card">
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="metric-value">{value}</div>
     </div>
   );

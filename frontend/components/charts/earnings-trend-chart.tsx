@@ -16,6 +16,7 @@ import {
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate } from "@/lib/format";
@@ -134,7 +135,7 @@ export function EarningsTrendChart({ earnings = [], points, sourceLabel }: Earni
                     width={64}
                   />
                   <Tooltip content={<EarningsTooltip />} {...RECHARTS_TOOLTIP_PROPS} />
-                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                   <Bar yAxisId="revenue" dataKey="revenue" name="Reported Revenue" fill="var(--positive)" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                   <Line
                     yAxisId="eps"

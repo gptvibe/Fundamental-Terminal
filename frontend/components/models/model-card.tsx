@@ -1,3 +1,4 @@
+import { MetricLabel } from "@/components/ui/metric-label";
 import { ModelPayload } from "@/lib/types";
 import { formatDate, titleCase } from "@/lib/format";
 
@@ -31,7 +32,9 @@ export function ModelCard({ model }: { model: ModelPayload }) {
         {rows.length ? (
           rows.map(([key, value]) => (
             <div key={key} className="metric-card">
-              <div className="metric-label">{titleCase(key)}</div>
+              <div className="metric-label">
+                <MetricLabel label={titleCase(key)} />
+              </div>
               <div className="metric-value">{value}</div>
             </div>
           ))

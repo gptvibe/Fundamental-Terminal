@@ -12,6 +12,7 @@ import {
   YAxis
 } from "recharts";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 import type { FilingParserInsightPayload, RefreshState } from "@/lib/types";
@@ -138,7 +139,7 @@ export function FilingParserInsights({
                   <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={chartTick()} />
                   <YAxis stroke={CHART_AXIS_COLOR} tick={chartTick()} tickFormatter={(value) => formatCompactNumber(Number(value))} />
                   <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
-                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+                  <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
                   <Line type="monotone" dataKey="revenue" stroke="var(--accent)" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="operatingIncome" stroke="var(--positive)" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="netIncome" stroke="var(--warning)" strokeWidth={2} dot={false} />
@@ -185,7 +186,9 @@ export function FilingParserInsights({
 function Metric({ label, value }: { label: string; value: number | null | undefined }) {
   return (
     <div className="filing-insights-metric">
-      <div className="filing-insights-metric-label">{label}</div>
+      <div className="filing-insights-metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="filing-insights-metric-value">{formatCompactNumber(value)}</div>
     </div>
   );

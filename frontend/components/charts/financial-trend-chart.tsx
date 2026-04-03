@@ -19,6 +19,7 @@ import {
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { useChartPreferences } from "@/hooks/use-chart-preferences";
 import {
   formatChartCadenceLabel,
@@ -234,7 +235,7 @@ function SharedTrendChrome({ expanded }: { expanded: boolean }) {
       <XAxis dataKey="period" stroke={CHART_AXIS_COLOR} tick={axisTick} />
       <YAxis stroke={CHART_AXIS_COLOR} tick={axisTick} tickFormatter={(value) => formatCompactNumber(Number(value))} />
       <Tooltip {...RECHARTS_TOOLTIP_PROPS} formatter={(value: number) => formatCompactNumber(value)} />
-      <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}>{value}</span>} />
+      <Legend formatter={(value) => <span style={{ color: CHART_LEGEND_COLOR }}><MetricLabel label={String(value)} /></span>} />
     </>
   );
 }

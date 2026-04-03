@@ -4032,6 +4032,20 @@ select {
   color: var(--text-muted);
 }
 
+.metric-label-tooltip-target {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--accent) 48%, transparent);
+  text-underline-offset: 0.14rem;
+  cursor: help;
+}
+
+.metric-label-tooltip-target:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 46%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .metric-value {
   margin-top: 4px;
   font-family: var(--mono);
@@ -4158,6 +4172,17 @@ select {
   font-size: 0.72rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+.plain-english-scorecard-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.plain-english-scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
 }
 
 .ticker-button {

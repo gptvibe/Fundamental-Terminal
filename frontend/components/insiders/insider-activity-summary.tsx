@@ -1,5 +1,6 @@
 "use client";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import type { InsiderActivitySummaryPayload, RefreshState } from "@/lib/types";
 
 interface InsiderActivitySummaryProps {
@@ -76,7 +77,9 @@ export function InsiderActivitySummary({ summary, loading = false, error = null,
 function MetricCard({ label, value, tone }: { label: string; value: string; tone: "bullish" | "bearish" | "neutral" }) {
   return (
     <div className={`insider-activity-metric-card insider-activity-metric-card-${tone}`}>
-      <div className="insider-activity-metric-label">{label}</div>
+      <div className="insider-activity-metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="insider-activity-metric-value">{value}</div>
     </div>
   );

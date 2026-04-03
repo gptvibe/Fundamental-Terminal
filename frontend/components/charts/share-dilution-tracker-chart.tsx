@@ -7,6 +7,7 @@ import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { FinancialChartStateBar } from "@/components/charts/financial-chart-state-bar";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { useChartPreferences } from "@/hooks/use-chart-preferences";
 import { formatChartTimeframeLabel } from "@/lib/chart-capabilities";
 import { RANGE_TIMEFRAME_OPTIONS } from "@/lib/chart-expansion-presets";
@@ -176,7 +177,7 @@ export function ShareDilutionTrackerChart({ financials, chartState }: ShareDilut
                       return formatPercent(value);
                     }}
                   />
-                  <Legend formatter={(value) => <span className="chart-legend-label">{value}</span>} />
+                  <Legend formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
                   <Bar yAxisId="shares" dataKey="shares" name="Shares Outstanding" fill="var(--accent)" radius={[2, 2, 0, 0]} />
                   <Line
                     yAxisId="dilution"

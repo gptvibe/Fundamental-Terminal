@@ -1,10 +1,12 @@
+import type { ReactNode } from "react";
+
 interface PlainEnglishScorecardProps {
   title: string;
   label: string;
   tone: "bullish" | "bearish" | "neutral" | "high" | "medium" | "low";
   summary: string;
   explanation: string;
-  chips?: string[];
+  chips?: ReactNode[];
 }
 
 export function PlainEnglishScorecard({ title, label, tone, summary, explanation, chips = [] }: PlainEnglishScorecardProps) {
@@ -20,8 +22,8 @@ export function PlainEnglishScorecard({ title, label, tone, summary, explanation
 
       {chips.length ? (
         <div className="plain-english-scorecard-chips">
-          {chips.map((chip) => (
-            <span key={chip} className="plain-english-scorecard-chip">
+          {chips.map((chip, index) => (
+            <span key={typeof chip === "string" ? chip : `chip-${index}`} className="plain-english-scorecard-chip">
               {chip}
             </span>
           ))}

@@ -17,6 +17,7 @@ import {
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { useChartPreferences } from "@/hooks/use-chart-preferences";
 import { getDefaultChartType, type ChartTimeframeMode, type ChartType } from "@/lib/chart-capabilities";
 import { buildWindowedSeries, downsampleSeries, sortSeriesByDate } from "@/lib/chart-windowing";
@@ -399,7 +400,9 @@ function ToggleChip({ label, active, onClick }: { label: string; active: boolean
 function SummaryStat({ label, value, accent }: { label: string; value: string; accent: "green" | "cyan" | "gold" }) {
   return (
     <div className={`summary-card accent-${accent}`}>
-      <div className="summary-card-label">{label}</div>
+      <div className="summary-card-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="summary-card-value">{value}</div>
     </div>
   );

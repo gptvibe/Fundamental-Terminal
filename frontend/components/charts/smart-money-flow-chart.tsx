@@ -16,6 +16,7 @@ import {
 
 import { ChartSourceBadges } from "@/components/charts/chart-framework";
 import { InteractiveChartFrame } from "@/components/charts/interactive-chart-frame";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, chartLegendStyle, chartTick } from "@/lib/chart-theme";
 import { normalizeExportFileStem } from "@/lib/export";
 import { formatDate } from "@/lib/format";
@@ -151,7 +152,7 @@ export function SmartMoneyFlowChart({ holdings, loading = false, error = null, r
                       <SmartMoneyFlowTooltip active={active} payload={payload as TooltipPayloadEntry[] | undefined} label={label} />
                     )}
                   />
-                  <Legend wrapperStyle={chartLegendStyle()} />
+                  <Legend wrapperStyle={chartLegendStyle()} formatter={(value) => <MetricLabel label={String(value)} className="chart-legend-label" />} />
                   <Bar dataKey="institutionalBuyValue" name="Institutional Buying" stackId="smart-money-flow" fill="var(--positive)" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="institutionalSellValue" name="Institutional Selling" stackId="smart-money-flow" fill="var(--negative)" radius={[4, 4, 0, 0]} />
                   <Line

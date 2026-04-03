@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useJobStream } from "@/hooks/use-job-stream";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { getCompanyDerivedMetricsSummary, invalidateApiReadCacheForTicker } from "@/lib/api";
 import { formatDate } from "@/lib/format";
@@ -161,10 +162,13 @@ function MetricValueCard({ metricKey, metric }: { metricKey: string; metric?: De
   const value = metric?.metric_value;
   const unit = String(metric?.provenance?.unit ?? "").toLowerCase();
   const isPercent = unit === "ratio" && metricKey !== "current_ratio" && metricKey !== "cash_ratio";
+  const label = metric?.metric_key ? metric.metric_key.replaceAll("_", " ") : metricKey.replaceAll("_", " ");
 
   return (
     <div className="metric-card">
-      <div className="metric-label">{metricKey.replaceAll("_", " ")}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} metricKey={metric?.metric_key ?? metricKey} />
+      </div>
       <div className="metric-value">{formatMetricValue(value, isPercent)}</div>
       {metric?.quality_flags?.length ? (
         <div className="text-muted" style={{ fontSize: 11 }}>

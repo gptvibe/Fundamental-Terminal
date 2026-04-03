@@ -11,6 +11,7 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyEarningsWorkspace } from "@/lib/api";
@@ -536,7 +537,9 @@ function AlertRow({ alert }: { alert: EarningsAlertPayload }) {
   return (
     <div className={`metric-card workspace-alert-card ${toneClass}`}>
       <div className="workspace-card-row">
-        <div className="metric-label">{alert.title}</div>
+        <div className="metric-label">
+          <MetricLabel label={alert.title} />
+        </div>
         <span className={`pill workspace-alert-pill ${toneClass}`}>{alert.level}</span>
       </div>
       <div className="workspace-note-line workspace-note-strong">{alert.detail}</div>

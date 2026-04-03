@@ -1,6 +1,7 @@
 "use client";
 
 import { ChartStateBlock } from "@/components/charts/chart-framework";
+import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type {
@@ -97,7 +98,9 @@ function PluginCard({ plugin }: { plugin: SectorPluginPayload }) {
         <div className="metric-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
           {plugin.summary_metrics.map((metric) => (
             <div key={metric.metric_id} className="metric-card">
-              <div className="metric-label">{metric.label}</div>
+              <div className="metric-label">
+                <MetricLabel label={metric.label} />
+              </div>
               <div className="metric-value">{formatUnitValue(metric.value, metric.unit)}</div>
               <div className="text-muted" style={{ fontSize: 12 }}>
                 {metric.change_percent != null ? `${formatUnitChange(metric.change_percent, metric.unit)} vs prior` : metric.as_of ?? "No prior comparison"}

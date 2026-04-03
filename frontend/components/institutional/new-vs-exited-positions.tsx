@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 
+import { MetricLabel } from "@/components/ui/metric-label";
 import type { InstitutionalHoldingPayload } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 
@@ -40,7 +41,9 @@ export function NewVsExitedPositions({ holdings }: { holdings: InstitutionalHold
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="metric-card">
-      <div className="metric-label">{label}</div>
+      <div className="metric-label">
+        <MetricLabel label={label} />
+      </div>
       <div className="metric-value">{value}</div>
     </div>
   );
