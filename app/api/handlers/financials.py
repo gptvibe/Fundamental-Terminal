@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.api.handlers._dispatch import route_handler
 
 
+company_compare = route_handler("company_compare")
 company_financials = route_handler("company_financials")
 company_segment_history = route_handler("company_segment_history")
 company_capital_structure = route_handler("company_capital_structure")
@@ -18,6 +19,7 @@ company_financial_history = route_handler("company_financial_history")
 __all__ = [
     "company_capital_structure",
     "company_changes_since_last_filing",
+    "company_compare",
     "company_derived_metrics",
     "company_derived_metrics_summary",
     "company_filing_insights",

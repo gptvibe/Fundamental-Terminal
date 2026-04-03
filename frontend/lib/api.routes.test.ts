@@ -4,6 +4,7 @@ import {
   __resetApiClientCacheForTests,
   getCompanyCapitalStructure,
   getCompanyChangesSinceLastFiling,
+  getCompaniesCompare,
   getCompanyEarningsWorkspace,
   getCompanyFinancials,
   getCompanyFinancialRestatements,
@@ -37,6 +38,7 @@ describe("api route stability", () => {
     await getLatestModelEvaluation();
     await getCompanyCapitalStructure("AAPL");
     await getCompanyPeers("AAPL", ["MSFT", "NVDA"]);
+    await getCompaniesCompare(["AAPL", "MSFT"]);
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -71,6 +73,11 @@ describe("api route stability", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
       "/backend/api/companies/AAPL/peers?peers=MSFT%2CNVDA",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      8,
+      "/backend/api/companies/compare?tickers=AAPL%2CMSFT",
       expect.objectContaining({ cache: "no-store" })
     );
   });
@@ -109,6 +116,7 @@ describe("api route stability", () => {
     await getCompanyFinancialRestatements("AAPL", { asOf: "2025-02-01" });
     await getCompanyModels("AAPL", ["dcf"], { dupontMode: "ttm", asOf: "2025-02-01" });
     await getCompanyPeers("AAPL", ["MSFT", "NVDA"], { asOf: "2025-02-01" });
+    await getCompaniesCompare(["AAPL", "MSFT"], { asOf: "2025-02-01" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -138,6 +146,11 @@ describe("api route stability", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
       "/backend/api/companies/AAPL/peers?peers=MSFT%2CNVDA&as_of=2025-02-01",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/backend/api/companies/compare?tickers=AAPL%2CMSFT&as_of=2025-02-01",
       expect.objectContaining({ cache: "no-store" })
     );
   });

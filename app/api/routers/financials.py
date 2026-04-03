@@ -7,6 +7,7 @@ from app.api.source_contracts import add_user_visible_route
 from app.api.schemas.financials import (
     CompanyCapitalStructureResponse,
     CompanyChangesSinceLastFilingResponse,
+    CompanyCompareResponse,
     CompanyDerivedMetricsResponse,
     CompanyDerivedMetricsSummaryResponse,
     CompanyFactsResponse,
@@ -20,6 +21,13 @@ from app.api.schemas.financials import (
 
 def build_router() -> APIRouter:
     router = APIRouter(tags=["financials"])
+    add_user_visible_route(
+        router,
+        "/api/companies/compare",
+        handlers.company_compare,
+        methods=["GET"],
+        response_model=CompanyCompareResponse,
+    )
     add_user_visible_route(
         router,
         "/api/companies/{ticker}/financials",

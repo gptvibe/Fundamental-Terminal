@@ -396,6 +396,29 @@ def official_screener_search(
     )
 
 
+@app.get("/api/companies/compare", response_model=CompanyCompareResponse)
+def company_compare(
+    tickers: str = Query(..., description="Comma-separated tickers to compare"),
+    background_tasks: BackgroundTasks = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyCompareResponse:
+    normalized_tickers = _normalize_compare_tickers(tickers)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    companies = [
+        _build_company_compare_item(
+            session=session,
+            background_tasks=background_tasks,
+            ticker=ticker,
+            requested_as_of=requested_as_of,
+            parsed_as_of=parsed_as_of,
+        )
+        for ticker in normalized_tickers
+    ]
+    return CompanyCompareResponse(tickers=normalized_tickers, companies=companies)
+
+
 @app.get("/api/companies/{ticker}/financials", response_model=CompanyFinancialsResponse)
 def company_financials(
     request: Request,
@@ -6827,6 +6850,250 @@ def _parse_csv_values(value: str | None) -> list[str]:
     if value is None:
         return []
     return [item.strip().upper() for item in value.split(",") if item.strip()]
+
+
+def _normalize_compare_tickers(value: str | None) -> list[str]:
+    tickers: list[str] = []
+    seen: set[str] = set()
+    for candidate in _parse_csv_values(value):
+        normalized = _normalize_ticker(candidate)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        tickers.append(normalized)
+
+    if not tickers:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one ticker is required")
+    if len(tickers) > 5:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A maximum of 5 tickers is allowed")
+    return tickers
+
+
+def _build_company_compare_item(
+    session: Session,
+    background_tasks: BackgroundTasks,
+    ticker: str,
+    requested_as_of: str | None,
+    parsed_as_of: datetime | None,
+) -> CompanyCompareItemPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        return CompanyCompareItemPayload(
+            ticker=normalized_ticker,
+            financials=_apply_requested_as_of(
+                CompanyFinancialsResponse(
+                    company=None,
+                    financials=[],
+                    price_history=[],
+                    refresh=refresh,
+                    diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+                    **_empty_provenance_contract("company_missing"),
+                ),
+                requested_as_of,
+            ),
+            metrics_summary=_apply_requested_as_of(
+                CompanyDerivedMetricsSummaryResponse(
+                    company=None,
+                    period_type="ttm",
+                    latest_period_end=None,
+                    metrics=[],
+                    last_metrics_check=None,
+                    last_financials_check=None,
+                    last_price_check=None,
+                    staleness_reason="company_missing",
+                    refresh=refresh,
+                    diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+                    **_empty_provenance_contract("company_missing"),
+                ),
+                requested_as_of,
+            ),
+            models=_apply_requested_as_of(
+                CompanyModelsResponse(
+                    company=None,
+                    requested_models=["dcf", "piotroski", "altman_z"],
+                    models=[],
+                    refresh=refresh,
+                    diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+                    **_empty_provenance_contract("company_missing"),
+                ),
+                requested_as_of,
+            ),
+        )
+
+    financials = _visible_financials_for_company(session, snapshot.company)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    price_history = _visible_price_history(session, snapshot.company.id)
+    compare_financials = financials
+    compare_price_history = price_history
+    if parsed_as_of is not None:
+        compare_financials = select_point_in_time_financials(compare_financials, parsed_as_of)
+        compare_price_history = filter_price_history_as_of(compare_price_history, parsed_as_of)
+
+    serialized_financials = [_serialize_financial(statement) for statement in compare_financials]
+    segment_analysis_payload = build_segment_analysis(serialized_financials)
+    financial_diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
+    financials_response = _apply_requested_as_of(
+        CompanyFinancialsResponse(
+            company=_serialize_company(
+                snapshot,
+                last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+                regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+            ),
+            financials=serialized_financials,
+            price_history=[_serialize_price_history(point) for point in compare_price_history],
+            segment_analysis=SegmentAnalysisPayload.model_validate(segment_analysis_payload) if segment_analysis_payload is not None else None,
+            refresh=refresh,
+            diagnostics=financial_diagnostics,
+            **_financials_provenance_contract(
+                compare_financials,
+                compare_price_history,
+                price_last_checked=price_last_checked,
+                diagnostics=financial_diagnostics,
+                refresh=refresh,
+            ),
+        ),
+        requested_as_of,
+    )
+
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    if parsed_as_of is None:
+        metric_rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
+        last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+        if not metric_rows:
+            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            if staleness_reason == "fresh":
+                staleness_reason = "metrics_missing"
+        summary = build_summary_payload(metric_rows, "ttm")
+        metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
+            [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+        )
+        metrics_diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
+        metrics_response = _apply_requested_as_of(
+            CompanyDerivedMetricsSummaryResponse(
+                company=_serialize_company(
+                    snapshot,
+                    last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                    last_checked_prices=price_last_checked,
+                    regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+                ),
+                period_type=summary["period_type"],
+                latest_period_end=summary["latest_period_end"],
+                metrics=metric_payload,
+                last_metrics_check=last_metrics_check,
+                last_financials_check=snapshot.last_checked,
+                last_price_check=price_last_checked,
+                staleness_reason=staleness_reason,
+                refresh=refresh,
+                diagnostics=metrics_diagnostics,
+                **_derived_metrics_provenance_contract(
+                    metric_payload,
+                    as_of=summary["latest_period_end"],
+                    derived_source_id="ft_derived_metrics_mart",
+                    last_metrics_check=last_metrics_check,
+                    last_financials_check=snapshot.last_checked,
+                    last_price_check=price_last_checked,
+                    diagnostics=metrics_diagnostics,
+                    refresh=refresh,
+                ),
+            ),
+            requested_as_of,
+        )
+    else:
+        point_rows = build_derived_metric_points(compare_financials, compare_price_history)
+        summary = build_summary_payload_from_points(point_rows, "ttm")
+        metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
+            [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+        )
+        metrics_diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
+        metrics_response = _apply_requested_as_of(
+            CompanyDerivedMetricsSummaryResponse(
+                company=_serialize_company(
+                    snapshot,
+                    last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                    last_checked_prices=price_last_checked,
+                    regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+                ),
+                period_type=summary["period_type"],
+                latest_period_end=summary["latest_period_end"],
+                metrics=metric_payload,
+                last_metrics_check=None,
+                last_financials_check=snapshot.last_checked,
+                last_price_check=price_last_checked,
+                staleness_reason=staleness_reason,
+                refresh=refresh,
+                diagnostics=metrics_diagnostics,
+                **_derived_metrics_provenance_contract(
+                    metric_payload,
+                    as_of=requested_as_of or summary["latest_period_end"],
+                    derived_source_id="ft_derived_metrics_engine",
+                    last_metrics_check=None,
+                    last_financials_check=snapshot.last_checked,
+                    last_price_check=price_last_checked,
+                    diagnostics=metrics_diagnostics,
+                    refresh=refresh,
+                ),
+            ),
+            requested_as_of,
+        )
+
+    requested_models = ["dcf", "piotroski", "altman_z"]
+    if parsed_as_of is None and snapshot.cache_state == "fresh":
+        model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
+        if any(not result.cached for result in model_job_results):
+            session.commit()
+
+    if parsed_as_of is None:
+        model_runs: list[ModelRun | dict[str, Any]] = get_company_models(
+            session,
+            snapshot.company.id,
+            requested_models,
+            config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+        )
+    else:
+        latest_price = latest_price_as_of(compare_price_history, parsed_as_of)
+        dataset = build_company_dataset(
+            snapshot.company,
+            compare_financials,
+            build_market_snapshot(latest_price),
+            as_of_date=parsed_as_of,
+        )
+        model_runs = ModelEngine(session).evaluate_models(
+            dataset,
+            model_names=requested_models,
+            created_at=datetime.now(timezone.utc),
+        )
+
+    company_context = _model_company_context(snapshot.company)
+    serialized_models = [_serialize_model_payload(model_run, company_context=company_context) for model_run in model_runs]
+    models_diagnostics = _diagnostics_for_models(serialized_models, refresh)
+    models_response = _apply_requested_as_of(
+        CompanyModelsResponse(
+            company=_serialize_company(snapshot),
+            requested_models=requested_models,
+            models=serialized_models,
+            refresh=refresh,
+            diagnostics=models_diagnostics,
+            **_models_provenance_contract(
+                model_runs,
+                compare_financials,
+                price_last_checked=price_last_checked,
+                diagnostics=models_diagnostics,
+                refresh=refresh,
+            ),
+        ),
+        requested_as_of,
+    )
+
+    return CompanyCompareItemPayload(
+        ticker=normalized_ticker,
+        financials=financials_response,
+        metrics_summary=metrics_response,
+        models=models_response,
+    )
 
 
 def _normalize_ticker(value: str) -> str:

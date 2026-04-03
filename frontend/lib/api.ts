@@ -3,6 +3,7 @@ import {
   CompanyActivityOverviewResponse,
   CompanyAlertsResponse,
   CompanyCapitalRaisesResponse,
+  CompanyCompareResponse,
   CompanyCapitalMarketsSummaryResponse,
   CompanyCapitalStructureResponse,
   CompanyChangesSinceLastFilingResponse,
@@ -378,6 +379,19 @@ export function getCompanyFinancials(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials${suffix}`, { signal: options?.signal });
+}
+
+export function getCompaniesCompare(
+  tickers: string[],
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyCompareResponse> {
+  const normalized = tickers
+    .map((ticker) => ticker.trim().toUpperCase())
+    .filter(Boolean)
+    .slice(0, 5);
+  const params = new URLSearchParams({ tickers: normalized.join(",") });
+  appendAsOf(params, options?.asOf);
+  return fetchJson(`/companies/compare?${params.toString()}`, { signal: options?.signal });
 }
 
 export function getCompanyCapitalStructure(

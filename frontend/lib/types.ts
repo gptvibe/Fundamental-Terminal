@@ -340,6 +340,18 @@ export interface CompanyFinancialsResponse extends ProvenanceEnvelope {
   diagnostics: DataQualityDiagnosticsPayload;
 }
 
+export interface CompanyCompareItemPayload {
+  ticker: string;
+  financials: CompanyFinancialsResponse;
+  metrics_summary: CompanyDerivedMetricsSummaryResponse;
+  models: CompanyModelsResponse;
+}
+
+export interface CompanyCompareResponse {
+  tickers: string[];
+  companies: CompanyCompareItemPayload[];
+}
+
 export interface CapitalStructureSectionMetaPayload {
   as_of: string | null;
   last_refreshed_at: string | null;

@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
+from app.api.schemas.models import CompanyModelsResponse
 
 
 class FinancialSegmentPayload(BaseModel):
@@ -254,6 +255,18 @@ class CompanyFinancialsResponse(ProvenanceEnvelope):
     segment_analysis: SegmentAnalysisPayload | None = None
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+
+
+class CompanyCompareItemPayload(BaseModel):
+    ticker: str
+    financials: CompanyFinancialsResponse
+    metrics_summary: "CompanyDerivedMetricsSummaryResponse"
+    models: CompanyModelsResponse
+
+
+class CompanyCompareResponse(BaseModel):
+    tickers: list[str] = Field(default_factory=list)
+    companies: list[CompanyCompareItemPayload] = Field(default_factory=list)
 
 
 class CapitalStructureSectionMetaPayload(BaseModel):
