@@ -19,9 +19,14 @@ describe("ValuationScenarioWorkbench", () => {
             input_periods: {},
             result: {
               model_status: "supported",
+              fair_value_per_share: 112,
+              enterprise_value: 11200,
+              equity_value: 10500,
+              net_debt: 700,
               assumptions: {
                 discount_rate: 0.1,
                 terminal_growth_rate: 0.025,
+                starting_growth_rate: 0.08,
                 projection_years: 5,
               },
               assumption_provenance: {
@@ -113,6 +118,8 @@ describe("ValuationScenarioWorkbench", () => {
             revenue: 1000,
             operating_income: 180,
             net_income: 120,
+            interest_expense: 20,
+            income_tax_expense: 30,
             total_assets: 1500,
             total_liabilities: 800,
             operating_cash_flow: 190,
@@ -133,6 +140,8 @@ describe("ValuationScenarioWorkbench", () => {
             revenue: 920,
             operating_income: 160,
             net_income: 110,
+            interest_expense: 18,
+            income_tax_expense: 28,
             total_assets: 1400,
             total_liabilities: 760,
             operating_cash_flow: 170,
@@ -151,10 +160,19 @@ describe("ValuationScenarioWorkbench", () => {
     expect(screen.getByRole("tab", { name: /^DCFSupported$/i })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /^Reverse DCFSupported$/i })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /^Residual IncomeSupported$/i })).toBeTruthy();
+    expect(screen.getByText("Interactive Scenario Builder")).toBeTruthy();
     expect(screen.getByText("Assumption lineage")).toBeTruthy();
     expect(screen.getByText("Exact fields used")).toBeTruthy();
     expect(screen.getAllByText("revenue").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("Revenue Growth")).toBeTruthy();
+    expect(screen.getByLabelText("Revenue Growth Rate")).toBeTruthy();
+    expect(screen.getByLabelText("WACC")).toBeTruthy();
+    expect(screen.getByText("Sensitivity table")).toBeTruthy();
+
+    const fairValueBefore = screen.getByTestId("dcf-scenario-after-fair-value").textContent;
+    fireEvent.change(screen.getByLabelText("WACC"), { target: { value: "11" } });
+
+    expect(screen.getByText("Assumptions changed")).toBeTruthy();
+    expect(screen.getByTestId("dcf-scenario-after-fair-value").textContent).not.toBe(fairValueBefore);
 
     fireEvent.click(screen.getByRole("tab", { name: /^Reverse DCFSupported$/i }));
 

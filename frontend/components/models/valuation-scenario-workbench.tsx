@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { formatDate, formatPercent, titleCase } from "@/lib/format";
+import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import type { FinancialPayload, ModelPayload, PriceHistoryPoint } from "@/lib/types";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
@@ -14,6 +14,9 @@ const CASE_COLORS = {
 } as const;
 const RESIDUAL_LONG_RUN_ROE = 0.1;
 const PROJECTION_YEARS = 5;
+const DCF_MAX_GROWTH_RATE = 0.15;
+const DCF_MIN_GROWTH_RATE = -0.1;
+const DCF_INPUT_EPSILON = 1e-4;
 
 type ScenarioModelKey = "dcf" | "reverse_dcf" | "residual_income";
 type ScenarioCaseKey = "bear" | "base" | "bull";
@@ -38,7 +41,7 @@ type DcfControls = {
   discountRate: number;
   terminalGrowth: number;
   operatingMargin: number;
-  capexPercent: number;
+  taxRate: number;
 };
 
 type ReverseDcfControls = {
@@ -57,12 +60,16 @@ type ResidualIncomeControls = {
 type DcfDefaults = {
   ready: boolean;
   resetKey: string;
-  revenue: number | null;
+  baseRevenue: number | null;
+  startingFreeCashFlow: number | null;
   sharesOutstanding: number | null;
-  cashConversion: number;
+  netDebt: number | null;
   projectionYears: number;
   periodEnd: string | null;
   latestPrice: number | null;
+  baselineFairValuePerShare: number | null;
+  baselineEnterpriseValue: number | null;
+  baselineEquityValue: number | null;
   controls: DcfControls;
   traceability: TraceabilityRow[];
 };
@@ -88,12 +95,33 @@ type ResidualIncomeDefaults = {
 
 type DcfCase = {
   perShareValue: number;
-  totalValue: number;
+  enterpriseValue: number;
+  equityValue: number;
+  presentValueOfCashFlows: number;
+  terminalValuePresentValue: number;
+  startingFreeCashFlow: number;
   revenueGrowth: number;
   discountRate: number;
   terminalGrowth: number;
   operatingMargin: number;
-  capexPercent: number;
+  taxRate: number;
+};
+
+type DcfComparisonRow = {
+  label: string;
+  before: string;
+  after: string;
+  delta: string;
+  afterTestId?: string;
+};
+
+type DcfSensitivityGrid = {
+  columns: Array<{ key: string; label: string }>;
+  rows: Array<{
+    key: string;
+    label: string;
+    cells: Array<{ key: string; value: number; current: boolean }>;
+  }>;
 };
 
 type ReverseDcfCase = {
@@ -367,10 +395,13 @@ function renderDcfWorkbench({
     return <ScenarioUnavailable title="DCF scenario analysis unavailable" copy={scenarioReason(result)} />;
   }
 
+  const assumptionsChanged = hasDcfAssumptionChanges(defaults.controls, controls);
   const basePriceGap =
     strictOfficialMode || defaults.latestPrice === null
       ? null
       : safeDivide(scenarios.base.perShareValue - defaults.latestPrice, defaults.latestPrice);
+  const comparisonRows = buildDcfComparisonRows(defaults, scenarios.base, strictOfficialMode ? null : defaults.latestPrice);
+  const sensitivityGrid = buildDcfSensitivityGrid(defaults, controls);
 
   return (
     <ScenarioWorkbenchLayout
@@ -378,17 +409,75 @@ function renderDcfWorkbench({
         <>
           <div className="valuation-card-header">
             <div>
-              <div className="valuation-card-kicker">Scenario inputs</div>
-              <div className="valuation-card-title">DCF sensitivities</div>
+              <div className="valuation-card-kicker">Interactive Scenario Builder</div>
+              <div className="valuation-card-title">DCF what-if inputs</div>
             </div>
-            <div className="valuation-card-subtitle">Revenue, margin, reinvestment, and discount assumptions stay tied back to SEC filings and Treasury inputs.</div>
+            <div className="valuation-card-subtitle">
+              Edit the last cached DCF inputs locally. Revenue growth sets the tapered forecast path, while margin and tax assumptions rescale the starting cash flow before the same discounting structure from the backend runs in the browser.
+            </div>
           </div>
-          <div className="dcf-control-list">
-            <SliderControl label="Revenue Growth" value={controls.revenueGrowth} min={-0.05} max={0.25} step={0.005} accent={CASE_COLORS.base} onChange={(value) => onControlsChange((current) => ({ ...current, revenueGrowth: value }))} />
-            <SliderControl label="Discount Rate" value={controls.discountRate} min={0.05} max={0.18} step={0.0025} accent={CASE_COLORS.bear} onChange={(value) => onControlsChange((current) => ({ ...current, discountRate: value, terminalGrowth: Math.min(current.terminalGrowth, value - 0.01) }))} />
-            <SliderControl label="Terminal Growth" value={controls.terminalGrowth} min={0} max={Math.min(0.06, Math.max(controls.discountRate - 0.01, 0))} step={0.0025} accent={CASE_COLORS.overlap} onChange={(value) => onControlsChange((current) => ({ ...current, terminalGrowth: Math.min(value, current.discountRate - 0.01) }))} />
-            <SliderControl label="Operating Margin" value={controls.operatingMargin} min={0.05} max={0.5} step={0.005} accent={CASE_COLORS.bull} onChange={(value) => onControlsChange((current) => ({ ...current, operatingMargin: value }))} />
-            <SliderControl label="Capex % of Revenue" value={controls.capexPercent} min={0.01} max={0.15} step={0.0025} accent="#a78bfa" onChange={(value) => onControlsChange((current) => ({ ...current, capexPercent: value }))} />
+          <div className="valuation-status-row">
+            {assumptionsChanged ? <span className="pill">Assumptions changed</span> : <span className="pill">Using cached model inputs</span>}
+            <span className="pill">Pure client-side</span>
+            <span className="pill">Base period {formatDate(defaults.periodEnd)}</span>
+          </div>
+          <div className="valuation-assumption-grid">
+            <PercentageInputField
+              label="Revenue Growth Rate"
+              value={controls.revenueGrowth}
+              min={DCF_MIN_GROWTH_RATE}
+              max={DCF_MAX_GROWTH_RATE}
+              step={0.005}
+              helper="Seeds the tapered forecast path."
+              onChange={(value) => onControlsChange((current) => ({ ...current, revenueGrowth: value }))}
+            />
+            <PercentageInputField
+              label="Operating Margin"
+              value={controls.operatingMargin}
+              min={0.02}
+              max={0.6}
+              step={0.005}
+              helper="Rescales the cached starting cash flow."
+              onChange={(value) => onControlsChange((current) => ({ ...current, operatingMargin: value }))}
+            />
+            <PercentageInputField
+              label="WACC"
+              value={controls.discountRate}
+              min={0.05}
+              max={0.2}
+              step={0.0025}
+              helper="Discount rate used in the DCF."
+              onChange={(value) =>
+                onControlsChange((current) => ({
+                  ...current,
+                  discountRate: value,
+                  terminalGrowth: Math.min(current.terminalGrowth, Math.max(value - 0.005, 0)),
+                }))
+              }
+            />
+            <PercentageInputField
+              label="Terminal Growth Rate"
+              value={controls.terminalGrowth}
+              min={0}
+              max={Math.min(0.06, Math.max(controls.discountRate - 0.005, 0))}
+              step={0.0025}
+              helper="Terminal growth must stay below WACC."
+              onChange={(value) =>
+                onControlsChange((current) => ({
+                  ...current,
+                  terminalGrowth: Math.min(value, Math.max(current.discountRate - 0.005, 0)),
+                }))
+              }
+            />
+            <PercentageInputField
+              label="Tax Rate"
+              value={controls.taxRate}
+              min={0}
+              max={0.45}
+              step={0.005}
+              helper="Normalizes after-tax operating cash flow."
+              onChange={(value) => onControlsChange((current) => ({ ...current, taxRate: value }))}
+            />
           </div>
           <TraceabilityTable rows={defaults.traceability} />
         </>
@@ -397,11 +486,15 @@ function renderDcfWorkbench({
         <>
           <div className="valuation-card-header">
             <div>
-              <div className="valuation-card-kicker">Range output</div>
-              <div className="valuation-card-title">DCF bear / base / bull range</div>
+              <div className="valuation-card-kicker">Scenario output</div>
+              <div className="valuation-card-title">Before vs after DCF fair value</div>
             </div>
-            <div className="valuation-card-subtitle">The range is shown as a span with the base case centered instead of a single fair-value point.</div>
+            <div className="valuation-card-subtitle">
+              Before is the last cached DCF result. After is recomputed locally from the edited assumptions without calling the backend.
+            </div>
           </div>
+          <ComparisonTable rows={comparisonRows} />
+          <SensitivityTable grid={sensitivityGrid} />
           <RangeComparison
             rows={[
               {
@@ -418,10 +511,10 @@ function renderDcfWorkbench({
           />
           <ScenarioSummaryStrip
             cards={[
-              { label: "Bear Case", value: formatCurrency(scenarios.bear.perShareValue), accent: "bear" },
-              { label: "Base Case", value: formatCurrency(scenarios.base.perShareValue), accent: "base" },
-              { label: "Bull Case", value: formatCurrency(scenarios.bull.perShareValue), accent: "bull" },
-              { label: "Scenario Range", value: `${formatCurrency(scenarios.bear.perShareValue)} - ${formatCurrency(scenarios.bull.perShareValue)}`, accent: "cyan" },
+              { label: "Before", value: formatCurrency(defaults.baselineFairValuePerShare), accent: "cyan" },
+              { label: "After", value: formatCurrency(scenarios.base.perShareValue), accent: "base" },
+              { label: "Range", value: `${formatCurrency(scenarios.bear.perShareValue)} - ${formatCurrency(scenarios.bull.perShareValue)}`, accent: "bull" },
+              { label: "Starting FCF", value: formatCompactNumber(scenarios.base.startingFreeCashFlow), accent: "bear" },
               { label: "Gap vs Price", value: strictOfficialMode ? "Disabled" : formatPercent(basePriceGap), accent: "gold" },
             ]}
           />
@@ -659,6 +752,49 @@ function SliderControl({
   );
 }
 
+function PercentageInputField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  helper,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  helper: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="valuation-input-card">
+      <span className="valuation-input-label">{label}</span>
+      <div className="valuation-input-shell">
+        <input
+          aria-label={label}
+          className="valuation-input-field"
+          type="number"
+          min={min * 100}
+          max={max * 100}
+          step={step * 100}
+          value={Number((value * 100).toFixed(2))}
+          onChange={(event) => {
+            const nextValue = Number(event.target.value);
+            if (Number.isFinite(nextValue)) {
+              onChange(clamp(nextValue / 100, min, max));
+            }
+          }}
+        />
+        <span className="valuation-input-unit">%</span>
+      </div>
+      <span className="valuation-input-help">{helper}</span>
+    </label>
+  );
+}
+
 function ScenarioSummaryStrip({
   cards,
 }: {
@@ -672,6 +808,67 @@ function ScenarioSummaryStrip({
           <div className="dcf-summary-value">{card.value}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ComparisonTable({ rows }: { rows: DcfComparisonRow[] }) {
+  return (
+    <div className="valuation-trace-card">
+      <div className="valuation-card-kicker">Comparison</div>
+      <div className="valuation-card-title">Cached result vs current scenario</div>
+      <table className="valuation-trace-table valuation-comparison-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Before</th>
+            <th>After</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td>{row.label}</td>
+              <td>{row.before}</td>
+              <td data-testid={row.afterTestId}>{row.after}</td>
+              <td>{row.delta}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SensitivityTable({ grid }: { grid: DcfSensitivityGrid }) {
+  return (
+    <div className="valuation-trace-card">
+      <div className="valuation-card-kicker">Sensitivity table</div>
+      <div className="valuation-card-title">Growth ±2 pts by WACC ±1 pt</div>
+      <div className="valuation-card-subtitle">Each cell shows the DCF fair value per share for that growth and WACC pair while holding margin, tax rate, and terminal growth constant.</div>
+      <table className="valuation-trace-table valuation-sensitivity-table">
+        <thead>
+          <tr>
+            <th>Revenue growth</th>
+            {grid.columns.map((column) => (
+              <th key={column.key}>{column.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {grid.rows.map((row) => (
+            <tr key={row.key}>
+              <td>{row.label}</td>
+              {row.cells.map((cell) => (
+                <td key={cell.key} className={cell.current ? "is-current" : undefined}>
+                  {formatCurrency(cell.value)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -857,43 +1054,48 @@ function buildDcfDefaults(
   const assumptions = asRecord(result.assumptions);
   const provenance = asRecord(result.assumption_provenance);
   const riskFree = asRecord(provenance.risk_free_rate);
-  const revenueGrowthDefault = growthRate(latestAnnual?.revenue ?? null, previousAnnual?.revenue ?? null) ?? 0.05;
+  const historicalFreeCashFlow = asObjectArray(result.historical_free_cash_flow);
+  const revenueGrowthDefault =
+    asNumber(assumptions.starting_growth_rate) ??
+    growthRate(latestAnnual?.revenue ?? null, previousAnnual?.revenue ?? null) ??
+    0.03;
   const discountRateDefault = asNumber(assumptions.discount_rate) ?? 0.1;
-  const terminalGrowthDefault = clamp(asNumber(assumptions.terminal_growth_rate) ?? 0.025, 0, Math.max(discountRateDefault - 0.01, 0));
+  const terminalGrowthDefault = clamp(asNumber(assumptions.terminal_growth_rate) ?? 0.025, 0, Math.max(discountRateDefault - 0.005, 0));
   const operatingMarginDefault = safeDivide(latestAnnual?.operating_income ?? null, latestAnnual?.revenue ?? null) ?? 0.18;
-  const capexPercentDefault =
-    safeDivide(
-      latestAnnual && latestAnnual.operating_cash_flow !== null && latestAnnual.free_cash_flow !== null
-        ? Math.abs(latestAnnual.operating_cash_flow - latestAnnual.free_cash_flow)
-        : null,
-      latestAnnual?.revenue ?? null
-    ) ?? 0.05;
+  const taxRateDefault = deriveTaxRate(latestAnnual) ?? 0.21;
+  const startingFreeCashFlowDefault =
+    asNumber(historicalFreeCashFlow.at(-1)?.free_cash_flow) ?? deriveLatestFreeCashFlow(latestAnnual);
+  const sharesOutstanding = deriveSharesOutstanding(latestAnnual);
 
   return {
-    ready: latestAnnual?.revenue !== null && deriveSharesOutstanding(latestAnnual) !== null,
-    resetKey: [ticker, latestAnnual?.period_end ?? "none", latestPrice ?? "none", discountRateDefault].join(":"),
-    revenue: latestAnnual?.revenue ?? null,
-    sharesOutstanding: deriveSharesOutstanding(latestAnnual),
-    cashConversion: clamp(safeDivide(latestAnnual?.operating_cash_flow ?? null, latestAnnual?.operating_income ?? null) ?? 0.9, 0.35, 2.2),
+    ready: startingFreeCashFlowDefault !== null && sharesOutstanding !== null,
+    resetKey: [ticker, latestAnnual?.period_end ?? "none", latestPrice ?? "none", discountRateDefault, startingFreeCashFlowDefault ?? "none"].join(":"),
+    baseRevenue: latestAnnual?.revenue ?? null,
+    startingFreeCashFlow: startingFreeCashFlowDefault,
+    sharesOutstanding,
+    netDebt: asNumber(result.net_debt),
     projectionYears: asNumber(assumptions.projection_years) ?? PROJECTION_YEARS,
     periodEnd: latestAnnual?.period_end ?? null,
     latestPrice,
+    baselineFairValuePerShare: asNumber(result.fair_value_per_share),
+    baselineEnterpriseValue: asNumber(result.enterprise_value),
+    baselineEquityValue: asNumber(result.equity_value),
     controls: {
-      revenueGrowth: clamp(revenueGrowthDefault, -0.05, 0.25),
+      revenueGrowth: clamp(revenueGrowthDefault, DCF_MIN_GROWTH_RATE, DCF_MAX_GROWTH_RATE),
       discountRate: clamp(discountRateDefault, 0.05, 0.18),
       terminalGrowth: terminalGrowthDefault,
-      operatingMargin: clamp(operatingMarginDefault, 0.05, 0.5),
-      capexPercent: clamp(capexPercentDefault, 0.01, 0.15),
+      operatingMargin: clamp(operatingMarginDefault, 0.02, 0.6),
+      taxRate: clamp(taxRateDefault, 0, 0.45),
     },
     traceability: [
       {
-        assumption: "Revenue Growth",
+        assumption: "Revenue Growth Rate",
         baseValue: formatPercent(revenueGrowthDefault),
-        source: "SEC annual revenue trend",
-        fields: "revenue",
+        source: "Cached DCF starting-growth assumption backed by historical cash-flow trend",
+        fields: "assumptions.starting_growth_rate, historical_free_cash_flow",
       },
       {
-        assumption: "Discount Rate",
+        assumption: "WACC",
         baseValue: formatPercent(discountRateDefault),
         source: `Treasury curve (${String(riskFree.source_name ?? "official risk-free")}) plus equity risk premium`,
         fields: "risk_free_rate, equity_risk_premium, sector_risk_premium",
@@ -911,10 +1113,16 @@ function buildDcfDefaults(
         fields: "operating_income, revenue",
       },
       {
-        assumption: "Capex % of Revenue",
-        baseValue: formatPercent(capexPercentDefault),
-        source: "SEC cash flow statement",
-        fields: "operating_cash_flow, free_cash_flow, revenue",
+        assumption: "Tax Rate",
+        baseValue: formatPercent(taxRateDefault),
+        source: "SEC tax expense normalized to current-period pretax profit proxy",
+        fields: "income_tax_expense, operating_income, interest_expense, net_income",
+      },
+      {
+        assumption: "Starting Free Cash Flow",
+        baseValue: formatCompactNumber(startingFreeCashFlowDefault),
+        source: "Last cached DCF starting cash flow",
+        fields: "historical_free_cash_flow, free_cash_flow, operating_cash_flow, capex",
       },
     ],
   };
@@ -1044,7 +1252,7 @@ function buildDcfScenarioSet(
   defaults: DcfDefaults,
   controls: DcfControls
 ): Record<ScenarioCaseKey, DcfCase> | null {
-  if (!defaults.ready || defaults.revenue === null || defaults.sharesOutstanding === null) {
+  if (!defaults.ready || defaults.startingFreeCashFlow === null || defaults.sharesOutstanding === null) {
     return null;
   }
   return {
@@ -1083,37 +1291,158 @@ function buildResidualIncomeScenarioSet(
 }
 
 function buildDcfScenario(defaults: DcfDefaults, controls: DcfControls, shift: -1 | 0 | 1): DcfCase {
-  const revenueGrowth = clamp(controls.revenueGrowth + shift * 0.025, -0.08, 0.3);
-  const discountRate = clamp(controls.discountRate - shift * 0.0125, 0.05, 0.2);
-  const terminalGrowth = clamp(controls.terminalGrowth + shift * 0.006, -0.01, discountRate - 0.01);
-  const operatingMargin = clamp(controls.operatingMargin + shift * 0.03, 0.03, 0.6);
-  const capexPercent = clamp(controls.capexPercent - shift * 0.01, 0.005, 0.18);
+  const revenueGrowth = clamp(controls.revenueGrowth + shift * 0.02, DCF_MIN_GROWTH_RATE, DCF_MAX_GROWTH_RATE);
+  const discountRate = clamp(controls.discountRate - shift * 0.01, 0.05, 0.2);
+  const operatingMargin = clamp(controls.operatingMargin + shift * 0.02, 0.02, 0.6);
+  const taxRate = clamp(controls.taxRate - shift * 0.01, 0, 0.45);
+  const terminalGrowth = clamp(controls.terminalGrowth + shift * 0.005, 0, Math.min(0.06, Math.max(discountRate - 0.005, 0)));
 
-  let revenue = defaults.revenue ?? 0;
-  let presentValueSum = 0;
-  for (let year = 1; year <= defaults.projectionYears; year += 1) {
-    revenue *= 1 + revenueGrowth;
-    const operatingIncome = revenue * operatingMargin;
-    const operatingCashFlow = operatingIncome * defaults.cashConversion;
-    const freeCashFlow = operatingCashFlow - revenue * capexPercent;
-    const presentValue = freeCashFlow / (1 + discountRate) ** year;
-    presentValueSum += presentValue;
-  }
-
-  const terminalFreeCashFlow = revenue * operatingMargin * defaults.cashConversion - revenue * capexPercent;
-  const terminalValue = (terminalFreeCashFlow * (1 + terminalGrowth)) / Math.max(discountRate - terminalGrowth, 0.01);
-  const terminalPresentValue = terminalValue / (1 + discountRate) ** defaults.projectionYears;
-  const totalValue = presentValueSum + terminalPresentValue;
-  const perShareValue = totalValue / (defaults.sharesOutstanding ?? 1);
-
-  return {
-    perShareValue,
-    totalValue,
+  const scenarioControls = {
     revenueGrowth,
     discountRate,
     terminalGrowth,
     operatingMargin,
-    capexPercent,
+    taxRate,
+  } satisfies DcfControls;
+
+  const startingFreeCashFlow = deriveScenarioStartingFreeCashFlow(defaults, scenarioControls);
+  let presentValueSum = 0;
+  let projectedFreeCashFlow = startingFreeCashFlow;
+  for (let year = 1; year <= defaults.projectionYears; year += 1) {
+    const taperFactor = year / defaults.projectionYears;
+    const yearGrowth = revenueGrowth + (terminalGrowth - revenueGrowth) * taperFactor;
+    projectedFreeCashFlow *= 1 + yearGrowth;
+    const presentValue = projectedFreeCashFlow / (1 + discountRate) ** year;
+    presentValueSum += presentValue;
+  }
+
+  const terminalFreeCashFlow = projectedFreeCashFlow * (1 + terminalGrowth);
+  const terminalValue = terminalFreeCashFlow / Math.max(discountRate - terminalGrowth, 0.01);
+  const terminalPresentValue = terminalValue / (1 + discountRate) ** defaults.projectionYears;
+  const enterpriseValue = presentValueSum + terminalPresentValue;
+  const equityValue = defaults.netDebt === null ? enterpriseValue : enterpriseValue - defaults.netDebt;
+  const perShareValue = equityValue / (defaults.sharesOutstanding ?? 1);
+
+  return {
+    perShareValue,
+    enterpriseValue,
+    equityValue,
+    presentValueOfCashFlows: presentValueSum,
+    terminalValuePresentValue: terminalPresentValue,
+    startingFreeCashFlow,
+    revenueGrowth,
+    discountRate,
+    terminalGrowth,
+    operatingMargin,
+    taxRate,
+  };
+}
+
+function deriveScenarioStartingFreeCashFlow(defaults: DcfDefaults, controls: DcfControls): number {
+  if (defaults.startingFreeCashFlow === null) {
+    return 0;
+  }
+
+  const baseProfitProxy =
+    defaults.baseRevenue !== null ? defaults.baseRevenue * defaults.controls.operatingMargin * (1 - defaults.controls.taxRate) : null;
+  const scenarioProfitProxy =
+    defaults.baseRevenue !== null ? defaults.baseRevenue * controls.operatingMargin * (1 - controls.taxRate) : null;
+  const scale = safeDivide(scenarioProfitProxy, baseProfitProxy);
+
+  if (scale === null || !Number.isFinite(scale) || baseProfitProxy === null || Math.abs(baseProfitProxy) <= 1e-9) {
+    return defaults.startingFreeCashFlow;
+  }
+
+  return defaults.startingFreeCashFlow * scale;
+}
+
+function buildDcfComparisonRows(
+  defaults: DcfDefaults,
+  scenario: DcfCase,
+  latestPrice: number | null
+): DcfComparisonRow[] {
+  const rows: DcfComparisonRow[] = [
+    {
+      label: "Fair value / share",
+      before: formatCurrency(defaults.baselineFairValuePerShare),
+      after: formatCurrency(scenario.perShareValue),
+      delta: formatSignedCurrency(deltaNumber(scenario.perShareValue, defaults.baselineFairValuePerShare)),
+      afterTestId: "dcf-scenario-after-fair-value",
+    },
+    {
+      label: "Enterprise value",
+      before: formatCompactNumber(defaults.baselineEnterpriseValue),
+      after: formatCompactNumber(scenario.enterpriseValue),
+      delta: formatSignedCompactNumber(deltaNumber(scenario.enterpriseValue, defaults.baselineEnterpriseValue)),
+    },
+    {
+      label: "Equity value",
+      before: formatCompactNumber(defaults.baselineEquityValue),
+      after: formatCompactNumber(scenario.equityValue),
+      delta: formatSignedCompactNumber(deltaNumber(scenario.equityValue, defaults.baselineEquityValue)),
+    },
+    {
+      label: "Starting FCF",
+      before: formatCompactNumber(defaults.startingFreeCashFlow),
+      after: formatCompactNumber(scenario.startingFreeCashFlow),
+      delta: formatSignedCompactNumber(deltaNumber(scenario.startingFreeCashFlow, defaults.startingFreeCashFlow)),
+    },
+  ];
+
+  if (latestPrice !== null) {
+    rows.push({
+      label: "Gap vs price",
+      before: formatPercent(safeDivide((defaults.baselineFairValuePerShare ?? 0) - latestPrice, latestPrice)),
+      after: formatPercent(safeDivide(scenario.perShareValue - latestPrice, latestPrice)),
+      delta: formatSignedPercent(
+        deltaNumber(
+          safeDivide(scenario.perShareValue - latestPrice, latestPrice),
+          safeDivide((defaults.baselineFairValuePerShare ?? 0) - latestPrice, latestPrice)
+        )
+      ),
+    });
+  }
+
+  return rows;
+}
+
+function buildDcfSensitivityGrid(defaults: DcfDefaults, controls: DcfControls): DcfSensitivityGrid {
+  const waccOffsets = [-0.01, 0, 0.01];
+  const growthOffsets = [-0.02, -0.01, 0, 0.01, 0.02];
+
+  return {
+    columns: waccOffsets.map((offset) => {
+      const wacc = clamp(controls.discountRate + offset, 0.05, 0.2);
+      return {
+        key: `wacc-${offset}`,
+        label: `WACC ${formatPercent(wacc)}`,
+      };
+    }),
+    rows: growthOffsets.map((growthOffset) => {
+      const adjustedGrowth = clamp(controls.revenueGrowth + growthOffset, DCF_MIN_GROWTH_RATE, DCF_MAX_GROWTH_RATE);
+      return {
+        key: `growth-${growthOffset}`,
+        label: `Growth ${formatPercent(adjustedGrowth)}`,
+        cells: waccOffsets.map((waccOffset) => {
+          const discountRate = clamp(controls.discountRate + waccOffset, 0.05, 0.2);
+          const scenario = buildDcfScenario(
+            defaults,
+            {
+              ...controls,
+              revenueGrowth: adjustedGrowth,
+              discountRate,
+              terminalGrowth: Math.min(controls.terminalGrowth, Math.max(discountRate - 0.005, 0)),
+            },
+            0
+          );
+          return {
+            key: `${growthOffset}-${waccOffset}`,
+            value: scenario.perShareValue,
+            current: growthOffset === 0 && waccOffset === 0,
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -1318,6 +1647,13 @@ function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function deltaNumber(current: number | null | undefined, previous: number | null | undefined): number | null {
+  if (current === null || current === undefined || previous === null || previous === undefined) {
+    return null;
+  }
+  return current - previous;
+}
+
 function deriveSharesOutstanding(statement: FinancialPayload | null): number | null {
   if (!statement) {
     return null;
@@ -1342,6 +1678,38 @@ function safeDivide(numerator: number | null | undefined, denominator: number | 
   return numerator / denominator;
 }
 
+function deriveLatestFreeCashFlow(statement: FinancialPayload | null): number | null {
+  if (!statement) {
+    return null;
+  }
+  if (statement.free_cash_flow !== null) {
+    return statement.free_cash_flow;
+  }
+  if (statement.operating_cash_flow !== null && statement.capex !== null) {
+    return statement.operating_cash_flow - Math.abs(statement.capex);
+  }
+  return statement.operating_cash_flow;
+}
+
+function deriveTaxRate(statement: FinancialPayload | null): number | null {
+  if (!statement || statement.income_tax_expense === null) {
+    return null;
+  }
+
+  const pretaxFromOperating =
+    statement.operating_income !== null
+      ? statement.operating_income - (statement.interest_expense ?? 0)
+      : null;
+  const pretaxFromIncome = statement.net_income !== null ? statement.net_income + statement.income_tax_expense : null;
+  const pretaxIncome = pretaxFromOperating && pretaxFromOperating > 0 ? pretaxFromOperating : pretaxFromIncome;
+
+  if (pretaxIncome === null || pretaxIncome <= 0) {
+    return null;
+  }
+
+  return clamp(statement.income_tax_expense / pretaxIncome, 0, 0.45);
+}
+
 function growthRate(current: number | null | undefined, previous: number | null | undefined): number | null {
   if (current === null || current === undefined || previous === null || previous === undefined || previous === 0) {
     return null;
@@ -1353,6 +1721,16 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function hasDcfAssumptionChanges(baseline: DcfControls, current: DcfControls): boolean {
+  return (
+    Math.abs(baseline.revenueGrowth - current.revenueGrowth) > DCF_INPUT_EPSILON ||
+    Math.abs(baseline.discountRate - current.discountRate) > DCF_INPUT_EPSILON ||
+    Math.abs(baseline.terminalGrowth - current.terminalGrowth) > DCF_INPUT_EPSILON ||
+    Math.abs(baseline.operatingMargin - current.operatingMargin) > DCF_INPUT_EPSILON ||
+    Math.abs(baseline.taxRate - current.taxRate) > DCF_INPUT_EPSILON
+  );
+}
+
 function formatCurrency(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "—";
@@ -1362,4 +1740,50 @@ function formatCurrency(value: number | null | undefined): string {
     currency: "USD",
     maximumFractionDigits: Math.abs(value) >= 100 ? 0 : 2,
   }).format(value);
+}
+
+function formatSignedCurrency(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: Math.abs(value) >= 100 ? 0 : 2,
+    signDisplay: "exceptZero",
+  }).format(value);
+}
+
+function formatSignedCompactNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  const formatted = formatCompactNumber(Math.abs(value));
+  if (formatted === "—") {
+    return formatted;
+  }
+  if (value > 0) {
+    return `+${formatted}`;
+  }
+  if (value < 0) {
+    return `-${formatted}`;
+  }
+  return formatted;
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  const formatted = formatPercent(Math.abs(value));
+  if (formatted === "—") {
+    return formatted;
+  }
+  if (value > 0) {
+    return `+${formatted}`;
+  }
+  if (value < 0) {
+    return `-${formatted}`;
+  }
+  return formatted;
 }

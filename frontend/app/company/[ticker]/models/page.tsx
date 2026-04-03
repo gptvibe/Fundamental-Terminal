@@ -442,7 +442,7 @@ export default function CompanyModelsPage() {
         <FinancialHealthScore models={models} financials={financialData?.financials ?? []} />
       </Panel>
 
-      <Panel title="Valuation Scenario Ranges" subtitle={loading ? "Loading valuation scenario inputs..." : strictOfficialMode ? "Interactive DCF and residual-income ranges with price-linked reverse DCF withheld in strict mode" : "Editable bear, base, and bull ranges across DCF, reverse DCF, and residual income"} className="models-page-span-full" variant="subtle">
+      <Panel title="Valuation Scenario Ranges" subtitle={loading ? "Loading valuation scenario inputs..." : strictOfficialMode ? "Interactive DCF scenario builder and residual-income ranges, with price-linked reverse DCF withheld in strict mode" : "Interactive DCF scenario builder plus editable bear, base, and bull ranges across DCF, reverse DCF, and residual income"} className="models-page-span-full" variant="subtle">
         <DeferredClientSection placeholder={<div className="text-muted">Loading valuation scenario ranges...</div>}>
           <ValuationScenarioWorkbench
             ticker={ticker}

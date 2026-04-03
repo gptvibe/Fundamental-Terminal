@@ -7213,6 +7213,67 @@ select {
   gap: 8px;
 }
 
+.valuation-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.valuation-assumption-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.valuation-input-card {
+  display: grid;
+  gap: 8px;
+}
+
+.valuation-input-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.valuation-input-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.valuation-input-field {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.96rem;
+}
+
+.valuation-input-field::-webkit-outer-spin-button,
+.valuation-input-field::-webkit-inner-spin-button {
+  margin: 0;
+}
+
+.valuation-input-unit {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.9rem;
+}
+
+.valuation-input-help {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .valuation-trace-table {
   width: 100%;
   border-collapse: collapse;
@@ -7230,6 +7291,18 @@ select {
 .valuation-trace-table th {
   color: var(--text-muted);
   font-weight: 600;
+}
+
+.valuation-comparison-table td:nth-child(n + 2),
+.valuation-sensitivity-table td:nth-child(n + 2),
+.valuation-sensitivity-table th:nth-child(n + 2) {
+  text-align: right;
+}
+
+.valuation-sensitivity-table td.is-current {
+  color: var(--accent);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .valuation-detail-block {
@@ -7272,6 +7345,10 @@ select {
   .valuation-range-labels {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .valuation-assumption-grid {
+    grid-template-columns: 1fr;
   }
 
   .valuation-range-labels span:last-child {
