@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { MetricLabel } from "@/components/ui/metric-label";
+import { downloadTextFile } from "@/lib/export";
 import { difference, formatSignedCompactDelta } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { FinancialPayload } from "@/lib/types";
@@ -70,14 +71,14 @@ export function FinancialStatementsTable({
           <button
             type="button"
             className="ticker-button financial-export-button"
-            onClick={() => triggerDownload(`${ticker}-financial-statements.csv`, csvPayload, "text/csv;charset=utf-8")}
+            onClick={() => downloadTextFile(`${ticker}-financial-statements.csv`, csvPayload, "text/csv;charset=utf-8")}
           >
             Download CSV
           </button>
           <button
             type="button"
             className="ticker-button financial-export-button"
-            onClick={() => triggerDownload(`${ticker}-financial-statements.json`, jsonPayload, "application/json;charset=utf-8")}
+            onClick={() => downloadTextFile(`${ticker}-financial-statements.json`, jsonPayload, "application/json;charset=utf-8")}
           >
             Download JSON
           </button>
@@ -535,18 +536,6 @@ function resolveDeltaStyle(value: number | null): CSSProperties | undefined {
     return { color: "var(--negative)", fontWeight: 700 };
   }
   return { color: "var(--text-muted)", fontWeight: 600 };
-}
-
-function triggerDownload(filename: string, payload: string, contentType: string) {
-  const blob = new Blob([payload], { type: contentType });
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(objectUrl);
 }
 
 function buildFinancialsCsv(financials: FinancialPayload[]): string {

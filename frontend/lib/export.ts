@@ -52,6 +52,15 @@ export function downloadTextFile(fileName: string, payload: string, mimeType: st
   downloadBlob(fileName, blob);
 }
 
+export function downloadJsonFile(fileName: string, payload: unknown) {
+  const jsonPayload = JSON.stringify(payload, null, 2);
+  if (jsonPayload === undefined) {
+    return;
+  }
+
+  downloadTextFile(fileName, jsonPayload, "application/json;charset=utf-8");
+}
+
 export function downloadBlob(fileName: string, blob: Blob) {
   if (typeof document === "undefined") {
     return;

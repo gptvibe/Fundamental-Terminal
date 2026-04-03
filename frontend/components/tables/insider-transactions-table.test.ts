@@ -42,6 +42,7 @@ describe("InsiderTransactionsTable", () => {
     expect(html).toContain("0001234567-26-000001");
     expect(html).toContain("href=\"https://www.sec.gov/Archives/edgar/data/1234567/000123456726000001/xslF345X05/wk-form4_1.xml\"");
     expect(html).toContain(">4<");
+    expect(html).toContain("Download CSV");
   });
 
   it("renders accession text without a link when source is missing", () => {

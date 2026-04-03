@@ -45,6 +45,7 @@ describe("HedgeFundActivityTable", () => {
     expect(html).toContain(">13F-HR<");
     expect(html).toContain("0001234567-26-000111");
     expect(html).toContain("href=\"https://www.sec.gov/Archives/edgar/data/1234567/000123456726000111/primary_doc.xml\"");
+    expect(html).toContain("Download CSV");
   });
 
   it("renders amendment indicator when filing is an amendment", () => {

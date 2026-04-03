@@ -19,8 +19,10 @@ import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
+import { showAppToast } from "@/lib/app-toast";
 import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
+import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
@@ -76,6 +78,7 @@ export default function CompanyModelsPage() {
   const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
   const [dupontMode, setDupontMode] = useState<DupontMode>("auto");
   const [showModeInfo, setShowModeInfo] = useState(false);
+  const [exportingModelOutputs, setExportingModelOutputs] = useState(false);
   const { consoleEntries, connectionState, lastEvent } = useJobStream(activeJobId);
   const models = useMemo(() => data?.models ?? [], [data?.models]);
   const hasModels = models.length > 0;
@@ -269,6 +272,36 @@ export default function CompanyModelsPage() {
     }
   }
 
+  async function handleExportModelOutputs() {
+    try {
+      setExportingModelOutputs(true);
+
+      if (!data && !financialData && !marketContextData && !sectorContextData && !capitalStructureData && !evaluationData) {
+        throw new Error("Model outputs are still loading.");
+      }
+
+      downloadJsonFile(`${normalizeExportFileStem(ticker, "company")}-model-outputs.json`, {
+        exported_at: new Date().toISOString(),
+        ticker,
+        dupont_mode: dupontMode,
+        models: data,
+        financials: financialData,
+        market_context: marketContextData,
+        sector_context: sectorContextData,
+        capital_structure: capitalStructureData,
+        latest_evaluation: evaluationData,
+      });
+      showAppToast({ message: "Model outputs exported as JSON.", tone: "info" });
+    } catch (nextError) {
+      showAppToast({
+        message: nextError instanceof Error ? nextError.message : "Unable to export model outputs.",
+        tone: "danger",
+      });
+    } finally {
+      setExportingModelOutputs(false);
+    }
+  }
+
   return (
     <CompanyWorkspaceShell
       rail={
@@ -295,6 +328,14 @@ export default function CompanyModelsPage() {
             secondaryActionHref={`/company/${encodeURIComponent(ticker)}/financials`}
             secondaryActionLabel="Open Financials"
             secondaryActionDescription="Review statements, charts, and historical company results."
+            extraActions={[
+              {
+                label: exportingModelOutputs ? "Exporting..." : "Export Model Outputs (JSON)",
+                description: "Download the loaded model responses and supporting model context as JSON.",
+                onClick: handleExportModelOutputs,
+                disabled: exportingModelOutputs || (loading && !data && !financialData),
+              },
+            ]}
             statusLines={[
               `Available models: ${modelSummary.cachedCount}/${MODEL_NAMES.length}`,
               `Last updated: ${modelSummary.latestComputed ? formatDate(modelSummary.latestComputed) : loading ? "Loading..." : "Preparing data"}`,

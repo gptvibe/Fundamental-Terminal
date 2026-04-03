@@ -238,6 +238,7 @@ describe("CompanyEarningsPage", () => {
     const q1Row = screen.getAllByText("Q1 2026").find((element) => element.closest("tr"))?.closest("tr");
     expect(q1Row).toBeTruthy();
 
+    fireEvent.click(screen.getAllByRole("button", { name: "Show metadata-only releases" })[0]);
     fireEvent.click(q1Row as HTMLElement);
 
     await waitFor(() => {

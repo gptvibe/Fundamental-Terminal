@@ -8,6 +8,7 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { useLocalScreener } from "@/hooks/use-local-screener";
 import { showAppToast } from "@/lib/app-toast";
 import { getOfficialScreenerMetadata, searchOfficialScreener } from "@/lib/api";
+import { exportRowsToCsv } from "@/lib/export";
 import {
   DEFAULT_LOCAL_SCREENER_DRAFT,
   areLocalScreenerDraftsEqual,
@@ -150,6 +151,7 @@ export default function OfficialScreenerPage() {
   const canPageBackward = Boolean(results && results.query.offset > 0);
   const canPageForward = Boolean(results && results.query.offset + results.query.limit < results.coverage.matched_count);
   const provenancePayload = results ?? metadata;
+  const visibleResultRows = useMemo(() => buildScreenerExportRows(results?.results ?? []), [results?.results]);
 
   const loadMetadata = useCallback(async () => {
     try {
@@ -613,6 +615,15 @@ export default function OfficialScreenerPage() {
             )}
           </div>
           <div className="screener-results-hint">{selectedSortOption?.note ?? "Use ranking scores for fast cross-sectional discovery, then jump directly into the Research Brief for a company-level read."}</div>
+          {results?.results.length ? (
+            <button
+              type="button"
+              className="ticker-button financial-export-button"
+              onClick={() => exportRowsToCsv(`official-screener-results-${draft.periodType}.csv`, visibleResultRows)}
+            >
+              Download CSV
+            </button>
+          ) : null}
         </div>
 
         {resultsError ? <div className="screener-muted">{resultsError}</div> : null}
@@ -955,4 +966,36 @@ function buildVisibleFlags(result: ScreenerResultPayload): string[] {
   }
 
   return [...flags.slice(0, 2), `+${flags.length - 2} more`];
+}
+
+function buildScreenerExportRows(results: ScreenerResultPayload[]) {
+  return results.map((result) => ({
+    ticker: result.company.ticker,
+    company_name: result.company.name,
+    sector: result.company.sector ?? "--",
+    cache_state: titleCase(result.company.cache_state),
+    period_type: result.period_type.toUpperCase(),
+    filing_type: result.filing_type ?? result.period_type.toUpperCase(),
+    period_end: formatDate(result.period_end),
+    quality_score: formatScore(result.rankings.quality.score),
+    quality_rank: result.rankings.quality.rank ?? "Unranked",
+    value_score: formatScore(result.rankings.value.score),
+    value_rank: result.rankings.value.rank ?? "Unranked",
+    capital_allocation_score: formatScore(result.rankings.capital_allocation.score),
+    capital_allocation_rank: result.rankings.capital_allocation.rank ?? "Unranked",
+    dilution_risk_score: formatScore(result.rankings.dilution_risk.score),
+    dilution_risk_rank: result.rankings.dilution_risk.rank ?? "Unranked",
+    filing_risk_score: formatScore(result.rankings.filing_risk.score),
+    filing_risk_rank: result.rankings.filing_risk.rank ?? "Unranked",
+    revenue_growth: formatMetricField("revenue_growth", result),
+    operating_margin: formatMetricField("operating_margin", result),
+    fcf_margin: formatMetricField("fcf_margin", result),
+    leverage_ratio: formatMetricField("leverage_ratio", result),
+    dilution: formatMetricField("dilution", result),
+    sbc_burden: formatMetricField("sbc_burden", result),
+    shareholder_yield: formatMetricField("shareholder_yield", result),
+    filing_lag_days: formatMetricField("filing_lag_days", result),
+    flags: buildVisibleFlags(result).join(" | "),
+    research_brief_url: `/company/${encodeURIComponent(result.company.ticker)}`,
+  }));
 }

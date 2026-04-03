@@ -13,6 +13,7 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
+import { showAppToast } from "@/lib/app-toast";
 import {
   getCompanyActivityOverview,
   getCompanyBeneficialOwnershipSummary,
@@ -20,7 +21,11 @@ import {
   getCompanyCapitalStructure,
   getCompanyChangesSinceLastFiling,
   getCompanyEarningsSummary,
+  getCompanyFinancials,
   getCompanyGovernanceSummary,
+  getCompanyInsiderTrades,
+  getCompanyInstitutionalHoldings,
+  getCompanyMetricsTimeseries,
   getCompanyModels,
   getCompanyPeers,
 } from "@/lib/api";
@@ -34,6 +39,7 @@ import {
   type SemanticTone,
 } from "@/lib/activity-feed-tone";
 import { MODEL_NAMES } from "@/lib/constants";
+import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
   CompanyActivityOverviewResponse,
@@ -216,6 +222,7 @@ export default function CompanyResearchBriefPage() {
   const briefData = useResearchBriefData(ticker, reloadKey);
   const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
   const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker);
+  const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
   const pageCompany = company ?? data?.company ?? briefData.activityOverview.data?.company ?? briefData.models.data?.company ?? null;
   const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
   const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
@@ -349,6 +356,61 @@ export default function CompanyResearchBriefPage() {
     !insiderError &&
     !institutionalError;
 
+  async function handleExportResearchPackage() {
+    try {
+      setExportingResearchPackage(true);
+
+      const exportRequests = [
+        ["financials", () => getCompanyFinancials(ticker)],
+        ["insider_trades", () => getCompanyInsiderTrades(ticker)],
+        ["institutional_holdings", () => getCompanyInstitutionalHoldings(ticker)],
+        ["activity_overview", () => getCompanyActivityOverview(ticker)],
+        ["changes_since_last_filing", () => getCompanyChangesSinceLastFiling(ticker)],
+        ["earnings_summary", () => getCompanyEarningsSummary(ticker)],
+        ["capital_structure", () => getCompanyCapitalStructure(ticker)],
+        ["capital_markets_summary", () => getCompanyCapitalMarketsSummary(ticker)],
+        ["governance_summary", () => getCompanyGovernanceSummary(ticker)],
+        ["beneficial_ownership_summary", () => getCompanyBeneficialOwnershipSummary(ticker)],
+        ["models", () => getCompanyModels(ticker, MODEL_NAMES)],
+        ["peers", () => getCompanyPeers(ticker)],
+        ["derived_metrics_timeseries_quarterly", () => getCompanyMetricsTimeseries(ticker, { cadence: "quarterly", maxPoints: 24 })],
+        ["derived_metrics_timeseries_annual", () => getCompanyMetricsTimeseries(ticker, { cadence: "annual", maxPoints: 24 })],
+        ["derived_metrics_timeseries_ttm", () => getCompanyMetricsTimeseries(ticker, { cadence: "ttm", maxPoints: 24 })],
+      ] as const;
+
+      const endpointEntries = await Promise.all(
+        exportRequests.map(async ([key, load]) => {
+          try {
+            return [key, { status: "fulfilled", payload: await load() }] as const;
+          } catch (nextError) {
+            return [
+              key,
+              {
+                status: "rejected",
+                error: nextError instanceof Error ? nextError.message : "Request failed",
+              },
+            ] as const;
+          }
+        })
+      );
+
+      downloadJsonFile(`${normalizeExportFileStem(ticker, "company")}-research-package.json`, {
+        exported_at: new Date().toISOString(),
+        ticker,
+        company: pageCompany,
+        endpoints: Object.fromEntries(endpointEntries),
+      });
+      showAppToast({ message: "Research package exported as JSON.", tone: "info" });
+    } catch (nextError) {
+      showAppToast({
+        message: nextError instanceof Error ? nextError.message : "Unable to export research package.",
+        tone: "danger",
+      });
+    } finally {
+      setExportingResearchPackage(false);
+    }
+  }
+
   return (
     <CompanyWorkspaceShell
       rail={
@@ -366,6 +428,14 @@ export default function CompanyResearchBriefPage() {
           secondaryActionHref={`/company/${encodeURIComponent(ticker)}/models`}
           secondaryActionLabel="Open Valuation Models"
           secondaryActionDescription="Move from the brief into full model diagnostics, scenarios, and assumption detail."
+          extraActions={[
+            {
+              label: exportingResearchPackage ? "Exporting..." : "Export Research Package",
+              description: "Download the company financial, model, derived-metric, and brief endpoint responses as JSON.",
+              onClick: handleExportResearchPackage,
+              disabled: exportingResearchPackage || initialCompanyLoad,
+            },
+          ]}
           statusLines={[
             `Annual filings available: ${annualStatements.length.toLocaleString()}`,
             `Price history points available: ${priceHistory.length.toLocaleString()}`,

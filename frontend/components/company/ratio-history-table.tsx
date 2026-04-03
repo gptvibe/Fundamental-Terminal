@@ -217,7 +217,7 @@ export function RatioHistoryTable({
             className="ticker-button financial-export-button"
             onClick={() => exportRowsToCsv(`${exportStem}-ratio-history.csv`, csvRows)}
           >
-            Export CSV
+            Download CSV
           </button>
           <button
             type="button"

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { exportRowsToCsv, normalizeExportFileStem } from "@/lib/export";
 import { formatDate, formatPercent } from "@/lib/format";
 import type { InstitutionalHoldingPayload, RefreshState } from "@/lib/types";
 
@@ -48,6 +49,29 @@ export function HedgeFundActivityTable({
   const increaseCount = filteredHoldings.filter((holding) => (holding.change_in_shares ?? 0) > 0).length;
   const decreaseCount = filteredHoldings.filter((holding) => (holding.change_in_shares ?? 0) < 0).length;
   const reportingLagSummary = useMemo(() => buildReportingLagSummary(holdings), [holdings]);
+  const exportStem = normalizeExportFileStem(ticker, "company");
+  const csvRows = useMemo(
+    () =>
+      filteredHoldings.map((holding) => ({
+        fund_name: holding.fund_name,
+        fund_manager: holding.fund_manager ?? "--",
+        fund_cik: holding.fund_cik ?? "--",
+        universe_source: holding.universe_source ?? "--",
+        strategy: holding.fund_strategy?.trim() || "--",
+        shares_held: formatInteger(holding.shares_held),
+        change_in_shares: formatSignedInteger(holding.change_in_shares),
+        percent_change: formatSignedPercent(holding.percent_change),
+        portfolio_weight: formatPercent(holding.portfolio_weight),
+        quarter: formatQuarter(holding.reporting_date),
+        reporting_date: formatDate(holding.reporting_date),
+        filing_form: holding.filing_form ?? "13F",
+        amendment: holding.is_amendment ? "Yes" : "No",
+        filing_date: holding.filing_date ? formatDate(holding.filing_date) : "--",
+        accession_number: holding.accession_number ?? "--",
+        filing_url: holding.source ?? "",
+      })),
+    [filteredHoldings]
+  );
 
   function handleSortToggle(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -107,6 +131,13 @@ export function HedgeFundActivityTable({
           <span>{filteredHoldings.length} rows</span>
           <span>{increaseCount} increases</span>
           <span>{decreaseCount} decreases</span>
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={() => exportRowsToCsv(`${exportStem}-institutional-holdings.csv`, csvRows)}
+          >
+            Download CSV
+          </button>
         </div>
       </div>
 

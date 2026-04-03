@@ -8,6 +8,7 @@ import OfficialScreenerPage from "@/app/screener/page";
 
 const getOfficialScreenerMetadata = vi.fn();
 const searchOfficialScreener = vi.fn();
+const exportRowsToCsv = vi.fn();
 const showAppToast = vi.fn();
 const mockUseLocalScreener = vi.fn();
 
@@ -20,6 +21,14 @@ vi.mock("@/lib/app-toast", () => ({
   showAppToast: (...args: unknown[]) => showAppToast(...args),
 }));
 
+vi.mock("@/lib/export", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/export")>("@/lib/export");
+  return {
+    ...actual,
+    exportRowsToCsv: (...args: unknown[]) => exportRowsToCsv(...args),
+  };
+});
+
 vi.mock("@/hooks/use-local-screener", () => ({
   useLocalScreener: () => mockUseLocalScreener(),
 }));
@@ -28,6 +37,7 @@ describe("OfficialScreenerPage", () => {
   beforeEach(() => {
     getOfficialScreenerMetadata.mockReset();
     searchOfficialScreener.mockReset();
+    exportRowsToCsv.mockReset();
     showAppToast.mockReset();
     mockUseLocalScreener.mockReset();
 
@@ -85,6 +95,21 @@ describe("OfficialScreenerPage", () => {
     });
     expect(updateDraft).toHaveBeenCalled();
     expect(searchOfficialScreener.mock.calls[1]?.[0]?.sort?.field).toBe("quality_score");
+  });
+
+  it("exports the visible screener results as CSV", async () => {
+    render(React.createElement(OfficialScreenerPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("Apple Inc.")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Download CSV" }));
+
+    expect(exportRowsToCsv).toHaveBeenCalledTimes(1);
+    expect(exportRowsToCsv.mock.calls[0]?.[0]).toBe("official-screener-results-ttm.csv");
+    expect(exportRowsToCsv.mock.calls[0]?.[1]).toHaveLength(1);
+    expect(exportRowsToCsv.mock.calls[0]?.[1]?.[0]?.ticker).toBe("AAPL");
   });
 });
 

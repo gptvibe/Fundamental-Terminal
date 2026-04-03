@@ -13,6 +13,14 @@ import type { ConsoleEntry, RefreshState } from "@/lib/types";
 
 type ConnectionState = "idle" | "connecting" | "open" | "closed" | "error";
 
+interface UtilityRailAction {
+  label: string;
+  description?: string;
+  onClick: () => void | Promise<void>;
+  disabled?: boolean;
+  tone?: "primary" | "secondary";
+}
+
 interface CompanyUtilityRailProps {
   ticker: string;
   companyName?: string | null;
@@ -27,6 +35,7 @@ interface CompanyUtilityRailProps {
   secondaryActionHref?: string;
   secondaryActionLabel?: string;
   secondaryActionDescription?: string;
+  extraActions?: UtilityRailAction[];
   statusLines?: string[];
   consoleEntries: ConsoleEntry[];
   connectionState: ConnectionState;
@@ -49,6 +58,7 @@ export function CompanyUtilityRail({
   secondaryActionHref,
   secondaryActionLabel,
   secondaryActionDescription,
+  extraActions,
   statusLines,
   consoleEntries,
   connectionState,
@@ -171,6 +181,22 @@ export function CompanyUtilityRail({
                 ) : null}
               </div>
             ) : null}
+
+            {(extraActions ?? []).map((action) => (
+              <div key={action.label} className="utility-action-item">
+                <button
+                  type="button"
+                  onClick={() => void action.onClick()}
+                  disabled={action.disabled}
+                  className={`ticker-button utility-action-button ${action.tone === "primary" ? "utility-action-button-primary" : "utility-action-button-secondary"}`}
+                >
+                  {action.label}
+                </button>
+                {action.description ? (
+                  <span className="utility-action-description">{action.description}</span>
+                ) : null}
+              </div>
+            ))}
           </div>
 
           {presentation === "brief" && effectiveStatusLines.length ? (

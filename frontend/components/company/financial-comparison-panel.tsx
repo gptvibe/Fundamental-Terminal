@@ -140,7 +140,7 @@ export function FinancialComparisonPanel({
             className="ticker-button financial-export-button"
             onClick={() => exportRowsToCsv(`${exportStem}-annual-financial-comparison.csv`, csvRows)}
           >
-            Export CSV
+            Download CSV
           </button>
           <button
             type="button"

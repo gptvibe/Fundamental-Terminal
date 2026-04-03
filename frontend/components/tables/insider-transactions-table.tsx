@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 
+import { exportRowsToCsv, normalizeExportFileStem } from "@/lib/export";
 import { formatDate } from "@/lib/format";
 import type { InsiderTradePayload, RefreshState } from "@/lib/types";
 
@@ -78,6 +79,33 @@ export function InsiderTransactionsTable({
   const buyCount = filteredTrades.filter((trade) => normalizeAction(trade.action) === "buy").length;
   const sellCount = filteredTrades.filter((trade) => normalizeAction(trade.action) === "sell").length;
   const filingLagSummary = useMemo(() => buildFilingLagSummary(trades), [trades]);
+  const exportStem = normalizeExportFileStem(ticker, "company");
+  const csvRows = useMemo(
+    () =>
+      filteredTrades.map((trade) => {
+        const action = normalizeAction(trade.action);
+        return {
+          date: trade.date ? formatDate(trade.date) : "--",
+          filing_form: trade.filing_type ? trade.filing_type : "Form 4",
+          filing_date: trade.filing_date ? formatDate(trade.filing_date) : "--",
+          accession_number: trade.accession_number ?? "--",
+          insider_name: trade.name,
+          role: trade.role ?? "Unspecified",
+          action: actionLabel(action),
+          transaction_code: trade.transaction_code ?? "--",
+          instrument: formatInstrument(trade),
+          ownership: formatOwnershipDescriptor(trade),
+          shares: formatInteger(trade.shares),
+          price: formatCurrency(trade.price),
+          value: formatCurrency(trade.value),
+          ownership_after: formatInteger(trade.ownership_after),
+          plan_10b5_1: trade.is_10b5_1 ? "Yes" : "No",
+          footnotes: formatFootnoteTags(trade.footnote_tags),
+          filing_url: trade.source ?? "",
+        };
+      }),
+    [filteredTrades]
+  );
 
   function handleSortToggle(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -153,6 +181,13 @@ export function InsiderTransactionsTable({
           <span className="insider-toolbar-meta-buy">{buyCount} buys</span>
           <span className="insider-toolbar-meta-sell">{sellCount} sells</span>
           <span>{refresh?.triggered ? "updating" : "up to date"}</span>
+          <button
+            type="button"
+            className="ticker-button financial-export-button"
+            onClick={() => exportRowsToCsv(`${exportStem}-insider-trades.csv`, csvRows)}
+          >
+            Download CSV
+          </button>
         </div>
       </div>
 

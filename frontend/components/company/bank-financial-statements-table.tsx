@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import type { CSSProperties } from "react";
 
 import { MetricLabel } from "@/components/ui/metric-label";
+import { downloadTextFile } from "@/lib/export";
 import { difference, formatSignedCompactDelta } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { FinancialPayload } from "@/lib/types";
@@ -65,14 +66,14 @@ export function BankFinancialStatementsTable({
           <button
             type="button"
             className="ticker-button financial-export-button"
-            onClick={() => triggerDownload(`${ticker}-regulated-bank-financials.csv`, csvPayload, "text/csv;charset=utf-8")}
+            onClick={() => downloadTextFile(`${ticker}-regulated-bank-financials.csv`, csvPayload, "text/csv;charset=utf-8")}
           >
             Download CSV
           </button>
           <button
             type="button"
             className="ticker-button financial-export-button"
-            onClick={() => triggerDownload(`${ticker}-regulated-bank-financials.json`, jsonPayload, "application/json;charset=utf-8")}
+            onClick={() => downloadTextFile(`${ticker}-regulated-bank-financials.json`, jsonPayload, "application/json;charset=utf-8")}
           >
             Download JSON
           </button>
@@ -168,16 +169,6 @@ function csvEscape(value: unknown): string {
     return text;
   }
   return `"${text.replaceAll("\"", "\"\"")}"`;
-}
-
-function triggerDownload(fileName: string, payload: string, mimeType: string) {
-  const blob = new Blob([payload], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  link.click();
-  URL.revokeObjectURL(url);
 }
 
 function safeRatio(numerator: number | null, denominator: number | null): number | null {
