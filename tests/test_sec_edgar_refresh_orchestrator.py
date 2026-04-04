@@ -249,6 +249,7 @@ def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):
     monkeypatch.setattr(service, "refresh_earnings", lambda **_kwargs: 7)
     monkeypatch.setattr(service, "refresh_events", lambda **_kwargs: 8)
     monkeypatch.setattr(service, "refresh_capital_markets", lambda **_kwargs: 9)
+    monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 0)
     monkeypatch.setattr(service, "refresh_prices", lambda **_kwargs: 10)
     monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)

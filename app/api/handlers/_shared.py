@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 import logging
 import asyncio
 from copy import deepcopy
@@ -141,6 +142,9 @@ app = _LegacyRouteDecorators()
 
 CORE_FILING_TIMELINE_FORMS = {"10-K", "10-Q", "8-K", "20-F", "40-F", "6-K"}
 MAX_FILING_TIMELINE_ITEMS = 60
+WATCHLIST_CALENDAR_WINDOW_DAYS = 90
+WATCHLIST_PROJECTED_FILING_FORMS = {"10-K", "10-Q"}
+DEFAULT_FILING_LAG_DAYS = {"10-Q": 40, "10-K": 60}
 ALLOWED_SEC_EMBED_HOSTS = {"www.sec.gov", "sec.gov", "data.sec.gov"}
 ALLOWED_SEC_EMBED_MIME_PREFIXES = ("text/html", "application/html", "application/xhtml+xml", "text/plain")
 ALLOWED_SEC_EMBED_EXTENSIONS = (".htm", ".html", ".xhtml", ".txt")
@@ -3031,6 +3035,51 @@ def watchlist_summary(
         len(companies),
     )
     return WatchlistSummaryResponse(tickers=normalized_tickers, companies=companies)
+
+
+@app.get("/api/watchlist/calendar", response_model=WatchlistCalendarResponse)
+def watchlist_calendar(
+    tickers: list[str] = Query(default_factory=list),
+    session: Session = Depends(get_db_session),
+) -> WatchlistCalendarResponse:
+    normalized_tickers = _normalize_watchlist_tickers(tickers)
+    if len(normalized_tickers) > 50:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A maximum of 50 tickers is allowed")
+
+    window_start = _watchlist_calendar_today()
+    window_end = window_start + timedelta(days=WATCHLIST_CALENDAR_WINDOW_DAYS)
+    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+
+    events: list[WatchlistCalendarEventPayload] = []
+    for ticker in normalized_tickers:
+        snapshot = snapshots_by_ticker.get(ticker)
+        if snapshot is None:
+            continue
+        try:
+            events.extend(
+                _build_watchlist_calendar_company_events(
+                    session,
+                    snapshot,
+                    window_start=window_start,
+                    window_end=window_end,
+                )
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to build watchlist calendar events for '%s'", ticker)
+
+    events.extend(_build_watchlist_13f_deadline_events(window_start=window_start, window_end=window_end))
+    events.sort(key=lambda item: (item.date, item.ticker or "", item.title, item.id))
+    logging.getLogger(__name__).info(
+        "TELEMETRY watchlist_calendar tickers=%s events=%s",
+        len(normalized_tickers),
+        len(events),
+    )
+    return WatchlistCalendarResponse(
+        tickers=normalized_tickers,
+        window_start=window_start,
+        window_end=window_end,
+        events=events,
+    )
 
 
 @app.get("/api/filings/{ticker}", response_model=list[FilingTimelineItemPayload])
@@ -7207,6 +7256,223 @@ def _normalize_watchlist_tickers(raw_tickers: list[str]) -> list[str]:
         seen.add(ticker)
         normalized.append(ticker)
     return normalized
+
+
+def _watchlist_calendar_today() -> DateType:
+    return datetime.now(timezone.utc).date()
+
+
+def _build_watchlist_calendar_company_events(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    window_start: DateType,
+    window_end: DateType,
+) -> list[WatchlistCalendarEventPayload]:
+    events: list[WatchlistCalendarEventPayload] = []
+
+    projected_filing = _project_watchlist_expected_filing(
+        session,
+        snapshot,
+        window_start=window_start,
+        window_end=window_end,
+    )
+    if projected_filing is not None:
+        events.append(projected_filing)
+
+    for filing_event in get_company_filing_events(session, snapshot.company.id, limit=120):
+        event_date = filing_event.filing_date or filing_event.report_date
+        if event_date is None or event_date < window_start or event_date > window_end:
+            continue
+        events.append(
+            WatchlistCalendarEventPayload(
+                id=f"sec-event-{snapshot.company.ticker}-{filing_event.accession_number}-{filing_event.item_code}",
+                date=event_date,
+                event_type="sec_event",
+                source="sec_rss",
+                ticker=snapshot.company.ticker,
+                company_name=snapshot.company.name,
+                title=filing_event.summary,
+                form=filing_event.form,
+                detail=_watchlist_sec_event_detail(filing_event),
+                href=filing_event.source_url,
+                period_end=filing_event.report_date,
+            )
+        )
+
+    return events
+
+
+def _project_watchlist_expected_filing(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    window_start: DateType,
+    window_end: DateType,
+) -> WatchlistCalendarEventPayload | None:
+    financials = _visible_financials_for_company(session, snapshot.company)
+    periodic_records = _dedupe_projectable_watchlist_financials(financials)
+    if not periodic_records:
+        return None
+
+    latest_record = periodic_records[0]
+    latest_annual = next((item for item in periodic_records if (item.filing_type or "").upper() == "10-K"), None)
+    next_projection = _next_watchlist_periodic_projection(latest_record, latest_annual)
+    if next_projection is None:
+        return None
+
+    next_form, next_period_end = next_projection
+    lag_samples = _watchlist_filing_lag_samples(periodic_records, next_form)
+    lag_days = _median_int(lag_samples, DEFAULT_FILING_LAG_DAYS[next_form])
+    projected_date = next_period_end + timedelta(days=lag_days)
+    if projected_date < window_start or projected_date > window_end:
+        return None
+
+    sample_size = len(lag_samples)
+    cadence_copy = (
+        f"Median {lag_days}-day lag from {sample_size} historical {next_form} filings"
+        if sample_size
+        else f"Using default {lag_days}-day {next_form} filing lag"
+    )
+    return WatchlistCalendarEventPayload(
+        id=f"expected-filing-{snapshot.company.ticker}-{next_form}-{next_period_end.isoformat()}",
+        date=projected_date,
+        event_type="expected_filing",
+        source="historical_cadence",
+        ticker=snapshot.company.ticker,
+        company_name=snapshot.company.name,
+        title=f"Expected {next_form} filing",
+        form=next_form,
+        detail=f"{cadence_copy} after the {next_period_end.isoformat()} period end.",
+        href=None,
+        period_end=next_period_end,
+    )
+
+
+def _dedupe_projectable_watchlist_financials(financials: list[Any]) -> list[Any]:
+    ordered = sorted(
+        (
+            item
+            for item in financials
+            if (item.filing_type or "").upper() in WATCHLIST_PROJECTED_FILING_FORMS and getattr(item, "period_end", None) is not None
+        ),
+        key=lambda item: (
+            item.period_end,
+            getattr(item, "filing_acceptance_at", None) or datetime.min.replace(tzinfo=timezone.utc),
+            item.filing_type,
+        ),
+        reverse=True,
+    )
+    deduped: list[Any] = []
+    seen: set[tuple[str, DateType]] = set()
+    for item in ordered:
+        key = ((item.filing_type or "").upper(), item.period_end)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _next_watchlist_periodic_projection(latest_record: Any, latest_annual: Any | None) -> tuple[str, DateType] | None:
+    latest_form = (latest_record.filing_type or "").upper()
+    if latest_form == "10-K":
+        return "10-Q", _add_months_preserving_month_end(latest_record.period_end, 3)
+    if latest_form != "10-Q":
+        return None
+
+    if latest_annual is not None and latest_record.period_end > latest_annual.period_end:
+        months_since_annual = _months_between_dates(latest_annual.period_end, latest_record.period_end)
+        projected_annual_period_end = _add_months_preserving_month_end(latest_annual.period_end, 12)
+        if months_since_annual >= 9 and projected_annual_period_end > latest_record.period_end:
+            return "10-K", projected_annual_period_end
+
+    return "10-Q", _add_months_preserving_month_end(latest_record.period_end, 3)
+
+
+def _watchlist_filing_lag_samples(financials: list[Any], filing_form: str) -> list[int]:
+    normalized_form = filing_form.upper()
+    lags: list[int] = []
+    for item in financials:
+        if (item.filing_type or "").upper() != normalized_form:
+            continue
+        accepted_at = getattr(item, "filing_acceptance_at", None)
+        if accepted_at is None:
+            continue
+        lag_days = (accepted_at.date() - item.period_end).days
+        if 0 < lag_days <= 180:
+            lags.append(lag_days)
+    return lags
+
+
+def _median_int(values: list[int], default: int) -> int:
+    if not values:
+        return default
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2 == 1:
+        return ordered[middle]
+    return int(round((ordered[middle - 1] + ordered[middle]) / 2))
+
+
+def _months_between_dates(start_date: DateType, end_date: DateType) -> int:
+    return (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
+
+
+def _add_months_preserving_month_end(base_date: DateType, months: int) -> DateType:
+    month_index = base_date.month - 1 + months
+    year = base_date.year + month_index // 12
+    month = month_index % 12 + 1
+    target_last_day = monthrange(year, month)[1]
+    base_last_day = monthrange(base_date.year, base_date.month)[1]
+    if base_date.day == base_last_day:
+        day = target_last_day
+    else:
+        day = min(base_date.day, target_last_day)
+    return DateType(year, month, day)
+
+
+def _watchlist_sec_event_detail(event: Any) -> str:
+    detail_parts = [event.form]
+    if getattr(event, "items", None):
+        detail_parts.append(f"Items {event.items}")
+    if getattr(event, "category", None):
+        detail_parts.append(str(event.category))
+    return " · ".join(part for part in detail_parts if part)
+
+
+def _build_watchlist_13f_deadline_events(
+    *,
+    window_start: DateType,
+    window_end: DateType,
+) -> list[WatchlistCalendarEventPayload]:
+    events: list[WatchlistCalendarEventPayload] = []
+    for year in range(window_start.year - 1, window_end.year + 1):
+        for quarter_end in (
+            DateType(year, 3, 31),
+            DateType(year, 6, 30),
+            DateType(year, 9, 30),
+            DateType(year, 12, 31),
+        ):
+            deadline = quarter_end + timedelta(days=45)
+            if deadline < window_start or deadline > window_end:
+                continue
+            events.append(
+                WatchlistCalendarEventPayload(
+                    id=f"13f-deadline-{quarter_end.isoformat()}",
+                    date=deadline,
+                    event_type="institutional_deadline",
+                    source="fixed_calendar",
+                    ticker=None,
+                    company_name=None,
+                    title="13F institutional reporting deadline",
+                    form="13F-HR",
+                    detail=f"Managers disclose holdings for the quarter ended {quarter_end.isoformat()}.",
+                    href=None,
+                    period_end=quarter_end,
+                )
+            )
+    return events
 
 
 def _build_watchlist_summary_item(

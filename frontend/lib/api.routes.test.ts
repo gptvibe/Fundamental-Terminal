@@ -14,6 +14,7 @@ import {
   getLatestModelEvaluation,
   getCompanyModels,
   getCompanyPeers,
+  getWatchlistCalendar,
   getWatchlistSummary,
 } from "@/lib/api";
 
@@ -99,6 +100,22 @@ describe("api route stability", () => {
         cache: "no-store",
         body: JSON.stringify({ tickers: ["AAPL", "MSFT"] }),
       })
+    );
+  });
+
+  it("keeps workspace GET helper paths unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tickers: [], window_start: "2026-04-04", window_end: "2026-07-03", events: [] }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getWatchlistCalendar(["AAPL", "MSFT"]);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/watchlist/calendar?tickers=AAPL&tickers=MSFT",
+      expect.objectContaining({ cache: "no-store" })
     );
   });
 

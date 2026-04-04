@@ -58,6 +58,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/{ticker}/alerts"),
         ("GET", "/api/companies/{ticker}/activity-overview"),
         ("POST", "/api/watchlist/summary"),
+        ("GET", "/api/watchlist/calendar"),
         ("GET", "/api/filings/{ticker}"),
         ("GET", "/api/search_filings"),
         ("GET", "/api/companies/{ticker}/financial-history"),

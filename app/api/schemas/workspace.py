@@ -214,3 +214,24 @@ class WatchlistSummaryItemPayload(BaseModel):
 class WatchlistSummaryResponse(BaseModel):
     tickers: list[str]
     companies: list[WatchlistSummaryItemPayload]
+
+
+class WatchlistCalendarEventPayload(BaseModel):
+    id: str
+    date: DateType
+    event_type: Literal["expected_filing", "sec_event", "institutional_deadline"]
+    source: Literal["historical_cadence", "sec_rss", "fixed_calendar"]
+    ticker: str | None = None
+    company_name: str | None = None
+    title: str
+    form: str | None = None
+    detail: str | None = None
+    href: str | None = None
+    period_end: DateType | None = None
+
+
+class WatchlistCalendarResponse(BaseModel):
+    tickers: list[str]
+    window_start: DateType
+    window_end: DateType
+    events: list[WatchlistCalendarEventPayload]

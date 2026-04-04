@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 
 import { Panel } from "@/components/ui/panel";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
-import { getWatchlistSummary, refreshCompany } from "@/lib/api";
+import { getWatchlistCalendar, getWatchlistSummary, refreshCompany } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
 import { formatDate, formatPercent } from "@/lib/format";
-import type { WatchlistSummaryItemPayload } from "@/lib/types";
+import type { WatchlistCalendarEventPayload, WatchlistSummaryItemPayload } from "@/lib/types";
 
 type WatchlistFilter = "all" | "attention" | "stale" | "no-note" | "undervalued" | "quality" | "capital-return" | "balance-risk";
 type WatchlistSort = "attention" | "undervaluation" | "quality" | "capital-return" | "balance-risk";
@@ -36,8 +36,11 @@ export default function WatchlistPage() {
   const router = useRouter();
   const { watchlist, notesByTicker } = useLocalUserData();
   const [rows, setRows] = useState<WatchlistRow[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<WatchlistCalendarEventPayload[]>([]);
   const [loading, setLoading] = useState(true);
+  const [calendarLoading, setCalendarLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [filter, setFilter] = useState<WatchlistFilter>("all");
   const [refreshingTicker, setRefreshingTicker] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<WatchlistSort>("attention");
@@ -57,28 +60,44 @@ export default function WatchlistPage() {
     async function loadSummary() {
       if (!watchlistTickers.length) {
         setRows([]);
+        setCalendarEvents([]);
         setError(null);
+        setCalendarError(null);
         setLoading(false);
+        setCalendarLoading(false);
         return;
       }
 
       try {
         setLoading(true);
+        setCalendarLoading(true);
         setError(null);
-        const response = await getWatchlistSummary(watchlistTickers);
+        setCalendarError(null);
+        const [summaryResult, calendarResult] = await Promise.allSettled([
+          getWatchlistSummary(watchlistTickers),
+          getWatchlistCalendar(watchlistTickers),
+        ]);
         if (cancelled) {
           return;
         }
 
-        setRows(toWatchlistRows(response.companies, notesByTicker));
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : "Unable to load watchlist summary");
+        if (summaryResult.status === "fulfilled") {
+          setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
+        } else {
+          setError(summaryResult.reason instanceof Error ? summaryResult.reason.message : "Unable to load watchlist summary");
           setRows([]);
+        }
+
+        if (calendarResult.status === "fulfilled") {
+          setCalendarEvents(sortCalendarEvents(calendarResult.value.events));
+        } else {
+          setCalendarError(calendarResult.reason instanceof Error ? calendarResult.reason.message : "Unable to load events calendar");
+          setCalendarEvents([]);
         }
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setCalendarLoading(false);
         }
       }
     }
@@ -104,15 +123,26 @@ export default function WatchlistPage() {
 
       pending = true;
       try {
-        const response = await getWatchlistSummary(watchlistTickers);
+        const [summaryResult, calendarResult] = await Promise.allSettled([
+          getWatchlistSummary(watchlistTickers),
+          getWatchlistCalendar(watchlistTickers),
+        ]);
         if (cancelled) {
           return;
         }
-        setRows(toWatchlistRows(response.companies, notesByTicker));
-        setError(null);
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : "Unable to auto-refresh watchlist summary");
+
+        if (summaryResult.status === "fulfilled") {
+          setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
+          setError(null);
+        } else {
+          setError(summaryResult.reason instanceof Error ? summaryResult.reason.message : "Unable to auto-refresh watchlist summary");
+        }
+
+        if (calendarResult.status === "fulfilled") {
+          setCalendarEvents(sortCalendarEvents(calendarResult.value.events));
+          setCalendarError(null);
+        } else {
+          setCalendarError(calendarResult.reason instanceof Error ? calendarResult.reason.message : "Unable to auto-refresh events calendar");
         }
       } finally {
         pending = false;
@@ -170,8 +200,18 @@ export default function WatchlistPage() {
       setRefreshingTicker(ticker);
       await refreshCompany(ticker);
       showAppToast({ message: `${ticker} refresh queued.`, tone: "info" });
-      const response = await getWatchlistSummary(watchlistTickers);
-      setRows(toWatchlistRows(response.companies, notesByTicker));
+      const [summaryResult, calendarResult] = await Promise.allSettled([
+        getWatchlistSummary(watchlistTickers),
+        getWatchlistCalendar(watchlistTickers),
+      ]);
+      if (summaryResult.status === "fulfilled") {
+        setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
+        setError(null);
+      }
+      if (calendarResult.status === "fulfilled") {
+        setCalendarEvents(sortCalendarEvents(calendarResult.value.events));
+        setCalendarError(null);
+      }
     } catch (nextError) {
       showAppToast({
         message: nextError instanceof Error ? nextError.message : `Unable to refresh ${ticker}`,
@@ -244,14 +284,13 @@ export default function WatchlistPage() {
                 <option value="balance-risk">Sort: Balance-sheet risk</option>
               </select>
             </div>
-            <div className="watchlist-filter-row" role="tablist" aria-label="Watchlist filters">
+            <div className="watchlist-filter-row" role="group" aria-label="Watchlist filters">
               {FILTERS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   className={`ticker-button${filter === item.key ? " is-active" : ""}`}
                   onClick={() => setFilter(item.key)}
-                  aria-pressed={filter === item.key}
                 >
                   {item.label}
                 </button>
@@ -400,6 +439,65 @@ export default function WatchlistPage() {
             </div>
           </div>
         )}
+
+        {watchlistTickers.length ? (
+          <section className="watchlist-calendar-section" aria-labelledby="watchlist-calendar-title">
+            <div className="watchlist-calendar-header">
+              <div className="watchlist-calendar-copy">
+                <div className="watchlist-intro-kicker">Next 90 days</div>
+                <div className="watchlist-calendar-title" id="watchlist-calendar-title">Events Calendar</div>
+                <div className="watchlist-calendar-text">
+                  Projected 10-Q or 10-K filings, known SEC 8-K events, and the next 13F reporting deadline in one date-sorted queue.
+                </div>
+              </div>
+              <div className="watchlist-toolbar-meta">
+                <span className="watchlist-toolbar-chip">Events {calendarEvents.length}</span>
+              </div>
+            </div>
+
+            {calendarError ? <div className="text-muted">{calendarError}</div> : null}
+
+            {calendarLoading ? (
+              <div className="text-muted">Loading events calendar...</div>
+            ) : calendarEvents.length ? (
+              <div className="watchlist-calendar-list">
+                {calendarEvents.map((event) => (
+                  <article key={event.id} className="watchlist-calendar-item">
+                    <div className="watchlist-calendar-date">{formatDate(event.date)}</div>
+                    <div className="watchlist-calendar-body">
+                      <div className="watchlist-calendar-pill-row">
+                        <span className="pill">{formatCalendarEventType(event.event_type)}</span>
+                        {event.form ? <span className="pill">{event.form}</span> : null}
+                        {event.ticker ? (
+                          <button
+                            type="button"
+                            className="watchlist-calendar-ticker"
+                            onClick={() => router.push(`/company/${encodeURIComponent(event.ticker!)}`)}
+                          >
+                            {event.ticker}
+                          </button>
+                        ) : (
+                          <span className="pill">Market-wide</span>
+                        )}
+                      </div>
+                      <div className="watchlist-calendar-item-title">{event.title}</div>
+                      <div className="watchlist-calendar-item-detail">
+                        {event.company_name ? `${event.company_name} · ` : ""}
+                        {event.detail ?? "No additional detail"}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="grid-empty-state watchlist-empty-state watchlist-calendar-empty-state">
+                <div className="grid-empty-kicker">Events calendar</div>
+                <div className="grid-empty-title">No events in the next 90 days</div>
+                <div className="grid-empty-copy">Projected filings or future-dated SEC events will appear here as cached company data updates.</div>
+              </div>
+            )}
+          </section>
+        ) : null}
       </Panel>
     </div>
   );
@@ -496,4 +594,26 @@ function formatMarketContextStatus(status: WatchlistSummaryItemPayload["market_c
   }
   const observed = status.observation_date ? ` (${formatDate(status.observation_date)})` : "";
   return `${status.label}${observed}`;
+}
+
+function sortCalendarEvents(events: WatchlistCalendarEventPayload[]): WatchlistCalendarEventPayload[] {
+  return [...events].sort((left, right) => {
+    if (left.date !== right.date) {
+      return left.date.localeCompare(right.date);
+    }
+    if ((left.ticker ?? "") !== (right.ticker ?? "")) {
+      return (left.ticker ?? "").localeCompare(right.ticker ?? "");
+    }
+    return left.title.localeCompare(right.title);
+  });
+}
+
+function formatCalendarEventType(value: WatchlistCalendarEventPayload["event_type"]): string {
+  if (value === "expected_filing") {
+    return "Projected filing";
+  }
+  if (value === "sec_event") {
+    return "SEC event";
+  }
+  return "13F deadline";
 }

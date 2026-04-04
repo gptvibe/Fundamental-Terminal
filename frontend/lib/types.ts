@@ -2056,6 +2056,27 @@ export interface WatchlistSummaryResponse {
   companies: WatchlistSummaryItemPayload[];
 }
 
+export interface WatchlistCalendarEventPayload {
+  id: string;
+  date: string;
+  event_type: "expected_filing" | "sec_event" | "institutional_deadline";
+  source: "historical_cadence" | "sec_rss" | "fixed_calendar";
+  ticker: string | null;
+  company_name: string | null;
+  title: string;
+  form: string | null;
+  detail: string | null;
+  href: string | null;
+  period_end: string | null;
+}
+
+export interface WatchlistCalendarResponse {
+  tickers: string[];
+  window_start: string;
+  window_end: string;
+  events: WatchlistCalendarEventPayload[];
+}
+
 export interface PeerOptionPayload {
   ticker: string;
   name: string;

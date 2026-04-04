@@ -459,6 +459,14 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "fred",
         "yahoo_finance",
     ),
+    (
+        "GET",
+        "/api/watchlist/calendar",
+    ): _derived_official_contract(
+        "sec_edgar",
+        "sec_companyfacts",
+        fallback_permitted=True,
+    ),
     ("GET", "/api/filings/{ticker}"): _official_only_contract("sec_edgar"),
     ("GET", "/api/search_filings"): _official_only_contract("sec_edgar"),
     ("GET", "/api/companies/{ticker}/financial-history"): _official_only_contract("sec_companyfacts"),

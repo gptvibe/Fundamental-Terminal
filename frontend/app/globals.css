@@ -4242,6 +4242,99 @@ select {
   min-height: 220px;
 }
 
+.watchlist-calendar-section {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-border) 110%, transparent);
+}
+
+.watchlist-calendar-header,
+.watchlist-calendar-item {
+  display: grid;
+  gap: 12px;
+}
+
+.watchlist-calendar-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.watchlist-calendar-copy,
+.watchlist-calendar-body,
+.watchlist-calendar-list {
+  display: grid;
+  gap: 8px;
+}
+
+.watchlist-calendar-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--surface-strong-text);
+}
+
+.watchlist-calendar-text,
+.watchlist-calendar-item-detail {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.watchlist-calendar-list {
+  gap: 10px;
+}
+
+.watchlist-calendar-item {
+  grid-template-columns: 110px minmax(0, 1fr);
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 86%, transparent);
+}
+
+.watchlist-calendar-date,
+.watchlist-calendar-item-title,
+.watchlist-calendar-ticker {
+  font-family: var(--mono);
+}
+
+.watchlist-calendar-date {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.watchlist-calendar-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.watchlist-calendar-item-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--surface-strong-text);
+}
+
+.watchlist-calendar-ticker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--action-accent) 48%, var(--panel-border));
+  background: color-mix(in srgb, var(--action-accent) 10%, var(--surface-soft));
+  color: var(--surface-strong-text);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.watchlist-calendar-empty-state {
+  min-height: 0;
+}
+
 .models-page-grid {
   display: grid;
   gap: 16px;

@@ -8,6 +8,7 @@ import WatchlistPage from "@/app/watchlist/page";
 
 const push = vi.fn();
 const mockUseLocalUserData = vi.fn();
+const getWatchlistCalendar = vi.fn();
 const getWatchlistSummary = vi.fn();
 const refreshCompany = vi.fn();
 const showAppToast = vi.fn();
@@ -21,6 +22,7 @@ vi.mock("@/hooks/use-local-user-data", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  getWatchlistCalendar: (...args: unknown[]) => getWatchlistCalendar(...args),
   getWatchlistSummary: (...args: unknown[]) => getWatchlistSummary(...args),
   refreshCompany: (...args: unknown[]) => refreshCompany(...args),
 }));
@@ -33,9 +35,16 @@ describe("WatchlistPage", () => {
   beforeEach(() => {
     push.mockReset();
     mockUseLocalUserData.mockReset();
+    getWatchlistCalendar.mockReset();
     getWatchlistSummary.mockReset();
     refreshCompany.mockReset();
     showAppToast.mockReset();
+    getWatchlistCalendar.mockResolvedValue({
+      tickers: [],
+      window_start: "2026-04-04",
+      window_end: "2026-07-03",
+      events: [],
+    });
   });
 
   afterEach(() => {
@@ -55,6 +64,7 @@ describe("WatchlistPage", () => {
       expect(screen.getByText("No companies saved yet")).toBeTruthy();
     });
     expect(getWatchlistSummary).not.toHaveBeenCalled();
+    expect(getWatchlistCalendar).not.toHaveBeenCalled();
   });
 
   it("renders loaded rows with merged local notes", async () => {
@@ -97,6 +107,73 @@ describe("WatchlistPage", () => {
     expect(screen.getByText(/Track gross margin trend and services mix/)).toBeTruthy();
     expect(screen.getByLabelText(/Alert summary for AAPL/i)).toBeTruthy();
     expect(screen.getByText(/Late filer notice/)).toBeTruthy();
+    expect(getWatchlistCalendar).toHaveBeenCalledWith(["AAPL"]);
+  });
+
+  it("renders the events calendar below the company table", async () => {
+    mockUseLocalUserData.mockReturnValue({
+      watchlist: [{ ticker: "AAPL" }],
+      notesByTicker: {},
+    });
+    getWatchlistSummary.mockResolvedValue({
+      tickers: ["AAPL"],
+      companies: [
+        {
+          ticker: "AAPL",
+          name: "Apple Inc.",
+          sector: "Technology",
+          cik: "1",
+          last_checked: null,
+          refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
+          alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
+          latest_alert: null,
+          latest_activity: null,
+          coverage: { financial_periods: 1, price_points: 1 },
+        },
+      ],
+    });
+    getWatchlistCalendar.mockResolvedValue({
+      tickers: ["AAPL"],
+      window_start: "2026-04-04",
+      window_end: "2026-07-03",
+      events: [
+        {
+          id: "expected-aapl",
+          date: "2026-05-10",
+          event_type: "expected_filing",
+          source: "historical_cadence",
+          ticker: "AAPL",
+          company_name: "Apple Inc.",
+          title: "Expected 10-Q filing",
+          form: "10-Q",
+          detail: "Median 40-day lag after the 2026-03-31 period end.",
+          href: null,
+          period_end: "2026-03-31",
+        },
+        {
+          id: "13f-2026-03-31",
+          date: "2026-05-15",
+          event_type: "institutional_deadline",
+          source: "fixed_calendar",
+          ticker: null,
+          company_name: null,
+          title: "13F institutional reporting deadline",
+          form: "13F-HR",
+          detail: "Managers disclose holdings for the quarter ended 2026-03-31.",
+          href: null,
+          period_end: "2026-03-31",
+        },
+      ],
+    });
+
+    render(React.createElement(WatchlistPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("Events Calendar")).toBeTruthy();
+    });
+
+    expect(screen.getByText("Expected 10-Q filing")).toBeTruthy();
+    expect(screen.getByText("13F institutional reporting deadline")).toBeTruthy();
   });
 
   it("applies filters for attention, stale, and no-note", async () => {

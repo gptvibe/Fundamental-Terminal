@@ -1638,3 +1638,86 @@ def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monk
     assert msft_item["ticker"] == "MSFT"
     assert msft_item["name"] is None
     assert msft_item["alert_summary"] == {"total": 0, "high": 0, "medium": 0, "low": 0}
+
+
+def test_watchlist_calendar_endpoint_projects_expected_events(monkeypatch):
+    aapl_snapshot = _snapshot("AAPL", "0000320193")
+    aapl_snapshot.company.id = 1
+    msft_snapshot = _snapshot("MSFT", "0000789019")
+    msft_snapshot.company.id = 2
+    snapshots = {
+        "AAPL": aapl_snapshot,
+        "MSFT": msft_snapshot,
+    }
+
+    financials_by_ticker = {
+        "AAPL": [
+            SimpleNamespace(filing_type="10-K", period_end=date(2025, 12, 31), filing_acceptance_at=datetime(2026, 3, 1, tzinfo=timezone.utc)),
+            SimpleNamespace(filing_type="10-Q", period_end=date(2025, 9, 30), filing_acceptance_at=datetime(2025, 11, 9, tzinfo=timezone.utc)),
+            SimpleNamespace(filing_type="10-Q", period_end=date(2025, 6, 30), filing_acceptance_at=datetime(2025, 8, 9, tzinfo=timezone.utc)),
+            SimpleNamespace(filing_type="10-Q", period_end=date(2025, 3, 31), filing_acceptance_at=datetime(2025, 5, 10, tzinfo=timezone.utc)),
+        ],
+        "MSFT": [
+            SimpleNamespace(filing_type="10-K", period_end=date(2025, 12, 31), filing_acceptance_at=datetime(2026, 2, 20, tzinfo=timezone.utc)),
+        ],
+    }
+    filing_events_by_company = {
+        1: [],
+        2: [
+            SimpleNamespace(
+                accession_number="0002-26-000001",
+                item_code="2.02",
+                filing_date=date(2026, 5, 20),
+                report_date=date(2026, 5, 20),
+                summary="8-K Item 2.02: Earnings update.",
+                form="8-K",
+                items="2.02,9.01",
+                category="Earnings",
+                source_url="https://www.sec.gov/Archives/example",
+            )
+        ],
+    }
+
+    monkeypatch.setattr(main_module, "_watchlist_calendar_today", lambda: date(2026, 4, 4))
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: snapshots)
+    monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda _session, company: financials_by_ticker[company.ticker])
+    monkeypatch.setattr(main_module, "get_company_filing_events", lambda _session, company_id, **_kwargs: filing_events_by_company[company_id])
+
+    client = TestClient(app)
+    response = client.get("/api/watchlist/calendar", params=[("tickers", "aapl"), ("tickers", "MSFT")])
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == ["AAPL", "MSFT"]
+    assert payload["window_start"] == "2026-04-04"
+    assert payload["window_end"] == "2026-07-03"
+    assert [item["event_type"] for item in payload["events"]] == ["expected_filing", "expected_filing", "institutional_deadline", "sec_event"]
+
+    expected_filing = payload["events"][0]
+    assert expected_filing["ticker"] == "AAPL"
+    assert expected_filing["date"] == "2026-05-10"
+    assert expected_filing["form"] == "10-Q"
+
+    second_filing = payload["events"][1]
+    assert second_filing["ticker"] == "MSFT"
+    assert second_filing["date"] == "2026-05-10"
+    assert second_filing["form"] == "10-Q"
+
+    deadline = payload["events"][2]
+    assert deadline["ticker"] is None
+    assert deadline["date"] == "2026-05-15"
+    assert deadline["form"] == "13F-HR"
+
+    sec_event = payload["events"][3]
+    assert sec_event["ticker"] == "MSFT"
+    assert sec_event["date"] == "2026-05-20"
+    assert sec_event["form"] == "8-K"
+
+
+def test_watchlist_calendar_endpoint_rejects_more_than_50_tickers():
+    client = TestClient(app)
+    params = [("tickers", f"T{i}") for i in range(51)]
+    response = client.get("/api/watchlist/calendar", params=params)
+
+    assert response.status_code == 422
+    assert "maximum of 50" in response.json()["detail"].lower()

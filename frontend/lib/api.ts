@@ -41,6 +41,7 @@ import {
   OfficialScreenerMetadataResponse,
   OfficialScreenerSearchRequest,
   OfficialScreenerSearchResponse,
+  WatchlistCalendarResponse,
   WatchlistSummaryResponse,
   FinancialHistoryPoint,
   RefreshQueuedResponse
@@ -677,6 +678,15 @@ export function getWatchlistSummary(tickers: string[]): Promise<WatchlistSummary
     method: "POST",
     body: JSON.stringify({ tickers }),
   });
+}
+
+export function getWatchlistCalendar(tickers: string[]): Promise<WatchlistCalendarResponse> {
+  const params = new URLSearchParams();
+  for (const ticker of tickers) {
+    params.append("tickers", ticker);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/watchlist/calendar${suffix}`);
 }
 
 export async function getCompanyFinancialHistory(
