@@ -30,6 +30,7 @@ import {
   CompanyInstitutionalHoldingsSummaryResponse,
   ModelEvaluationResponse,
   CompanyModelsResponse,
+  CompanyOilScenarioOverlayResponse,
   CompanyMarketContextResponse,
   CompanySectorContextResponse,
   CompanyMetricsTimeseriesResponse,
@@ -68,6 +69,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/segment-history(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/oil-scenario-overlay(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/model-evaluations\/latest(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 240_000 } },
   { pattern: /^\/companies\/[^/]+\/peers(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/sector-context(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -602,6 +604,16 @@ export function getCompanyModels(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`);
+}
+
+export function getCompanyOilScenarioOverlay(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyOilScenarioOverlayResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/oil-scenario-overlay${suffix}`, { signal: options?.signal });
 }
 
 export function getLatestModelEvaluation(suiteKey?: string | null): Promise<ModelEvaluationResponse> {

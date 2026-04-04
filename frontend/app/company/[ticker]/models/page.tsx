@@ -11,6 +11,7 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { MarketContextPanel } from "@/components/models/market-context-panel";
 import { ModelEvaluationPanel } from "@/components/models/model-evaluation-panel";
+import { OilScenarioOverlayPanel } from "@/components/models/oil-scenario-overlay-panel";
 import { SectorContextPanel } from "@/components/models/sector-context-panel";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
@@ -20,12 +21,12 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import { showAppToast } from "@/lib/app-toast";
-import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
+import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanyOilScenarioOverlay, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
+import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioOverlayResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
@@ -33,6 +34,7 @@ interface ModelsWorkspaceData {
   marketContextData: CompanyMarketContextResponse | null;
   sectorContextData: CompanySectorContextResponse | null;
   capitalStructureData: CompanyCapitalStructureResponse | null;
+  oilScenarioOverlayData: CompanyOilScenarioOverlayResponse | null;
   evaluationData: ModelEvaluationResponse | null;
   activeJobId: string | null;
 }
@@ -70,6 +72,7 @@ export default function CompanyModelsPage() {
   const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
   const [sectorContextData, setSectorContextData] = useState<CompanySectorContextResponse | null>(null);
   const [capitalStructureData, setCapitalStructureData] = useState<CompanyCapitalStructureResponse | null>(null);
+  const [oilScenarioOverlayData, setOilScenarioOverlayData] = useState<CompanyOilScenarioOverlayResponse | null>(null);
   const [evaluationData, setEvaluationData] = useState<ModelEvaluationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +89,9 @@ export default function CompanyModelsPage() {
   const showMarketContext = hasMeaningfulMarketContext(marketContextData);
   const showSectorContext = Boolean((sectorContextData?.plugins ?? []).length);
   const showCapitalStructure = Boolean(capitalStructureData?.latest);
+  const oilSupportStatus = data?.company?.oil_support_status ?? financialData?.company?.oil_support_status ?? "unsupported";
+  const oilSupportReasons = data?.company?.oil_support_reasons ?? financialData?.company?.oil_support_reasons ?? [];
+  const showOilScenarioOverlay = oilSupportStatus === "supported" || oilSupportStatus === "partial";
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +108,7 @@ export default function CompanyModelsPage() {
           setMarketContextData(workspaceData.marketContextData);
           setSectorContextData(workspaceData.sectorContextData);
           setCapitalStructureData(workspaceData.capitalStructureData);
+          setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
           setEvaluationData(workspaceData.evaluationData);
           setActiveJobId(workspaceData.activeJobId);
         }
@@ -146,6 +153,7 @@ export default function CompanyModelsPage() {
         setMarketContextData(workspaceData.marketContextData);
         setSectorContextData(workspaceData.sectorContextData);
         setCapitalStructureData(workspaceData.capitalStructureData);
+        setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
         setEvaluationData(workspaceData.evaluationData);
         setActiveJobId(workspaceData.activeJobId);
       })
@@ -186,6 +194,7 @@ export default function CompanyModelsPage() {
         setMarketContextData(workspaceData.marketContextData);
         setSectorContextData(workspaceData.sectorContextData);
         setCapitalStructureData(workspaceData.capitalStructureData);
+        setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
         setEvaluationData(workspaceData.evaluationData);
         setActiveJobId(workspaceData.activeJobId);
 
@@ -289,6 +298,7 @@ export default function CompanyModelsPage() {
         market_context: marketContextData,
         sector_context: sectorContextData,
         capital_structure: capitalStructureData,
+        oil_scenario_overlay: oilScenarioOverlayData,
         latest_evaluation: evaluationData,
       });
       showAppToast({ message: "Model outputs exported as JSON.", tone: "info" });
@@ -408,7 +418,7 @@ export default function CompanyModelsPage() {
           />
         ) : null}
         {strictOfficialMode ? (
-          <div className="text-muted" style={{ marginBottom: 12 }}>
+          <div className="text-muted models-page-strict-note">
             Strict official mode disables commercial equity price inputs. Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured.
           </div>
         ) : null}
@@ -417,6 +427,7 @@ export default function CompanyModelsPage() {
             <div className="metric-label">DuPont Basis</div>
             <select
               className="dupont-mode-select"
+              aria-label="DuPont basis"
               value={dupontMode}
               onChange={(event) => setDupontMode(event.target.value as DupontMode)}
             >
@@ -494,6 +505,26 @@ export default function CompanyModelsPage() {
           />
         </DeferredClientSection>
       </Panel>
+
+      {showOilScenarioOverlay ? (
+        <Panel
+          title="Oil Scenario Overlay"
+          subtitle={strictOfficialMode ? "Official oil benchmark overlay with manual price entry support when strict mode suppresses cached market prices" : "Fair-value overlay using official oil benchmarks and user-edited scenario inputs on top of the current model base"}
+          className="models-page-span-full"
+          variant="subtle"
+        >
+          <OilScenarioOverlayPanel
+            ticker={ticker}
+            overlay={oilScenarioOverlayData}
+            models={models}
+            financials={financialData?.financials ?? []}
+            priceHistory={financialData?.price_history ?? []}
+            strictOfficialMode={strictOfficialMode}
+            companySupportStatus={oilSupportStatus}
+            companySupportReasons={oilSupportReasons}
+          />
+        </Panel>
+      ) : null}
 
       <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, the Altman proxy, and ratios"} className="models-page-span-full" variant="subtle">
         {hasModels ? (
@@ -580,8 +611,8 @@ export default function CompanyModelsPage() {
               <div className="grid-empty-copy">
                 For a new or out-of-date company, results may take a moment while data refreshes and the models finish running.
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                <button onClick={() => void queueRefresh()} className="ticker-button" style={{ borderColor: "var(--positive)", color: "var(--positive)" }}>
+              <div className="models-empty-actions">
+                <button onClick={() => void queueRefresh()} className="ticker-button models-refresh-button">
                   {refreshing ? "Refreshing..." : "Refresh Model Data"}
                 </button>
                 <span className="pill">{activeJobId ? "Update in progress" : loading ? "Preparing model data" : "Waiting for first update"}</span>
@@ -595,12 +626,13 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, evaluationResult] = await Promise.allSettled([
+  const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, oilScenarioOverlayResult, evaluationResult] = await Promise.allSettled([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
     getCompanyMarketContext(ticker),
     getCompanySectorContext(ticker),
     getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
+    getCompanyOilScenarioOverlay(ticker),
     getLatestModelEvaluation(),
   ]);
 
@@ -609,6 +641,7 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
   const marketContextData = optionalModelsWorkspacePayload(marketContextResult);
   const sectorContextData = optionalModelsWorkspacePayload(sectorContextResult);
   const capitalStructureData = optionalModelsWorkspacePayload(capitalStructureResult);
+  const oilScenarioOverlayData = optionalModelsWorkspacePayload(oilScenarioOverlayResult);
   const evaluationData = optionalModelsWorkspacePayload(evaluationResult);
 
   return {
@@ -617,11 +650,13 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     marketContextData,
     sectorContextData,
     capitalStructureData,
+    oilScenarioOverlayData,
     evaluationData,
     activeJobId:
       modelData.refresh.job_id ??
       financialData.refresh.job_id ??
       capitalStructureData?.refresh.job_id ??
+      oilScenarioOverlayData?.refresh.job_id ??
       marketContextData?.refresh.job_id ??
       sectorContextData?.refresh.job_id ??
       evaluationData?.run?.id?.toString() ?? null

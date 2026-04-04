@@ -5,7 +5,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CompanyModelsPage from "@/app/company/[ticker]/models/page";
-import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanySectorContext, getLatestModelEvaluation } from "@/lib/api";
+import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanyOilScenarioOverlay, getCompanySectorContext, getLatestModelEvaluation } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 
 vi.mock("next/navigation", () => ({
@@ -52,11 +52,16 @@ vi.mock("@/components/models/sector-context-panel", () => ({
   SectorContextPanel: () => React.createElement("div", null, "sector-context-panel"),
 }));
 
+vi.mock("@/components/models/oil-scenario-overlay-panel", () => ({
+  OilScenarioOverlayPanel: () => React.createElement("div", null, "oil-scenario-overlay-panel"),
+}));
+
 vi.mock("@/lib/api", () => ({
   getCompanyCapitalStructure: vi.fn(),
   getCompanyModels: vi.fn(),
   getCompanyFinancials: vi.fn(),
   getCompanyMarketContext: vi.fn(),
+  getCompanyOilScenarioOverlay: vi.fn(),
   getCompanySectorContext: vi.fn(),
   getLatestModelEvaluation: vi.fn(),
   refreshCompany: vi.fn(),
@@ -72,6 +77,9 @@ describe("CompanyModelsPage", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["sector_not_oil_exposed"],
         strict_official_mode: false,
         last_checked: "2026-03-22T00:00:00Z",
         last_checked_financials: "2026-03-22T00:00:00Z",
@@ -155,6 +163,7 @@ describe("CompanyModelsPage", () => {
         reconciliation_disagreement_count: 0,
       },
     });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue(undefined as never);
     vi.mocked(getCompanyMarketContext).mockRejectedValue(new Error("API request failed: 500 Internal Server Error"));
     vi.mocked(getCompanySectorContext).mockResolvedValue({
       company: null,
@@ -239,6 +248,9 @@ describe("CompanyModelsPage", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["sector_not_oil_exposed"],
         strict_official_mode: false,
         last_checked: "2026-03-22T00:00:00Z",
         last_checked_financials: "2026-03-22T00:00:00Z",
@@ -306,6 +318,7 @@ describe("CompanyModelsPage", () => {
         reconciliation_disagreement_count: 0,
       },
     });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue(undefined as never);
     vi.mocked(getCompanyFinancials).mockResolvedValue({
       company: {
         ticker: "ACME",
@@ -314,6 +327,9 @@ describe("CompanyModelsPage", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["sector_not_oil_exposed"],
         strict_official_mode: false,
         last_checked: "2026-03-22T00:00:00Z",
         last_checked_financials: "2026-03-22T00:00:00Z",
@@ -512,6 +528,9 @@ describe("CompanyModelsPage", () => {
         sector: "prepackaged software",
         market_sector: "Technology",
         market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["sector_not_oil_exposed"],
         strict_official_mode: true,
         last_checked: "2026-03-22T00:00:00Z",
         last_checked_financials: "2026-03-22T00:00:00Z",
@@ -545,6 +564,7 @@ describe("CompanyModelsPage", () => {
         reconciliation_disagreement_count: 0,
       },
     });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue(undefined as never);
     vi.mocked(getCompanyFinancials).mockResolvedValue({
       company: {
         ticker: "ACME",
@@ -553,6 +573,9 @@ describe("CompanyModelsPage", () => {
         sector: "prepackaged software",
         market_sector: "Technology",
         market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["sector_not_oil_exposed"],
         strict_official_mode: true,
         last_checked: "2026-03-22T00:00:00Z",
         last_checked_financials: "2026-03-22T00:00:00Z",
@@ -689,5 +712,108 @@ describe("CompanyModelsPage", () => {
     expect(screen.getByText(/Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured\./i)).toBeTruthy();
     expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Price Layer");
     expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Disabled");
+  });
+
+  it("shows the oil scenario overlay panel for supported oil companies", async () => {
+    vi.mocked(getCompanyModels).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Energy",
+        sector: "Energy",
+        market_sector: "Energy",
+        market_industry: "Integrated Oil & Gas",
+        oil_exposure_type: "integrated",
+        oil_support_status: "supported",
+        oil_support_reasons: ["integrated_upstream_supported"],
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      requested_models: MODEL_NAMES,
+      models: [],
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-22T00:00:00Z",
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyFinancials).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Energy",
+        sector: "Energy",
+        market_sector: "Energy",
+        market_industry: "Integrated Oil & Gas",
+        oil_exposure_type: "integrated",
+        oil_support_status: "supported",
+        oil_support_reasons: ["integrated_upstream_supported"],
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      financials: [],
+      price_history: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue({
+      company: null,
+      status: "supported",
+      fetched_at: "2026-04-04T00:00:00Z",
+      strict_official_mode: false,
+      exposure_profile: {
+        profile_id: "integrated",
+        label: "Integrated",
+        oil_exposure_type: "integrated",
+        oil_support_status: "supported",
+        oil_support_reasons: ["integrated_upstream_supported"],
+        relevance_reasons: ["integrated_upstream_supported"],
+        hedging_signal: "unknown",
+        pass_through_signal: "unknown",
+        evidence: [],
+      },
+      benchmark_series: [],
+      scenarios: [],
+      sensitivity: null,
+      provenance: [],
+      as_of: "2026-04-04",
+      last_refreshed_at: "2026-04-04T00:00:00Z",
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: null, fallback_ratio: null, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({ company: null, status: "ok", curve_points: [], slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null }, slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null }, fred_series: [], provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true }, confidence_flags: [], provenance_details: {}, fetched_at: "2026-03-22T00:00:00Z", refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null }, rates_credit: [], inflation_labor: [], growth_activity: [], cyclical_demand: [], cyclical_costs: [], relevant_series: [], relevant_indicators: [], sector_exposure: [], hqm_snapshot: null });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({ company: null, status: "ok", matched_plugin_ids: [], plugins: [], fetched_at: "2026-03-22T00:00:00Z", provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true }, confidence_flags: [], refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null } });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({ company: null, latest: null, history: [], last_capital_structure_check: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true }, confidence_flags: [], refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null }, diagnostics: { coverage_ratio: null, fallback_ratio: null, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 } });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({ run: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false }, confidence_flags: [] });
+
+    render(React.createElement(CompanyModelsPage));
+
+    await waitFor(() => {
+      expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME");
+    });
+
+    expect(screen.getByText("Oil Scenario Overlay")).toBeTruthy();
+    expect(screen.getByText("oil-scenario-overlay-panel")).toBeTruthy();
   });
 });

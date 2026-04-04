@@ -2906,6 +2906,92 @@ select {
   justify-content: space-between;
 }
 
+.models-page-strict-note {
+  margin-bottom: 12px;
+}
+
+.models-empty-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.models-refresh-button {
+  border-color: var(--positive);
+  color: var(--positive);
+}
+
+.oil-overlay-controls {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.oil-overlay-field {
+  display: grid;
+  gap: 6px;
+}
+
+.oil-overlay-help {
+  font-size: var(--text-xs);
+}
+
+.oil-overlay-curve-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 120px minmax(0, 180px) auto;
+  align-items: center;
+}
+
+.oil-overlay-summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.oil-overlay-summary-card {
+  gap: 6px;
+}
+
+.oil-overlay-summary-value {
+  font-size: var(--text-xl);
+  font-weight: 700;
+}
+
+.oil-overlay-summary-value.tone-accent {
+  color: var(--accent);
+}
+
+.oil-overlay-summary-value.tone-warning {
+  color: var(--warning);
+}
+
+.oil-overlay-summary-value.tone-positive {
+  color: var(--positive);
+}
+
+.oil-overlay-summary-value.tone-cyan {
+  color: var(--cyan);
+}
+
+.oil-overlay-reasons {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.oil-overlay-footer-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+@media (max-width: 720px) {
+  .oil-overlay-curve-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .company-source-chip-label {
   color: var(--text-muted);
   text-transform: none;
