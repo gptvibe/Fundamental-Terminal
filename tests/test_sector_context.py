@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 import app.main as main_module
 from app.db import get_db_session
 from app.main import RefreshState, app
-from app.services.sector_plugins import bts_airlines, eia_power, fhfa_housing, usda_wasde
+from app.services.sector_plugins import bts_airlines, cftc_cot, eia_power, fed_h8_banking, fhfa_housing, usda_wasde
 
 
 class _StubResponse:
@@ -200,6 +200,91 @@ def test_usda_wasde_plugin_parses_corn_and_soy_sections(monkeypatch):
     assert result.summary_metrics[2].value == 315.0
     assert result.detail_view is not None
     assert result.detail_view.rows[3].label == "Soybean avg. farm price"
+
+
+def test_fed_h8_banking_plugin_parses_weekly_series(monkeypatch):
+    monkeypatch.setattr(
+        fed_h8_banking,
+        "settings",
+        SimpleNamespace(
+            fred_api_key="demo-key",
+            sec_timeout_seconds=30.0,
+        ),
+    )
+    monkeypatch.setattr(
+        fed_h8_banking,
+        "build_http_client",
+        lambda *, timeout_seconds: _StubClient(
+            [
+                _StubResponse(json_data={"observations": [{"date": "2026-03-19", "value": "13600.0"}, {"date": "2026-03-26", "value": "13650.0"}]}),
+                _StubResponse(json_data={"observations": [{"date": "2026-03-19", "value": "18920.0"}, {"date": "2026-03-26", "value": "18980.0"}]}),
+                _StubResponse(json_data={"observations": [{"date": "2026-03-19", "value": "5740.0"}, {"date": "2026-03-26", "value": "5755.0"}]}),
+                _StubResponse(json_data={"observations": [{"date": "2026-03-19", "value": "2950.0"}, {"date": "2026-03-26", "value": "2968.0"}]}),
+            ]
+        ),
+    )
+
+    result = fed_h8_banking.fetch_plugin()
+
+    assert result.status == "ok"
+    assert result.summary_metrics[0].metric_id == "h8_loans_and_leases"
+    assert result.summary_metrics[0].value == 13650.0
+    assert result.charts[0].chart_id == "h8_balance_sheet_trend"
+
+
+def test_cftc_cot_plugin_parses_latest_snapshot(monkeypatch):
+    monkeypatch.setattr(
+        cftc_cot,
+        "settings",
+        SimpleNamespace(
+            sec_timeout_seconds=30.0,
+        ),
+    )
+    monkeypatch.setattr(
+        cftc_cot,
+        "build_http_client",
+        lambda *, timeout_seconds: _StubClient(
+            [
+                _StubResponse(json_data=[{"latest": "2026-03-31T00:00:00"}]),
+                _StubResponse(
+                    json_data=[
+                        {
+                            "report_date_as_yyyy_mm_dd": "2026-03-31T00:00:00",
+                            "commodity_name": "CRUDE OIL",
+                            "commodity_subgroup_name": "PETROLEUM AND PRODUCTS",
+                            "open_interest_all": "1000000",
+                            "noncomm_positions_long_all": "410000",
+                            "noncomm_positions_short_all": "300000",
+                        },
+                        {
+                            "report_date_as_yyyy_mm_dd": "2026-03-31T00:00:00",
+                            "commodity_name": "NATURAL GAS",
+                            "commodity_subgroup_name": "NATURAL GAS AND PRODUCTS",
+                            "open_interest_all": "600000",
+                            "noncomm_positions_long_all": "205000",
+                            "noncomm_positions_short_all": "250000",
+                        },
+                        {
+                            "report_date_as_yyyy_mm_dd": "2026-03-31T00:00:00",
+                            "commodity_name": "COPPER",
+                            "commodity_subgroup_name": "BASE METALS",
+                            "open_interest_all": "300000",
+                            "noncomm_positions_long_all": "120000",
+                            "noncomm_positions_short_all": "90000",
+                        },
+                    ]
+                ),
+            ]
+        ),
+    )
+
+    result = cftc_cot.fetch_plugin()
+
+    assert result.status == "ok"
+    assert result.summary_metrics[0].label == "Energy open interest"
+    assert result.summary_metrics[0].value == 1600000.0
+    assert result.summary_metrics[3].label == "Materials non-commercial net"
+    assert result.summary_metrics[3].value == 30000.0
 
 
 def test_company_sector_context_route_returns_payload(monkeypatch):

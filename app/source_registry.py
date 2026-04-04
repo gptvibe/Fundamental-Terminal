@@ -86,6 +86,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=24 * 60 * 60,
         disclosure_note="Official Federal Reserve holding-company regulatory data used for consolidated bank holding company financial coverage.",
     ),
+    "cftc_cot": SourceDefinition(
+        source_id="cftc_cot",
+        tier="official_regulator",
+        display_label="CFTC Commitments of Traders",
+        url="https://publicreporting.cftc.gov/",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official CFTC Commitments of Traders positioning data used for commodity-linked energy and materials market context.",
+    ),
     "us_treasury_daily_par_yield_curve": SourceDefinition(
         source_id="us_treasury_daily_par_yield_curve",
         tier="official_treasury_or_fed",
@@ -109,6 +117,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         url="https://fred.stlouisfed.org/",
         default_freshness_ttl_seconds=24 * 60 * 60,
         disclosure_note="Federal Reserve public macro series used for supplemental rates, inflation, labor, and credit context.",
+    ),
+    "federal_reserve_h8": SourceDefinition(
+        source_id="federal_reserve_h8",
+        tier="official_treasury_or_fed",
+        display_label="Federal Reserve H.8 Assets and Liabilities",
+        url="https://fred.stlouisfed.org/release?rid=22",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Federal Reserve H.8 commercial-banking balance-sheet aggregates used for banking sector liquidity and credit context.",
     ),
     "bls_public_data": SourceDefinition(
         source_id="bls_public_data",
@@ -380,11 +396,15 @@ def infer_source_id(source_hint: str | None, *, default: str | None = None) -> s
         return "fdic_bankfind_financials"
     if "fr y-9c" in normalized or "fr_y-9c" in normalized or "federalreserve.gov" in normalized:
         return "federal_reserve_fr_y9c"
+    if "publicreporting.cftc.gov" in normalized or "commitments of traders" in normalized or "cftc" in normalized:
+        return "cftc_cot"
     if "fiscaldata" in normalized or "average interest rates" in normalized:
         return "us_treasury_fiscaldata"
     if "hqm" in normalized and "treasury" in normalized:
         return "treasury_hqm_corporate_yield_curve"
     if "fred" in normalized or "stlouisfed.org" in normalized:
+        if "release?rid=22" in normalized or "/release/tables?rid=22" in normalized or "h.8" in normalized:
+            return "federal_reserve_h8"
         return "fred"
     if "bureau of labor statistics" in normalized or " bls" in normalized or "bls.gov" in normalized:
         return "bls_public_data"

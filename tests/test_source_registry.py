@@ -14,6 +14,8 @@ def test_infer_source_id_maps_supported_provider_hints() -> None:
     assert infer_source_id("https://api.eia.gov/v2/petroleum/pri/spt/data/") == "eia_petroleum_spot_prices"
     assert infer_source_id("https://api.eia.gov/v2/steo/data/") == "eia_steo"
     assert infer_source_id("https://api.eia.gov/v2/aeo/") == "eia_aeo"
+    assert infer_source_id("https://fred.stlouisfed.org/release?rid=22") == "federal_reserve_h8"
+    assert infer_source_id("https://publicreporting.cftc.gov/") == "cftc_cot"
     assert infer_source_id("Manual Override") == "manual_override"
 
 

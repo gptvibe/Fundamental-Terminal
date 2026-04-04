@@ -145,16 +145,24 @@ def get_company_sector_context(
         )
 
     provenance_entries = build_provenance_entries(usages)
+    serialized_provenance: list[dict[str, Any]] = []
+    for entry in provenance_entries:
+        normalized = dict(entry)
+        refreshed = normalized.get("last_refreshed_at")
+        if isinstance(refreshed, datetime):
+            normalized["last_refreshed_at"] = refreshed.isoformat()
+        serialized_provenance.append(normalized)
+
     source_mix = build_source_mix(provenance_entries)
     as_of = max((entry.get("as_of") for entry in provenance_entries if entry.get("as_of")), default=None)
-    last_refreshed_at = max(
-        (
-            entry.get("last_refreshed_at").isoformat()
-            for entry in provenance_entries
-            if entry.get("last_refreshed_at") is not None
-        ),
-        default=now.isoformat(),
-    )
+    refreshed_candidates: list[str] = []
+    for entry in provenance_entries:
+        refreshed_value = entry.get("last_refreshed_at")
+        if isinstance(refreshed_value, datetime):
+            refreshed_candidates.append(refreshed_value.isoformat())
+        elif isinstance(refreshed_value, str) and refreshed_value:
+            refreshed_candidates.append(refreshed_value)
+    last_refreshed_at = max(refreshed_candidates, default=now.isoformat())
 
     if not matched_plugin_ids:
         status = "not_applicable"
@@ -171,7 +179,7 @@ def get_company_sector_context(
         "matched_plugin_ids": matched_plugin_ids,
         "plugins": plugins,
         "fetched_at": now.isoformat(),
-        "provenance": provenance_entries,
+        "provenance": serialized_provenance,
         "as_of": as_of,
         "last_refreshed_at": last_refreshed_at,
         "source_mix": source_mix,

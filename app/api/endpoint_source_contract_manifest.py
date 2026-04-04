@@ -357,6 +357,8 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "/api/companies/{ticker}/sector-context",
     ): _official_only_contract(
         "eia_electricity_retail_sales",
+        "federal_reserve_h8",
+        "cftc_cot",
         "fhfa_house_price_index",
         "bts_t100_segment_summary",
         "bts_form41_financial_review",
