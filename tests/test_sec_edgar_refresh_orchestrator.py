@@ -112,6 +112,11 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
     )
     monkeypatch.setattr(
         sec_edgar,
+        "_refresh_oil_scenario_overlay_cache",
+        lambda *_args, **_kwargs: cache_steps.append("oil-scenario"),
+    )
+    monkeypatch.setattr(
+        sec_edgar,
         "_refresh_earnings_model_cache",
         lambda *_args, **_kwargs: cache_steps.append("earnings-model"),
     )
@@ -127,7 +132,7 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
     assert result.status == "skipped"
     assert result.fetched_from_sec is False
     assert result.detail == "Freshness window still valid"
-    assert cache_steps == ["derived", "capital-structure", "earnings-model"]
+    assert cache_steps == ["derived", "capital-structure", "oil-scenario", "earnings-model"]
     assert reporter.completed == ["Using fresh cached data."]
     assert session.commit_count == 1
 
@@ -247,6 +252,7 @@ def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):
     monkeypatch.setattr(service, "refresh_prices", lambda **_kwargs: 10)
     monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
 
     result = service.refresh_company("MSFT", reporter=reporter)

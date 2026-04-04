@@ -39,6 +39,7 @@ from app.services.market_data import (
 from app.services.capital_structure_intelligence import recompute_and_persist_company_capital_structure
 from app.services.derived_metrics_mart import recompute_and_persist_company_derived_metrics
 from app.services.earnings_intelligence import recompute_and_persist_company_earnings_model_points
+from app.services.oil_scenario_overlay import refresh_company_oil_scenario_overlay
 from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, collect_regulated_financial_statements
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.sec_sic import resolve_sec_sic_profile
@@ -2044,6 +2045,7 @@ class EdgarIngestionService:
         if policy.can_skip_sec_refresh():
             _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
             _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
+            _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
             reporter.complete("Using fresh cached data.")
             session.commit()
@@ -2238,6 +2240,7 @@ class EdgarIngestionService:
                 session.rollback()
             _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
             _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
+            _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
@@ -2454,6 +2457,7 @@ class EdgarIngestionService:
 
             _refresh_derived_metrics_cache(session, company.id, checked_at, reporter)
             _refresh_capital_structure_cache(session, company.id, checked_at, reporter)
+            _refresh_oil_scenario_overlay_cache(session, company, checked_at, reporter)
             _refresh_earnings_model_cache(session, company.id, checked_at, reporter)
 
             session.commit()
@@ -2696,6 +2700,23 @@ def _refresh_capital_structure_cache(
     reporter.step("capital_structure", "Recomputing capital structure intelligence cache...")
     rows_written = recompute_and_persist_company_capital_structure(session, company_id, checked_at=checked_at)
     reporter.step("capital_structure", f"Updated {rows_written} capital structure rows")
+    return rows_written
+
+
+def _refresh_oil_scenario_overlay_cache(
+    session: Session,
+    company: Company,
+    checked_at: datetime,
+    reporter: JobReporter,
+) -> int:
+    reporter.step("oil_scenario_overlay", "Refreshing oil scenario overlay cache...")
+    rows_written = refresh_company_oil_scenario_overlay(
+        session,
+        company,
+        checked_at=checked_at,
+        job_id=getattr(reporter, "job_id", None),
+    )
+    reporter.step("oil_scenario_overlay", f"Updated {rows_written} oil scenario overlay rows")
     return rows_written
 
 

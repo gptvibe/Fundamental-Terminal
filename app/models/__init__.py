@@ -4,6 +4,7 @@ from app.models.capital_markets_event import CapitalMarketsEvent
 from app.models.capital_structure_snapshot import CapitalStructureSnapshot
 from app.models.company import Company
 from app.models.company_macro_snapshot import CompanyMacroSnapshot
+from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
 from app.models.company_sector_snapshot import CompanySectorSnapshot
 from app.models.dataset_refresh_state import DatasetRefreshState
 from app.models.derived_metric_point import DerivedMetricPoint
@@ -33,6 +34,7 @@ __all__ = [
     "CapitalStructureSnapshot",
     "Company",
     "CompanyMacroSnapshot",
+    "CompanyOilScenarioOverlaySnapshot",
     "CompanySectorSnapshot",
     "DatasetRefreshState",
     "DerivedMetricPoint",

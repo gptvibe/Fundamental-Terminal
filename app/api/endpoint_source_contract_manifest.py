@@ -212,6 +212,14 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "fdic_bankfind_financials",
         "federal_reserve_fr_y9c",
     ),
+    (
+        "GET",
+        "/api/companies/{ticker}/oil-scenario-overlay",
+    ): _derived_official_contract(
+        "ft_oil_scenario_overlay",
+        "sec_edgar",
+        "eia_steo",
+    ),
     ("GET", "/api/companies/{ticker}/filing-insights"): _official_only_contract("sec_edgar"),
     (
         "GET",

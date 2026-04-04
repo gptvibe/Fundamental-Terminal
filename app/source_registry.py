@@ -126,6 +126,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=24 * 60 * 60,
         disclosure_note="Official EIA electricity demand and retail pricing data used for power-sector context.",
     ),
+    "eia_steo": SourceDefinition(
+        source_id="eia_steo",
+        tier="official_statistical",
+        display_label="U.S. Energy Information Administration Short-Term Energy Outlook",
+        url="https://api.eia.gov/v2/steo/",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official EIA Short-Term Energy Outlook series intended for oil and petroleum scenario context.",
+    ),
     "fhfa_house_price_index": SourceDefinition(
         source_id="fhfa_house_price_index",
         tier="official_statistical",
@@ -277,6 +285,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         url=_REPO_URL,
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Persisted capital structure roll-forwards, maturities, payout mix, and dilution bridges derived from official SEC companyfacts statements.",
+    ),
+    "ft_oil_scenario_overlay": SourceDefinition(
+        source_id="ft_oil_scenario_overlay",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Oil Scenario Overlay",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Persisted oil exposure overlays derived from official company metadata and official energy scenario inputs when available.",
     ),
     "ft_screener_backend": SourceDefinition(
         source_id="ft_screener_backend",

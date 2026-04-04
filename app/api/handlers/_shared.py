@@ -94,6 +94,11 @@ from app.services.market_context import (
     get_market_context_v2,
 )
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
+from app.services.oil_scenario_overlay import (
+    build_company_oil_scenario_overlay_placeholder,
+    get_company_oil_scenario_overlay,
+    get_company_oil_scenario_overlay_last_checked,
+)
 from app.services.segment_history import build_segment_history
 from app.services.sector_context import get_company_sector_context
 from app.services.screener import build_official_screener_filter_catalog, run_official_screener
@@ -1589,6 +1594,92 @@ def company_models(
             dupont_model.reset_mode_override(token)
 
 
+def company_oil_scenario_overlay(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyOilScenarioOverlayResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    hot_key = f"oil_scenario_overlay:{normalized_ticker}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload_data, is_fresh = cached_hot
+        cached_response = CompanyOilScenarioOverlayResponse.model_validate(payload_data)
+        if not is_fresh:
+            stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
+            cached_response = cached_response.model_copy(
+                update={
+                    "refresh": stale_refresh,
+                    "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                    "confidence_flags": sorted(
+                        set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])
+                    ),
+                }
+            )
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=cached_response.company.last_checked if cached_response.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyOilScenarioOverlayResponse(
+            company=None,
+            status="insufficient_data",
+            fetched_at=datetime.now(timezone.utc),
+            strict_official_mode=settings.strict_official_mode,
+            exposure_profile=OilExposureProfilePayload(
+                profile_id="not_applicable",
+                label="Not Applicable",
+                hedging_signal="unknown",
+                pass_through_signal="unknown",
+            ),
+            benchmark_series=[],
+            scenarios=[],
+            sensitivity=None,
+            diagnostics=_build_data_quality_diagnostics(
+                coverage_ratio=0.0,
+                stale_flags=["company_missing", "oil_scenario_overlay_missing"],
+                missing_field_flags=["oil_scenario_overlay_missing"],
+            ),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            **_empty_provenance_contract("company_missing", "oil_scenario_overlay_missing"),
+        )
+
+    payload, cache_state = get_company_oil_scenario_overlay(session, snapshot.company.id)
+    last_checked = get_company_oil_scenario_overlay_last_checked(session, snapshot.company.id)
+    refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+    response = _serialize_oil_scenario_overlay_response(
+        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
+        payload=payload
+        or build_company_oil_scenario_overlay_placeholder(
+            snapshot.company,
+            checked_at=last_checked or snapshot.last_checked or datetime.now(timezone.utc),
+        ),
+        refresh=refresh,
+        default_checked_at=last_checked or snapshot.last_checked or datetime.now(timezone.utc),
+        mark_missing=payload is None,
+    )
+    _store_hot_cached_payload(hot_key, response)
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        response,
+        last_modified=response.company.last_checked if response.company else None,
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return response
+
+
 def latest_model_evaluation(
     request: Request,
     http_response: Response,
@@ -1860,6 +1951,94 @@ def _coerce_market_context_number(value: Any) -> float | None:
         return None
 
     return numeric_value
+
+
+def _parse_datetime_value(value: Any, default: datetime) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return default
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return default
+
+
+def _serialize_oil_scenario_overlay_response(
+    *,
+    company: CompanyPayload,
+    payload: dict[str, Any],
+    refresh: RefreshState,
+    default_checked_at: datetime,
+    mark_missing: bool,
+) -> CompanyOilScenarioOverlayResponse:
+    diagnostics = _diagnostics_for_oil_scenario_overlay(payload, refresh, mark_missing=mark_missing)
+    fetched_at = _parse_datetime_value(payload.get("fetched_at"), default_checked_at)
+    last_refreshed_at = _parse_datetime_value(payload.get("last_refreshed_at"), fetched_at)
+    confidence_flags = sorted(
+        set(
+            [
+                *[flag for flag in payload.get("confidence_flags") or [] if isinstance(flag, str)],
+                *_confidence_flags_from_diagnostics(diagnostics),
+                *_confidence_flags_from_refresh(refresh),
+            ]
+        )
+    )
+
+    provenance = [
+        ProvenanceEntryPayload.model_validate(entry)
+        for entry in (payload.get("provenance") or [])
+        if isinstance(entry, dict)
+    ]
+    source_mix = SourceMixPayload.model_validate(payload.get("source_mix") or {})
+    benchmark_series = [
+        OilCurveSeriesPayload.model_validate(item)
+        for item in (payload.get("benchmark_series") or [])
+        if isinstance(item, dict)
+    ]
+    scenarios = [
+        OilScenarioCasePayload.model_validate(item)
+        for item in (payload.get("scenarios") or [])
+        if isinstance(item, dict)
+    ]
+
+    sensitivity_payload = payload.get("sensitivity")
+    sensitivity = OilSensitivityPayload.model_validate(sensitivity_payload) if isinstance(sensitivity_payload, dict) else None
+    exposure_profile = payload.get("exposure_profile") if isinstance(payload.get("exposure_profile"), dict) else {}
+
+    return CompanyOilScenarioOverlayResponse(
+        company=company,
+        status=str(payload.get("status") or "partial"),
+        fetched_at=fetched_at,
+        strict_official_mode=bool(payload.get("strict_official_mode", settings.strict_official_mode)),
+        exposure_profile=OilExposureProfilePayload.model_validate(
+            {
+                "profile_id": str(exposure_profile.get("profile_id") or "not_applicable"),
+                "label": str(exposure_profile.get("label") or "Not Applicable"),
+                "relevance_reasons": [
+                    str(reason) for reason in (exposure_profile.get("relevance_reasons") or []) if isinstance(reason, str)
+                ],
+                "hedging_signal": str(exposure_profile.get("hedging_signal") or "unknown"),
+                "pass_through_signal": str(exposure_profile.get("pass_through_signal") or "unknown"),
+                "evidence": [item for item in (exposure_profile.get("evidence") or []) if isinstance(item, dict)],
+            }
+        ),
+        benchmark_series=benchmark_series,
+        scenarios=scenarios,
+        sensitivity=sensitivity,
+        diagnostics=diagnostics,
+        refresh=refresh,
+        provenance=provenance,
+        as_of=_normalize_as_of(payload.get("as_of")),
+        last_refreshed_at=last_refreshed_at,
+        source_mix=source_mix,
+        confidence_flags=confidence_flags,
+    )
 
 
 @app.get("/api/market-context", response_model=CompanyMarketContextResponse)
@@ -2709,6 +2888,18 @@ def _refresh_for_capital_structure(
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
+def _refresh_for_oil_scenario_overlay(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    cache_state: Literal["fresh", "stale", "missing"],
+) -> RefreshState:
+    if snapshot.cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+    if cache_state in {"missing", "stale"}:
+        return _trigger_cached_company_refresh(background_tasks, snapshot.company.ticker, reason=cache_state)
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
 def _refresh_for_governance(
     background_tasks: BackgroundTasks,
     session: Session,
@@ -3101,6 +3292,17 @@ def _trigger_refresh(
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
+def _trigger_cached_company_refresh(
+    background_tasks: BackgroundTasks,
+    ticker: str,
+    *,
+    reason: Literal["missing", "stale"],
+) -> RefreshState:
+    normalized_ticker = _normalize_ticker(ticker)
+    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=False)
+    return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
+
+
 def _serialize_company(
     snapshot: CompanyCacheSnapshot,
     last_checked: datetime | None = None,
@@ -3435,6 +3637,34 @@ def _diagnostics_for_capital_structure(
         stale_flags=_stale_flags_from_refresh(refresh),
         parser_confidence=latest.confidence_score if latest.confidence_score is not None else coverage_ratio,
         missing_field_flags=sorted(set(latest.quality_flags)),
+    )
+
+
+def _diagnostics_for_oil_scenario_overlay(
+    payload: dict[str, Any],
+    refresh: RefreshState,
+    *,
+    mark_missing: bool,
+) -> DataQualityDiagnosticsPayload:
+    diagnostics = payload.get("diagnostics") if isinstance(payload.get("diagnostics"), dict) else {}
+    stale_flags = [str(flag) for flag in diagnostics.get("stale_flags") or [] if isinstance(flag, str)]
+    missing_field_flags = [str(flag) for flag in diagnostics.get("missing_field_flags") or [] if isinstance(flag, str)]
+    if mark_missing:
+        missing_field_flags.append("oil_scenario_overlay_missing")
+    if not payload.get("benchmark_series"):
+        missing_field_flags.append("official_oil_curve_missing")
+    if not payload.get("scenarios"):
+        missing_field_flags.append("oil_scenarios_missing")
+    if payload.get("sensitivity") is None:
+        missing_field_flags.append("sensitivity_not_computed")
+    return _build_data_quality_diagnostics(
+        coverage_ratio=_coerce_number(diagnostics.get("coverage_ratio"), None),
+        fallback_ratio=_coerce_number(diagnostics.get("fallback_ratio"), None),
+        stale_flags=sorted(set([*_stale_flags_from_refresh(refresh), *stale_flags])),
+        parser_confidence=_coerce_number(diagnostics.get("parser_confidence"), None),
+        missing_field_flags=sorted(set(missing_field_flags)),
+        reconciliation_penalty=_coerce_number(diagnostics.get("reconciliation_penalty"), None),
+        reconciliation_disagreement_count=int(diagnostics.get("reconciliation_disagreement_count") or 0),
     )
 
 

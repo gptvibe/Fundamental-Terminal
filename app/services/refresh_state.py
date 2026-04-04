@@ -23,6 +23,7 @@ DatasetName = Literal[
     "capital_markets",
     "proxy",
     "derived_metrics",
+    "oil_scenario_overlay",
     "company_refresh",
 ]
 

@@ -903,6 +903,67 @@ export interface CompanyModelsResponse extends ProvenanceEnvelope {
   diagnostics: DataQualityDiagnosticsPayload;
 }
 
+export interface OilCurvePointPayload {
+  label: string;
+  value: number | null;
+  units: string;
+  observation_date: string | null;
+}
+
+export interface OilCurveSeriesPayload {
+  series_id: string;
+  label: string;
+  units: string;
+  status: string;
+  points: OilCurvePointPayload[];
+  latest_value: number | null;
+  latest_observation_date: string | null;
+}
+
+export interface OilScenarioCasePayload {
+  scenario_id: string;
+  label: string;
+  benchmark_value: number | null;
+  benchmark_delta_percent: number | null;
+  revenue_delta_percent: number | null;
+  operating_margin_delta_bps: number | null;
+  free_cash_flow_delta_percent: number | null;
+  confidence_flags: string[];
+}
+
+export interface OilSensitivityPayload {
+  metric_basis: string;
+  lookback_quarters: number;
+  elasticity: number | null;
+  r_squared: number | null;
+  sample_size: number;
+  direction: string;
+  status: string;
+  confidence_flags: string[];
+}
+
+export interface OilExposureProfilePayload {
+  profile_id: string;
+  label: string;
+  relevance_reasons: string[];
+  hedging_signal: string;
+  pass_through_signal: string;
+  evidence: Array<Record<string, unknown>>;
+}
+
+export interface CompanyOilScenarioOverlayResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  status: string;
+  fetched_at: string;
+  strict_official_mode: boolean;
+  exposure_profile: OilExposureProfilePayload;
+  benchmark_series: OilCurveSeriesPayload[];
+  scenarios: OilScenarioCasePayload[];
+  sensitivity: OilSensitivityPayload | null;
+  diagnostics: DataQualityDiagnosticsPayload;
+  refresh: RefreshState;
+}
+
 export interface MarketCurvePointPayload {
   tenor: string;
   rate: number;

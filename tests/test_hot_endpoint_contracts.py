@@ -23,6 +23,19 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
             "diagnostics",
             *provenance_fields,
         },
+        "/api/companies/{ticker}/oil-scenario-overlay": {
+            "company",
+            "status",
+            "fetched_at",
+            "strict_official_mode",
+            "exposure_profile",
+            "benchmark_series",
+            "scenarios",
+            "sensitivity",
+            "refresh",
+            "diagnostics",
+            *provenance_fields,
+        },
         "/api/companies/{ticker}/changes-since-last-filing": {
             "company",
             "current_filing",
@@ -129,6 +142,7 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
         "ProvenanceEnvelope",
         "CompanyFinancialsResponse",
         "CompanyCapitalStructureResponse",
+        "CompanyOilScenarioOverlayResponse",
         "CompanyChangesSinceLastFilingResponse",
         "CompanyModelsResponse",
         "CompanyMarketContextResponse",
@@ -150,6 +164,10 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "relevant_indicators?: MacroSeriesItemPayload[];" in frontend_types
     assert "interface SectorPluginPayload" in frontend_types
     assert "interface CompanySectorContextResponse" in frontend_types
+    assert "interface OilExposureProfilePayload" in frontend_types
+    assert "interface OilCurveSeriesPayload" in frontend_types
+    assert "interface OilScenarioCasePayload" in frontend_types
+    assert "interface OilSensitivityPayload" in frontend_types
     assert "diagnostics: DataQualityDiagnosticsPayload;" in frontend_types
     assert "interface FinancialReconciliationPayload" in frontend_types
     assert "interface FinancialFactReferencePayload" in frontend_types
