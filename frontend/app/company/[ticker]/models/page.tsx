@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
@@ -11,7 +12,6 @@ import { CompanyResearchHeader } from "@/components/layout/company-research-head
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { MarketContextPanel } from "@/components/models/market-context-panel";
 import { ModelEvaluationPanel } from "@/components/models/model-evaluation-panel";
-import { OilScenarioOverlayPanel } from "@/components/models/oil-scenario-overlay-panel";
 import { SectorContextPanel } from "@/components/models/sector-context-panel";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
@@ -25,8 +25,9 @@ import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketConte
 import { MODEL_NAMES } from "@/lib/constants";
 import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
+import { describeOilOverlayAvailability, describeOilSupportReason, resolveOilOverlayEvaluationSummary, supportsOilWorkspace } from "@/lib/oil-workspace";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioOverlayResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
+import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
@@ -34,7 +35,7 @@ interface ModelsWorkspaceData {
   marketContextData: CompanyMarketContextResponse | null;
   sectorContextData: CompanySectorContextResponse | null;
   capitalStructureData: CompanyCapitalStructureResponse | null;
-  oilScenarioOverlayData: CompanyOilScenarioOverlayResponse | null;
+  oilScenarioOverlayData: CompanyOilScenarioResponse | null;
   evaluationData: ModelEvaluationResponse | null;
   oilOverlayEvaluationData: ModelEvaluationResponse | null;
   activeJobId: string | null;
@@ -74,7 +75,7 @@ export default function CompanyModelsPage() {
   const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
   const [sectorContextData, setSectorContextData] = useState<CompanySectorContextResponse | null>(null);
   const [capitalStructureData, setCapitalStructureData] = useState<CompanyCapitalStructureResponse | null>(null);
-  const [oilScenarioOverlayData, setOilScenarioOverlayData] = useState<CompanyOilScenarioOverlayResponse | null>(null);
+  const [oilScenarioOverlayData, setOilScenarioOverlayData] = useState<CompanyOilScenarioResponse | null>(null);
   const [evaluationData, setEvaluationData] = useState<ModelEvaluationResponse | null>(null);
   const [oilOverlayEvaluationData, setOilOverlayEvaluationData] = useState<ModelEvaluationResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,7 +95,8 @@ export default function CompanyModelsPage() {
   const showCapitalStructure = Boolean(capitalStructureData?.latest);
   const oilSupportStatus = data?.company?.oil_support_status ?? financialData?.company?.oil_support_status ?? "unsupported";
   const oilSupportReasons = data?.company?.oil_support_reasons ?? financialData?.company?.oil_support_reasons ?? [];
-  const showOilScenarioOverlay = oilSupportStatus === "supported" || oilSupportStatus === "partial";
+  const showOilScenarioOverlay = supportsOilWorkspace(oilSupportStatus);
+  const oilWorkspaceEvaluationSummary = useMemo(() => resolveOilOverlayEvaluationSummary(ticker, oilOverlayEvaluationData), [ticker, oilOverlayEvaluationData]);
 
   useEffect(() => {
     let cancelled = false;
@@ -514,22 +516,52 @@ export default function CompanyModelsPage() {
 
       {showOilScenarioOverlay ? (
         <Panel
-          title="Oil Scenario Overlay"
-          subtitle={strictOfficialMode ? "Official oil benchmark overlay with manual price entry support when strict mode suppresses cached market prices" : "Fair-value overlay using official oil benchmarks and user-edited scenario inputs on top of the current model base"}
+          title="Oil Workspace"
+          subtitle={strictOfficialMode ? "Dedicated oil workspace with official benchmark curves, strict-mode-safe manual price input, and historical overlay evaluation context" : "Dedicated oil workspace with official benchmark curves, evaluation context, and an interactive overlay workbench"}
           className="models-page-span-full"
           variant="subtle"
         >
-          <OilScenarioOverlayPanel
-            ticker={ticker}
-            overlay={oilScenarioOverlayData}
-            models={models}
-            financials={financialData?.financials ?? []}
-            priceHistory={financialData?.price_history ?? []}
-            strictOfficialMode={strictOfficialMode}
-            companySupportStatus={oilSupportStatus}
-            companySupportReasons={oilSupportReasons}
-            oilOverlayEvaluation={oilOverlayEvaluationData}
-          />
+          <div className="workspace-card-stack workspace-card-stack-tight">
+            <div className="text-muted">
+              Oil moved into its own workspace so the interactive overlay, provenance, and extension controls do not compete with the broader valuation stack on this page.
+            </div>
+            <div className="workspace-pill-row">
+              <span className="pill">Support {titleCase(oilSupportStatus)}</span>
+              <span className="pill">Official Curve {(oilScenarioOverlayData?.official_base_curve?.points?.length ?? 0) > 0 ? "Ready" : "Blocked"}</span>
+              <span className="pill">Sensitivity {oilScenarioOverlayData?.sensitivity_source?.kind ? titleCase(String(oilScenarioOverlayData.sensitivity_source.kind).replaceAll("_", " ")) : "Pending"}</span>
+              {oilWorkspaceEvaluationSummary ? <span className="pill">Eval Samples {oilWorkspaceEvaluationSummary.sampleCount ?? "—"}</span> : null}
+            </div>
+            <div className="text-muted">
+              {oilSupportStatus === "partial"
+                ? (oilSupportReasons[0] ? describeOilSupportReason(oilSupportReasons[0]) : "Oil support is partial for this company.")
+                : "Use the dedicated workspace for the official benchmark curve, direct SEC evidence, realized-spread settings, downstream offsets, and historical PIT evaluation context."}
+            </div>
+            {oilWorkspaceEvaluationSummary ? (
+              <div className="filing-link-card workspace-card-stack-tight">
+                <div className="metric-label">Latest Oil Overlay Evaluation</div>
+                <div className="workspace-pill-row">
+                  <span className="pill">Samples {oilWorkspaceEvaluationSummary.sampleCount ?? "—"}</span>
+                  <span className="pill">MAE Lift {formatSigned(oilWorkspaceEvaluationSummary.maeLift)}</span>
+                  <span className="pill">Improvement Rate {formatPercent(oilWorkspaceEvaluationSummary.improvementRate)}</span>
+                  <span className="pill">As Of {oilWorkspaceEvaluationSummary.asOf ?? "—"}</span>
+                </div>
+                <div className="text-muted">{oilWorkspaceEvaluationSummary.description}</div>
+              </div>
+            ) : null}
+            <div>
+              <Link href={`/company/${encodeURIComponent(ticker)}/oil`} className="ticker-button utility-action-button utility-action-button-primary utility-action-link-button">
+                Open Oil Workspace
+              </Link>
+            </div>
+            <SourceFreshnessSummary
+              provenance={oilScenarioOverlayData?.provenance}
+              asOf={oilScenarioOverlayData?.as_of}
+              lastRefreshedAt={oilScenarioOverlayData?.last_refreshed_at}
+              sourceMix={oilScenarioOverlayData?.source_mix}
+              confidenceFlags={oilScenarioOverlayData?.confidence_flags}
+              emptyMessage="Oil workspace provenance will appear after the official oil overlay dataset is available."
+            />
+          </div>
         </Panel>
       ) : (
         <div className="models-page-span-full text-muted">
@@ -721,23 +753,6 @@ function formatSigned(value: number | null): string {
   }).format(value);
 }
 
-
-
-function describeOilOverlayAvailability(reasons: string[]): string {
-  if (reasons.includes("non_energy_classification")) {
-    return "the issuer is not currently classified as an energy or oil-exposed company.";
-  }
-  if (reasons.includes("oilfield_services_not_supported_v1")) {
-    return "v1 does not model oilfield-services economics yet.";
-  }
-  if (reasons.includes("midstream_not_supported_v1")) {
-    return "v1 does not model midstream or pipeline oil economics yet.";
-  }
-  if (reasons.includes("oil_taxonomy_unresolved_v1")) {
-    return "the issuer's oil exposure could not be resolved from the current classification signals.";
-  }
-  return "this issuer is not currently supported by the oil scenario overlay.";
-}
 
 
 

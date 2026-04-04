@@ -20,6 +20,7 @@ This is a navigation and information-architecture triage, not a route-deletion p
 | /company/[ticker] | Mixed overview with price, segments, changes, metrics, peer module, and research pulse | All steps | Primary workflow surface | Recast as Research Brief and make it the clear default landing surface |
 | /company/[ticker]/financials | Full statement history, quality diagnostics, segment analysis, capital structure, and detailed charts | Understand business; assess business quality | Primary workflow surface | Keep as the main deep financial evidence page |
 | /company/[ticker]/models | Valuation workbench, model diagnostics, market context, sector context, and evaluation summary | Compare and value | Primary workflow surface | Keep as the main underwriting and valuation page |
+| /company/[ticker]/oil | Dedicated oil scenario workspace with official benchmark curves, SEC evidence, interactive controls, and PIT overlay evaluation | Compare and value for oil-exposed names | Primary workflow surface for supported or partial oil names | Expose conditionally in the company subnav and keep Models as a summary handoff |
 | /company/[ticker]/peers | Peer comparison dashboard for valuation, quality, and growth context | Compare and value | Primary workflow surface | Keep as the main comparative analysis page |
 | /company/[ticker]/earnings | Release-level earnings analysis, guidance, trend context, and earnings-specific backtests | Detect what changed | Drill-down | Keep as a release-specific drill-down linked from the What Changed section |
 | /company/[ticker]/filings | SEC filing timeline, parser snapshot, filing events, and document viewer | Detect what changed | Drill-down | Keep as the core filing-evidence drill-down |
@@ -39,6 +40,7 @@ This is a navigation and information-architecture triage, not a route-deletion p
 - Brief
 - Financials
 - Models
+- Oil for supported or partial oil names
 - Peers
 
 ### Secondary research menu
@@ -96,6 +98,13 @@ This is a navigation and information-architecture triage, not a route-deletion p
 
 - These remain primary because valuation and comparison are core investor jobs.
 - Research Brief should summarize them, not replace them.
+- Models now summarizes the oil surface and hands off to `/company/[ticker]/oil` for the full oil workflow.
+
+### /company/[ticker]/oil
+
+- This route should only appear in the subnav when the company is `supported` or `partial` for oil modeling.
+- It is the full oil workbench: official curve, SEC evidence, realized-spread controls, downstream offsets, provenance, and PIT evaluation context.
+- Unsupported companies may still resolve the route directly, but the page should present a precise unavailable reason rather than expose inactive controls.
 
 ### /company/[ticker]/filings, /earnings, and /events
 

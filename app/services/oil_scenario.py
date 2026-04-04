@@ -57,6 +57,7 @@ def build_company_oil_scenario_public_payload(
         else None
     )
     realized_spread_defaults = _resolve_realized_spread_defaults(exposure_profile, direct_company_evidence)
+    phase2_extensions = _build_phase2_extensions(exposure_profile)
 
     overlay_outputs = compute_oil_fair_value_overlay_payload(
         OilOverlayEngineInputs(
@@ -79,6 +80,7 @@ def build_company_oil_scenario_public_payload(
                 if realized_spread_defaults.get("reference_benchmark") is not None
                 else None
             ),
+            downstream_offset_percent=_as_float(phase2_extensions.get("downstream_offset_percent")) or 0.0,
             oil_support_status=_support_status(exposure_profile.get("oil_support_status")),
             confidence_flags=tuple(str(flag) for flag in (overlay_payload.get("confidence_flags") or []) if isinstance(flag, str)),
         )
@@ -173,6 +175,7 @@ def build_company_oil_scenario_public_payload(
                 str(flag) for flag in (sensitivity.get("confidence_flags") or []) if isinstance(flag, str)
             ],
         },
+        "phase2_extensions": phase2_extensions,
         "overlay_outputs": overlay_outputs,
         "requirements": {
             "strict_official_mode": strict_official_mode,
@@ -190,6 +193,51 @@ def build_company_oil_scenario_public_payload(
         "confidence_flags": sorted(confidence_flags),
         "provenance": provenance_entries,
         "source_mix": source_mix,
+    }
+
+
+def _build_phase2_extensions(exposure_profile: dict[str, Any]) -> dict[str, Any]:
+    oil_exposure_type = str(exposure_profile.get("oil_exposure_type") or "non_oil")
+    integrated_supported = oil_exposure_type == "integrated"
+    refiner_profile = oil_exposure_type == "refiner"
+    pending_reason = "Official EIA AEO long-term cases are not wired into the oil input service yet."
+    rac_reason = (
+        "Official EIA RAC inputs are not wired yet, so refiner mode still uses producer-style oil-price sensitivities."
+        if refiner_profile
+        else "RAC inputs will appear for refiner mode once official EIA RAC series are wired."
+    )
+
+    return {
+        "downstream_offset_supported": integrated_supported,
+        "downstream_offset_percent": 25.0 if integrated_supported else None,
+        "downstream_offset_reason": None if integrated_supported else "Downstream offsets are only surfaced for integrated majors.",
+        "refiner_rac_supported": False,
+        "refiner_rac_reason": rac_reason,
+        "aeo_presets_supported": False,
+        "aeo_presets_reason": pending_reason,
+        "aeo_preset_options": [
+            {
+                "preset_id": "reference",
+                "label": "Reference",
+                "status": "pending_eia_wiring",
+                "reason": pending_reason,
+                "source_id": "eia_aeo",
+            },
+            {
+                "preset_id": "high_oil_price",
+                "label": "High Oil Price",
+                "status": "pending_eia_wiring",
+                "reason": pending_reason,
+                "source_id": "eia_aeo",
+            },
+            {
+                "preset_id": "low_oil_price",
+                "label": "Low Oil Price",
+                "status": "pending_eia_wiring",
+                "reason": pending_reason,
+                "source_id": "eia_aeo",
+            },
+        ],
     }
 
 

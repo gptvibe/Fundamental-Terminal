@@ -18,6 +18,7 @@ import {
   resolveDefaultLongTermAnchor,
   resolveDilutedShares,
 } from "@/lib/oil-overlay";
+import { describeOilSupportReason, resolveOilOverlayEvaluationSummary } from "@/lib/oil-workspace";
 import type {
   CompanyOilScenarioResponse,
   FinancialPayload,
@@ -86,6 +87,7 @@ export function OilScenarioOverlayPanel({
   );
   const defaultCustomRealizedSpread = overlay?.user_editable_defaults?.custom_realized_spread;
   const defaultMeanReversionYears = overlay?.user_editable_defaults?.mean_reversion_years ?? 3;
+  const defaultDownstreamOffsetPercent = overlay?.phase2_extensions?.downstream_offset_percent ?? 0;
   const hasOfficialCurve = activeAnnualBaseCurve.length > 0;
   const blockedReasons = useMemo(() => buildOverlayBlockedReasons(overlay), [overlay]);
   const availabilityCards = useMemo(() => buildAvailabilityCards(overlay, hasOfficialCurve, datasetSensitivity, dilutedShares), [overlay, hasOfficialCurve, datasetSensitivity, dilutedShares]);
@@ -99,6 +101,7 @@ export function OilScenarioOverlayPanel({
   const [currentSharePriceInput, setCurrentSharePriceInput] = useState(latestPrice == null ? "" : String(latestPrice));
   const [realizedSpreadMode, setRealizedSpreadMode] = useState<RealizedSpreadMode>(defaultRealizedSpreadMode);
   const [customRealizedSpreadInput, setCustomRealizedSpreadInput] = useState(defaultCustomRealizedSpread == null ? "" : String(defaultCustomRealizedSpread));
+  const [downstreamOffsetInput, setDownstreamOffsetInput] = useState(String(defaultDownstreamOffsetPercent));
 
   useEffect(() => {
     setBenchmarkId(defaultBenchmarkId);
@@ -122,11 +125,16 @@ export function OilScenarioOverlayPanel({
     setCustomRealizedSpreadInput(defaultCustomRealizedSpread == null ? "" : String(defaultCustomRealizedSpread));
   }, [defaultCustomRealizedSpread, defaultRealizedSpreadMode]);
 
+  useEffect(() => {
+    setDownstreamOffsetInput(String(defaultDownstreamOffsetPercent));
+  }, [defaultDownstreamOffsetPercent]);
+
   const activeSensitivity = sensitivitySource === "dataset" ? datasetSensitivity : parseNumber(manualSensitivityInput);
   const currentSharePrice = parseNumber(currentSharePriceInput) ?? latestPrice;
   const fadeYears = Math.max(0, Number.parseInt(fadeYearsInput || "0", 10) || 0);
   const longTermAnchor = parseNumber(longTermAnchorInput);
   const customRealizedSpread = parseNumber(customRealizedSpreadInput);
+  const downstreamOffsetPercent = parseNumber(downstreamOffsetInput) ?? 0;
   const overlayResult = useMemo(
     () =>
       computeOilOverlayScenario({
@@ -150,11 +158,12 @@ export function OilScenarioOverlayPanel({
         meanReversionTargetSpread: overlay?.user_editable_defaults?.mean_reversion_target_spread ?? 0,
         meanReversionYears: defaultMeanReversionYears,
         realizedSpreadReferenceBenchmark: overlay?.user_editable_defaults?.realized_spread_reference_benchmark ?? null,
+        downstreamOffsetPercent,
         annualDiscountRate: 0.1,
         oilSupportStatus: supportStatus,
         confidenceFlags: [...(overlay?.confidence_flags ?? []), ...(overlay?.sensitivity?.confidence_flags ?? [])],
       }),
-    [activeAnnualBaseCurve, activeSensitivity, baseFairValuePerShare, currentSharePrice, customRealizedSpread, defaultMeanReversionYears, dilutedShares, fadeYears, longTermAnchor, overlay?.confidence_flags, overlay?.sensitivity?.confidence_flags, overlay?.sensitivity_source?.kind, overlay?.user_editable_defaults?.current_realized_spread, overlay?.user_editable_defaults?.mean_reversion_target_spread, overlay?.user_editable_defaults?.realized_spread_reference_benchmark, realizedSpreadMode, realizedSpreadSupported, sensitivitySource, shortTermCurve, supportStatus],
+    [activeAnnualBaseCurve, activeSensitivity, baseFairValuePerShare, currentSharePrice, customRealizedSpread, defaultMeanReversionYears, dilutedShares, downstreamOffsetPercent, fadeYears, longTermAnchor, overlay?.confidence_flags, overlay?.sensitivity?.confidence_flags, overlay?.sensitivity_source?.kind, overlay?.user_editable_defaults?.current_realized_spread, overlay?.user_editable_defaults?.mean_reversion_target_spread, overlay?.user_editable_defaults?.realized_spread_reference_benchmark, realizedSpreadMode, realizedSpreadSupported, sensitivitySource, shortTermCurve, supportStatus],
   );
   const confidenceReasons = useMemo(
     () => Array.from(new Set([...supportReasons.map(describeOilSupportReason), ...(overlay?.confidence_flags ?? []).map(humanizeFlag), ...overlayResult.confidenceFlags.map(humanizeFlag)])).filter(Boolean),
@@ -181,6 +190,7 @@ export function OilScenarioOverlayPanel({
           custom_realized_spread: customRealizedSpread,
           mean_reversion_target_spread: overlay?.user_editable_defaults?.mean_reversion_target_spread ?? 0,
           mean_reversion_years: defaultMeanReversionYears,
+          downstream_offset_percent: downstreamOffsetPercent,
           base_fair_value_per_share: baseFairValuePerShare,
           diluted_shares: dilutedShares,
         },
@@ -322,6 +332,27 @@ export function OilScenarioOverlayPanel({
         )}
       </div>
 
+      <div className="filing-link-card workspace-card-stack-tight">
+        <div className="metric-label">Phase 2 Extensions</div>
+        <div className="workspace-pill-row">
+          <span className="pill">Downstream Offset {overlay?.phase2_extensions?.downstream_offset_supported ? "Active" : "N/A"}</span>
+          <span className="pill">Refiner RAC {overlay?.phase2_extensions?.refiner_rac_supported ? "Ready" : "Pending"}</span>
+          <span className="pill">AEO Presets {overlay?.phase2_extensions?.aeo_presets_supported ? "Ready" : "Pending"}</span>
+        </div>
+        <div className="text-muted">
+          {overlay?.phase2_extensions?.downstream_offset_supported
+            ? "Integrated names can reduce upstream-only sensitivity with a downstream offset. Refiner RAC inputs and official AEO preset decks stay pending until those EIA feeds are wired."
+            : overlay?.phase2_extensions?.downstream_offset_reason ?? "Phase-2 controls are only shown when the company profile supports them."}
+        </div>
+        {(overlay?.phase2_extensions?.aeo_preset_options?.length ?? 0) > 0 ? (
+          <div className="workspace-pill-row">
+            {overlay?.phase2_extensions?.aeo_preset_options?.map((option) => (
+              <span key={option.preset_id} className="pill">{option.label} {titleCase(option.status.replaceAll("_", " "))}</span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
       {hasOfficialCurve ? (
         <div className="filing-link-card workspace-card-stack-tight">
           <div className="metric-label">Benchmark Curve View</div>
@@ -338,6 +369,7 @@ export function OilScenarioOverlayPanel({
         <span className="pill">Support {titleCase(supportStatus)}</span>
         <span className="pill">Base Fair Value {formatCurrency(baseFairValuePerShare)}</span>
         <span className="pill">Diluted Shares {formatCompact(dilutedShares)}</span>
+        {overlay?.phase2_extensions?.downstream_offset_supported ? <span className="pill">Downstream Offset {formatPercent(downstreamOffsetPercent / 100)}</span> : null}
         <button type="button" className="ticker-button financial-export-button" onClick={() => void handleExportJson()}>
           Export JSON
         </button>
@@ -413,6 +445,27 @@ export function OilScenarioOverlayPanel({
               : "Defaults to the latest cached share price when market data is available."}
           </span>
         </label>
+
+        {overlay?.phase2_extensions?.downstream_offset_supported ? (
+          <label className="oil-overlay-field">
+            <span className="metric-label">Downstream Offset</span>
+            <input
+              aria-label="Downstream offset percent input"
+              type="number"
+              min="0"
+              max="100"
+              step="1"
+              value={downstreamOffsetInput}
+              onChange={(event) => setDownstreamOffsetInput(event.target.value)}
+              disabled={sensitivitySource === "dataset" && overlay?.sensitivity_source?.kind === "disclosed"}
+            />
+            <span className="text-muted oil-overlay-help">
+              {sensitivitySource === "dataset" && overlay?.sensitivity_source?.kind === "disclosed"
+                ? "SEC disclosed company-level sensitivity already captures net economics, so the downstream offset stays disabled in disclosed mode."
+                : "Reduces upstream-only oil sensitivity for integrated majors by the selected percent to reflect downstream offsets."}
+            </span>
+          </label>
+        ) : null}
 
         {realizedSpreadSupported ? (
           <>
@@ -612,27 +665,6 @@ function formatCompact(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
-function describeOilSupportReason(reason: string): string {
-  switch (reason) {
-    case "non_energy_classification":
-      return "The issuer is not currently classified as an energy or oil-exposed company.";
-    case "oilfield_services_not_supported_v1":
-      return "v1 does not model oilfield-services economics yet.";
-    case "midstream_not_supported_v1":
-      return "v1 does not model midstream or pipeline oil economics yet.";
-    case "refining_margin_exposure_partial_v1":
-      return "Refiner economics are only partially supported because v1 is built around producer-style realized-versus-benchmark dynamics.";
-    case "oil_taxonomy_unresolved_v1":
-      return "The issuer's oil exposure could not be resolved from the current classification signals.";
-    case "integrated_oil_supported_v1":
-      return "Integrated upstream producer economics are supported in v1.";
-    case "upstream_oil_supported_v1":
-      return "Upstream producer economics are supported in v1.";
-    default:
-      return reason.includes(":") ? reason.replace(":", ": ") : humanizeFlag(reason);
-  }
-}
-
 function buildOverlayBlockedReasons(overlay: CompanyOilScenarioResponse | null): string[] {
   if (!overlay) {
     return ["Official oil overlay data has not been cached for this company yet."];
@@ -682,37 +714,6 @@ function buildAvailabilityCards(
       tone: dilutedShares != null ? "cyan" : "warning",
     },
   ];
-}
-
-function resolveOilOverlayEvaluationSummary(
-  ticker: string,
-  oilOverlayEvaluation: ModelEvaluationResponse | null,
-): {
-  sampleCount: number | null;
-  maeLift: number | null;
-  improvementRate: number | null;
-  asOf: string | null;
-  description: string;
-} | null {
-  const run = oilOverlayEvaluation?.run;
-  if (!run) {
-    return null;
-  }
-  const summary = asRecord(run.summary);
-  const artifacts = asRecord(run.artifacts);
-  const comparison = asRecord(summary.comparison ?? artifacts.comparison);
-  const companySummaries = asRecord(artifacts.company_summaries);
-  const companySummary = asRecord(companySummaries[ticker]);
-
-  const sampleCount = asNumber(companySummary.sample_count ?? comparison.sample_count);
-  const maeLift = asNumber(companySummary.mean_absolute_error_lift ?? comparison.mean_absolute_error_lift);
-  const improvementRate = asNumber(companySummary.improvement_rate ?? comparison.improvement_rate);
-  const asOf = asString(companySummary.latest_as_of ?? summary.latest_as_of ?? run.completed_at)?.slice(0, 10) ?? null;
-  const description = companySummary.ticker
-    ? `${ticker} point-in-time comparison of the base model versus base-plus-oil-overlay.`
-    : "Latest point-in-time comparison across supported oil names in the historical overlay harness.";
-
-  return { sampleCount, maeLift, improvementRate, asOf, description };
 }
 
 function BenchmarkCurveChart({
@@ -771,14 +772,3 @@ function formatEvidenceStatus(status: string | null | undefined): string {
   return humanizeFlag(status).replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-  return value != null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-}
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === "string" && value.length ? value : null;
-}

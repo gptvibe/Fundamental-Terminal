@@ -12,6 +12,10 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
 }));
 
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...props }: { href: string; children?: React.ReactNode }) => React.createElement("a", { href, ...props }, children),
+}));
+
 vi.mock("@/hooks/use-job-stream", () => ({
   useJobStream: () => ({ consoleEntries: [], connectionState: "connected", lastEvent: null }),
 }));
@@ -50,10 +54,6 @@ vi.mock("@/components/models/market-context-panel", () => ({
 
 vi.mock("@/components/models/sector-context-panel", () => ({
   SectorContextPanel: () => React.createElement("div", null, "sector-context-panel"),
-}));
-
-vi.mock("@/components/models/oil-scenario-overlay-panel", () => ({
-  OilScenarioOverlayPanel: () => React.createElement("div", null, "oil-scenario-overlay-panel"),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -714,7 +714,7 @@ describe("CompanyModelsPage", () => {
     expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Disabled");
   });
 
-  it("shows the oil scenario overlay panel for supported oil companies", async () => {
+  it("shows an Oil workspace summary and deep link for supported oil companies", async () => {
     vi.mocked(getCompanyModels).mockResolvedValue({
       company: {
         ticker: "ACME",
@@ -813,8 +813,10 @@ describe("CompanyModelsPage", () => {
       expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME");
     });
 
-    expect(screen.getByText("Oil Scenario Overlay")).toBeTruthy();
-    expect(screen.getByText("oil-scenario-overlay-panel")).toBeTruthy();
+    expect(screen.getByText("Oil Workspace")).toBeTruthy();
+    expect(screen.getByText(/Oil moved into its own workspace/i)).toBeTruthy();
+    const oilWorkspaceLink = screen.getByRole("link", { name: "Open Oil Workspace" });
+    expect(oilWorkspaceLink.getAttribute("href")).toBe("/company/ACME/oil");
   });
 
   it("hides the oil scenario overlay panel for unsupported issuers and shows a precise reason", async () => {
@@ -916,7 +918,6 @@ describe("CompanyModelsPage", () => {
       expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME");
     });
 
-    expect(screen.queryByText("oil-scenario-overlay-panel")).toBeNull();
     expect(screen.getByText(/Oil scenario overlay unavailable: v1 does not model midstream or pipeline oil economics yet\./i)).toBeTruthy();
   });
 });

@@ -102,6 +102,25 @@ class OilScenarioSensitivitySourcePayload(BaseModel):
     confidence_flags: list[str] = Field(default_factory=list)
 
 
+class OilScenarioExtensionOptionPayload(BaseModel):
+    preset_id: str
+    label: str
+    status: str
+    reason: str | None = None
+    source_id: str | None = None
+
+
+class OilScenarioPhase2ExtensionsPayload(BaseModel):
+    downstream_offset_supported: bool = False
+    downstream_offset_percent: Number = None
+    downstream_offset_reason: str | None = None
+    refiner_rac_supported: bool = False
+    refiner_rac_reason: str | None = None
+    aeo_presets_supported: bool = False
+    aeo_presets_reason: str | None = None
+    aeo_preset_options: list[OilScenarioExtensionOptionPayload] = Field(default_factory=list)
+
+
 class OilScenarioOverlayYearResultPayload(BaseModel):
     year: int
     base_oil_price: Number = None
@@ -230,6 +249,7 @@ class CompanyOilScenarioResponse(ProvenanceEnvelope):
     scenarios: list[OilScenarioCasePayload] = Field(default_factory=list)
     sensitivity: OilSensitivityPayload | None = None
     sensitivity_source: OilScenarioSensitivitySourcePayload
+    phase2_extensions: OilScenarioPhase2ExtensionsPayload
     overlay_outputs: OilScenarioOverlayOutputsPayload
     requirements: OilScenarioRequirementsPayload
     direct_company_evidence: OilScenarioDirectCompanyEvidencePayload

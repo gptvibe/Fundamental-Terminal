@@ -5,6 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 
+import { getCompanyFinancials } from "@/lib/api";
+import { companySupportsOilWorkspace } from "@/lib/oil-workspace";
+
 interface CompanySubnavProps {
   ticker: string;
 }
@@ -22,7 +25,7 @@ type CompanySubnavTab = {
   matchers?: CompanySubnavMatcher[];
 };
 
-const tabs: CompanySubnavTab[] = [
+const baseTabs: CompanySubnavTab[] = [
   {
     key: "brief",
     label: "Brief",
@@ -52,13 +55,17 @@ const tabs: CompanySubnavTab[] = [
   { key: "sec-feed", label: "SEC Feed", suffix: "/sec-feed", section: "more" }
 ];
 
+const oilTab: CompanySubnavTab = { key: "oil", label: "Oil", suffix: "/oil", section: "primary" };
+
 export function CompanySubnav({ ticker }: CompanySubnavProps) {
   const pathname = usePathname();
   const moreRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [showOilTab, setShowOilTab] = useState(false);
   const baseHref = `/company/${encodeURIComponent(ticker)}`;
+  const tabs = showOilTab ? [...baseTabs.slice(0, 3), oilTab, ...baseTabs.slice(3)] : baseTabs;
   const tabLinks = tabs.map((tab) => ({
     ...tab,
     href: `${baseHref}${tab.suffix}`
@@ -70,6 +77,28 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
   useEffect(() => {
     setMoreOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadOilTabVisibility() {
+      try {
+        const financialData = await getCompanyFinancials(ticker);
+        if (!cancelled) {
+          setShowOilTab(companySupportsOilWorkspace(financialData.company));
+        }
+      } catch {
+        if (!cancelled) {
+          setShowOilTab(false);
+        }
+      }
+    }
+
+    void loadOilTabVisibility();
+    return () => {
+      cancelled = true;
+    };
+  }, [ticker]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -240,7 +269,6 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
             type="button"
             className={clsx("company-subnav-link", "company-subnav-more-trigger", activeTab.section === "more" && "is-active", moreOpen && "is-open")}
             aria-haspopup="menu"
-            aria-expanded={moreOpen}
             aria-controls="company-subnav-more-menu"
             onClick={() => setMoreOpen((current) => !current)}
             onKeyDown={handleMoreTriggerKeyDown}
@@ -249,7 +277,7 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
             <span className="company-subnav-more-caret" aria-hidden="true" />
           </button>
           {moreOpen ? (
-            <div ref={moreMenuRef} id="company-subnav-more-menu" className="company-subnav-more-menu" role="menu" aria-label="More company sections">
+            <div ref={moreMenuRef} id="company-subnav-more-menu" className="company-subnav-more-menu" aria-label="More company sections">
               {moreTabs.map((tab) => {
                 const isActive = isTabActive(pathname, baseHref, tab);
 
@@ -257,7 +285,6 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
                   <Link
                     key={tab.key}
                     href={tab.href}
-                    role="menuitem"
                     className={clsx("company-subnav-more-link", isActive && "is-active")}
                     aria-current={isActive ? "page" : undefined}
                     onClick={() => setMoreOpen(false)}

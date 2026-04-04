@@ -49,6 +49,7 @@ class OilOverlayEngineInputs:
     mean_reversion_target_spread: float = 0.0
     mean_reversion_years: int = 3
     realized_spread_reference_benchmark: str | None = None
+    downstream_offset_percent: float = 0.0
     discount_assumptions: OilOverlayDiscountAssumptions = field(
         default_factory=lambda: OilOverlayDiscountAssumptions(annual_discount_rate=0.1)
     )
@@ -184,7 +185,9 @@ def compute_oil_fair_value_overlay(inputs: OilOverlayEngineInputs) -> OilOverlay
         scenario_realized_price = scenario_oil_price + scenario_spread
         realized_price_delta = scenario_realized_price - base_realized_price
         earnings_price_delta = oil_price_delta if inputs.sensitivity_source_kind == "disclosed" else realized_price_delta
-        earnings_delta_after_tax = float(inputs.annual_after_tax_oil_sensitivity) * earnings_price_delta
+        base_earnings_delta_after_tax = float(inputs.annual_after_tax_oil_sensitivity) * earnings_price_delta
+        downstream_offset_ratio = _effective_downstream_offset_ratio(inputs)
+        earnings_delta_after_tax = base_earnings_delta_after_tax * (1.0 - downstream_offset_ratio)
         per_share_delta = earnings_delta_after_tax / float(inputs.diluted_shares)
         discount_factor = (1 + inputs.discount_assumptions.annual_discount_rate) ** year_index
         present_value_per_share = per_share_delta / discount_factor
@@ -270,6 +273,8 @@ def _validate_inputs(inputs: OilOverlayEngineInputs) -> str | None:
         return "Custom realized spread is required when custom spread mode is selected."
     if inputs.discount_assumptions.annual_discount_rate <= -1.0:
         return "Annual discount rate must be greater than -100%."
+    if inputs.downstream_offset_percent < 0 or inputs.downstream_offset_percent > 100:
+        return "Downstream offset percent must be between 0 and 100."
     return None
 
 
@@ -338,6 +343,7 @@ def _interpolate_curve(points: dict[int, float], year: int) -> float:
 
 def _assumptions_payload(inputs: OilOverlayEngineInputs) -> dict[str, Any]:
     effective_spread_mode, _flags = _resolve_effective_spread_mode(inputs)
+    effective_downstream_offset_percent = _effective_downstream_offset_percent(inputs)
     return {
         "discount_rate": json_number(inputs.discount_assumptions.annual_discount_rate),
         "discounting_convention": inputs.discount_assumptions.discounting_convention,
@@ -355,6 +361,9 @@ def _assumptions_payload(inputs: OilOverlayEngineInputs) -> dict[str, Any]:
         "mean_reversion_target_spread": json_number(inputs.mean_reversion_target_spread),
         "mean_reversion_years": inputs.mean_reversion_years,
         "realized_spread_reference_benchmark": inputs.realized_spread_reference_benchmark,
+        "requested_downstream_offset_percent": json_number(inputs.downstream_offset_percent),
+        "effective_downstream_offset_percent": json_number(effective_downstream_offset_percent),
+        "downstream_offset_applied": effective_downstream_offset_percent > 0,
         "oil_support_status": inputs.oil_support_status,
     }
 
@@ -386,3 +395,13 @@ def _scenario_realized_spread(
     elapsed_years = max(0, year - start_year + 1)
     progress = min(1.0, elapsed_years / inputs.mean_reversion_years)
     return base_reference_spread + (float(inputs.mean_reversion_target_spread) - base_reference_spread) * progress
+
+
+def _effective_downstream_offset_percent(inputs: OilOverlayEngineInputs) -> float:
+    if inputs.sensitivity_source_kind == "disclosed":
+        return 0.0
+    return min(max(float(inputs.downstream_offset_percent), 0.0), 100.0)
+
+
+def _effective_downstream_offset_ratio(inputs: OilOverlayEngineInputs) -> float:
+    return _effective_downstream_offset_percent(inputs) / 100.0

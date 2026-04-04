@@ -1737,6 +1737,7 @@ def company_oil_scenario(
             scenarios=[],
             sensitivity=None,
             sensitivity_source=OilScenarioSensitivitySourcePayload(kind="manual_override", value=None, metric_basis=None, status=None, confidence_flags=[]),
+            phase2_extensions=OilScenarioPhase2ExtensionsPayload(),
             overlay_outputs=OilScenarioOverlayOutputsPayload(
                 status="insufficient_data",
                 model_status="insufficient_data",
@@ -2285,6 +2286,7 @@ def _serialize_oil_scenario_response(
         scenarios=scenarios,
         sensitivity=sensitivity,
         sensitivity_source=OilScenarioSensitivitySourcePayload.model_validate(payload.get("sensitivity_source") or {"kind": "manual_override"}),
+        phase2_extensions=OilScenarioPhase2ExtensionsPayload.model_validate(payload.get("phase2_extensions") or {}),
         overlay_outputs=OilScenarioOverlayOutputsPayload.model_validate(
             payload.get("overlay_outputs") or {"status": "insufficient_data", "model_status": "insufficient_data", "reason": "Oil scenario output is unavailable."}
         ),

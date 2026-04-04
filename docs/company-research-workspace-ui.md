@@ -10,8 +10,11 @@ This update keeps the existing company routes intact while making the workspace 
 - Expanded the shared segment view on overview and financials so business and geography disclosures now lead with investor-facing summaries of mix shifts, margin contribution, concentration, and unusual disclosure changes before the charts.
 - Added a capital structure intelligence panel on the financials and models routes with persisted debt maturity ladders, lease schedules, debt roll-forwards, interest burden, payout mix, SBC, and net dilution bridges.
 - Grouped company navigation into core views and research feeds, with keyboard arrow navigation between sections.
+- Promoted oil modeling into a dedicated `/company/[ticker]/oil` workspace and made the Oil tab conditional for supported or partial oil names only.
+- Kept `/company/[ticker]/models` as the valuation hub while reducing oil there to a summary card that links into the full Oil workspace.
 - Standardized summary strips, utility-rail actions, and empty or loading states.
 - Converted the peer selection area into a compare tray that works better on mobile and remains keyboard accessible.
+- Added a dedicated mobile section picker inside the Oil workspace so overview, workbench, and provenance sections stay reachable without long scroll hunting.
 
 ## Data trust model
 
@@ -21,6 +24,7 @@ This update keeps the existing company routes intact while making the workspace 
 - The Financials route now also exposes additive `segment_analysis` payloads for business and geographic disclosures, each carrying `as_of`, `last_refreshed_at`, provenance sources, confidence flags, concentration, top mix movers, margin contributors, and unusual disclosure summaries.
 - Capital structure intelligence is derived only from persisted SEC companyfacts and surfaces provenance, as-of dates, refresh timestamps, and confidence flags for each section.
 - Market profile and price context continue to rely on cached Yahoo Finance data only where already allowed.
+- Oil overlays now separate current-workspace provenance from persisted point-in-time evaluation provenance, and phase-2 oil extensions surface explicit pending states when official EIA feeds are not wired yet.
 - Refresh actions remain background-queued so the UI can serve cached data immediately.
 
 ## UX notes

@@ -182,6 +182,8 @@ def test_oil_scenario_reads_cached_payload_without_live_fetch(monkeypatch):
     assert payload["user_editable_defaults"]["current_share_price"] == 90.0
     assert payload["user_editable_defaults"]["current_oil_price"] == 83.4
     assert payload["user_editable_defaults"]["current_oil_price_source"] == "wti_spot_history"
+    assert payload["phase2_extensions"]["downstream_offset_supported"] is True
+    assert payload["phase2_extensions"]["downstream_offset_percent"] == 25.0
     assert payload["overlay_outputs"]["status"] == "insufficient_data"
 
 
@@ -385,6 +387,8 @@ def test_oil_scenario_prefers_sec_disclosed_sensitivity_and_matching_benchmark(m
     assert resolved["user_editable_defaults"]["annual_after_tax_sensitivity"] == 650000000.0
     assert resolved["requirements"]["realized_spread_supported"] is True
     assert resolved["user_editable_defaults"]["current_realized_spread"] == pytest.approx(-2.75)
+    assert resolved["phase2_extensions"]["aeo_presets_supported"] is False
+    assert resolved["phase2_extensions"]["aeo_preset_options"][0]["preset_id"] == "reference"
 
 
 def test_oil_scenario_labels_benchmark_only_fallback_when_realized_spread_is_unavailable(monkeypatch):

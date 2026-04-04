@@ -184,6 +184,18 @@ describe("OilScenarioOverlayPanel", () => {
             status: null,
             confidence_flags: [],
           },
+          phase2_extensions: {
+            downstream_offset_supported: true,
+            downstream_offset_percent: 0,
+            downstream_offset_reason: null,
+            refiner_rac_supported: false,
+            refiner_rac_reason: "Official EIA RAC inputs are not wired yet.",
+            aeo_presets_supported: false,
+            aeo_presets_reason: "Official EIA AEO long-term cases are not wired yet.",
+            aeo_preset_options: [
+              { preset_id: "reference", label: "Reference", status: "pending_eia_wiring", reason: "pending", source_id: "eia_aeo" },
+            ],
+          },
           user_editable_defaults: {
             benchmark_id: "wti_short_term_baseline",
             benchmark_options: [
@@ -273,6 +285,7 @@ describe("OilScenarioOverlayPanel", () => {
     expect(screen.getByLabelText("Long-term anchor input")).toBeTruthy();
     expect(screen.getByLabelText("Fade years input")).toBeTruthy();
     expect(screen.getByLabelText("Annual after-tax sensitivity input")).toBeTruthy();
+    expect(screen.getByLabelText("Downstream offset percent input")).toBeTruthy();
     expect(screen.getByLabelText("Realized spread mode")).toBeTruthy();
     expect(screen.getByText("$129.55")).toBeTruthy();
     expect(screen.getAllByText("+$29.55").length).toBeGreaterThan(0);

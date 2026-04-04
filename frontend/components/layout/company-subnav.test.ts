@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { fireEvent, render, within } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompanySubnav } from "@/components/layout/company-subnav";
 
 const mockUsePathname = vi.fn();
+const getCompanyFinancials = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
+}));
+
+vi.mock("@/lib/api", () => ({
+  getCompanyFinancials: (...args: unknown[]) => getCompanyFinancials(...args),
 }));
 
 vi.mock("next/link", () => ({
@@ -19,6 +24,8 @@ vi.mock("next/link", () => ({
 describe("CompanySubnav", () => {
   beforeEach(() => {
     mockUsePathname.mockReset();
+    getCompanyFinancials.mockReset();
+    getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "unsupported" } });
   });
 
   it("includes peers tab and marks it active on peers route", () => {
@@ -72,8 +79,35 @@ describe("CompanySubnav", () => {
 
     fireEvent.click(moreButton);
 
-    const ownershipTab = within(mobileNav).getByRole("menuitem", { name: "Ownership & Stakes" });
+    const ownershipTab = within(mobileNav).getByRole("link", { name: "Ownership & Stakes" });
     expect(ownershipTab.getAttribute("href")).toBe("/company/AAPL/stakes");
     expect(ownershipTab.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("adds an Oil tab for supported or partial oil companies", async () => {
+    mockUsePathname.mockReturnValue("/company/XOM/oil");
+    getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "partial" } });
+
+    const { container } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
+    const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
+
+    await waitFor(() => {
+      const oilTab = within(desktopNav).getByRole("link", { name: "Oil" });
+      expect(oilTab.getAttribute("href")).toBe("/company/XOM/oil");
+      expect(oilTab.getAttribute("aria-current")).toBe("page");
+    });
+  });
+
+  it("keeps the Oil tab hidden for unsupported companies", async () => {
+    mockUsePathname.mockReturnValue("/company/KMI/models");
+    getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "unsupported" } });
+
+    const { container } = render(React.createElement(CompanySubnav, { ticker: "KMI" }));
+    const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
+
+    await waitFor(() => {
+      expect(getCompanyFinancials).toHaveBeenCalledWith("KMI");
+    });
+    expect(within(desktopNav).queryByRole("link", { name: "Oil" })).toBeNull();
   });
 });

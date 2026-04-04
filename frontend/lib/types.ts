@@ -1025,6 +1025,25 @@ export interface OilScenarioSensitivitySourcePayload {
   confidence_flags?: string[];
 }
 
+export interface OilScenarioExtensionOptionPayload {
+  preset_id: string;
+  label: string;
+  status: string;
+  reason?: string | null;
+  source_id?: string | null;
+}
+
+export interface OilScenarioPhase2ExtensionsPayload {
+  downstream_offset_supported: boolean;
+  downstream_offset_percent?: number | null;
+  downstream_offset_reason?: string | null;
+  refiner_rac_supported: boolean;
+  refiner_rac_reason?: string | null;
+  aeo_presets_supported: boolean;
+  aeo_presets_reason?: string | null;
+  aeo_preset_options?: OilScenarioExtensionOptionPayload[];
+}
+
 export interface OilScenarioOverlayYearResultPayload {
   year: number;
   base_oil_price: number | null;
@@ -1120,6 +1139,7 @@ export interface CompanyOilScenarioResponse extends CompanyOilScenarioOverlayRes
   official_base_curve?: OilScenarioOfficialBaseCurvePayload;
   user_editable_defaults?: OilScenarioUserEditableDefaultsPayload;
   sensitivity_source?: OilScenarioSensitivitySourcePayload;
+  phase2_extensions?: OilScenarioPhase2ExtensionsPayload;
   overlay_outputs?: OilScenarioOverlayOutputsPayload;
   requirements?: OilScenarioRequirementsPayload;
   direct_company_evidence?: OilScenarioDirectCompanyEvidencePayload;

@@ -26,6 +26,7 @@ export interface OilOverlayScenarioInputs {
   meanReversionTargetSpread?: number;
   meanReversionYears?: number;
   realizedSpreadReferenceBenchmark?: string | null;
+  downstreamOffsetPercent?: number;
   annualDiscountRate: number;
   oilSupportStatus: OilSupportStatus;
   confidenceFlags?: string[];
@@ -193,7 +194,8 @@ export function computeOilOverlayScenario(inputs: OilOverlayScenarioInputs): Oil
     const scenarioRealizedPrice = scenarioOilPrice + scenarioSpread;
     const realizedPriceDelta = scenarioRealizedPrice - baseRealizedPrice;
     const earningsPriceDelta = (inputs.sensitivitySourceKind ?? "manual_override") === "disclosed" ? oilPriceDelta : realizedPriceDelta;
-    const earningsDeltaAfterTax = Number(inputs.annualAfterTaxOilSensitivity) * earningsPriceDelta;
+    const baseEarningsDeltaAfterTax = Number(inputs.annualAfterTaxOilSensitivity) * earningsPriceDelta;
+    const earningsDeltaAfterTax = baseEarningsDeltaAfterTax * (1 - resolveEffectiveDownstreamOffsetRatio(inputs));
     const perShareDelta = earningsDeltaAfterTax / Number(inputs.dilutedShares);
     const discountFactor = (1 + inputs.annualDiscountRate) ** (offset + 1);
     const presentValuePerShare = perShareDelta / discountFactor;
@@ -280,6 +282,9 @@ function validateOilOverlayInputs(inputs: OilOverlayScenarioInputs): string | nu
   if (inputs.annualDiscountRate <= -1) {
     return "Discount rate must be greater than -100%.";
   }
+  if ((inputs.downstreamOffsetPercent ?? 0) < 0 || (inputs.downstreamOffsetPercent ?? 0) > 100) {
+    return "Downstream offset percent must be between 0 and 100.";
+  }
   return null;
 }
 
@@ -359,6 +364,14 @@ function safeDivide(numerator: number, denominator: number): number | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveEffectiveDownstreamOffsetRatio(inputs: OilOverlayScenarioInputs): number {
+  const requestedPercent = Math.min(Math.max(inputs.downstreamOffsetPercent ?? 0, 0), 100);
+  if ((inputs.sensitivitySourceKind ?? "manual_override") === "disclosed") {
+    return 0;
+  }
+  return requestedPercent / 100;
 }
 
 function resolveEffectiveSpreadMode(inputs: OilOverlayScenarioInputs): { mode: RealizedSpreadMode; flags: string[] } {
