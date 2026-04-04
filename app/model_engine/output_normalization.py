@@ -5,6 +5,7 @@ from typing import Any
 
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import ANNUAL_FORMS, UNSUPPORTED_FINANCIAL_KEYWORDS, json_number
+from app.services.oil_exposure import classify_oil_exposure
 
 MODEL_STATUS_SUPPORTED = "supported"
 MODEL_STATUS_PARTIAL = "partial"
@@ -248,6 +249,9 @@ def _company_context(
             "sector": company_context.get("sector"),
             "market_sector": company_context.get("market_sector"),
             "market_industry": company_context.get("market_industry"),
+            "oil_exposure_type": company_context.get("oil_exposure_type"),
+            "oil_support_status": company_context.get("oil_support_status"),
+            "oil_support_reasons": company_context.get("oil_support_reasons") or [],
         }
 
     applicability = result.get("applicability")
@@ -258,15 +262,34 @@ def _company_context(
                 "sector": classification.get("sector"),
                 "market_sector": classification.get("market_sector"),
                 "market_industry": classification.get("market_industry"),
+                "oil_exposure_type": classification.get("oil_exposure_type"),
+                "oil_support_status": classification.get("oil_support_status"),
+                "oil_support_reasons": classification.get("oil_support_reasons") or [],
             }
 
     if dataset is None:
-        return {"sector": None, "market_sector": None, "market_industry": None}
+        return {
+            "sector": None,
+            "market_sector": None,
+            "market_industry": None,
+            "oil_exposure_type": None,
+            "oil_support_status": None,
+            "oil_support_reasons": [],
+        }
+
+    oil_classification = classify_oil_exposure(
+        sector=dataset.sector,
+        market_sector=dataset.market_sector,
+        market_industry=dataset.market_industry,
+    )
 
     return {
         "sector": dataset.sector,
         "market_sector": dataset.market_sector,
         "market_industry": dataset.market_industry,
+        "oil_exposure_type": oil_classification.oil_exposure_type,
+        "oil_support_status": oil_classification.oil_support_status,
+        "oil_support_reasons": list(oil_classification.oil_support_reasons),
     }
 
 
@@ -421,6 +444,9 @@ def _sector_suitability(model_name: str, result: dict[str, Any], context: dict[s
         "sector": context.get("sector"),
         "market_sector": context.get("market_sector"),
         "market_industry": context.get("market_industry"),
+        "oil_exposure_type": context.get("oil_exposure_type"),
+        "oil_support_status": context.get("oil_support_status"),
+        "oil_support_reasons": context.get("oil_support_reasons") or [],
     }
     applicability = result.get("applicability") if isinstance(result.get("applicability"), dict) else None
     classification_text = " ".join(str(value or "") for value in classification.values()).lower()

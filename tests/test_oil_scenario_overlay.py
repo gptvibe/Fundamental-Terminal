@@ -36,6 +36,9 @@ def _overlay_payload() -> dict[str, object]:
         "exposure_profile": {
             "profile_id": "oil_sensitive",
             "label": "Oil Sensitive",
+            "oil_exposure_type": "integrated",
+            "oil_support_status": "supported",
+            "oil_support_reasons": ["market_sector:Energy", "market_industry:Oil & Gas Integrated", "sector:Energy", "integrated_oil_supported_v1"],
             "relevance_reasons": ["sector: Energy"],
             "hedging_signal": "unknown",
             "pass_through_signal": "unknown",
@@ -147,7 +150,11 @@ def test_oil_scenario_overlay_reads_cached_payload_without_live_fetch(monkeypatc
     payload = response.json()
     assert payload["refresh"] == {"triggered": False, "reason": "fresh", "ticker": "XOM", "job_id": None}
     assert payload["company"]["ticker"] == "XOM"
+    assert payload["company"]["oil_exposure_type"] == "integrated"
+    assert payload["company"]["oil_support_status"] == "supported"
     assert payload["benchmark_series"][0]["series_id"] == "eia_steo_brent_placeholder"
+    assert payload["exposure_profile"]["oil_exposure_type"] == "integrated"
+    assert payload["exposure_profile"]["oil_support_status"] == "supported"
 
 
 def test_oil_scenario_overlay_returns_stale_payload_and_queues_revalidation(monkeypatch):
@@ -195,7 +202,7 @@ def test_oil_scenario_overlay_returns_placeholder_shell_when_dataset_missing(mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["refresh"] == {"triggered": True, "reason": "missing", "ticker": "XOM", "job_id": "job-oil-missing"}
-    assert payload["status"] == "partial"
+    assert payload["status"] == "supported"
     assert payload["company"]["ticker"] == "XOM"
     assert payload["benchmark_series"]
     assert "oil_scenario_overlay_missing" in payload["diagnostics"]["missing_field_flags"]

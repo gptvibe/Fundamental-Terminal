@@ -158,6 +158,9 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "source_mix: SourceMixPayload;" in frontend_types
     assert "confidence_flags: string[];" in frontend_types
     assert "strict_official_mode: boolean;" in frontend_types
+    assert 'oil_exposure_type: "upstream" | "integrated" | "refiner" | "midstream" | "services" | "non_oil";' in frontend_types
+    assert 'oil_support_status: "supported" | "partial" | "unsupported";' in frontend_types
+    assert "oil_support_reasons: string[];" in frontend_types
     assert "provenance_details: Record<string, unknown>;" in frontend_types
     assert "cyclical_demand?: MacroSeriesItemPayload[];" in frontend_types
     assert "cyclical_costs?: MacroSeriesItemPayload[];" in frontend_types

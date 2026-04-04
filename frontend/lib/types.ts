@@ -70,6 +70,9 @@ export interface CompanyPayload {
   sector: string | null;
   market_sector: string | null;
   market_industry: string | null;
+  oil_exposure_type: "upstream" | "integrated" | "refiner" | "midstream" | "services" | "non_oil";
+  oil_support_status: "supported" | "partial" | "unsupported";
+  oil_support_reasons: string[];
   regulated_entity?: RegulatedEntityPayload | null;
   strict_official_mode: boolean;
   last_checked: string | null;
@@ -945,6 +948,9 @@ export interface OilSensitivityPayload {
 export interface OilExposureProfilePayload {
   profile_id: string;
   label: string;
+  oil_exposure_type: string;
+  oil_support_status: string;
+  oil_support_reasons: string[];
   relevance_reasons: string[];
   hedging_signal: string;
   pass_through_signal: string;

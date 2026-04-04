@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.company import Company
+from app.services.oil_exposure import classify_company_oil_exposure
 from app.services.oil_scenario_overlay_persistence import (
     read_company_oil_scenario_overlay_snapshot_with_meta,
     upsert_company_oil_scenario_overlay_snapshot,
@@ -212,7 +213,7 @@ def refresh_company_oil_scenario_overlay(
 
 def _build_placeholder_overlay(company: Company, *, checked_at: datetime) -> OilScenarioOverlayDTO:
     strict_official_mode = settings.strict_official_mode
-    exposure_label = _classify_exposure(company)
+    oil_classification = classify_company_oil_exposure(company, strict_official_mode=strict_official_mode)
     usages = [
         SourceUsage(
             source_id="sec_edgar",
@@ -240,15 +241,24 @@ def _build_placeholder_overlay(company: Company, *, checked_at: datetime) -> Oil
         "reconciliation_disagreement_count": 0,
     }
     return OilScenarioOverlayDTO(
-        status="partial" if exposure_label != "not_applicable" else "not_applicable",
+        status=(
+            "supported"
+            if oil_classification.oil_support_status == "supported"
+            else "partial"
+            if oil_classification.oil_support_status == "partial"
+            else "not_applicable"
+        ),
         fetched_at=checked_at,
         as_of=checked_at.date().isoformat(),
         last_refreshed_at=checked_at,
         strict_official_mode=strict_official_mode,
         exposure_profile={
-            "profile_id": exposure_label,
-            "label": exposure_label.replace("_", " ").title(),
-            "relevance_reasons": _relevance_reasons(company, exposure_label),
+            "profile_id": oil_classification.oil_exposure_type,
+            "label": oil_classification.oil_exposure_type.replace("_", " ").title(),
+            "oil_exposure_type": oil_classification.oil_exposure_type,
+            "oil_support_status": oil_classification.oil_support_status,
+            "oil_support_reasons": list(oil_classification.oil_support_reasons),
+            "relevance_reasons": _relevance_reasons(company, oil_classification),
             "hedging_signal": "unknown",
             "pass_through_signal": "unknown",
             "evidence": [],
@@ -326,29 +336,6 @@ def _build_placeholder_overlay(company: Company, *, checked_at: datetime) -> Oil
     )
 
 
-def _classify_exposure(company: Company) -> str:
-    combined = " ".join(
-        [
-            (company.sector or "").lower(),
-            (company.market_sector or "").lower(),
-            (company.market_industry or "").lower(),
-        ]
-    )
-    if any(token in combined for token in ("oil", "gas", "petroleum", "refining", "drilling", "pipeline")):
-        return "oil_sensitive"
-    if any(token in combined for token in ("airline", "transport", "logistics", "chemicals", "industrial")):
-        return "cost_sensitive"
-    return "not_applicable"
-
-
-def _relevance_reasons(company: Company, exposure_label: str) -> list[str]:
-    if exposure_label == "not_applicable":
-        return []
-    reasons: list[str] = []
-    if company.sector:
-        reasons.append(f"sector: {company.sector}")
-    if company.market_sector:
-        reasons.append(f"market sector: {company.market_sector}")
-    if company.market_industry:
-        reasons.append(f"industry: {company.market_industry}")
+def _relevance_reasons(company: Company, oil_classification: Any) -> list[str]:
+    reasons = [str(reason) for reason in oil_classification.oil_support_reasons if reason]
     return reasons

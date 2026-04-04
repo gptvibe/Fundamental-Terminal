@@ -94,6 +94,7 @@ from app.services.market_context import (
     get_market_context_v2,
 )
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
+from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
 from app.services.oil_scenario_overlay import (
     build_company_oil_scenario_overlay_placeholder,
     get_company_oil_scenario_overlay,
@@ -2020,6 +2021,11 @@ def _serialize_oil_scenario_overlay_response(
             {
                 "profile_id": str(exposure_profile.get("profile_id") or "not_applicable"),
                 "label": str(exposure_profile.get("label") or "Not Applicable"),
+                "oil_exposure_type": str(exposure_profile.get("oil_exposure_type") or "non_oil"),
+                "oil_support_status": str(exposure_profile.get("oil_support_status") or "unsupported"),
+                "oil_support_reasons": [
+                    str(reason) for reason in (exposure_profile.get("oil_support_reasons") or []) if isinstance(reason, str)
+                ],
                 "relevance_reasons": [
                     str(reason) for reason in (exposure_profile.get("relevance_reasons") or []) if isinstance(reason, str)
                 ],
@@ -3315,6 +3321,11 @@ def _serialize_company(
     regulated_entity: RegulatedEntityPayload | None = None,
 ) -> CompanyPayload:
     market_sector, market_industry = _company_market_classification(snapshot.company)
+    oil_classification = classify_oil_exposure(
+        sector=snapshot.company.sector,
+        market_sector=market_sector,
+        market_industry=market_industry,
+    )
     return CompanyPayload(
         ticker=snapshot.company.ticker,
         cik=snapshot.company.cik,
@@ -3322,6 +3333,9 @@ def _serialize_company(
         sector=snapshot.company.sector,
         market_sector=market_sector,
         market_industry=market_industry,
+        oil_exposure_type=oil_classification.oil_exposure_type,
+        oil_support_status=oil_classification.oil_support_status,
+        oil_support_reasons=list(oil_classification.oil_support_reasons),
         regulated_entity=regulated_entity,
         strict_official_mode=settings.strict_official_mode,
         last_checked=last_checked if last_checked is not None else snapshot.last_checked,
@@ -5365,10 +5379,19 @@ def _build_institutional_holdings_summary(rows: list[InstitutionalHoldingPayload
 def _model_company_context(company: Company | None) -> dict[str, Any] | None:
     if company is None:
         return None
+    market_sector, market_industry = _company_market_classification(company)
+    oil_classification = classify_oil_exposure(
+        sector=getattr(company, "sector", None),
+        market_sector=market_sector,
+        market_industry=market_industry,
+    )
     return {
         "sector": getattr(company, "sector", None),
-        "market_sector": getattr(company, "market_sector", None),
-        "market_industry": getattr(company, "market_industry", None),
+        "market_sector": market_sector,
+        "market_industry": market_industry,
+        "oil_exposure_type": oil_classification.oil_exposure_type,
+        "oil_support_status": oil_classification.oil_support_status,
+        "oil_support_reasons": list(oil_classification.oil_support_reasons),
     }
 
 

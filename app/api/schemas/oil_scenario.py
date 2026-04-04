@@ -50,6 +50,9 @@ class OilSensitivityPayload(BaseModel):
 class OilExposureProfilePayload(BaseModel):
     profile_id: str
     label: str
+    oil_exposure_type: str = "non_oil"
+    oil_support_status: str = "unsupported"
+    oil_support_reasons: list[str] = Field(default_factory=list)
     relevance_reasons: list[str] = Field(default_factory=list)
     hedging_signal: str
     pass_through_signal: str

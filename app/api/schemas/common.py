@@ -69,6 +69,9 @@ class CompanyPayload(BaseModel):
     sector: str | None = None
     market_sector: str | None = None
     market_industry: str | None = None
+    oil_exposure_type: Literal["upstream", "integrated", "refiner", "midstream", "services", "non_oil"] = "non_oil"
+    oil_support_status: Literal["supported", "partial", "unsupported"] = "unsupported"
+    oil_support_reasons: list[str] = Field(default_factory=list)
     regulated_entity: RegulatedEntityPayload | None = None
     strict_official_mode: bool = False
     last_checked: datetime | None = None
