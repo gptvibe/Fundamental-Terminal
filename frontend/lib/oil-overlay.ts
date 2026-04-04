@@ -2,7 +2,8 @@ import type { FinancialPayload, ModelPayload, OilCurveSeriesPayload, OilSensitiv
 
 export type OilOverlayModelStatus = "supported" | "partial" | "insufficient_data" | "unsupported";
 export type OilSupportStatus = "supported" | "partial" | "unsupported";
-export type OilSensitivitySource = "manual" | "dataset";
+export type OilSensitivitySource = "manual_override" | "disclosed" | "derived_from_official";
+export type RealizedSpreadMode = "hold_current_spread" | "mean_revert" | "custom_spread" | "benchmark_only";
 
 export interface OilOverlayYearPoint {
   year: number;
@@ -17,7 +18,14 @@ export interface OilOverlayScenarioInputs {
   fadeYears: number;
   annualAfterTaxOilSensitivity: number | null;
   dilutedShares: number | null;
+  sensitivitySourceKind?: OilSensitivitySource;
   currentSharePrice?: number | null;
+  realizedSpreadMode?: RealizedSpreadMode;
+  currentRealizedSpread?: number | null;
+  customRealizedSpread?: number | null;
+  meanReversionTargetSpread?: number;
+  meanReversionYears?: number;
+  realizedSpreadReferenceBenchmark?: string | null;
   annualDiscountRate: number;
   oilSupportStatus: OilSupportStatus;
   confidenceFlags?: string[];
@@ -28,6 +36,9 @@ export interface OilOverlayYearResult {
   baseOilPrice: number;
   scenarioOilPrice: number;
   oilPriceDelta: number;
+  baseRealizedPrice: number;
+  scenarioRealizedPrice: number;
+  realizedPriceDelta: number;
   earningsDeltaAfterTax: number;
   perShareDelta: number;
   presentValuePerShare: number;
@@ -159,6 +170,8 @@ export function computeOilOverlayScenario(inputs: OilOverlayScenarioInputs): Oil
 
   const baseCurve = dedupeCurve(inputs.officialBaseCurve);
   const userCurve = dedupeCurve(inputs.userEditedShortTermCurve);
+  const baseReferenceSpread = inputs.currentRealizedSpread ?? 0;
+  const { mode: effectiveSpreadMode, flags: spreadFlags } = resolveEffectiveSpreadMode(inputs);
   const startYear = Math.min(...Array.from(new Set([...baseCurve.keys(), ...userCurve.keys()])));
   const endYear = Math.max(Math.max(...baseCurve.keys()), Math.max(...userCurve.keys()) + inputs.fadeYears);
 
@@ -169,7 +182,18 @@ export function computeOilOverlayScenario(inputs: OilOverlayScenarioInputs): Oil
     const baseOilPrice = interpolateCurve(baseCurve, year);
     const scenarioOilPrice = evaluateScenarioCurve(year, baseCurve, userCurve, Number(inputs.userLongTermAnchor), inputs.fadeYears);
     const oilPriceDelta = scenarioOilPrice - baseOilPrice;
-    const earningsDeltaAfterTax = Number(inputs.annualAfterTaxOilSensitivity) * oilPriceDelta;
+    const scenarioSpread = scenarioRealizedSpread({
+      year,
+      startYear,
+      inputs,
+      effectiveSpreadMode,
+      baseReferenceSpread,
+    });
+    const baseRealizedPrice = baseOilPrice + baseReferenceSpread;
+    const scenarioRealizedPrice = scenarioOilPrice + scenarioSpread;
+    const realizedPriceDelta = scenarioRealizedPrice - baseRealizedPrice;
+    const earningsPriceDelta = (inputs.sensitivitySourceKind ?? "manual_override") === "disclosed" ? oilPriceDelta : realizedPriceDelta;
+    const earningsDeltaAfterTax = Number(inputs.annualAfterTaxOilSensitivity) * earningsPriceDelta;
     const perShareDelta = earningsDeltaAfterTax / Number(inputs.dilutedShares);
     const discountFactor = (1 + inputs.annualDiscountRate) ** (offset + 1);
     const presentValuePerShare = perShareDelta / discountFactor;
@@ -179,6 +203,9 @@ export function computeOilOverlayScenario(inputs: OilOverlayScenarioInputs): Oil
       baseOilPrice,
       scenarioOilPrice,
       oilPriceDelta,
+      baseRealizedPrice,
+      scenarioRealizedPrice,
+      realizedPriceDelta,
       earningsDeltaAfterTax,
       perShareDelta,
       presentValuePerShare,
@@ -193,6 +220,9 @@ export function computeOilOverlayScenario(inputs: OilOverlayScenarioInputs): Oil
     inputs.currentSharePrice == null ? null : safeDivide(scenarioFairValuePerShare - inputs.currentSharePrice, inputs.currentSharePrice);
 
   const flags = new Set(inputs.confidenceFlags ?? []);
+  for (const flag of spreadFlags) {
+    flags.add(flag);
+  }
   if (inputs.oilSupportStatus === "partial") {
     flags.add("oil_support_partial");
   }
@@ -237,6 +267,12 @@ function validateOilOverlayInputs(inputs: OilOverlayScenarioInputs): string | nu
   }
   if (inputs.dilutedShares == null || inputs.dilutedShares === 0) {
     return "Diluted shares are required for per-share overlay calculations.";
+  }
+  if ((inputs.meanReversionYears ?? 0) < 0) {
+    return "Mean reversion years must be zero or greater.";
+  }
+  if ((inputs.realizedSpreadMode ?? "benchmark_only") === "custom_spread" && inputs.customRealizedSpread == null) {
+    return "Custom realized spread is required when custom spread mode is selected.";
   }
   if (inputs.fadeYears < 0) {
     return "Fade years must be zero or greater.";
@@ -323,4 +359,44 @@ function safeDivide(numerator: number, denominator: number): number | null {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveEffectiveSpreadMode(inputs: OilOverlayScenarioInputs): { mode: RealizedSpreadMode; flags: string[] } {
+  const mode = inputs.realizedSpreadMode ?? "benchmark_only";
+  if (mode === "custom_spread") {
+    return { mode, flags: [] };
+  }
+  if ((mode === "hold_current_spread" || mode === "mean_revert") && inputs.currentRealizedSpread == null) {
+    return { mode: "benchmark_only", flags: ["realized_spread_fallback_benchmark_only", "realized_spread_not_available"] };
+  }
+  return { mode, flags: [] };
+}
+
+function scenarioRealizedSpread({
+  year,
+  startYear,
+  inputs,
+  effectiveSpreadMode,
+  baseReferenceSpread,
+}: {
+  year: number;
+  startYear: number;
+  inputs: OilOverlayScenarioInputs;
+  effectiveSpreadMode: RealizedSpreadMode;
+  baseReferenceSpread: number;
+}): number {
+  if (effectiveSpreadMode === "benchmark_only" || effectiveSpreadMode === "hold_current_spread") {
+    return baseReferenceSpread;
+  }
+  if (effectiveSpreadMode === "custom_spread") {
+    return Number(inputs.customRealizedSpread ?? 0);
+  }
+  const meanReversionYears = inputs.meanReversionYears ?? 0;
+  const meanReversionTargetSpread = inputs.meanReversionTargetSpread ?? 0;
+  if (meanReversionYears === 0) {
+    return meanReversionTargetSpread;
+  }
+  const elapsedYears = Math.max(0, year - startYear + 1);
+  const progress = Math.min(1, elapsedYears / meanReversionYears);
+  return baseReferenceSpread + (meanReversionTargetSpread - baseReferenceSpread) * progress;
 }

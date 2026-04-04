@@ -11,7 +11,7 @@ from app.services.oil_overlay_engine import OilCurveYearPoint, OilOverlayEngineI
 from app.source_registry import SourceUsage, build_provenance_entries, build_source_mix
 
 
-SensitivitySourceKind = Literal["manual", "disclosed", "derived_from_official"]
+SensitivitySourceKind = Literal["manual_override", "disclosed", "derived_from_official"]
 
 
 def build_company_oil_scenario_public_payload(
@@ -24,7 +24,8 @@ def build_company_oil_scenario_public_payload(
     strict_official_mode = bool(settings.strict_official_mode or overlay_payload.get("strict_official_mode"))
     exposure_profile = overlay_payload.get("exposure_profile") if isinstance(overlay_payload.get("exposure_profile"), dict) else {}
     benchmark_series = [item for item in (overlay_payload.get("benchmark_series") or []) if isinstance(item, dict)]
-    sensitivity = overlay_payload.get("sensitivity") if isinstance(overlay_payload.get("sensitivity"), dict) else None
+    overlay_sensitivity = overlay_payload.get("sensitivity") if isinstance(overlay_payload.get("sensitivity"), dict) else None
+    direct_company_evidence = _validated_direct_company_evidence(overlay_payload.get("direct_company_evidence"))
 
     models = get_company_models(session, company.id, model_names=["dcf", "residual_income"])
     financials = get_company_financials(session, company.id)
@@ -34,7 +35,7 @@ def build_company_oil_scenario_public_payload(
     diluted_shares = _resolve_diluted_shares(financials)
     current_share_price, current_price_as_of = _resolve_current_share_price(price_history)
 
-    selected_benchmark_id = _resolve_selected_benchmark_id(benchmark_series)
+    selected_benchmark_id = _resolve_selected_benchmark_id(benchmark_series, direct_company_evidence)
     benchmark_options = _benchmark_options(benchmark_series)
     selected_series = next((series for series in benchmark_series if series.get("series_id") == selected_benchmark_id), None)
     official_base_curve = _annualize_curve_series(selected_series)
@@ -43,7 +44,10 @@ def build_company_oil_scenario_public_payload(
     fade_years = 2
     current_oil_price, current_oil_price_source = _resolve_current_oil_price(selected_benchmark_id, benchmark_series)
 
-    sensitivity_source_kind, default_sensitivity_value = _resolve_sensitivity_source(sensitivity)
+    sensitivity_source_kind, default_sensitivity_value, sensitivity = _resolve_sensitivity_source(
+        overlay_sensitivity,
+        direct_company_evidence,
+    )
     manual_sensitivity_required = default_sensitivity_value is None
     manual_price_required = current_share_price is None
     manual_price_reason = _manual_price_reason(current_share_price, strict_official_mode=strict_official_mode)
@@ -52,7 +56,7 @@ def build_company_oil_scenario_public_payload(
         if manual_sensitivity_required
         else None
     )
-    direct_company_evidence = _validated_direct_company_evidence(overlay_payload.get("direct_company_evidence"))
+    realized_spread_defaults = _resolve_realized_spread_defaults(exposure_profile, direct_company_evidence)
 
     overlay_outputs = compute_oil_fair_value_overlay_payload(
         OilOverlayEngineInputs(
@@ -63,7 +67,18 @@ def build_company_oil_scenario_public_payload(
             fade_years=fade_years,
             annual_after_tax_oil_sensitivity=default_sensitivity_value,
             diluted_shares=diluted_shares,
+            sensitivity_source_kind=sensitivity_source_kind,
             current_share_price=current_share_price,
+            realized_spread_mode=str(realized_spread_defaults["mode"]),
+            current_realized_spread=_as_float(realized_spread_defaults.get("current_realized_spread")),
+            custom_realized_spread=_as_float(realized_spread_defaults.get("custom_realized_spread")),
+            mean_reversion_target_spread=_as_float(realized_spread_defaults.get("mean_reversion_target_spread")) or 0.0,
+            mean_reversion_years=int(realized_spread_defaults.get("mean_reversion_years") or 0),
+            realized_spread_reference_benchmark=(
+                str(realized_spread_defaults.get("reference_benchmark"))
+                if realized_spread_defaults.get("reference_benchmark") is not None
+                else None
+            ),
             oil_support_status=_support_status(exposure_profile.get("oil_support_status")),
             confidence_flags=tuple(str(flag) for flag in (overlay_payload.get("confidence_flags") or []) if isinstance(flag, str)),
         )
@@ -139,6 +154,13 @@ def build_company_oil_scenario_public_payload(
             "current_share_price_source": "cached_market_price" if current_share_price is not None else "manual_required",
             "current_oil_price": current_oil_price,
             "current_oil_price_source": current_oil_price_source,
+            "realized_spread_mode": realized_spread_defaults["mode"],
+            "current_realized_spread": realized_spread_defaults.get("current_realized_spread"),
+            "current_realized_spread_source": realized_spread_defaults.get("current_realized_spread_source"),
+            "custom_realized_spread": realized_spread_defaults.get("custom_realized_spread"),
+            "mean_reversion_target_spread": realized_spread_defaults.get("mean_reversion_target_spread"),
+            "mean_reversion_years": realized_spread_defaults.get("mean_reversion_years"),
+            "realized_spread_reference_benchmark": realized_spread_defaults.get("reference_benchmark"),
         },
         "scenarios": [item for item in (overlay_payload.get("scenarios") or []) if isinstance(item, dict)],
         "sensitivity": sensitivity,
@@ -159,6 +181,9 @@ def build_company_oil_scenario_public_payload(
             "manual_sensitivity_required": manual_sensitivity_required,
             "manual_sensitivity_reason": manual_sensitivity_reason,
             "price_input_mode": "manual" if manual_price_required else "cached_market_price",
+            "realized_spread_supported": bool(realized_spread_defaults.get("supported")),
+            "realized_spread_reason": realized_spread_defaults.get("reason"),
+            "realized_spread_fallback_label": realized_spread_defaults.get("fallback_label"),
         },
         "direct_company_evidence": direct_company_evidence,
         "diagnostics": diagnostics,
@@ -205,7 +230,21 @@ def _resolve_current_share_price(price_history: list[Any]) -> tuple[float | None
     return _as_float(getattr(latest, "close", None)), trade_date.isoformat() if isinstance(trade_date, date) else None
 
 
-def _resolve_selected_benchmark_id(series_list: list[dict[str, Any]]) -> str | None:
+def _resolve_selected_benchmark_id(series_list: list[dict[str, Any]], direct_company_evidence: dict[str, Any]) -> str | None:
+    preferred_benchmark = _preferred_benchmark_from_direct_evidence(direct_company_evidence)
+    if preferred_benchmark is not None:
+        preferred = next(
+            (
+                series
+                for series in series_list
+                if "short_term_baseline" in str(series.get("series_id") or "").lower()
+                and preferred_benchmark in str(series.get("series_id") or "").lower()
+            ),
+            None,
+        )
+        if preferred is not None:
+            return str(preferred.get("series_id") or "") or None
+
     preferred = next(
         (
             series
@@ -377,13 +416,20 @@ def _resolve_default_long_term_anchor(points: list[dict[str, float | int]]) -> f
     return _as_float(points[-1].get("price"))
 
 
-def _resolve_sensitivity_source(sensitivity: dict[str, Any] | None) -> tuple[SensitivitySourceKind, float | None]:
+def _resolve_sensitivity_source(
+    sensitivity: dict[str, Any] | None,
+    direct_company_evidence: dict[str, Any],
+) -> tuple[SensitivitySourceKind, float | None, dict[str, Any] | None]:
+    disclosed = _disclosed_sensitivity_payload(direct_company_evidence)
+    if disclosed is not None:
+        return "disclosed", _as_float(disclosed.get("elasticity")), disclosed
+
     if not isinstance(sensitivity, dict):
-        return "manual", None
+        return "manual_override", None, None
 
     value = _as_float(sensitivity.get("elasticity"))
     if value is None or str(sensitivity.get("status") or "").lower() == "placeholder":
-        return "manual", None
+        return "manual_override", None, None
 
     markers = " ".join(
         [
@@ -393,8 +439,136 @@ def _resolve_sensitivity_source(sensitivity: dict[str, Any] | None) -> tuple[Sen
         ]
     ).lower()
     if "disclosed" in markers:
-        return "disclosed", value
-    return "derived_from_official", value
+        return "disclosed", value, sensitivity
+    return "derived_from_official", value, sensitivity
+
+
+def _disclosed_sensitivity_payload(direct_company_evidence: dict[str, Any]) -> dict[str, Any] | None:
+    disclosed = direct_company_evidence.get("disclosed_sensitivity") if isinstance(direct_company_evidence, dict) else None
+    if not isinstance(disclosed, dict) or disclosed.get("status") != "available":
+        return None
+
+    value = _as_float(disclosed.get("annual_after_tax_sensitivity"))
+    if value is None:
+        return None
+
+    return {
+        "metric_basis": str(disclosed.get("metric_basis") or "annual_after_tax_earnings_usd"),
+        "lookback_quarters": 0,
+        "elasticity": value,
+        "r_squared": None,
+        "sample_size": 1,
+        "direction": "positive_with_higher_oil",
+        "status": "disclosed",
+        "confidence_flags": [
+            str(flag) for flag in (disclosed.get("confidence_flags") or []) if isinstance(flag, str)
+        ],
+    }
+
+
+def _resolve_realized_spread_defaults(exposure_profile: dict[str, Any], direct_company_evidence: dict[str, Any]) -> dict[str, Any]:
+    oil_exposure_type = str(exposure_profile.get("oil_exposure_type") or "non_oil").strip().lower()
+    support_status = _support_status(exposure_profile.get("oil_support_status"))
+    realized = direct_company_evidence.get("realized_price_comparison") if isinstance(direct_company_evidence, dict) else None
+
+    defaults = {
+        "supported": False,
+        "mode": "benchmark_only",
+        "current_realized_spread": None,
+        "current_realized_spread_source": None,
+        "custom_realized_spread": None,
+        "mean_reversion_target_spread": 0.0,
+        "mean_reversion_years": 3,
+        "reference_benchmark": None,
+        "reason": None,
+        "fallback_label": "Benchmark-only fallback",
+    }
+
+    if support_status == "unsupported":
+        defaults["reason"] = _unsupported_oil_overlay_reason(exposure_profile)
+        defaults["fallback_label"] = "Unsupported"
+        return defaults
+
+    if oil_exposure_type not in {"upstream", "integrated"}:
+        defaults["reason"] = "v1 realized-spread controls are only supported for producer and integrated-upstream oil names."
+        defaults["fallback_label"] = "Producer-only v1 model"
+        return defaults
+
+    if not isinstance(realized, dict) or realized.get("status") != "available":
+        defaults["reason"] = str(
+            (realized or {}).get("reason")
+            or "No clear SEC realized-price-versus-benchmark table is cached for this producer yet."
+        )
+        return defaults
+
+    current_realized_spread = _latest_realized_spread(realized)
+    if current_realized_spread is None:
+        defaults["reason"] = "A realized-price comparison was found, but it did not include a numeric spread that can anchor the v1 controls."
+        return defaults
+
+    reference_benchmark = realized.get("benchmark")
+    defaults.update(
+        {
+            "supported": True,
+            "mode": "hold_current_spread",
+            "current_realized_spread": current_realized_spread,
+            "current_realized_spread_source": "sec_realized_price_comparison",
+            "custom_realized_spread": current_realized_spread,
+            "reference_benchmark": None if reference_benchmark is None else str(reference_benchmark),
+            "reason": None,
+            "fallback_label": None,
+        }
+    )
+    return defaults
+
+
+def _latest_realized_spread(realized_payload: dict[str, Any]) -> float | None:
+    best_row: dict[str, Any] | None = None
+    best_year = -1
+    for row in realized_payload.get("rows") or []:
+        if not isinstance(row, dict):
+            continue
+        row_year = _extract_year(row.get("period_label")) or -1
+        if row_year > best_year:
+            best_year = row_year
+            best_row = row
+    if not isinstance(best_row, dict):
+        return None
+    premium_discount = _as_float(best_row.get("premium_discount"))
+    if premium_discount is not None:
+        return premium_discount
+    realized_price = _as_float(best_row.get("realized_price"))
+    benchmark_price = _as_float(best_row.get("benchmark_price"))
+    if realized_price is None or benchmark_price is None:
+        return None
+    return realized_price - benchmark_price
+
+
+def _preferred_benchmark_from_direct_evidence(direct_company_evidence: dict[str, Any]) -> str | None:
+    disclosed = direct_company_evidence.get("disclosed_sensitivity") if isinstance(direct_company_evidence, dict) else None
+    if isinstance(disclosed, dict) and disclosed.get("status") == "available":
+        benchmark = str(disclosed.get("benchmark") or "").strip().lower()
+        if benchmark in {"wti", "brent"}:
+            return benchmark
+    realized = direct_company_evidence.get("realized_price_comparison") if isinstance(direct_company_evidence, dict) else None
+    if isinstance(realized, dict) and realized.get("status") == "available":
+        benchmark = str(realized.get("benchmark") or "").strip().lower()
+        if benchmark in {"wti", "brent"}:
+            return benchmark
+    return None
+
+
+def _unsupported_oil_overlay_reason(exposure_profile: dict[str, Any]) -> str:
+    reasons = [str(reason) for reason in (exposure_profile.get("oil_support_reasons") or []) if isinstance(reason, str)]
+    if "non_energy_classification" in reasons:
+        return "The issuer is not currently classified as an energy or oil-exposed company."
+    if "oilfield_services_not_supported_v1" in reasons:
+        return "v1 does not model oilfield-services economics yet."
+    if "midstream_not_supported_v1" in reasons:
+        return "v1 does not model midstream or pipeline oil economics yet."
+    if "oil_taxonomy_unresolved_v1" in reasons:
+        return "The issuer's oil exposure could not be resolved from the current classification signals."
+    return "This issuer is not currently supported by the oil scenario overlay."
 
 
 def _manual_price_reason(current_share_price: float | None, *, strict_official_mode: bool) -> str | None:

@@ -269,3 +269,168 @@ def test_oil_scenario_strict_official_mode_omits_fallback_price_sources(monkeypa
     assert payload["user_editable_defaults"]["current_share_price"] is None
     assert "yahoo_finance" not in payload["source_mix"]["source_ids"]
     assert payload["source_mix"]["official_only"] is True
+
+
+def test_oil_scenario_prefers_sec_disclosed_sensitivity_and_matching_benchmark(monkeypatch):
+    payload = _overlay_payload()
+    payload["benchmark_series"].extend(
+        [
+            {
+                "series_id": "brent_spot_history",
+                "label": "Brent spot history",
+                "units": "usd_per_barrel",
+                "status": "ok",
+                "points": [
+                    {"label": "2026-04-03", "value": 85.0, "units": "usd_per_barrel", "observation_date": "2026-04-03"},
+                ],
+                "latest_value": 85.0,
+                "latest_observation_date": "2026-04-03",
+            },
+            {
+                "series_id": "brent_short_term_baseline",
+                "label": "Brent short-term official baseline",
+                "units": "usd_per_barrel",
+                "status": "ok",
+                "points": [
+                    {"label": "2026-01", "value": 84.0, "units": "usd_per_barrel", "observation_date": "2026-01"},
+                    {"label": "2027-01", "value": 82.0, "units": "usd_per_barrel", "observation_date": "2027-01"},
+                ],
+                "latest_value": 82.0,
+                "latest_observation_date": "2027-01",
+            },
+        ]
+    )
+    payload["sensitivity"] = {
+        "metric_basis": "annual_after_tax_earnings_usd",
+        "lookback_quarters": 8,
+        "elasticity": 300000000.0,
+        "r_squared": 0.61,
+        "sample_size": 8,
+        "direction": "positive_with_higher_oil",
+        "status": "ok",
+        "confidence_flags": ["derived_from_official"],
+    }
+    payload["direct_company_evidence"] = {
+        "status": "partial",
+        "checked_at": "2026-04-04T00:00:00+00:00",
+        "parser_confidence_flags": ["oil_sensitivity_disclosed", "realized_vs_benchmark_available"],
+        "disclosed_sensitivity": {
+            "status": "available",
+            "benchmark": "brent",
+            "oil_price_change_per_bbl": 1.0,
+            "annual_after_tax_earnings_change": 650000000.0,
+            "annual_after_tax_sensitivity": 650000000.0,
+            "metric_basis": "annual_after_tax_earnings_usd",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/34088/xom.htm",
+            "accession_number": "0000034088-26-000012",
+            "filing_form": "10-K",
+            "confidence_flags": ["oil_sensitivity_disclosed"],
+            "provenance_sources": ["sec_edgar"],
+        },
+        "diluted_shares": {
+            "status": "available",
+            "value": 4200000000.0,
+            "unit": "shares",
+            "taxonomy": "us-gaap",
+            "tag": "WeightedAverageNumberOfDilutedSharesOutstanding",
+            "confidence_flags": ["weighted_average_diluted_shares_companyfacts"],
+            "provenance_sources": ["sec_companyfacts"],
+        },
+        "realized_price_comparison": {
+            "status": "available",
+            "benchmark": "brent",
+            "rows": [
+                {
+                    "period_label": "2025",
+                    "benchmark": "brent",
+                    "realized_price": 71.25,
+                    "benchmark_price": 74.0,
+                    "realized_percent_of_benchmark": 96.3,
+                    "premium_discount": -2.75,
+                }
+            ],
+            "confidence_flags": ["realized_vs_benchmark_available"],
+            "provenance_sources": ["sec_edgar"],
+        },
+    }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (payload, "fresh"))
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc))
+    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: pytest.fail("refresh should not queue for fresh cache"))
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_models",
+        lambda *_args, **_kwargs: [SimpleNamespace(model_name="dcf", result={"fair_value_per_share": 100.0}, created_at=datetime(2026, 4, 4, tzinfo=timezone.utc))],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_financials",
+        lambda *_args, **_kwargs: [SimpleNamespace(weighted_average_diluted_shares=10.0, shares_outstanding=10.0)],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_price_history",
+        lambda *_args, **_kwargs: [SimpleNamespace(close=90.0, trade_date=date(2026, 4, 4))],
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    resolved = response.json()
+    assert resolved["user_editable_defaults"]["benchmark_id"] == "brent_short_term_baseline"
+    assert resolved["user_editable_defaults"]["current_oil_price_source"] == "brent_spot_history"
+    assert resolved["sensitivity_source"]["kind"] == "disclosed"
+    assert resolved["user_editable_defaults"]["annual_after_tax_sensitivity"] == 650000000.0
+    assert resolved["requirements"]["realized_spread_supported"] is True
+    assert resolved["user_editable_defaults"]["current_realized_spread"] == pytest.approx(-2.75)
+
+
+def test_oil_scenario_labels_benchmark_only_fallback_when_realized_spread_is_unavailable(monkeypatch):
+    payload = _overlay_payload()
+    payload["direct_company_evidence"] = {
+        "status": "partial",
+        "checked_at": "2026-04-04T00:00:00+00:00",
+        "parser_confidence_flags": ["realized_vs_benchmark_not_available"],
+        "disclosed_sensitivity": {
+            "status": "not_available",
+            "reason": "No explicit annual oil sensitivity was disclosed.",
+            "confidence_flags": ["oil_sensitivity_not_available"],
+            "provenance_sources": ["sec_edgar"],
+        },
+        "diluted_shares": {
+            "status": "available",
+            "value": 4200000000.0,
+            "unit": "shares",
+            "taxonomy": "us-gaap",
+            "tag": "WeightedAverageNumberOfDilutedSharesOutstanding",
+            "confidence_flags": ["weighted_average_diluted_shares_companyfacts"],
+            "provenance_sources": ["sec_companyfacts"],
+        },
+        "realized_price_comparison": {
+            "status": "not_available",
+            "reason": "No clear SEC realized-price-versus-benchmark table is cached for this producer yet.",
+            "benchmark": "wti",
+            "rows": [],
+            "confidence_flags": ["realized_vs_benchmark_not_available"],
+            "provenance_sources": ["sec_edgar"],
+        },
+    }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (payload, "fresh"))
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc))
+    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: pytest.fail("refresh should not queue for fresh cache"))
+    monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(oil_scenario_service, "get_company_price_history", lambda *_args, **_kwargs: [])
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    resolved = response.json()
+    assert resolved["requirements"]["realized_spread_supported"] is False
+    assert resolved["requirements"]["realized_spread_fallback_label"] == "Benchmark-only fallback"
+    assert "No clear SEC realized-price-versus-benchmark table" in resolved["requirements"]["realized_spread_reason"]

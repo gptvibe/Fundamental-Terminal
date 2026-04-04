@@ -85,6 +85,13 @@ class OilScenarioUserEditableDefaultsPayload(BaseModel):
     current_share_price_source: str = "manual_required"
     current_oil_price: Number = None
     current_oil_price_source: str | None = None
+    realized_spread_mode: str = "benchmark_only"
+    current_realized_spread: Number = None
+    current_realized_spread_source: str | None = None
+    custom_realized_spread: Number = None
+    mean_reversion_target_spread: Number = None
+    mean_reversion_years: int = 0
+    realized_spread_reference_benchmark: str | None = None
 
 
 class OilScenarioSensitivitySourcePayload(BaseModel):
@@ -100,6 +107,9 @@ class OilScenarioOverlayYearResultPayload(BaseModel):
     base_oil_price: Number = None
     scenario_oil_price: Number = None
     oil_price_delta: Number = None
+    base_realized_price: Number = None
+    scenario_realized_price: Number = None
+    realized_price_delta: Number = None
     earnings_delta_after_tax: Number = None
     per_share_delta: Number = None
     present_value_per_share: Number = None
@@ -129,6 +139,9 @@ class OilScenarioRequirementsPayload(BaseModel):
     manual_sensitivity_required: bool
     manual_sensitivity_reason: str | None = None
     price_input_mode: str
+    realized_spread_supported: bool = False
+    realized_spread_reason: str | None = None
+    realized_spread_fallback_label: str | None = None
 
 
 class OilScenarioDirectEvidenceFieldPayload(BaseModel):

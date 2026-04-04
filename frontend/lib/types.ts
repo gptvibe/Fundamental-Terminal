@@ -1008,10 +1008,17 @@ export interface OilScenarioUserEditableDefaultsPayload {
   current_share_price_source?: string;
   current_oil_price?: number | null;
   current_oil_price_source?: string | null;
+  realized_spread_mode?: string;
+  current_realized_spread?: number | null;
+  current_realized_spread_source?: string | null;
+  custom_realized_spread?: number | null;
+  mean_reversion_target_spread?: number | null;
+  mean_reversion_years?: number;
+  realized_spread_reference_benchmark?: string | null;
 }
 
 export interface OilScenarioSensitivitySourcePayload {
-  kind: "manual" | "disclosed" | "derived_from_official";
+  kind: "manual_override" | "disclosed" | "derived_from_official";
   value?: number | null;
   metric_basis?: string | null;
   status?: string | null;
@@ -1023,6 +1030,9 @@ export interface OilScenarioOverlayYearResultPayload {
   base_oil_price: number | null;
   scenario_oil_price: number | null;
   oil_price_delta: number | null;
+  base_realized_price?: number | null;
+  scenario_realized_price?: number | null;
+  realized_price_delta?: number | null;
   earnings_delta_after_tax: number | null;
   per_share_delta: number | null;
   present_value_per_share: number | null;
@@ -1052,6 +1062,9 @@ export interface OilScenarioRequirementsPayload {
   manual_sensitivity_required: boolean;
   manual_sensitivity_reason?: string | null;
   price_input_mode: string;
+  realized_spread_supported?: boolean;
+  realized_spread_reason?: string | null;
+  realized_spread_fallback_label?: string | null;
 }
 
 export interface OilScenarioDirectEvidenceFieldPayload {

@@ -176,6 +176,84 @@ describe("OilScenarioOverlayPanel", () => {
             fallback_source_ids: [],
             official_only: true,
           },
+          sensitivity_source: {
+            kind: "manual_override",
+            value: null,
+            metric_basis: null,
+            status: null,
+            confidence_flags: [],
+          },
+          user_editable_defaults: {
+            benchmark_id: "wti_short_term_baseline",
+            benchmark_options: [
+              { value: "wti_short_term_baseline", label: "WTI" },
+              { value: "brent_short_term_baseline", label: "Brent" },
+            ],
+            short_term_curve: [
+              { year: 2026, price: 80 },
+              { year: 2027, price: 78 },
+              { year: 2028, price: 76 },
+            ],
+            long_term_anchor: 76,
+            fade_years: 2,
+            annual_after_tax_sensitivity: null,
+            base_fair_value_per_share: 100,
+            diluted_shares: 10,
+            current_realized_spread: -4,
+            current_realized_spread_source: "sec_realized_price_comparison",
+            custom_realized_spread: -4,
+            mean_reversion_target_spread: 0,
+            mean_reversion_years: 2,
+            realized_spread_mode: "hold_current_spread",
+            realized_spread_reference_benchmark: "wti",
+          },
+          requirements: {
+            strict_official_mode: true,
+            manual_price_required: true,
+            manual_price_reason: "Company cache is missing.",
+            manual_sensitivity_required: true,
+            manual_sensitivity_reason: "No disclosed or derived official oil sensitivity is cached yet.",
+            price_input_mode: "manual",
+            realized_spread_supported: true,
+            realized_spread_reason: null,
+            realized_spread_fallback_label: null,
+          },
+          direct_company_evidence: {
+            status: "partial",
+            checked_at: "2026-04-04T00:00:00Z",
+            parser_confidence_flags: ["realized_vs_benchmark_available"],
+            disclosed_sensitivity: {
+              status: "not_available",
+              reason: "No explicit annual oil sensitivity was disclosed.",
+              confidence_flags: ["oil_sensitivity_not_available"],
+              provenance_sources: ["sec_edgar"],
+            },
+            diluted_shares: {
+              status: "available",
+              value: 10,
+              unit: "shares",
+              taxonomy: "us-gaap",
+              tag: "WeightedAverageNumberOfDilutedSharesOutstanding",
+              confidence_flags: ["weighted_average_diluted_shares_companyfacts"],
+              provenance_sources: ["sec_companyfacts"],
+            },
+            realized_price_comparison: {
+              status: "available",
+              benchmark: "wti",
+              rows: [
+                {
+                  period_label: "2025",
+                  benchmark: "wti",
+                  realized_price: 72,
+                  benchmark_price: 76,
+                  realized_percent_of_benchmark: 94.74,
+                  premium_discount: -4,
+                },
+              ],
+              confidence_flags: ["realized_vs_benchmark_available"],
+              provenance_sources: ["sec_edgar"],
+            },
+          },
           confidence_flags: [],
           refresh: { triggered: false, reason: "fresh", ticker: "CVX", job_id: null },
         },
@@ -184,18 +262,22 @@ describe("OilScenarioOverlayPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Annual after-tax sensitivity input"), { target: { value: "10" } });
     fireEvent.change(screen.getByLabelText("Current share price input"), { target: { value: "90" } });
-  fireEvent.change(screen.getByLabelText("Short-term curve 2026"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Short-term curve 2026"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("Realized spread mode"), { target: { value: "custom_spread" } });
+    fireEvent.change(screen.getByLabelText("Custom realized spread input"), { target: { value: "-1" } });
 
     expect(screen.getByText("Oil Scenario Overlay")).toBeTruthy();
+    expect(screen.getByText(/v1 models realized-vs-benchmark economics for producers/i)).toBeTruthy();
     expect(screen.getByLabelText("Benchmark Selector")).toBeTruthy();
     expect(screen.getByLabelText("Long-term anchor input")).toBeTruthy();
     expect(screen.getByLabelText("Fade years input")).toBeTruthy();
     expect(screen.getByLabelText("Annual after-tax sensitivity input")).toBeTruthy();
-  expect(screen.getByText("$118.18")).toBeTruthy();
-  expect(screen.getAllByText("+$18.18").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Realized spread mode")).toBeTruthy();
+    expect(screen.getByText("$129.55")).toBeTruthy();
+    expect(screen.getAllByText("+$29.55").length).toBeGreaterThan(0);
     expect(screen.getByText("+1")).toBeTruthy();
-  expect(screen.getByText("31.31%")).toBeTruthy();
-    expect(screen.getByText("integrated_upstream_supported")).toBeTruthy();
+    expect(screen.getByText("43.95%")).toBeTruthy();
+    expect(screen.getByText("integrated upstream supported")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Export JSON" }));
     fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
@@ -205,7 +287,7 @@ describe("OilScenarioOverlayPanel", () => {
     expect(showAppToast).toHaveBeenCalled();
   });
 
-  it("shows a +5 percent example when official benchmark points are missing", () => {
+  it("shows benchmark-only fallback labeling when realized spread evidence is unavailable", () => {
     render(
       React.createElement(OilScenarioOverlayPanel, {
         ticker: "CVX",
@@ -289,9 +371,28 @@ describe("OilScenarioOverlayPanel", () => {
             pass_through_signal: "unknown",
             evidence: [],
           },
-          benchmark_series: [],
+          benchmark_series: [
+            {
+              series_id: "wti_short_term_baseline",
+              label: "WTI short-term official baseline",
+              units: "usd_per_barrel",
+              status: "ok",
+              points: [
+                { label: "2026-01", value: 80, units: "usd_per_barrel", observation_date: "2026-01" },
+              ],
+              latest_value: 80,
+              latest_observation_date: "2026-01",
+            },
+          ],
           scenarios: [],
           sensitivity: null,
+          sensitivity_source: {
+            kind: "manual_override",
+            value: null,
+            metric_basis: null,
+            status: null,
+            confidence_flags: [],
+          },
           diagnostics: {
             coverage_ratio: 0,
             fallback_ratio: 0,
@@ -311,22 +412,60 @@ describe("OilScenarioOverlayPanel", () => {
           },
           confidence_flags: [],
           user_editable_defaults: {
-            benchmark_options: [],
+            benchmark_id: "wti_short_term_baseline",
+            benchmark_options: [{ value: "wti_short_term_baseline", label: "WTI" }],
             current_oil_price: 83.4,
             current_oil_price_source: "wti_spot_history",
+            realized_spread_mode: "benchmark_only",
+            current_realized_spread: null,
+            custom_realized_spread: null,
+            mean_reversion_target_spread: 0,
+            mean_reversion_years: 3,
+            realized_spread_reference_benchmark: "wti",
+          },
+          requirements: {
+            strict_official_mode: false,
+            manual_price_required: false,
+            manual_price_reason: null,
+            manual_sensitivity_required: true,
+            manual_sensitivity_reason: "No disclosed or derived official oil sensitivity is cached yet.",
+            price_input_mode: "cached_market_price",
+            realized_spread_supported: false,
+            realized_spread_reason: "v1 realized-spread controls are only supported for producer and integrated-upstream oil names.",
+            realized_spread_fallback_label: "Producer-only v1 model",
+          },
+          direct_company_evidence: {
+            status: "not_available",
+            checked_at: "2026-04-04T00:00:00Z",
+            parser_confidence_flags: ["realized_vs_benchmark_not_available"],
+            disclosed_sensitivity: {
+              status: "not_available",
+              reason: "No explicit annual oil sensitivity was disclosed.",
+              confidence_flags: ["oil_sensitivity_not_available"],
+              provenance_sources: ["sec_edgar"],
+            },
+            diluted_shares: {
+              status: "not_available",
+              reason: "No diluted share evidence was cached.",
+              confidence_flags: ["diluted_shares_not_available"],
+              provenance_sources: ["sec_companyfacts"],
+            },
+            realized_price_comparison: {
+              status: "not_available",
+              reason: "No clear SEC realized-price-versus-benchmark table is cached for this producer yet.",
+              benchmark: "wti",
+              rows: [],
+              confidence_flags: ["realized_vs_benchmark_not_available"],
+              provenance_sources: ["sec_edgar"],
+            },
           },
           refresh: { triggered: false, reason: "fresh", ticker: "CVX", job_id: null },
         },
       }),
     );
 
-    expect(screen.getByText("Load +5% example")).toBeTruthy();
-    expect(screen.getByText(/Example mode uses \$83.40\/bbl/)).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Example benchmark ($83.40/bbl baseline)" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Load +5% example" }));
-
-    expect((screen.getByLabelText("Long-term anchor input") as HTMLInputElement).value).toBe("83.4");
-    expect((screen.getByLabelText("Short-term curve 2026") as HTMLInputElement).value).toBe("87.57");
+    expect(screen.getByText("Producer-only v1 model")).toBeTruthy();
+    expect(screen.getByText(/only supported for producer and integrated-upstream oil names/i)).toBeTruthy();
+    expect(screen.queryByText("Load +5% example")).toBeNull();
   });
 });

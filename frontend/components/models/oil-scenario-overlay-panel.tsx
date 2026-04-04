@@ -37,10 +37,7 @@ interface OilScenarioOverlayPanelProps {
 }
 
 type SensitivitySource = "manual" | "dataset";
-
-const EXAMPLE_BENCHMARK_ID = "__example_current_oil__";
-const EXAMPLE_BASELINE_OIL_PRICE = 80;
-const EXAMPLE_CURVE_YEARS = 3;
+type RealizedSpreadMode = "hold_current_spread" | "mean_revert" | "custom_spread" | "benchmark_only";
 
 export function OilScenarioOverlayPanel({
   ticker,
@@ -58,43 +55,14 @@ export function OilScenarioOverlayPanel({
     () => (overlay?.user_editable_defaults?.benchmark_options?.length ? overlay.user_editable_defaults.benchmark_options : resolveBenchmarkOptions(overlay?.benchmark_series ?? [])),
     [overlay?.benchmark_series, overlay?.user_editable_defaults?.benchmark_options],
   );
-  const usingExampleBenchmark = benchmarkOptions.length === 0;
-  const exampleBaseOilPrice = useMemo(
-    () => resolveExampleBaseOilPrice(overlay?.user_editable_defaults?.current_oil_price, overlay?.benchmark_series ?? []),
-    [overlay?.benchmark_series, overlay?.user_editable_defaults?.current_oil_price],
-  );
-  const exampleStartYear = useMemo(() => resolveExampleStartYear(overlay?.as_of), [overlay?.as_of]);
-  const displayBenchmarkOptions = useMemo(
-    () =>
-      benchmarkOptions.length
-        ? benchmarkOptions
-        : [{ value: EXAMPLE_BENCHMARK_ID, label: `Example benchmark (${formatCurrency(exampleBaseOilPrice)}/bbl baseline)` }],
-    [benchmarkOptions, exampleBaseOilPrice],
-  );
-  const defaultBenchmarkId = displayBenchmarkOptions.find((option) => option.value.toLowerCase().includes("wti"))?.value ?? displayBenchmarkOptions[0]?.value ?? "";
+  const defaultBenchmarkId = overlay?.user_editable_defaults?.benchmark_id ?? benchmarkOptions[0]?.value ?? "";
   const [benchmarkId, setBenchmarkId] = useState(defaultBenchmarkId);
   const selectedBenchmark = useMemo(
     () => (overlay?.benchmark_series ?? []).find((series) => series.series_id === benchmarkId) ?? null,
     [benchmarkId, overlay?.benchmark_series],
   );
   const annualBaseCurve = useMemo(() => annualizeOilCurveSeries(selectedBenchmark), [selectedBenchmark]);
-  const exampleBaselineCurve = useMemo(
-    () => buildExampleBaselineCurve(exampleStartYear, exampleBaseOilPrice),
-    [exampleBaseOilPrice, exampleStartYear],
-  );
-  const examplePlusFiveCurve = useMemo(
-    () => buildExampleScenarioCurve(exampleStartYear, exampleBaseOilPrice, 0.05),
-    [exampleBaseOilPrice, exampleStartYear],
-  );
-  const activeAnnualBaseCurve = useMemo(() => {
-    if (annualBaseCurve.length) {
-      return annualBaseCurve;
-    }
-    if (usingExampleBenchmark && benchmarkId === EXAMPLE_BENCHMARK_ID) {
-      return exampleBaselineCurve;
-    }
-    return [];
-  }, [annualBaseCurve, benchmarkId, exampleBaselineCurve, usingExampleBenchmark]);
+  const activeAnnualBaseCurve = annualBaseCurve;
   const defaultShortTermCurve = useMemo(() => buildDefaultShortTermCurve(activeAnnualBaseCurve), [activeAnnualBaseCurve]);
   const defaultLongTermAnchor = useMemo(() => resolveDefaultLongTermAnchor(activeAnnualBaseCurve), [activeAnnualBaseCurve]);
   const latestPrice = priceHistory.at(-1)?.close ?? null;
@@ -103,13 +71,26 @@ export function OilScenarioOverlayPanel({
     : companySupportStatus;
   const supportReasons = overlay?.exposure_profile.oil_support_reasons?.length ? overlay.exposure_profile.oil_support_reasons : companySupportReasons;
   const datasetSensitivity = useMemo(() => resolveDatasetAnnualSensitivity(overlay?.sensitivity), [overlay?.sensitivity]);
+  const defaultSensitivitySource = useMemo<SensitivitySource>(
+    () => (datasetSensitivity == null ? "manual" : "dataset"),
+    [datasetSensitivity],
+  );
+  const realizedSpreadSupported = Boolean(overlay?.requirements?.realized_spread_supported);
+  const defaultRealizedSpreadMode = useMemo<RealizedSpreadMode>(
+    () => ((overlay?.user_editable_defaults?.realized_spread_mode as RealizedSpreadMode | undefined) ?? "benchmark_only"),
+    [overlay?.user_editable_defaults?.realized_spread_mode],
+  );
+  const defaultCustomRealizedSpread = overlay?.user_editable_defaults?.custom_realized_spread;
+  const defaultMeanReversionYears = overlay?.user_editable_defaults?.mean_reversion_years ?? 3;
 
   const [shortTermCurve, setShortTermCurve] = useState(defaultShortTermCurve);
   const [longTermAnchorInput, setLongTermAnchorInput] = useState(defaultLongTermAnchor == null ? "" : String(defaultLongTermAnchor));
   const [fadeYearsInput, setFadeYearsInput] = useState("2");
-  const [sensitivitySource, setSensitivitySource] = useState<SensitivitySource>(datasetSensitivity == null ? "manual" : "dataset");
+  const [sensitivitySource, setSensitivitySource] = useState<SensitivitySource>(defaultSensitivitySource);
   const [manualSensitivityInput, setManualSensitivityInput] = useState("");
   const [currentSharePriceInput, setCurrentSharePriceInput] = useState(latestPrice == null ? "" : String(latestPrice));
+  const [realizedSpreadMode, setRealizedSpreadMode] = useState<RealizedSpreadMode>(defaultRealizedSpreadMode);
+  const [customRealizedSpreadInput, setCustomRealizedSpreadInput] = useState(defaultCustomRealizedSpread == null ? "" : String(defaultCustomRealizedSpread));
 
   useEffect(() => {
     setBenchmarkId(defaultBenchmarkId);
@@ -124,10 +105,20 @@ export function OilScenarioOverlayPanel({
     setCurrentSharePriceInput(latestPrice == null ? "" : String(latestPrice));
   }, [latestPrice, strictOfficialMode]);
 
+  useEffect(() => {
+    setSensitivitySource(defaultSensitivitySource);
+  }, [defaultSensitivitySource]);
+
+  useEffect(() => {
+    setRealizedSpreadMode(defaultRealizedSpreadMode);
+    setCustomRealizedSpreadInput(defaultCustomRealizedSpread == null ? "" : String(defaultCustomRealizedSpread));
+  }, [defaultCustomRealizedSpread, defaultRealizedSpreadMode]);
+
   const activeSensitivity = sensitivitySource === "dataset" ? datasetSensitivity : parseNumber(manualSensitivityInput);
   const currentSharePrice = parseNumber(currentSharePriceInput) ?? latestPrice;
   const fadeYears = Math.max(0, Number.parseInt(fadeYearsInput || "0", 10) || 0);
   const longTermAnchor = parseNumber(longTermAnchorInput);
+  const customRealizedSpread = parseNumber(customRealizedSpreadInput);
   const overlayResult = useMemo(
     () =>
       computeOilOverlayScenario({
@@ -138,15 +129,27 @@ export function OilScenarioOverlayPanel({
         fadeYears,
         annualAfterTaxOilSensitivity: activeSensitivity,
         dilutedShares,
+        sensitivitySourceKind:
+          sensitivitySource === "dataset"
+            ? overlay?.sensitivity_source?.kind === "disclosed"
+              ? "disclosed"
+              : "derived_from_official"
+            : "manual_override",
         currentSharePrice,
+        realizedSpreadMode: realizedSpreadSupported ? realizedSpreadMode : "benchmark_only",
+        currentRealizedSpread: overlay?.user_editable_defaults?.current_realized_spread ?? null,
+        customRealizedSpread,
+        meanReversionTargetSpread: overlay?.user_editable_defaults?.mean_reversion_target_spread ?? 0,
+        meanReversionYears: defaultMeanReversionYears,
+        realizedSpreadReferenceBenchmark: overlay?.user_editable_defaults?.realized_spread_reference_benchmark ?? null,
         annualDiscountRate: 0.1,
         oilSupportStatus: supportStatus,
         confidenceFlags: [...(overlay?.confidence_flags ?? []), ...(overlay?.sensitivity?.confidence_flags ?? [])],
       }),
-    [activeAnnualBaseCurve, activeSensitivity, baseFairValuePerShare, currentSharePrice, dilutedShares, fadeYears, longTermAnchor, overlay?.confidence_flags, overlay?.sensitivity?.confidence_flags, shortTermCurve, supportStatus],
+    [activeAnnualBaseCurve, activeSensitivity, baseFairValuePerShare, currentSharePrice, customRealizedSpread, defaultMeanReversionYears, dilutedShares, fadeYears, longTermAnchor, overlay?.confidence_flags, overlay?.sensitivity?.confidence_flags, overlay?.sensitivity_source?.kind, overlay?.user_editable_defaults?.current_realized_spread, overlay?.user_editable_defaults?.mean_reversion_target_spread, overlay?.user_editable_defaults?.realized_spread_reference_benchmark, realizedSpreadMode, realizedSpreadSupported, sensitivitySource, shortTermCurve, supportStatus],
   );
   const confidenceReasons = useMemo(
-    () => Array.from(new Set([...supportReasons, ...(overlay?.confidence_flags ?? []).map(humanizeFlag), ...overlayResult.confidenceFlags.map(humanizeFlag)])).filter(Boolean),
+    () => Array.from(new Set([...supportReasons.map(describeOilSupportReason), ...(overlay?.confidence_flags ?? []).map(humanizeFlag), ...overlayResult.confidenceFlags.map(humanizeFlag)])).filter(Boolean),
     [overlay?.confidence_flags, overlayResult.confidenceFlags, supportReasons],
   );
 
@@ -165,6 +168,11 @@ export function OilScenarioOverlayPanel({
           sensitivity_source: sensitivitySource,
           annual_after_tax_sensitivity: activeSensitivity,
           current_share_price: currentSharePrice,
+          realized_spread_mode: realizedSpreadSupported ? realizedSpreadMode : "benchmark_only",
+          current_realized_spread: overlay?.user_editable_defaults?.current_realized_spread ?? null,
+          custom_realized_spread: customRealizedSpread,
+          mean_reversion_target_spread: overlay?.user_editable_defaults?.mean_reversion_target_spread ?? 0,
+          mean_reversion_years: defaultMeanReversionYears,
           base_fair_value_per_share: baseFairValuePerShare,
           diluted_shares: dilutedShares,
         },
@@ -186,6 +194,9 @@ export function OilScenarioOverlayPanel({
           base_oil_price: item.baseOilPrice,
           scenario_oil_price: item.scenarioOilPrice,
           oil_price_delta: item.oilPriceDelta,
+          base_realized_price: item.baseRealizedPrice,
+          scenario_realized_price: item.scenarioRealizedPrice,
+          realized_price_delta: item.realizedPriceDelta,
           earnings_delta_after_tax: item.earningsDeltaAfterTax,
           per_share_delta: item.perShareDelta,
           present_value_per_share: item.presentValuePerShare,
@@ -214,6 +225,13 @@ export function OilScenarioOverlayPanel({
         </div>
       </div>
 
+      <div className="filing-link-card workspace-card-stack-tight">
+        <div className="metric-label">v1 Scope</div>
+        <div>
+          v1 models realized-vs-benchmark economics for producers and integrated upstream names. It does not claim to know the exact company purchase price of oil.
+        </div>
+      </div>
+
       <div className="workspace-pill-row">
         <span className="pill">Support {titleCase(supportStatus)}</span>
         <span className="pill">Base Fair Value {formatCurrency(baseFairValuePerShare)}</span>
@@ -227,19 +245,21 @@ export function OilScenarioOverlayPanel({
       </div>
 
       <div className="oil-overlay-controls">
-        <label className="oil-overlay-field">
-          <span className="metric-label">Benchmark Selector</span>
-          <select aria-label="Benchmark Selector" value={benchmarkId} onChange={(event) => setBenchmarkId(event.target.value)}>
-            {displayBenchmarkOptions.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          {usingExampleBenchmark ? (
-            <span className="text-muted oil-overlay-help">
-              No official benchmark points are cached yet. Example mode uses {formatCurrency(exampleBaseOilPrice)}/bbl as a stand-in current oil price so you can see the expected input format.
-            </span>
-          ) : null}
-        </label>
+        {benchmarkOptions.length ? (
+          <label className="oil-overlay-field">
+            <span className="metric-label">Benchmark Selector</span>
+            <select aria-label="Benchmark Selector" value={benchmarkId} onChange={(event) => setBenchmarkId(event.target.value)}>
+              {benchmarkOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <div className="oil-overlay-field">
+            <span className="metric-label">Benchmark Selector</span>
+            <div className="text-muted oil-overlay-help">No official benchmark curve is cached yet for this company.</div>
+          </div>
+        )}
 
         <label className="oil-overlay-field">
           <span className="metric-label">Long-Term Anchor</span>
@@ -254,8 +274,11 @@ export function OilScenarioOverlayPanel({
         <label className="oil-overlay-field">
           <span className="metric-label">Sensitivity Source</span>
           <select value={sensitivitySource} onChange={(event) => setSensitivitySource(event.target.value as SensitivitySource)}>
-            <option value="manual">Manual annual after-tax input</option>
-            <option value="dataset" disabled={datasetSensitivity == null}>Overlay dataset{datasetSensitivity == null ? " (unavailable)" : ""}</option>
+            <option value="manual">Manual override</option>
+            <option value="dataset" disabled={datasetSensitivity == null}>
+              {overlay?.sensitivity_source?.kind === "disclosed" ? "SEC disclosed sensitivity" : "Derived official estimate"}
+              {datasetSensitivity == null ? " (unavailable)" : ""}
+            </option>
           </select>
         </label>
 
@@ -287,34 +310,52 @@ export function OilScenarioOverlayPanel({
               : "Defaults to the latest cached share price when market data is available."}
           </span>
         </label>
+
+        {realizedSpreadSupported ? (
+          <>
+            <label className="oil-overlay-field">
+              <span className="metric-label">Realized Spread Mode</span>
+              <select aria-label="Realized spread mode" value={realizedSpreadMode} onChange={(event) => setRealizedSpreadMode(event.target.value as RealizedSpreadMode)}>
+                <option value="hold_current_spread">Hold current spread</option>
+                <option value="mean_revert">Mean revert to benchmark</option>
+                <option value="custom_spread">Custom spread</option>
+              </select>
+              <span className="text-muted oil-overlay-help">
+                Current SEC-derived spread: {formatSignedCurrency(overlay?.user_editable_defaults?.current_realized_spread)} versus {String(overlay?.user_editable_defaults?.realized_spread_reference_benchmark ?? overlay?.direct_company_evidence?.realized_price_comparison?.benchmark ?? "benchmark").toUpperCase()}. Mean reversion fades that spread to $0.00 over {defaultMeanReversionYears} years.
+              </span>
+            </label>
+
+            <label className="oil-overlay-field">
+              <span className="metric-label">Custom Realized Spread</span>
+              <input
+                aria-label="Custom realized spread input"
+                type="number"
+                step="0.01"
+                value={customRealizedSpreadInput}
+                onChange={(event) => setCustomRealizedSpreadInput(event.target.value)}
+                disabled={realizedSpreadMode !== "custom_spread"}
+              />
+            </label>
+          </>
+        ) : (
+          <div className="oil-overlay-field">
+            <span className="metric-label">Realized Spread Controls</span>
+            <div>{overlay?.requirements?.realized_spread_fallback_label ?? "Benchmark-only fallback"}</div>
+            <div className="text-muted oil-overlay-help">
+              {overlay?.requirements?.realized_spread_reason ?? "No SEC realized-price-versus-benchmark spread is cached yet, so the overlay stays benchmark-only."}
+            </div>
+          </div>
+        )}
       </div>
+
+      {overlay?.sensitivity_source?.kind === "disclosed" ? (
+        <div className="text-muted oil-overlay-help">
+          SEC disclosed sensitivity is benchmark-linked. Realized-spread controls remain visible for context, but benchmark-linked earnings deltas stay anchored to the disclosed benchmark sensitivity unless you switch to manual override.
+        </div>
+      ) : null}
 
       <div className="workspace-card-stack-tight">
         <div className="metric-label">Short-Term Curve Editor</div>
-        {usingExampleBenchmark ? (
-          <div className="filing-link-card workspace-card-stack-tight oil-overlay-example-card">
-            <div className="metric-label">Example Input</div>
-            <div>
-              If current oil is {formatCurrency(exampleBaseOilPrice)}/bbl, a +5% scenario is {formatCurrency(examplePlusFiveCurve[0]?.price ?? null)}/bbl.
-            </div>
-            <div className="text-muted">
-              Load a simple example to prefill the editable years, then replace those prices with your own path once you have a view.
-            </div>
-            <div className="oil-overlay-example-actions">
-              <button
-                type="button"
-                className="ticker-button"
-                onClick={() => {
-                  setBenchmarkId(EXAMPLE_BENCHMARK_ID);
-                  setShortTermCurve(examplePlusFiveCurve);
-                  setLongTermAnchorInput(String(exampleBaseOilPrice));
-                }}
-              >
-                Load +5% example
-              </button>
-            </div>
-          </div>
-        ) : null}
         {shortTermCurve.length ? (
           <div className="workspace-card-stack-tight">
             {shortTermCurve.map((point, index) => (
@@ -330,12 +371,12 @@ export function OilScenarioOverlayPanel({
                     setShortTermCurve((current) => current.map((item, currentIndex) => (currentIndex === index && Number.isFinite(nextValue) ? { ...item, price: nextValue } : item)));
                   }}
                 />
-                <span className="text-muted">{usingExampleBenchmark ? "Example baseline" : "Official base"} {formatCurrency(activeAnnualBaseCurve[index]?.price ?? point.price)}</span>
+                <span className="text-muted">Official base {formatCurrency(activeAnnualBaseCurve[index]?.price ?? point.price)}</span>
               </div>
             ))}
             <div>
               <button type="button" className="ticker-button" onClick={() => setShortTermCurve(defaultShortTermCurve)}>
-                {usingExampleBenchmark ? "Reset to example baseline" : "Reset to official curve"}
+                Reset to official curve
               </button>
             </div>
           </div>
@@ -377,7 +418,8 @@ export function OilScenarioOverlayPanel({
             <thead>
               <tr>
                 <th>Year</th>
-                <th>Oil Delta</th>
+                <th>Benchmark Delta</th>
+                <th>Realized Delta</th>
                 <th>Earnings Delta</th>
                 <th>Per Share</th>
                 <th>PV / Share</th>
@@ -388,6 +430,7 @@ export function OilScenarioOverlayPanel({
                 <tr key={item.year}>
                   <td>{item.year}</td>
                   <td>{formatSignedCurrency(item.oilPriceDelta)}</td>
+                  <td>{formatSignedCurrency(item.realizedPriceDelta)}</td>
                   <td>{formatSignedCurrency(item.earningsDeltaAfterTax)}</td>
                   <td>{formatSignedCurrency(item.perShareDelta)}</td>
                   <td>{formatSignedCurrency(item.presentValuePerShare)}</td>
@@ -461,43 +504,23 @@ function formatCompact(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
-function resolveExampleBaseOilPrice(currentOilPrice: number | null | undefined, series: CompanyOilScenarioResponse["benchmark_series"]): number {
-  if (currentOilPrice != null && Number.isFinite(currentOilPrice)) {
-    return currentOilPrice;
+function describeOilSupportReason(reason: string): string {
+  switch (reason) {
+    case "non_energy_classification":
+      return "The issuer is not currently classified as an energy or oil-exposed company.";
+    case "oilfield_services_not_supported_v1":
+      return "v1 does not model oilfield-services economics yet.";
+    case "midstream_not_supported_v1":
+      return "v1 does not model midstream or pipeline oil economics yet.";
+    case "refining_margin_exposure_partial_v1":
+      return "Refiner economics are only partially supported because v1 is built around producer-style realized-versus-benchmark dynamics.";
+    case "oil_taxonomy_unresolved_v1":
+      return "The issuer's oil exposure could not be resolved from the current classification signals.";
+    case "integrated_oil_supported_v1":
+      return "Integrated upstream producer economics are supported in v1.";
+    case "upstream_oil_supported_v1":
+      return "Upstream producer economics are supported in v1.";
+    default:
+      return reason.includes(":") ? reason.replace(":", ": ") : humanizeFlag(reason);
   }
-  for (const item of series ?? []) {
-    if (item.latest_value != null && Number.isFinite(item.latest_value)) {
-      return item.latest_value;
-    }
-    for (const point of item.points ?? []) {
-      if (point.value != null && Number.isFinite(point.value)) {
-        return point.value;
-      }
-    }
-  }
-  return EXAMPLE_BASELINE_OIL_PRICE;
-}
-
-function resolveExampleStartYear(asOf: string | null | undefined): number {
-  const matched = asOf?.match(/(19|20)\d{2}/);
-  return matched ? Number(matched[0]) : new Date().getUTCFullYear();
-}
-
-function buildExampleBaselineCurve(startYear: number, baselinePrice: number) {
-  return Array.from({ length: EXAMPLE_CURVE_YEARS }, (_value, index) => ({
-    year: startYear + index,
-    price: roundOilPrice(baselinePrice),
-  }));
-}
-
-function buildExampleScenarioCurve(startYear: number, baselinePrice: number, changePercent: number) {
-  const scenarioPrice = roundOilPrice(baselinePrice * (1 + changePercent));
-  return Array.from({ length: EXAMPLE_CURVE_YEARS }, (_value, index) => ({
-    year: startYear + index,
-    price: scenarioPrice,
-  }));
-}
-
-function roundOilPrice(value: number): number {
-  return Math.round(value * 100) / 100;
 }

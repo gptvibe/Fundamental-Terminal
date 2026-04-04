@@ -816,4 +816,107 @@ describe("CompanyModelsPage", () => {
     expect(screen.getByText("Oil Scenario Overlay")).toBeTruthy();
     expect(screen.getByText("oil-scenario-overlay-panel")).toBeTruthy();
   });
+
+  it("hides the oil scenario overlay panel for unsupported issuers and shows a precise reason", async () => {
+    vi.mocked(getCompanyModels).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Midstream",
+        sector: "Energy",
+        market_sector: "Energy",
+        market_industry: "Pipeline Transportation",
+        oil_exposure_type: "midstream",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["midstream_not_supported_v1"],
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      requested_models: MODEL_NAMES,
+      models: [],
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-22T00:00:00Z",
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyFinancials).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Midstream",
+        sector: "Energy",
+        market_sector: "Energy",
+        market_industry: "Pipeline Transportation",
+        oil_exposure_type: "midstream",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["midstream_not_supported_v1"],
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      financials: [],
+      price_history: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue({
+      company: null,
+      status: "not_applicable",
+      fetched_at: "2026-04-04T00:00:00Z",
+      strict_official_mode: false,
+      exposure_profile: {
+        profile_id: "midstream",
+        label: "Midstream",
+        oil_exposure_type: "midstream",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["midstream_not_supported_v1"],
+        relevance_reasons: ["midstream_not_supported_v1"],
+        hedging_signal: "unknown",
+        pass_through_signal: "unknown",
+        evidence: [],
+      },
+      benchmark_series: [],
+      scenarios: [],
+      sensitivity: null,
+      provenance: [],
+      as_of: "2026-04-04",
+      last_refreshed_at: "2026-04-04T00:00:00Z",
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: null, fallback_ratio: null, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({ company: null, status: "ok", curve_points: [], slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null }, slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null }, fred_series: [], provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true }, confidence_flags: [], provenance_details: {}, fetched_at: "2026-03-22T00:00:00Z", refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null }, rates_credit: [], inflation_labor: [], growth_activity: [], cyclical_demand: [], cyclical_costs: [], relevant_series: [], relevant_indicators: [], sector_exposure: [], hqm_snapshot: null });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({ company: null, status: "ok", matched_plugin_ids: [], plugins: [], fetched_at: "2026-03-22T00:00:00Z", provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true }, confidence_flags: [], refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null } });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({ company: null, latest: null, history: [], last_capital_structure_check: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true }, confidence_flags: [], refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null }, diagnostics: { coverage_ratio: null, fallback_ratio: null, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 } });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({ run: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false }, confidence_flags: [] });
+
+    render(React.createElement(CompanyModelsPage));
+
+    await waitFor(() => {
+      expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME");
+    });
+
+    expect(screen.queryByText("oil-scenario-overlay-panel")).toBeNull();
+    expect(screen.getByText(/Oil scenario overlay unavailable: v1 does not model midstream or pipeline oil economics yet\./i)).toBeTruthy();
+  });
 });

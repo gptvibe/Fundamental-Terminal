@@ -9,6 +9,8 @@ from app.model_engine.utils import json_number, safe_divide
 OilOverlayModelStatus = Literal["supported", "partial", "insufficient_data", "unsupported"]
 OilSupportStatus = Literal["supported", "partial", "unsupported"]
 DiscountingConvention = Literal["year_end"]
+OilSensitivitySourceKind = Literal["disclosed", "derived_from_official", "manual_override"]
+RealizedSpreadMode = Literal["hold_current_spread", "mean_revert", "custom_spread", "benchmark_only"]
 
 _LOW_CONFIDENCE_FLAGS = {
     "oil_sensitivity_low_confidence",
@@ -39,7 +41,14 @@ class OilOverlayEngineInputs:
     fade_years: int
     annual_after_tax_oil_sensitivity: float | None
     diluted_shares: float | None
+    sensitivity_source_kind: OilSensitivitySourceKind = "manual_override"
     current_share_price: float | None = None
+    realized_spread_mode: RealizedSpreadMode = "benchmark_only"
+    current_realized_spread: float | None = None
+    custom_realized_spread: float | None = None
+    mean_reversion_target_spread: float = 0.0
+    mean_reversion_years: int = 3
+    realized_spread_reference_benchmark: str | None = None
     discount_assumptions: OilOverlayDiscountAssumptions = field(
         default_factory=lambda: OilOverlayDiscountAssumptions(annual_discount_rate=0.1)
     )
@@ -53,6 +62,9 @@ class OilOverlayYearResult:
     base_oil_price: float
     scenario_oil_price: float
     oil_price_delta: float
+    base_realized_price: float
+    scenario_realized_price: float
+    realized_price_delta: float
     earnings_delta_after_tax: float
     per_share_delta: float
     present_value_per_share: float
@@ -93,6 +105,9 @@ class OilOverlayEngineResult:
                     "base_oil_price": json_number(item.base_oil_price),
                     "scenario_oil_price": json_number(item.scenario_oil_price),
                     "oil_price_delta": json_number(item.oil_price_delta),
+                    "base_realized_price": json_number(item.base_realized_price),
+                    "scenario_realized_price": json_number(item.scenario_realized_price),
+                    "realized_price_delta": json_number(item.realized_price_delta),
                     "earnings_delta_after_tax": json_number(item.earnings_delta_after_tax),
                     "per_share_delta": json_number(item.per_share_delta),
                     "present_value_per_share": json_number(item.present_value_per_share),
@@ -141,6 +156,8 @@ def compute_oil_fair_value_overlay(inputs: OilOverlayEngineInputs) -> OilOverlay
 
     base_curve = _dedupe_curve(inputs.official_base_curve)
     user_curve = _dedupe_curve(inputs.user_edited_short_term_curve)
+    base_reference_spread = float(inputs.current_realized_spread) if inputs.current_realized_spread is not None else 0.0
+    effective_spread_mode, spread_flags = _resolve_effective_spread_mode(inputs)
     start_year = min(min(base_curve), min(user_curve))
     end_year = max(max(base_curve), max(user_curve) + inputs.fade_years)
 
@@ -156,7 +173,18 @@ def compute_oil_fair_value_overlay(inputs: OilOverlayEngineInputs) -> OilOverlay
             fade_years=inputs.fade_years,
         )
         oil_price_delta = scenario_oil_price - base_oil_price
-        earnings_delta_after_tax = float(inputs.annual_after_tax_oil_sensitivity) * oil_price_delta
+        scenario_spread = _scenario_realized_spread(
+            year=year,
+            start_year=start_year,
+            inputs=inputs,
+            effective_mode=effective_spread_mode,
+            base_reference_spread=base_reference_spread,
+        )
+        base_realized_price = base_oil_price + base_reference_spread
+        scenario_realized_price = scenario_oil_price + scenario_spread
+        realized_price_delta = scenario_realized_price - base_realized_price
+        earnings_price_delta = oil_price_delta if inputs.sensitivity_source_kind == "disclosed" else realized_price_delta
+        earnings_delta_after_tax = float(inputs.annual_after_tax_oil_sensitivity) * earnings_price_delta
         per_share_delta = earnings_delta_after_tax / float(inputs.diluted_shares)
         discount_factor = (1 + inputs.discount_assumptions.annual_discount_rate) ** year_index
         present_value_per_share = per_share_delta / discount_factor
@@ -167,6 +195,9 @@ def compute_oil_fair_value_overlay(inputs: OilOverlayEngineInputs) -> OilOverlay
                 base_oil_price=base_oil_price,
                 scenario_oil_price=scenario_oil_price,
                 oil_price_delta=oil_price_delta,
+                base_realized_price=base_realized_price,
+                scenario_realized_price=scenario_realized_price,
+                realized_price_delta=realized_price_delta,
                 earnings_delta_after_tax=earnings_delta_after_tax,
                 per_share_delta=per_share_delta,
                 present_value_per_share=present_value_per_share,
@@ -188,6 +219,7 @@ def compute_oil_fair_value_overlay(inputs: OilOverlayEngineInputs) -> OilOverlay
     )
 
     derived_flags = set(inputs.confidence_flags)
+    derived_flags.update(spread_flags)
     if inputs.oil_support_status == "partial":
         derived_flags.add("oil_support_partial")
     if any(flag in _LOW_CONFIDENCE_FLAGS for flag in derived_flags):
@@ -232,6 +264,10 @@ def _validate_inputs(inputs: OilOverlayEngineInputs) -> str | None:
         return "Annual after-tax oil sensitivity is required for the overlay engine."
     if inputs.diluted_shares in (None, 0):
         return "Diluted shares are required for per-share overlay calculations."
+    if inputs.mean_reversion_years < 0:
+        return "Mean reversion years must be zero or greater."
+    if inputs.realized_spread_mode == "custom_spread" and inputs.custom_realized_spread is None:
+        return "Custom realized spread is required when custom spread mode is selected."
     if inputs.discount_assumptions.annual_discount_rate <= -1.0:
         return "Annual discount rate must be greater than -100%."
     return None
@@ -301,13 +337,52 @@ def _interpolate_curve(points: dict[int, float], year: int) -> float:
 
 
 def _assumptions_payload(inputs: OilOverlayEngineInputs) -> dict[str, Any]:
+    effective_spread_mode, _flags = _resolve_effective_spread_mode(inputs)
     return {
         "discount_rate": json_number(inputs.discount_assumptions.annual_discount_rate),
         "discounting_convention": inputs.discount_assumptions.discounting_convention,
         "fade_years": inputs.fade_years,
         "user_long_term_anchor": json_number(inputs.user_long_term_anchor),
         "annual_after_tax_oil_sensitivity": json_number(inputs.annual_after_tax_oil_sensitivity),
+        "sensitivity_source_kind": inputs.sensitivity_source_kind,
+        "earnings_delta_basis": "benchmark_price_delta" if inputs.sensitivity_source_kind == "disclosed" else "realized_price_delta",
         "diluted_shares": json_number(inputs.diluted_shares),
         "current_share_price": json_number(inputs.current_share_price),
+        "realized_spread_mode": effective_spread_mode,
+        "requested_realized_spread_mode": inputs.realized_spread_mode,
+        "current_realized_spread": json_number(inputs.current_realized_spread),
+        "custom_realized_spread": json_number(inputs.custom_realized_spread),
+        "mean_reversion_target_spread": json_number(inputs.mean_reversion_target_spread),
+        "mean_reversion_years": inputs.mean_reversion_years,
+        "realized_spread_reference_benchmark": inputs.realized_spread_reference_benchmark,
         "oil_support_status": inputs.oil_support_status,
     }
+
+
+def _resolve_effective_spread_mode(inputs: OilOverlayEngineInputs) -> tuple[RealizedSpreadMode, tuple[str, ...]]:
+    mode = inputs.realized_spread_mode
+    if mode == "custom_spread":
+        return mode, tuple()
+    if mode in {"hold_current_spread", "mean_revert"} and inputs.current_realized_spread is None:
+        return "benchmark_only", ("realized_spread_fallback_benchmark_only", "realized_spread_not_available")
+    return mode, tuple()
+
+
+def _scenario_realized_spread(
+    *,
+    year: int,
+    start_year: int,
+    inputs: OilOverlayEngineInputs,
+    effective_mode: RealizedSpreadMode,
+    base_reference_spread: float,
+) -> float:
+    if effective_mode in {"benchmark_only", "hold_current_spread"}:
+        return base_reference_spread
+    if effective_mode == "custom_spread":
+        return float(inputs.custom_realized_spread or 0.0)
+    if inputs.mean_reversion_years == 0:
+        return float(inputs.mean_reversion_target_spread)
+
+    elapsed_years = max(0, year - start_year + 1)
+    progress = min(1.0, elapsed_years / inputs.mean_reversion_years)
+    return base_reference_spread + (float(inputs.mean_reversion_target_spread) - base_reference_spread) * progress
