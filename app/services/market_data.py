@@ -18,6 +18,12 @@ from app.services.refresh_state import cache_state_for_dataset, mark_dataset_che
 PRICE_SOURCE = "yahoo_finance_chart"
 
 
+class MarketDataUnavailableError(RuntimeError):
+    def __init__(self, symbol: str, message: str) -> None:
+        self.symbol = symbol
+        super().__init__(message)
+
+
 @dataclass(slots=True)
 class PriceBar:
     trade_date: date
@@ -52,21 +58,31 @@ class MarketDataClient:
 
         symbol = _normalize_market_symbol(ticker)
         period_end = int(time.time())
-        response = _request_with_retries(
-            self._http,
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-            params={
-                "period1": 0,
-                "period2": period_end,
-                "interval": "1d",
-                "includeAdjustedClose": "true",
-            },
-        )
+        try:
+            response = _request_with_retries(
+                self._http,
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+                params={
+                    "period1": 0,
+                    "period2": period_end,
+                    "interval": "1d",
+                    "includeAdjustedClose": "true",
+                },
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise MarketDataUnavailableError(symbol, f"Yahoo Finance has no chart history for {symbol}.") from exc
+            raise
 
         payload = response.json()
         chart_root = payload.get("chart", {})
         if chart_root.get("error"):
-            raise ValueError(str(chart_root["error"]))
+            error_payload = chart_root["error"]
+            if isinstance(error_payload, dict):
+                description = _string_or_none(error_payload.get("description")) or _string_or_none(error_payload.get("code"))
+                if description and any(token in description.lower() for token in ("not found", "no data", "no price")):
+                    raise MarketDataUnavailableError(symbol, f"Yahoo Finance has no chart history for {symbol}.")
+            raise ValueError(str(error_payload))
 
         results = chart_root.get("result") or []
         if not results:

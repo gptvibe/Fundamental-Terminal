@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from urllib.parse import quote_plus
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -31,6 +32,7 @@ from app.services.institutional_holdings import (
 )
 from app.services.market_data import (
     MarketDataClient,
+    MarketDataUnavailableError,
     MarketProfile,
     get_company_price_last_checked,
     touch_company_price_history,
@@ -998,7 +1000,63 @@ class EdgarClient:
         if exact_name_match is not None:
             return exact_name_match
 
+        browse_edgar_match = self._resolve_company_from_browse_edgar(lookup)
+        if browse_edgar_match is not None:
+            return browse_edgar_match
+
         raise ValueError(f"Unable to resolve SEC company for '{identifier}'")
+
+    def _resolve_company_from_browse_edgar(self, lookup: str) -> CompanyIdentity | None:
+        # The SEC ticker file can lag behind active symbols; browse-edgar often resolves them.
+        lookup_token = quote_plus(lookup)
+        url = (
+            "https://www.sec.gov/cgi-bin/browse-edgar"
+            f"?action=getcompany&owner=exclude&count=1&CIK={lookup_token}&output=atom"
+        )
+
+        try:
+            payload = self._get_text(url)
+        except Exception:
+            return None
+
+        atom_identity = self._parse_browse_edgar_atom_identity(payload, lookup)
+        if atom_identity is not None:
+            return atom_identity
+
+        return self._parse_browse_edgar_html_identity(payload, lookup)
+
+    def _parse_browse_edgar_atom_identity(self, payload: str, lookup: str) -> CompanyIdentity | None:
+        try:
+            root = ET.fromstring(payload)
+        except ET.ParseError:
+            return None
+
+        cik = (root.findtext(".//{*}company-info/{*}cik") or "").strip()
+        if not cik.isdigit():
+            return None
+
+        conformed_name = (root.findtext(".//{*}company-info/{*}conformed-name") or "").strip()
+        ticker = lookup.upper()
+        name = conformed_name or ticker
+        return CompanyIdentity(cik=cik.zfill(10), ticker=ticker, name=name)
+
+    def _parse_browse_edgar_html_identity(self, payload: str, lookup: str) -> CompanyIdentity | None:
+        if "No matching Ticker Symbol." in payload:
+            return None
+
+        cik_match = re.search(r"CIK#?:\s*(\d{10})", payload)
+        if cik_match is None:
+            cik_match = re.search(r"CIK=(\d{10})", payload)
+        if cik_match is None:
+            return None
+
+        soup = BeautifulSoup(payload, "html.parser")
+        company_name_node = soup.select_one("span.companyName")
+        company_name = company_name_node.get_text(" ", strip=True) if company_name_node else ""
+        name = re.sub(r"\s+CIK#?:\s*\d{10}.*$", "", company_name).strip() if company_name else ""
+        ticker = lookup.upper()
+
+        return CompanyIdentity(cik=cik_match.group(1), ticker=ticker, name=name or ticker)
 
     def get_submissions(self, cik: str) -> dict[str, Any]:
         return self._get_json(f"{settings.sec_submissions_base_url}/CIK{cik}.json")
@@ -1798,7 +1856,18 @@ class EdgarIngestionService:
                 company.market_industry = market_profile.industry
 
         reporter.step("market", "Fetching price history...")
-        price_bars = self.market_data.get_price_history(company.ticker)
+        try:
+            price_bars = self.market_data.get_price_history(company.ticker)
+        except MarketDataUnavailableError as exc:
+            reporter.step("market", f"{exc} Marking prices checked without cached bars.")
+            touch_company_price_history(session, company.id, checked_at)
+            return 0
+
+        if not price_bars:
+            reporter.step("market", f"No Yahoo price history returned for {company.ticker}; marking prices checked without cached bars.")
+            touch_company_price_history(session, company.id, checked_at)
+            return 0
+
         reporter.step("database", "Saving price history to database...")
         price_points_written = upsert_price_history(
             session=session,
@@ -1806,8 +1875,7 @@ class EdgarIngestionService:
             price_bars=price_bars,
             checked_at=checked_at,
         )
-        if price_points_written > 0:
-            touch_company_price_history(session, company.id, checked_at)
+        touch_company_price_history(session, company.id, checked_at)
         return price_points_written
 
     def refresh_insiders(

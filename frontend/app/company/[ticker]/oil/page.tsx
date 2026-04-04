@@ -96,6 +96,11 @@ export default function CompanyOilPage() {
   const oilSupportStatus = workspaceData.oilScenarioData?.exposure_profile.oil_support_status ?? pageCompany?.oil_support_status ?? "unsupported";
   const oilSupportReasons = workspaceData.oilScenarioData?.exposure_profile.oil_support_reasons ?? pageCompany?.oil_support_reasons ?? [];
   const showOilWorkspace = supportsOilWorkspace(oilSupportStatus);
+  const normalizedOilSupportStatus: "supported" | "partial" | "unsupported" = showOilWorkspace
+    ? oilSupportStatus === "partial"
+      ? "partial"
+      : "supported"
+    : "unsupported";
   const evaluationSummary = useMemo(
     () => resolveOilOverlayEvaluationSummary(ticker, workspaceData.oilEvaluationData),
     [ticker, workspaceData.oilEvaluationData],
@@ -230,7 +235,7 @@ export default function CompanyOilPage() {
             financials={financials}
             priceHistory={priceHistory}
             strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
-            companySupportStatus={oilSupportStatus}
+            companySupportStatus={normalizedOilSupportStatus}
             companySupportReasons={oilSupportReasons}
             oilOverlayEvaluation={workspaceData.oilEvaluationData}
           />

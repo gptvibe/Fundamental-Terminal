@@ -271,3 +271,56 @@ def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):
     assert ("insider", "Insider refresh failed: boom") in reporter.steps
     assert reporter.completed == ["Refresh and compute complete."]
     assert session.rollback_count == 1
+
+
+def test_refresh_prices_marks_prices_checked_when_symbol_has_no_yahoo_history(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+    company = _company()
+    checked_at = datetime.now(timezone.utc)
+    touched: list[tuple[int, datetime]] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(
+        service.market_data,
+        "get_price_history",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(sec_edgar.MarketDataUnavailableError("OXYWS", "Yahoo Finance has no chart history for OXYWS.")),
+        raising=False,
+    )
+    monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: pytest.fail("price upsert should not run when the symbol is unavailable"))
+    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp: touched.append((company_id, timestamp)))
+
+    written = service.refresh_prices(
+        session=SimpleNamespace(),
+        company=company,
+        checked_at=checked_at,
+        reporter=reporter,
+    )
+
+    assert written == 0
+    assert touched == [(company.id, checked_at)]
+    assert reporter.steps[-1] == ("market", "Yahoo Finance has no chart history for OXYWS. Marking prices checked without cached bars.")
+
+
+def test_refresh_prices_marks_prices_checked_when_yahoo_returns_no_bars(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+    company = _company()
+    checked_at = datetime.now(timezone.utc)
+    touched: list[tuple[int, datetime]] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(service.market_data, "get_price_history", lambda *_args, **_kwargs: [], raising=False)
+    monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: pytest.fail("price upsert should not run when Yahoo returns no bars"))
+    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp: touched.append((company_id, timestamp)))
+
+    written = service.refresh_prices(
+        session=SimpleNamespace(),
+        company=company,
+        checked_at=checked_at,
+        reporter=reporter,
+    )
+
+    assert written == 0
+    assert touched == [(company.id, checked_at)]
+    assert reporter.steps[-1] == ("market", "No Yahoo price history returned for MSFT; marking prices checked without cached bars.")
