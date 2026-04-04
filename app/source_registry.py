@@ -134,6 +134,22 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=24 * 60 * 60,
         disclosure_note="Official EIA Short-Term Energy Outlook series intended for oil and petroleum scenario context.",
     ),
+    "eia_petroleum_spot_prices": SourceDefinition(
+        source_id="eia_petroleum_spot_prices",
+        tier="official_statistical",
+        display_label="U.S. Energy Information Administration Petroleum Spot Prices",
+        url="https://api.eia.gov/v2/petroleum/pri/spt/data/",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official EIA petroleum spot-price history used for WTI and Brent benchmark normalization.",
+    ),
+    "eia_aeo": SourceDefinition(
+        source_id="eia_aeo",
+        tier="official_statistical",
+        display_label="U.S. Energy Information Administration Annual Energy Outlook",
+        url="https://api.eia.gov/v2/aeo/",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official EIA Annual Energy Outlook cases intended for later long-term energy scenario extensions.",
+    ),
     "fhfa_house_price_index": SourceDefinition(
         source_id="fhfa_house_price_index",
         tier="official_statistical",
@@ -370,6 +386,12 @@ def infer_source_id(source_hint: str | None, *, default: str | None = None) -> s
         return "bea_gdp_by_industry"
     if "bureau of economic analysis" in normalized or "bea" in normalized or "bea.gov" in normalized:
         return "bea_nipa"
+    if "/petroleum/pri/spt" in normalized or "petroleum spot" in normalized:
+        return "eia_petroleum_spot_prices"
+    if "/steo/" in normalized or "short-term energy outlook" in normalized:
+        return "eia_steo"
+    if "/aeo/" in normalized or "annual energy outlook" in normalized:
+        return "eia_aeo"
     if "api.eia.gov" in normalized or "eia.gov" in normalized:
         return "eia_electricity_retail_sales"
     if "fhfa.gov" in normalized and "hpi" in normalized:

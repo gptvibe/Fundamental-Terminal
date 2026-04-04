@@ -11,6 +11,9 @@ def test_infer_source_id_maps_supported_provider_hints() -> None:
     assert infer_source_id("https://finance.yahoo.com/quote/AAPL") == "yahoo_finance"
     assert infer_source_id("U.S. Treasury Daily Par Yield Curve") == "us_treasury_daily_par_yield_curve"
     assert infer_source_id("https://fred.stlouisfed.org/series/T10YIE") == "fred"
+    assert infer_source_id("https://api.eia.gov/v2/petroleum/pri/spt/data/") == "eia_petroleum_spot_prices"
+    assert infer_source_id("https://api.eia.gov/v2/steo/data/") == "eia_steo"
+    assert infer_source_id("https://api.eia.gov/v2/aeo/") == "eia_aeo"
     assert infer_source_id("Manual Override") == "manual_override"
 
 
