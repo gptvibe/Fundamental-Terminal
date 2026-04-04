@@ -12,6 +12,7 @@ from app.models import (
     BeneficialOwnershipReport,
     CapitalMarketsEvent,
     CapitalStructureSnapshot,
+    CommentLetter,
     Company,
     DerivedMetricPoint,
     DatasetRefreshState,
@@ -666,6 +667,21 @@ def get_company_capital_markets_events(
     return list(session.execute(statement).scalars())
 
 
+def get_company_comment_letters(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 200,
+) -> list[CommentLetter]:
+    statement = (
+        select(CommentLetter)
+        .where(CommentLetter.company_id == company_id)
+        .order_by(CommentLetter.filing_date.desc().nullslast(), CommentLetter.id.desc())
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
 def get_company_capital_structure_snapshots(
     session: Session,
     company_id: int,
@@ -708,6 +724,20 @@ def get_company_capital_markets_cache_status(session: Session, company: Company)
         last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "capital_markets", checked_at=last_checked, success=True)
+    return last_checked, _cache_state_from_last_checked(last_checked)
+
+
+def get_company_comment_letters_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "comment_letters")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
+    last_checked = _normalize_datetime(company.comment_letters_last_checked)
+    if last_checked is None:
+        statement = select(func.max(CommentLetter.last_checked)).where(CommentLetter.company_id == company.id)
+        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "comment_letters", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 

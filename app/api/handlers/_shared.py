@@ -12,7 +12,7 @@ import re
 import threading
 import time
 from email.utils import formatdate
-from datetime import date as DateType, datetime, timezone
+from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -40,6 +40,8 @@ from app.services import (
     CompanyCacheSnapshot,
     build_changes_since_last_filing,
     get_company_capital_markets_events,
+    get_company_comment_letters,
+    get_company_comment_letters_cache_status,
     get_company_capital_structure_last_checked,
     get_company_capital_structure_snapshots,
     get_company_coverage_counts,
@@ -1251,6 +1253,41 @@ def company_form144_filings(
         ),
         filings=[_serialize_form144_filing(filing) for filing in filings],
         refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/comment-letters", response_model=CompanyCommentLettersResponse)
+def company_comment_letters(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyCommentLettersResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        return CompanyCommentLettersResponse(
+            company=None,
+            letters=[],
+            refresh=refresh,
+            error=None,
+            **_empty_provenance_contract("company_missing"),
+        )
+
+    letters_last_checked, letters_cache_state = get_company_comment_letters_cache_status(session, snapshot.company)
+    letters = [_serialize_comment_letter(letter) for letter in get_company_comment_letters(session, snapshot.company.id)]
+    refresh = (
+        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=letters_cache_state)
+        if letters_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    merged_last_checked = _merge_last_checked(snapshot.last_checked, letters_last_checked)
+    return CompanyCommentLettersResponse(
+        company=_serialize_company(snapshot, last_checked=merged_last_checked),
+        letters=letters,
+        refresh=refresh,
+        error=None,
+        **_comment_letters_provenance_contract(letters, last_refreshed_at=merged_last_checked, refresh=refresh),
     )
 
 
@@ -4997,6 +5034,16 @@ def _activity_overview_provenance_contract(
         if macro_usage is not None:
             usages.append(macro_usage)
 
+    if any(entry.type == "comment-letter" for entry in entries):
+        usages.append(
+            SourceUsage(
+                source_id="sec_edgar_corresp",
+                role="primary",
+                as_of=latest_entry_date,
+                last_refreshed_at=last_refreshed_at,
+            )
+        )
+
     confidence_flags = set(_confidence_flags_from_refresh(refresh))
     if not entries:
         confidence_flags.add("activity_feed_empty")
@@ -5008,6 +5055,31 @@ def _activity_overview_provenance_contract(
     return _build_provenance_contract(
         usages,
         as_of=latest_entry_date,
+        last_refreshed_at=last_refreshed_at,
+        confidence_flags=sorted(confidence_flags),
+    )
+
+
+def _comment_letters_provenance_contract(
+    letters: list[CommentLetterPayload],
+    *,
+    last_refreshed_at: datetime | None,
+    refresh: RefreshState | None = None,
+) -> dict[str, Any]:
+    as_of = max((letter.filing_date for letter in letters if letter.filing_date is not None), default=None)
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    if not letters:
+        confidence_flags.add("comment_letters_empty")
+    return _build_provenance_contract(
+        [
+            SourceUsage(
+                source_id="sec_edgar_corresp",
+                role="primary",
+                as_of=as_of,
+                last_refreshed_at=last_refreshed_at,
+            )
+        ],
+        as_of=as_of,
         last_refreshed_at=last_refreshed_at,
         confidence_flags=sorted(confidence_flags),
     )
@@ -5501,6 +5573,15 @@ def _serialize_form144_filing(filing: Form144Filing) -> Form144FilingPayload:
         broker_name=filing.broker_name,
         source_url=filing.source_url,
         summary=filing.summary,
+    )
+
+
+def _serialize_comment_letter(letter) -> CommentLetterPayload:
+    return CommentLetterPayload(
+        accession_number=letter.accession_number,
+        filing_date=letter.filing_date,
+        description=letter.description,
+        sec_url=letter.sec_url,
     )
 
 
@@ -6721,12 +6802,14 @@ def _build_company_activity_overview_response(
         insider_trades=activity["insider_trades"],
         form144_filings=activity["form144_filings"],
         institutional_holdings=activity["institutional_holdings"],
+        comment_letters=activity.get("comment_letters", []),
     )
     alerts = _build_activity_alerts(
         beneficial_filings=activity["beneficial_filings"],
         capital_filings=activity["capital_filings"],
         insider_trades=activity["insider_trades"],
         institutional_holdings=activity["institutional_holdings"],
+        comment_letters=activity.get("comment_letters", []),
     )
     market_context_status = get_cached_market_context_status()
     return CompanyActivityOverviewResponse(
@@ -6780,6 +6863,14 @@ def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot
         _serialize_cached_capital_markets_event(event)
         for event in get_company_capital_markets_events(session, snapshot.company.id, limit=80 if compact else 200)
     ]
+    try:
+        comment_letters = [
+            _serialize_comment_letter(letter)
+            for letter in get_company_comment_letters(session, snapshot.company.id, limit=80 if compact else 200)
+        ]
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load cached SEC comment letters for %s", snapshot.company.ticker)
+        comment_letters = []
     governance_filings = [
         _serialize_cached_proxy_statement(statement)
         for statement in get_company_proxy_statements(session, snapshot.company.id, limit=40 if compact else 60)
@@ -6794,6 +6885,7 @@ def _load_company_activity_data(session: Session, snapshot: CompanyCacheSnapshot
         "form144_filings": form144_filings,
         "institutional_holdings": institutional_holdings,
         "capital_filings": capital_filings,
+        "comment_letters": comment_letters,
     }
 
 
@@ -6847,6 +6939,7 @@ def _build_activity_feed_entries(
     insider_trades: list[InsiderTradePayload],
     form144_filings: list[Form144FilingPayload],
     institutional_holdings: list[InstitutionalHoldingPayload],
+    comment_letters: list[CommentLetterPayload],
 ) -> list[ActivityFeedEntryPayload]:
     entries: list[ActivityFeedEntryPayload] = []
 
@@ -6948,6 +7041,19 @@ def _build_activity_feed_entries(
             )
         )
 
+    for letter in comment_letters[:40]:
+        entries.append(
+            ActivityFeedEntryPayload(
+                id=f"comment-letter-{letter.accession_number}",
+                date=letter.filing_date,
+                type="comment-letter",
+                badge="CORRESP",
+                title=letter.description,
+                detail=letter.accession_number,
+                href=letter.sec_url,
+            )
+        )
+
     entries.sort(
         key=lambda item: (
             item.date or DateType.min,
@@ -6983,6 +7089,7 @@ def _build_activity_alerts(
     capital_filings: list[CapitalRaisePayload],
     insider_trades: list[InsiderTradePayload],
     institutional_holdings: list[InstitutionalHoldingPayload],
+    comment_letters: list[CommentLetterPayload],
 ) -> list[AlertPayload]:
     alerts: list[AlertPayload] = []
 
@@ -7061,6 +7168,22 @@ def _build_activity_alerts(
                     href=holding.source,
                 )
             )
+
+    cutoff_date = datetime.now(timezone.utc).date() - timedelta(days=90)
+    for letter in comment_letters[:80]:
+        if letter.filing_date is None or letter.filing_date < cutoff_date:
+            continue
+        alerts.append(
+            AlertPayload(
+                id=f"alert-comment-letter-{letter.accession_number}",
+                level="medium",
+                title="New SEC comment letter correspondence",
+                detail=letter.description,
+                source="comment-letters",
+                date=letter.filing_date,
+                href=letter.sec_url,
+            )
+        )
 
     alerts.sort(
         key=lambda item: (

@@ -1270,6 +1270,18 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
             )
         ],
     )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_comment_letters",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000008",
+                filing_date=date(2026, 3, 18),
+                description="SEC correspondence regarding disclosure clarity.",
+                sec_url="https://www.sec.gov/Archives/edgar/data/1/8/index.html",
+            )
+        ],
+    )
     monkeypatch.setattr(main_module, "get_company_capital_markets_events", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)
@@ -1285,6 +1297,7 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
     assert "insider" in entry_types
     assert "form144" in entry_types
     assert "institutional" in entry_types
+    assert "comment-letter" in entry_types
     form144_entry = next(item for item in payload["entries"] if item["type"] == "form144")
     assert form144_entry["badge"] == "144"
     assert "Planned sale 2026-03-20" in form144_entry["detail"]
@@ -1370,6 +1383,18 @@ def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
     )
     monkeypatch.setattr(main_module, "get_company_form144_filings", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_institutional_holdings", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "get_company_comment_letters",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000103",
+                filing_date=date(2026, 3, 20),
+                description="SEC correspondence regarding revenue presentation.",
+                sec_url="https://www.sec.gov/Archives/edgar/data/1/103/index.html",
+            )
+        ],
+    )
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/alerts")
@@ -1381,6 +1406,7 @@ def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
     titles = {item["title"] for item in payload["alerts"]}
     assert "Large beneficial ownership stake reported" in titles
     assert "Late filer notice" in titles
+    assert "New SEC comment letter correspondence" in titles
 
 
     # ---------------------------------------------------------------------------

@@ -73,6 +73,20 @@ class CompanyEventsResponse(BaseModel):
     error: str | None = None
 
 
+class CommentLetterPayload(BaseModel):
+    accession_number: str
+    filing_date: DateType | None = None
+    description: str
+    sec_url: str
+
+
+class CompanyCommentLettersResponse(ProvenanceEnvelope):
+    company: CompanyPayload | None
+    letters: list[CommentLetterPayload]
+    refresh: RefreshState
+    error: str | None = None
+
+
 class FilingEventsSummaryPayload(BaseModel):
     total_events: int
     unique_accessions: int

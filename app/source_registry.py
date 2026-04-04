@@ -54,6 +54,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
     ),
+    "sec_edgar_corresp": SourceDefinition(
+        source_id="sec_edgar_corresp",
+        tier="official_regulator",
+        display_label="SEC EDGAR Correspondence Filings",
+        url="https://www.sec.gov/edgar/search/",
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Official SEC correspondence filings (CORRESP) used to track regulator comment-letter exchanges.",
+    ),
     "fdic_bankfind_institutions": SourceDefinition(
         source_id="fdic_bankfind_institutions",
         tier="official_regulator",
@@ -362,6 +370,8 @@ def infer_source_id(source_hint: str | None, *, default: str | None = None) -> s
         return "yahoo_finance"
     if "companyfacts" in normalized:
         return "sec_companyfacts"
+    if "corresp" in normalized or "comment letter" in normalized or "correspondence" in normalized:
+        return "sec_edgar_corresp"
     if "sec.gov" in normalized or "edgar" in normalized:
         return "sec_edgar"
     if "api.fdic.gov/banks/institutions" in normalized:

@@ -8,6 +8,7 @@ from app.api.schemas.events import (
     CompanyActivityFeedResponse,
     CompanyActivityOverviewResponse,
     CompanyAlertsResponse,
+    CompanyCommentLettersResponse,
     CompanyCapitalMarketsSummaryResponse,
     CompanyCapitalRaisesResponse,
     CompanyEventsResponse,
@@ -58,6 +59,13 @@ def build_router() -> APIRouter:
         handlers.company_filing_events_summary,
         methods=["GET"],
         response_model=CompanyFilingEventsSummaryResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/comment-letters",
+        handlers.company_comment_letters,
+        methods=["GET"],
+        response_model=CompanyCommentLettersResponse,
     )
     add_user_visible_route(
         router,

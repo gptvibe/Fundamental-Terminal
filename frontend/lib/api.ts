@@ -2,6 +2,7 @@ import {
   CompanyActivityFeedResponse,
   CompanyActivityOverviewResponse,
   CompanyAlertsResponse,
+  CompanyCommentLettersResponse,
   CompanyCapitalRaisesResponse,
   CompanyCompareResponse,
   CompanyCapitalMarketsSummaryResponse,
@@ -566,6 +567,10 @@ export function getCompanyAlerts(ticker: string): Promise<CompanyAlertsResponse>
 
 export function getCompanyActivityOverview(ticker: string): Promise<CompanyActivityOverviewResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/activity-overview`);
+}
+
+export function getCompanyCommentLetters(ticker: string): Promise<CompanyCommentLettersResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/comment-letters`);
 }
 
 

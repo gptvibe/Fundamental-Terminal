@@ -146,6 +146,42 @@ vi.mock("@/lib/api", () => ({
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
     error: null,
   })),
+  getCompanyCommentLetters: vi.fn(async () => ({
+    company: { ticker: "ACME", cik: "0000001", name: "Acme Corp", sector: "Tech", market_sector: null, market_industry: null, last_checked: null, last_checked_financials: null, last_checked_prices: null, last_checked_insiders: null, last_checked_institutional: null, last_checked_filings: null, cache_state: "fresh" },
+    letters: [
+      {
+        accession_number: "0001000000-26-000777",
+        filing_date: "2026-03-12",
+        description: "SEC comment letter correspondence",
+        sec_url: "https://www.sec.gov/Archives/edgar/data/1/000100000026000777/index.html",
+      },
+    ],
+    provenance: [
+      {
+        source_id: "sec_edgar_corresp",
+        source_tier: "official_regulator",
+        display_label: "SEC EDGAR Correspondence Filings",
+        url: "https://www.sec.gov/edgar/search/",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Official SEC correspondence filings (CORRESP) used to track regulator comment-letter exchanges.",
+        role: "primary",
+        as_of: "2026-03-12",
+        last_refreshed_at: "2026-03-12T00:00:00Z",
+      },
+    ],
+    as_of: "2026-03-12",
+    last_refreshed_at: "2026-03-12T00:00:00Z",
+    source_mix: {
+      source_ids: ["sec_edgar_corresp"],
+      source_tiers: ["official_regulator"],
+      primary_source_ids: ["sec_edgar_corresp"],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: [],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    error: null,
+  })),
 }));
 
 describe("CompanySecFeedPage interactions", () => {
@@ -162,6 +198,7 @@ describe("CompanySecFeedPage interactions", () => {
     expect(screen.getByText("Jane Doe filed Form 144 planned sale")).toBeTruthy();
     expect(screen.getByText("High (1)").className).toContain("tone-red");
     expect(screen.getByText("SEC EDGAR Filing Archive")).toBeTruthy();
+    expect(screen.getByText("SEC comment letter correspondence")).toBeTruthy();
 
     const newest = screen.getByText("Newest Event");
     const older = screen.getByText("Older Event");

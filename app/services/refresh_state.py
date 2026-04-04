@@ -21,6 +21,7 @@ DatasetName = Literal[
     "beneficial_ownership",
     "filings",
     "capital_markets",
+    "comment_letters",
     "proxy",
     "derived_metrics",
     "oil_scenario_overlay",

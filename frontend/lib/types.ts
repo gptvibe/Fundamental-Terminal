@@ -1719,6 +1719,13 @@ export interface AlertPayload {
   href: string | null;
 }
 
+export interface CommentLetterPayload {
+  accession_number: string;
+  filing_date: string | null;
+  description: string;
+  sec_url: string;
+}
+
 export interface ModelEvaluationMetricDeltaPayload {
   calibration: number | null;
   stability: number | null;
@@ -1779,6 +1786,13 @@ export interface CompanyActivityOverviewResponse extends ProvenanceEnvelope {
   alerts: AlertPayload[];
   summary: AlertsSummaryPayload;
   market_context_status?: MarketContextStatusPayload | null;
+  refresh: RefreshState;
+  error: string | null;
+}
+
+export interface CompanyCommentLettersResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  letters: CommentLetterPayload[];
   refresh: RefreshState;
   error: string | null;
 }

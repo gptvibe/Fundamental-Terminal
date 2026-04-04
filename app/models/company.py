@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.capital_markets_event import CapitalMarketsEvent
     from app.models.capital_structure_snapshot import CapitalStructureSnapshot
+    from app.models.comment_letter import CommentLetter
     from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
     from app.models.derived_metric_point import DerivedMetricPoint
     from app.models.dataset_refresh_state import DatasetRefreshState
@@ -50,6 +51,7 @@ class Company(Base):
     beneficial_ownership_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     filing_events_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     capital_markets_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    comment_letters_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     form144_filings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     earnings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     proxy_statements_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -95,6 +97,11 @@ class Company(Base):
         passive_deletes=True,
     )
     capital_markets_events: Mapped[list["CapitalMarketsEvent"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    comment_letters: Mapped[list["CommentLetter"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

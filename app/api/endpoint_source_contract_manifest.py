@@ -405,12 +405,14 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ("GET", "/api/companies/{ticker}/events"): _official_only_contract("sec_edgar"),
     ("GET", "/api/companies/{ticker}/filing-events"): _official_only_contract("sec_edgar"),
     ("GET", "/api/companies/{ticker}/filing-events/summary"): _derived_official_contract("sec_edgar"),
+    ("GET", "/api/companies/{ticker}/comment-letters"): _official_only_contract("sec_edgar_corresp"),
     (
         "GET",
         "/api/companies/{ticker}/activity-feed",
     ): _derived_official_contract(
         "ft_activity_overview",
         "sec_edgar",
+        "sec_edgar_corresp",
         "us_treasury_daily_par_yield_curve",
         "us_treasury_fiscaldata",
         "fred",
@@ -422,6 +424,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ): _derived_official_contract(
         "ft_activity_overview",
         "sec_edgar",
+        "sec_edgar_corresp",
         "us_treasury_daily_par_yield_curve",
         "us_treasury_fiscaldata",
         "fred",
@@ -433,6 +436,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ): _derived_official_contract(
         "ft_activity_overview",
         "sec_edgar",
+        "sec_edgar_corresp",
         "us_treasury_daily_par_yield_curve",
         "us_treasury_fiscaldata",
         "fred",

@@ -30,6 +30,8 @@ export function toneForAlertSource(source: string): SemanticTone {
       return "red";
     case "institutional-holdings":
       return "cyan";
+    case "comment-letters":
+      return "gold";
     default:
       return "cyan";
   }
@@ -42,6 +44,7 @@ export function toneForEntryType(type: string): SemanticTone {
     case "event":
     case "earnings":
     case "governance":
+    case "comment-letter":
       return "gold";
     case "ownership-change":
       return "green";

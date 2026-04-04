@@ -87,6 +87,35 @@ vi.mock("@/lib/api", () => ({
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
     error: null,
   })),
+  getCompanyCommentLetters: vi.fn(async () => ({
+    company: null,
+    letters: [],
+    provenance: [
+      {
+        source_id: "sec_edgar_corresp",
+        source_tier: "official_regulator",
+        display_label: "SEC EDGAR Correspondence Filings",
+        url: "https://www.sec.gov/edgar/search/",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Official SEC correspondence filings (CORRESP) used to track regulator comment-letter exchanges.",
+        role: "primary",
+        as_of: null,
+        last_refreshed_at: "2026-03-10T00:00:00Z",
+      },
+    ],
+    as_of: null,
+    last_refreshed_at: "2026-03-10T00:00:00Z",
+    source_mix: {
+      source_ids: ["sec_edgar_corresp"],
+      source_tiers: ["official_regulator"],
+      primary_source_ids: ["sec_edgar_corresp"],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: ["comment_letters_empty"],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    error: null,
+  })),
 }));
 
 describe("CompanySecFeedPage", () => {
@@ -97,8 +126,10 @@ describe("CompanySecFeedPage", () => {
     expect(html).toContain("Unified SEC signal stream across filings");
     expect(html).toContain("Priority Alerts");
     expect(html).toContain("Chronological SEC Stream");
+    expect(html).toContain("Comment Letters");
     expect(html).toContain("Source &amp; Freshness");
     expect(html).toContain("Loading alerts...");
     expect(html).toContain("Loading SEC feed...");
+    expect(html).toContain("Loading comment letters...");
   });
 });

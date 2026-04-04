@@ -24,7 +24,7 @@ from app.config import SecClientConfig, build_sec_client_config, settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
-from app.models import BeneficialOwnershipReport, Company, EarningsRelease, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
+from app.models import BeneficialOwnershipReport, CommentLetter, Company, EarningsRelease, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight, SUPPORTED_PARSER_FORMS
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -715,6 +715,14 @@ class NormalizedForm144Filing:
 
 
 @dataclass(slots=True)
+class NormalizedCommentLetter:
+    accession_number: str
+    filing_date: date | None
+    description: str
+    sec_url: str
+
+
+@dataclass(slots=True)
 class IngestionResult:
     identifier: str
     company_id: int
@@ -1147,6 +1155,31 @@ class EdgarClient:
         numeric_cik = str(int(cik))
         source_url = f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/{document_name}"
         return source_url, self._get_text(source_url)
+
+    def get_correspondence_filings(
+        self,
+        cik: str,
+        submissions: dict[str, Any],
+        *,
+        filing_index: dict[str, FilingMetadata] | None = None,
+    ) -> list[NormalizedCommentLetter]:
+        scanned_index = filing_index or self.build_filing_index(submissions)
+        rows: list[NormalizedCommentLetter] = []
+        for metadata in scanned_index.values():
+            if _base_form(metadata.form) != "CORRESP":
+                continue
+            description = (metadata.primary_doc_description or "").strip() or "SEC correspondence"
+            rows.append(
+                NormalizedCommentLetter(
+                    accession_number=metadata.accession_number,
+                    filing_date=metadata.filing_date,
+                    description=description,
+                    sec_url=_build_archive_filing_url(cik, metadata.accession_number, metadata.primary_document),
+                )
+            )
+
+        rows.sort(key=lambda item: (item.filing_date or date.min, item.accession_number), reverse=True)
+        return rows
 
 
 class EdgarNormalizer:
@@ -2012,6 +2045,42 @@ class EdgarIngestionService:
             checked_at=checked_at,
         )
 
+    def refresh_comment_letters(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        submissions: dict[str, Any],
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        force: bool = False,
+    ) -> int:
+        reporter.step("corresp", "Caching SEC correspondence filings...")
+        existing_accessions = _existing_comment_letter_accessions(session, company.id)
+        session.commit()
+
+        normalized_letters = self.client.get_correspondence_filings(
+            company.cik,
+            submissions,
+            filing_index=filing_index,
+        )
+        candidate_letters = normalized_letters if force else [
+            letter for letter in normalized_letters if letter.accession_number not in existing_accessions
+        ]
+
+        reporter.step("database", "Saving SEC correspondence filings to database...")
+        letters_written = 0
+        if candidate_letters:
+            letters_written = _upsert_comment_letters(
+                session=session,
+                company=company,
+                comment_letters=candidate_letters,
+                checked_at=checked_at,
+            )
+        _touch_company_comment_letters(session, company.id, checked_at)
+        return letters_written
+
     def _build_refresh_policy(
         self,
         session: Session,
@@ -2507,6 +2576,23 @@ class EdgarIngestionService:
                 ),
             )
 
+            comment_letters_outcome = self._run_dataset_job(
+                session,
+                company,
+                reporter,
+                stage="corresp",
+                label="SEC correspondence",
+                job=lambda: self.refresh_comment_letters(
+                    session=session,
+                    company=company,
+                    submissions=submissions,
+                    filing_index=filing_index,
+                    checked_at=checked_at,
+                    reporter=reporter,
+                    force=policy.force,
+                ),
+            )
+
             price_outcome = DatasetRefreshOutcome()
             if policy.force or not policy.prices_fresh:
                 price_outcome = self._run_dataset_job(
@@ -2590,6 +2676,14 @@ class EdgarIngestionService:
                     f"Cached {capital_markets_outcome.written} capital markets rows"
                     if capital_markets_outcome.written
                     else "Checked capital markets filings"
+                )
+            )
+            detail_parts.append(
+                comment_letters_outcome.error
+                or (
+                    f"Cached {comment_letters_outcome.written} SEC correspondence filings"
+                    if comment_letters_outcome.written
+                    else "Checked SEC correspondence filings"
                 )
             )
             if policy.force or not policy.prices_fresh:
@@ -2834,6 +2928,11 @@ def _existing_earnings_release_accessions(session: Session, company_id: int) -> 
     return {value for value in session.execute(statement).scalars() if value}
 
 
+def _existing_comment_letter_accessions(session: Session, company_id: int) -> set[str]:
+    statement = select(CommentLetter.accession_number).where(CommentLetter.company_id == company_id).distinct()
+    return {value for value in session.execute(statement).scalars() if value}
+
+
 def _latest_insider_trade_last_checked(session: Session, company: Company) -> datetime | None:
     state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "insiders")
     if state_cache != "missing":
@@ -2881,6 +2980,18 @@ def _latest_beneficial_ownership_last_checked(session: Session, company: Company
     statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(
         BeneficialOwnershipReport.company_id == company.id
     )
+    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _latest_comment_letter_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "comment_letters")
+    if state_cache != "missing":
+        return state_last_checked
+
+    if company.comment_letters_last_checked is not None:
+        return _normalize_datetime_value(company.comment_letters_last_checked)
+
+    statement = select(func.max(CommentLetter.last_checked)).where(CommentLetter.company_id == company.id)
     return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
 
 
@@ -3222,6 +3333,42 @@ def _upsert_form144_filings(
     return len(payload)
 
 
+def _upsert_comment_letters(
+    session: Session,
+    company: Company,
+    comment_letters: list[NormalizedCommentLetter],
+    checked_at: datetime,
+) -> int:
+    if not comment_letters:
+        return 0
+
+    payload = [
+        {
+            "company_id": company.id,
+            "accession_number": letter.accession_number,
+            "filing_date": letter.filing_date,
+            "description": letter.description,
+            "sec_url": letter.sec_url,
+            "last_checked": checked_at,
+        }
+        for letter in comment_letters
+    ]
+
+    statement = insert(CommentLetter).values(payload)
+    statement = statement.on_conflict_do_update(
+        index_elements=["company_id", "accession_number"],
+        set_={
+            "filing_date": statement.excluded.filing_date,
+            "description": statement.excluded.description,
+            "sec_url": statement.excluded.sec_url,
+            "last_updated": func.now(),
+            "last_checked": statement.excluded.last_checked,
+        },
+    )
+    session.execute(statement)
+    return len(payload)
+
+
 def _touch_company_insider_trades(session: Session, company_id: int, checked_at: datetime) -> None:
     session.execute(
         update(InsiderTrade)
@@ -3262,6 +3409,20 @@ def _touch_company_earnings_releases(session: Session, company_id: int, checked_
         .values(earnings_last_checked=checked_at)
     )
     mark_dataset_checked(session, company_id, "earnings", checked_at=checked_at, success=True)
+
+
+def _touch_company_comment_letters(session: Session, company_id: int, checked_at: datetime) -> None:
+    session.execute(
+        update(CommentLetter)
+        .where(CommentLetter.company_id == company_id)
+        .values(last_checked=checked_at)
+    )
+    session.execute(
+        update(Company)
+        .where(Company.id == company_id)
+        .values(comment_letters_last_checked=checked_at)
+    )
+    mark_dataset_checked(session, company_id, "comment_letters", checked_at=checked_at, success=True)
 
 
 def _load_form144_document(client: EdgarClient, cik: str, filing_metadata: FilingMetadata) -> tuple[str, str]:
@@ -4918,6 +5079,14 @@ def _build_filing_source_url(cik: str, accession_number: str, primary_document: 
     if primary_document:
         return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/{primary_document}"
     return f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json#accn={accession_number}"
+
+
+def _build_archive_filing_url(cik: str, accession_number: str, primary_document: str | None) -> str:
+    accession_compact = accession_number.replace("-", "")
+    numeric_cik = str(int(cik))
+    if primary_document:
+        return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/{primary_document}"
+    return f"https://www.sec.gov/Archives/edgar/data/{numeric_cik}/{accession_compact}/index.html"
 
 
 def _parse_datetime_value(value: str | None) -> datetime | None:

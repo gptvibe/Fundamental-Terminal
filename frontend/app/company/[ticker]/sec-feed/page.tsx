@@ -9,10 +9,10 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyActivityOverview } from "@/lib/api";
+import { getCompanyActivityOverview, getCompanyCommentLetters } from "@/lib/api";
 import { toneForAlertLevel, toneForAlertSource, toneForEntryBadge, toneForEntryCard, toneForEntryType } from "@/lib/activity-feed-tone";
 import { formatDate } from "@/lib/format";
-import type { CompanyActivityOverviewResponse } from "@/lib/types";
+import type { CompanyActivityOverviewResponse, CompanyCommentLettersResponse } from "@/lib/types";
 
 type AlertLevelFilter = "all" | "high" | "medium" | "low";
 
@@ -30,6 +30,7 @@ export default function CompanySecFeedPage() {
     reloadKey
   } = useCompanyWorkspace(ticker);
   const [activityData, setActivityData] = useState<CompanyActivityOverviewResponse | null>(null);
+  const [commentLettersData, setCommentLettersData] = useState<CompanyCommentLettersResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [alertLevelFilter, setAlertLevelFilter] = useState<AlertLevelFilter>("all");
@@ -41,9 +42,13 @@ export default function CompanySecFeedPage() {
       try {
         setLoading(true);
         setError(null);
-        const activity = await getCompanyActivityOverview(ticker);
+        const [activity, commentLetters] = await Promise.all([
+          getCompanyActivityOverview(ticker),
+          getCompanyCommentLetters(ticker),
+        ]);
         if (!cancelled) {
           setActivityData(activity);
+          setCommentLettersData(commentLetters);
         }
       } catch (nextError) {
         if (!cancelled) {
@@ -68,6 +73,7 @@ export default function CompanySecFeedPage() {
     [alertLevelFilter, activityData?.alerts]
   );
   const topAlerts = useMemo(() => filteredAlerts.slice(0, 3), [filteredAlerts]);
+  const commentLetters = useMemo(() => commentLettersData?.letters ?? [], [commentLettersData?.letters]);
 
   const effectiveRefreshState = activityData?.refresh ?? refreshState;
   const latestDate = feed[0]?.date ?? null;
@@ -173,7 +179,6 @@ export default function CompanySecFeedPage() {
                     type="button"
                     className={`pill workspace-filter-pill tone-${tone}`}
                     onClick={() => setAlertLevelFilter(level)}
-                    aria-pressed={alertLevelFilter === level}
                   >
                     {label}
                   </button>
@@ -266,11 +271,42 @@ export default function CompanySecFeedPage() {
             })}
           </div>
         ) : (
-          <div className="grid-empty-state" style={{ minHeight: 220 }}>
+          <div className="grid-empty-state">
             <div className="grid-empty-kicker">SEC feed</div>
             <div className="grid-empty-title">No activity yet</div>
             <div className="grid-empty-copy">This page fills in once the cache has SEC filings, insider trades, or institutional holdings for the selected company.</div>
           </div>
+        )}
+      </Panel>
+
+      <Panel title="Comment Letters" subtitle="Timeline of SEC regulator correspondence (CORRESP) persisted from EDGAR submissions">
+        {error ? (
+          <div className="text-muted">{error}</div>
+        ) : loading || workspaceLoading ? (
+          <div className="text-muted">Loading comment letters...</div>
+        ) : commentLetters.length ? (
+          <div className="workspace-card-stack">
+            {commentLetters.map((letter) => (
+              <a
+                key={letter.accession_number}
+                href={letter.sec_url}
+                target="_blank"
+                rel="noreferrer"
+                className="filing-link-card workspace-card-link tone-gold"
+              >
+                <div className="workspace-card-row">
+                  <div className="workspace-pill-row">
+                    <span className="pill tone-gold">CORRESP</span>
+                  </div>
+                  <div className="text-muted">{formatDate(letter.filing_date)}</div>
+                </div>
+                <div className="workspace-card-title">{letter.description}</div>
+                <div className="text-muted workspace-card-copy">{letter.accession_number}</div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <div className="text-muted">No SEC comment letters in cache yet.</div>
         )}
       </Panel>
     </CompanyWorkspaceShell>
