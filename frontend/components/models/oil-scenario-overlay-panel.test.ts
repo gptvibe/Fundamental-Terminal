@@ -310,18 +310,23 @@ describe("OilScenarioOverlayPanel", () => {
             official_only: true,
           },
           confidence_flags: [],
+          user_editable_defaults: {
+            benchmark_options: [],
+            current_oil_price: 83.4,
+            current_oil_price_source: "wti_spot_history",
+          },
           refresh: { triggered: false, reason: "fresh", ticker: "CVX", job_id: null },
         },
       }),
     );
 
     expect(screen.getByText("Load +5% example")).toBeTruthy();
-    expect(screen.getByText(/Example mode uses \$80.00\/bbl/)).toBeTruthy();
-    expect(screen.getByRole("option", { name: "Example benchmark ($80.00/bbl baseline)" })).toBeTruthy();
+    expect(screen.getByText(/Example mode uses \$83.40\/bbl/)).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Example benchmark ($83.40/bbl baseline)" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Load +5% example" }));
 
-    expect((screen.getByLabelText("Long-term anchor input") as HTMLInputElement).value).toBe("80");
-    expect((screen.getByLabelText("Short-term curve 2026") as HTMLInputElement).value).toBe("84");
+    expect((screen.getByLabelText("Long-term anchor input") as HTMLInputElement).value).toBe("83.4");
+    expect((screen.getByLabelText("Short-term curve 2026") as HTMLInputElement).value).toBe("87.57");
   });
 });

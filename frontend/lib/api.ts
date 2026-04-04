@@ -31,7 +31,6 @@ import {
   ModelEvaluationResponse,
   CompanyModelsResponse,
   CompanyOilScenarioResponse,
-  CompanyOilScenarioOverlayResponse,
   CompanyMarketContextResponse,
   CompanySectorContextResponse,
   CompanyMetricsTimeseriesResponse,
@@ -611,7 +610,7 @@ export function getCompanyModels(
 export function getCompanyOilScenarioOverlay(
   ticker: string,
   options?: { asOf?: string | null; signal?: AbortSignal }
-): Promise<CompanyOilScenarioOverlayResponse> {
+): Promise<CompanyOilScenarioResponse> {
   return getCompanyOilScenario(ticker, options);
 }
 

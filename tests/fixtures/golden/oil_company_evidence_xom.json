@@ -1,0 +1,46 @@
+{
+  "cik": "0000034088",
+  "filing": {
+    "accession_number": "0000034088-26-000012",
+    "form": "10-K",
+    "filing_date": "2026-02-24",
+    "report_date": "2025-12-31",
+    "primary_document": "xom_oil_sensitivity.html"
+  },
+  "source_fixture": "xom_oil_sensitivity.html",
+  "companyfacts": {
+    "facts": {
+      "us-gaap": {
+        "WeightedAverageNumberOfDilutedSharesOutstanding": {
+          "units": {
+            "shares": [
+              {
+                "val": 4200000000,
+                "accn": "0000034088-26-000012",
+                "end": "2025-12-31",
+                "filed": "2026-02-24",
+                "form": "10-K"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expected": {
+    "status": "partial",
+    "disclosed_sensitivity": {
+      "status": "available",
+      "benchmark": "brent",
+      "annual_after_tax_sensitivity": 650000000.0
+    },
+    "diluted_shares": {
+      "status": "available",
+      "value": 4200000000.0,
+      "tag": "WeightedAverageNumberOfDilutedSharesOutstanding"
+    },
+    "realized_price_comparison": {
+      "status": "not_available"
+    }
+  }
+}

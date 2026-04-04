@@ -218,7 +218,9 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ): _price_sensitive_contract(
         "ft_oil_scenario_overlay",
         "ft_model_engine",
+        "sec_companyfacts",
         "sec_edgar",
+        "eia_petroleum_spot_prices",
         "eia_steo",
         "yahoo_finance",
     ),
@@ -227,7 +229,9 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "/api/companies/{ticker}/oil-scenario-overlay",
     ): _derived_official_contract(
         "ft_oil_scenario_overlay",
+        "sec_companyfacts",
         "sec_edgar",
+        "eia_petroleum_spot_prices",
         "eia_steo",
     ),
     ("GET", "/api/companies/{ticker}/filing-insights"): _official_only_contract("sec_edgar"),

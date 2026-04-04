@@ -1750,6 +1750,30 @@ def company_oil_scenario(
                 manual_sensitivity_reason="Company cache is missing.",
                 price_input_mode="manual",
             ),
+            direct_company_evidence=OilScenarioDirectCompanyEvidencePayload(
+                status="not_available",
+                parser_confidence_flags=["oil_company_evidence_not_available"],
+                disclosed_sensitivity=OilScenarioDisclosedSensitivityEvidencePayload(
+                    status="not_available",
+                    reason="Company cache is missing.",
+                    confidence_flags=["oil_sensitivity_not_available"],
+                    provenance_sources=["sec_edgar"],
+                ),
+                diluted_shares=OilScenarioDilutedSharesEvidencePayload(
+                    status="not_available",
+                    reason="Company cache is missing.",
+                    confidence_flags=["diluted_shares_not_available"],
+                    provenance_sources=["sec_companyfacts"],
+                ),
+                realized_price_comparison=OilScenarioRealizedPriceComparisonEvidencePayload(
+                    status="not_available",
+                    reason="Company cache is missing.",
+                    benchmark=None,
+                    rows=[],
+                    confidence_flags=["realized_vs_benchmark_not_available"],
+                    provenance_sources=["sec_edgar"],
+                ),
+            ),
             diagnostics=_build_data_quality_diagnostics(
                 coverage_ratio=0.0,
                 stale_flags=["company_missing", "oil_scenario_missing"],
@@ -2218,6 +2242,33 @@ def _serialize_oil_scenario_response(
                 "manual_price_required": True,
                 "manual_sensitivity_required": True,
                 "price_input_mode": "manual",
+            }
+        ),
+        direct_company_evidence=OilScenarioDirectCompanyEvidencePayload.model_validate(
+            payload.get("direct_company_evidence")
+            or {
+                "status": "not_available",
+                "parser_confidence_flags": ["oil_company_evidence_not_available"],
+                "disclosed_sensitivity": {
+                    "status": "not_available",
+                    "reason": "Direct SEC oil evidence is unavailable.",
+                    "confidence_flags": ["oil_sensitivity_not_available"],
+                    "provenance_sources": ["sec_edgar"],
+                },
+                "diluted_shares": {
+                    "status": "not_available",
+                    "reason": "Direct SEC oil evidence is unavailable.",
+                    "confidence_flags": ["diluted_shares_not_available"],
+                    "provenance_sources": ["sec_companyfacts"],
+                },
+                "realized_price_comparison": {
+                    "status": "not_available",
+                    "reason": "Direct SEC oil evidence is unavailable.",
+                    "benchmark": None,
+                    "rows": [],
+                    "confidence_flags": ["realized_vs_benchmark_not_available"],
+                    "provenance_sources": ["sec_edgar"],
+                },
             }
         ),
         diagnostics=diagnostics,

@@ -1,0 +1,51 @@
+{
+  "cik": "0000797468",
+  "filing": {
+    "accession_number": "0000797468-26-000021",
+    "form": "10-K",
+    "filing_date": "2026-02-26",
+    "report_date": "2025-12-31",
+    "primary_document": "oxy_realized_benchmark.html"
+  },
+  "source_fixture": "oxy_realized_benchmark.html",
+  "companyfacts": {
+    "facts": {
+      "dei": {
+        "EntityCommonStockSharesOutstanding": {
+          "units": {
+            "shares": [
+              {
+                "val": 950000000,
+                "accn": "0000797468-26-000021",
+                "end": "2025-12-31",
+                "filed": "2026-02-26",
+                "form": "10-K"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "expected": {
+    "status": "partial",
+    "disclosed_sensitivity": {
+      "status": "not_available"
+    },
+    "diluted_shares": {
+      "status": "available",
+      "value": 950000000.0,
+      "tag": "EntityCommonStockSharesOutstanding"
+    },
+    "realized_price_comparison": {
+      "status": "available",
+      "benchmark": "brent",
+      "first_row": {
+        "period_label": "2025",
+        "realized_price": 71.25,
+        "benchmark_price": 74.0,
+        "realized_percent_of_benchmark": 96.3
+      }
+    }
+  }
+}

@@ -35,12 +35,13 @@ def build_company_oil_scenario_public_payload(
     current_share_price, current_price_as_of = _resolve_current_share_price(price_history)
 
     selected_benchmark_id = _resolve_selected_benchmark_id(benchmark_series)
-    benchmark_options = [_benchmark_option(series) for series in benchmark_series]
+    benchmark_options = _benchmark_options(benchmark_series)
     selected_series = next((series for series in benchmark_series if series.get("series_id") == selected_benchmark_id), None)
     official_base_curve = _annualize_curve_series(selected_series)
     user_short_term_curve = _build_default_short_term_curve(official_base_curve)
     long_term_anchor = _resolve_default_long_term_anchor(official_base_curve)
     fade_years = 2
+    current_oil_price, current_oil_price_source = _resolve_current_oil_price(selected_benchmark_id, benchmark_series)
 
     sensitivity_source_kind, default_sensitivity_value = _resolve_sensitivity_source(sensitivity)
     manual_sensitivity_required = default_sensitivity_value is None
@@ -51,6 +52,7 @@ def build_company_oil_scenario_public_payload(
         if manual_sensitivity_required
         else None
     )
+    direct_company_evidence = _validated_direct_company_evidence(overlay_payload.get("direct_company_evidence"))
 
     overlay_outputs = compute_oil_fair_value_overlay_payload(
         OilOverlayEngineInputs(
@@ -135,6 +137,8 @@ def build_company_oil_scenario_public_payload(
             "diluted_shares": diluted_shares,
             "current_share_price": current_share_price,
             "current_share_price_source": "cached_market_price" if current_share_price is not None else "manual_required",
+            "current_oil_price": current_oil_price,
+            "current_oil_price_source": current_oil_price_source,
         },
         "scenarios": [item for item in (overlay_payload.get("scenarios") or []) if isinstance(item, dict)],
         "sensitivity": sensitivity,
@@ -156,6 +160,7 @@ def build_company_oil_scenario_public_payload(
             "manual_sensitivity_reason": manual_sensitivity_reason,
             "price_input_mode": "manual" if manual_price_required else "cached_market_price",
         },
+        "direct_company_evidence": direct_company_evidence,
         "diagnostics": diagnostics,
         "confidence_flags": sorted(confidence_flags),
         "provenance": provenance_entries,
@@ -201,7 +206,21 @@ def _resolve_current_share_price(price_history: list[Any]) -> tuple[float | None
 
 
 def _resolve_selected_benchmark_id(series_list: list[dict[str, Any]]) -> str | None:
-    preferred = next((series for series in series_list if "wti" in str(series.get("series_id") or "").lower()), None)
+    preferred = next(
+        (
+            series
+            for series in series_list
+            if "short_term_baseline" in str(series.get("series_id") or "").lower()
+            and "wti" in str(series.get("series_id") or "").lower()
+        ),
+        None,
+    )
+    if preferred is not None:
+        return str(preferred.get("series_id") or "") or None
+    preferred = next(
+        (series for series in series_list if "short_term_baseline" in str(series.get("series_id") or "").lower()),
+        None,
+    )
     if preferred is not None:
         return str(preferred.get("series_id") or "") or None
     first = series_list[0] if series_list else None
@@ -217,6 +236,112 @@ def _benchmark_option(series: dict[str, Any]) -> dict[str, str]:
     elif "brent" in normalized_id:
         label = "Brent"
     return {"value": series_id, "label": label}
+
+
+def _benchmark_options(series_list: list[dict[str, Any]]) -> list[dict[str, str]]:
+    options: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for series in series_list:
+        series_id = str(series.get("series_id") or "")
+        if "short_term_baseline" not in series_id.lower():
+            continue
+        option = _benchmark_option(series)
+        if option["value"] in seen:
+            continue
+        options.append(option)
+        seen.add(option["value"])
+    return options
+
+
+def _resolve_current_oil_price(selected_benchmark_id: str | None, series_list: list[dict[str, Any]]) -> tuple[float | None, str | None]:
+    series_by_id = {
+        str(item.get("series_id") or ""): item
+        for item in series_list
+        if isinstance(item, dict)
+    }
+    preferred_keys: list[str] = []
+    if selected_benchmark_id:
+        normalized = selected_benchmark_id.lower()
+        if "wti" in normalized:
+            preferred_keys.append("wti_spot_history")
+        if "brent" in normalized:
+            preferred_keys.append("brent_spot_history")
+    preferred_keys.extend(["wti_spot_history", "brent_spot_history"])
+
+    for key in preferred_keys:
+        series = series_by_id.get(key)
+        if not isinstance(series, dict):
+            continue
+        latest_value = _as_float(series.get("latest_value"))
+        if latest_value is not None:
+            return latest_value, key
+
+    for series in series_list:
+        latest_value = _as_float(series.get("latest_value") if isinstance(series, dict) else None)
+        if latest_value is not None:
+            return latest_value, str(series.get("series_id") or "") if isinstance(series, dict) else None
+
+    return None, None
+
+
+def _validated_direct_company_evidence(raw_payload: Any) -> dict[str, Any]:
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    return {
+        "status": str(payload.get("status") or "not_available"),
+        "checked_at": payload.get("checked_at"),
+        "parser_confidence_flags": [
+            str(flag) for flag in (payload.get("parser_confidence_flags") or []) if isinstance(flag, str)
+        ],
+        "disclosed_sensitivity": _validated_direct_company_evidence_field(
+            payload.get("disclosed_sensitivity"),
+            extras=(
+                "benchmark",
+                "oil_price_change_per_bbl",
+                "annual_after_tax_earnings_change",
+                "annual_after_tax_sensitivity",
+                "metric_basis",
+            ),
+        ),
+        "diluted_shares": _validated_direct_company_evidence_field(
+            payload.get("diluted_shares"),
+            extras=("value", "unit", "taxonomy", "tag"),
+        ),
+        "realized_price_comparison": {
+            **_validated_direct_company_evidence_field(payload.get("realized_price_comparison"), extras=("benchmark",)),
+            "rows": [
+                {
+                    "period_label": str(item.get("period_label") or ""),
+                    "benchmark": None if item.get("benchmark") is None else str(item.get("benchmark")),
+                    "realized_price": item.get("realized_price"),
+                    "benchmark_price": item.get("benchmark_price"),
+                    "realized_percent_of_benchmark": item.get("realized_percent_of_benchmark"),
+                    "premium_discount": item.get("premium_discount"),
+                }
+                for item in (payload.get("realized_price_comparison") or {}).get("rows", [])
+                if isinstance(item, dict)
+            ],
+        },
+    }
+
+
+def _validated_direct_company_evidence_field(raw_payload: Any, *, extras: tuple[str, ...]) -> dict[str, Any]:
+    payload = raw_payload if isinstance(raw_payload, dict) else {}
+    validated = {
+        "status": str(payload.get("status") or "not_available"),
+        "reason": None if payload.get("reason") is None else str(payload.get("reason")),
+        "source_url": None if payload.get("source_url") is None else str(payload.get("source_url")),
+        "accession_number": None if payload.get("accession_number") is None else str(payload.get("accession_number")),
+        "filing_form": None if payload.get("filing_form") is None else str(payload.get("filing_form")),
+        "confidence_flags": [
+            str(flag) for flag in (payload.get("confidence_flags") or []) if isinstance(flag, str)
+        ],
+        "provenance_sources": [
+            str(source_id) for source_id in (payload.get("provenance_sources") or []) if isinstance(source_id, str)
+        ],
+    }
+    for key in extras:
+        validated[key] = payload.get(key)
+    return validated
 
 
 def _annualize_curve_series(series: dict[str, Any] | None) -> list[dict[str, float | int]]:

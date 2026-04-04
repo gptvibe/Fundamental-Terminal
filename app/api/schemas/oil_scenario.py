@@ -83,6 +83,8 @@ class OilScenarioUserEditableDefaultsPayload(BaseModel):
     diluted_shares: Number = None
     current_share_price: Number = None
     current_share_price_source: str = "manual_required"
+    current_oil_price: Number = None
+    current_oil_price_source: str | None = None
 
 
 class OilScenarioSensitivitySourcePayload(BaseModel):
@@ -129,6 +131,54 @@ class OilScenarioRequirementsPayload(BaseModel):
     price_input_mode: str
 
 
+class OilScenarioDirectEvidenceFieldPayload(BaseModel):
+    status: str
+    reason: str | None = None
+    source_url: str | None = None
+    accession_number: str | None = None
+    filing_form: str | None = None
+    confidence_flags: list[str] = Field(default_factory=list)
+    provenance_sources: list[str] = Field(default_factory=list)
+
+
+class OilScenarioDisclosedSensitivityEvidencePayload(OilScenarioDirectEvidenceFieldPayload):
+    benchmark: str | None = None
+    oil_price_change_per_bbl: Number = None
+    annual_after_tax_earnings_change: Number = None
+    annual_after_tax_sensitivity: Number = None
+    metric_basis: str | None = None
+
+
+class OilScenarioDilutedSharesEvidencePayload(OilScenarioDirectEvidenceFieldPayload):
+    value: Number = None
+    unit: str | None = None
+    taxonomy: str | None = None
+    tag: str | None = None
+
+
+class OilScenarioRealizedBenchmarkRowPayload(BaseModel):
+    period_label: str
+    benchmark: str | None = None
+    realized_price: Number = None
+    benchmark_price: Number = None
+    realized_percent_of_benchmark: Number = None
+    premium_discount: Number = None
+
+
+class OilScenarioRealizedPriceComparisonEvidencePayload(OilScenarioDirectEvidenceFieldPayload):
+    benchmark: str | None = None
+    rows: list[OilScenarioRealizedBenchmarkRowPayload] = Field(default_factory=list)
+
+
+class OilScenarioDirectCompanyEvidencePayload(BaseModel):
+    status: str
+    checked_at: datetime | None = None
+    parser_confidence_flags: list[str] = Field(default_factory=list)
+    disclosed_sensitivity: OilScenarioDisclosedSensitivityEvidencePayload
+    diluted_shares: OilScenarioDilutedSharesEvidencePayload
+    realized_price_comparison: OilScenarioRealizedPriceComparisonEvidencePayload
+
+
 class OilExposureProfilePayload(BaseModel):
     profile_id: str
     label: str
@@ -169,5 +219,6 @@ class CompanyOilScenarioResponse(ProvenanceEnvelope):
     sensitivity_source: OilScenarioSensitivitySourcePayload
     overlay_outputs: OilScenarioOverlayOutputsPayload
     requirements: OilScenarioRequirementsPayload
+    direct_company_evidence: OilScenarioDirectCompanyEvidencePayload
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     refresh: RefreshState

@@ -1006,6 +1006,8 @@ export interface OilScenarioUserEditableDefaultsPayload {
   diluted_shares?: number | null;
   current_share_price?: number | null;
   current_share_price_source?: string;
+  current_oil_price?: number | null;
+  current_oil_price_source?: string | null;
 }
 
 export interface OilScenarioSensitivitySourcePayload {
@@ -1052,6 +1054,54 @@ export interface OilScenarioRequirementsPayload {
   price_input_mode: string;
 }
 
+export interface OilScenarioDirectEvidenceFieldPayload {
+  status: string;
+  reason?: string | null;
+  source_url?: string | null;
+  accession_number?: string | null;
+  filing_form?: string | null;
+  confidence_flags?: string[];
+  provenance_sources?: string[];
+}
+
+export interface OilScenarioDisclosedSensitivityEvidencePayload extends OilScenarioDirectEvidenceFieldPayload {
+  benchmark?: string | null;
+  oil_price_change_per_bbl?: number | null;
+  annual_after_tax_earnings_change?: number | null;
+  annual_after_tax_sensitivity?: number | null;
+  metric_basis?: string | null;
+}
+
+export interface OilScenarioDilutedSharesEvidencePayload extends OilScenarioDirectEvidenceFieldPayload {
+  value?: number | null;
+  unit?: string | null;
+  taxonomy?: string | null;
+  tag?: string | null;
+}
+
+export interface OilScenarioRealizedBenchmarkRowPayload {
+  period_label: string;
+  benchmark?: string | null;
+  realized_price?: number | null;
+  benchmark_price?: number | null;
+  realized_percent_of_benchmark?: number | null;
+  premium_discount?: number | null;
+}
+
+export interface OilScenarioRealizedPriceComparisonEvidencePayload extends OilScenarioDirectEvidenceFieldPayload {
+  benchmark?: string | null;
+  rows?: OilScenarioRealizedBenchmarkRowPayload[];
+}
+
+export interface OilScenarioDirectCompanyEvidencePayload {
+  status: string;
+  checked_at?: string | null;
+  parser_confidence_flags?: string[];
+  disclosed_sensitivity: OilScenarioDisclosedSensitivityEvidencePayload;
+  diluted_shares: OilScenarioDilutedSharesEvidencePayload;
+  realized_price_comparison: OilScenarioRealizedPriceComparisonEvidencePayload;
+}
+
 export interface CompanyOilScenarioResponse extends CompanyOilScenarioOverlayResponse {
   eligibility?: OilScenarioEligibilityPayload;
   official_base_curve?: OilScenarioOfficialBaseCurvePayload;
@@ -1059,6 +1109,7 @@ export interface CompanyOilScenarioResponse extends CompanyOilScenarioOverlayRes
   sensitivity_source?: OilScenarioSensitivitySourcePayload;
   overlay_outputs?: OilScenarioOverlayOutputsPayload;
   requirements?: OilScenarioRequirementsPayload;
+  direct_company_evidence?: OilScenarioDirectCompanyEvidencePayload;
 }
 
 export interface MarketCurvePointPayload {

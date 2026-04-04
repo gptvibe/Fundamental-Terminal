@@ -46,6 +46,17 @@ def _overlay_payload() -> dict[str, object]:
         },
         "benchmark_series": [
             {
+                "series_id": "wti_spot_history",
+                "label": "WTI spot history",
+                "units": "usd_per_barrel",
+                "status": "ok",
+                "points": [
+                    {"label": "2026-04-03", "value": 83.4, "units": "usd_per_barrel", "observation_date": "2026-04-03"},
+                ],
+                "latest_value": 83.4,
+                "latest_observation_date": "2026-04-03",
+            },
+            {
                 "series_id": "wti_short_term_baseline",
                 "label": "WTI short-term official baseline",
                 "units": "usd_per_barrel",
@@ -94,11 +105,33 @@ def _overlay_payload() -> dict[str, object]:
                 "as_of": "2026-04-04",
                 "last_refreshed_at": "2026-04-04T00:00:00+00:00",
             },
+            {
+                "source_id": "eia_petroleum_spot_prices",
+                "source_tier": "official_statistical",
+                "display_label": "EIA Petroleum Spot Prices",
+                "url": "https://www.eia.gov/",
+                "default_freshness_ttl_seconds": 86400,
+                "disclosure_note": "Official EIA petroleum spot-price history used for WTI and Brent benchmark normalization.",
+                "role": "primary",
+                "as_of": "2026-04-03",
+                "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+            },
+            {
+                "source_id": "eia_steo",
+                "source_tier": "official_statistical",
+                "display_label": "EIA Short-Term Energy Outlook",
+                "url": "https://www.eia.gov/outlooks/steo/",
+                "default_freshness_ttl_seconds": 86400,
+                "disclosure_note": "Official EIA short-term oil price baseline scenarios.",
+                "role": "primary",
+                "as_of": "2026-04",
+                "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+            },
         ],
         "source_mix": {
-            "source_ids": ["ft_oil_scenario_overlay", "sec_edgar"],
-            "source_tiers": ["derived_from_official", "official_regulator"],
-            "primary_source_ids": ["sec_edgar"],
+            "source_ids": ["eia_petroleum_spot_prices", "eia_steo", "ft_oil_scenario_overlay", "sec_edgar"],
+            "source_tiers": ["official_statistical", "derived_from_official", "official_regulator"],
+            "primary_source_ids": ["eia_petroleum_spot_prices", "eia_steo", "sec_edgar"],
             "fallback_source_ids": [],
             "official_only": True,
         },
@@ -147,6 +180,8 @@ def test_oil_scenario_reads_cached_payload_without_live_fetch(monkeypatch):
     assert payload["eligibility"]["eligible"] is True
     assert payload["official_base_curve"]["benchmark_id"] == "wti_short_term_baseline"
     assert payload["user_editable_defaults"]["current_share_price"] == 90.0
+    assert payload["user_editable_defaults"]["current_oil_price"] == 83.4
+    assert payload["user_editable_defaults"]["current_oil_price_source"] == "wti_spot_history"
     assert payload["overlay_outputs"]["status"] == "insufficient_data"
 
 

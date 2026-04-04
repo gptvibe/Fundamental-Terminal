@@ -19,6 +19,8 @@ Representative SEC filing samples for parser testing.
 | `form_144.xml` | Form 144 | Planned insider sale with broker, shares, and aggregate market value |
 | `form_s3.html` | S-3 | Shelf registration statement with dollar amount |
 | `form_nt10k.html` | NT 10-K | Late-filing notification |
+| `xom_oil_sensitivity.html` | 10-K | Example annual filing sentence with clearly disclosed Brent oil sensitivity |
+| `oxy_realized_benchmark.html` | 10-K | Example realized-price-versus-Brent table with realized-as-%-of-benchmark rows |
 
 ## Usage
 

@@ -583,6 +583,17 @@ def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
                 },
                 "benchmark_series": [
                     {
+                        "series_id": "wti_spot_history",
+                        "label": "WTI spot history",
+                        "units": "usd_per_barrel",
+                        "status": "ok",
+                        "points": [
+                            {"label": "2026-04-03", "value": 83.4, "units": "usd_per_barrel", "observation_date": "2026-04-03"},
+                        ],
+                        "latest_value": 83.4,
+                        "latest_observation_date": "2026-04-03",
+                    },
+                    {
                         "series_id": "wti_short_term_baseline",
                         "label": "WTI short-term official baseline",
                         "units": "usd_per_barrel",
@@ -630,11 +641,33 @@ def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
                         "as_of": "2026-04-04",
                         "last_refreshed_at": "2026-04-04T00:00:00+00:00",
                     },
+                    {
+                        "source_id": "eia_petroleum_spot_prices",
+                        "source_tier": "official_statistical",
+                        "display_label": "EIA Petroleum Spot Prices",
+                        "url": "https://www.eia.gov/",
+                        "default_freshness_ttl_seconds": 86400,
+                        "disclosure_note": "Official EIA petroleum spot-price history used for WTI and Brent benchmark normalization.",
+                        "role": "primary",
+                        "as_of": "2026-04-03",
+                        "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+                    },
+                    {
+                        "source_id": "eia_steo",
+                        "source_tier": "official_statistical",
+                        "display_label": "EIA Short-Term Energy Outlook",
+                        "url": "https://www.eia.gov/outlooks/steo/",
+                        "default_freshness_ttl_seconds": 86400,
+                        "disclosure_note": "Official EIA short-term oil price baseline scenarios.",
+                        "role": "primary",
+                        "as_of": "2026-04",
+                        "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+                    },
                 ],
                 "source_mix": {
-                    "source_ids": ["ft_oil_scenario_overlay", "sec_edgar"],
-                    "source_tiers": ["derived_from_official", "official_regulator"],
-                    "primary_source_ids": ["sec_edgar"],
+                    "source_ids": ["eia_petroleum_spot_prices", "eia_steo", "ft_oil_scenario_overlay", "sec_edgar"],
+                    "source_tiers": ["official_statistical", "derived_from_official", "official_regulator"],
+                    "primary_source_ids": ["eia_petroleum_spot_prices", "eia_steo", "sec_edgar"],
                     "fallback_source_ids": [],
                     "official_only": True,
                 },
@@ -668,10 +701,11 @@ def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    _assert_provenance_envelope(payload, {"ft_oil_scenario_overlay", "sec_edgar", "ft_model_engine", "yahoo_finance"})
+    _assert_provenance_envelope(payload, {"ft_oil_scenario_overlay", "sec_edgar", "eia_petroleum_spot_prices", "eia_steo", "ft_model_engine", "yahoo_finance"})
     assert payload["source_mix"]["official_only"] is False
     assert payload["requirements"]["manual_sensitivity_required"] is True
     assert payload["user_editable_defaults"]["current_share_price"] == 90.0
+    assert payload["user_editable_defaults"]["current_oil_price"] == 83.4
 
 
 def test_models_route_includes_registry_backed_provenance(monkeypatch):

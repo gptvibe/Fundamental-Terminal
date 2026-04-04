@@ -36,6 +36,7 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
             "sensitivity_source",
             "overlay_outputs",
             "requirements",
+            "direct_company_evidence",
             "refresh",
             "diagnostics",
             *provenance_fields,

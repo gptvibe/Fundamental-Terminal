@@ -19,7 +19,7 @@ import {
   resolveDilutedShares,
 } from "@/lib/oil-overlay";
 import type {
-  CompanyOilScenarioOverlayResponse,
+  CompanyOilScenarioResponse,
   FinancialPayload,
   ModelPayload,
   PriceHistoryPoint,
@@ -27,7 +27,7 @@ import type {
 
 interface OilScenarioOverlayPanelProps {
   ticker: string;
-  overlay: CompanyOilScenarioOverlayResponse | null;
+  overlay: CompanyOilScenarioResponse | null;
   models: ModelPayload[];
   financials: FinancialPayload[];
   priceHistory: PriceHistoryPoint[];
@@ -54,9 +54,15 @@ export function OilScenarioOverlayPanel({
 }: OilScenarioOverlayPanelProps) {
   const baseFairValuePerShare = useMemo(() => resolveBaseFairValuePerShare(models), [models]);
   const dilutedShares = useMemo(() => resolveDilutedShares(financials), [financials]);
-  const benchmarkOptions = useMemo(() => resolveBenchmarkOptions(overlay?.benchmark_series ?? []), [overlay?.benchmark_series]);
+  const benchmarkOptions = useMemo(
+    () => (overlay?.user_editable_defaults?.benchmark_options?.length ? overlay.user_editable_defaults.benchmark_options : resolveBenchmarkOptions(overlay?.benchmark_series ?? [])),
+    [overlay?.benchmark_series, overlay?.user_editable_defaults?.benchmark_options],
+  );
   const usingExampleBenchmark = benchmarkOptions.length === 0;
-  const exampleBaseOilPrice = useMemo(() => resolveExampleBaseOilPrice(overlay?.benchmark_series ?? []), [overlay?.benchmark_series]);
+  const exampleBaseOilPrice = useMemo(
+    () => resolveExampleBaseOilPrice(overlay?.user_editable_defaults?.current_oil_price, overlay?.benchmark_series ?? []),
+    [overlay?.benchmark_series, overlay?.user_editable_defaults?.current_oil_price],
+  );
   const exampleStartYear = useMemo(() => resolveExampleStartYear(overlay?.as_of), [overlay?.as_of]);
   const displayBenchmarkOptions = useMemo(
     () =>
@@ -455,7 +461,10 @@ function formatCompact(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
 }
 
-function resolveExampleBaseOilPrice(series: CompanyOilScenarioOverlayResponse["benchmark_series"]): number {
+function resolveExampleBaseOilPrice(currentOilPrice: number | null | undefined, series: CompanyOilScenarioResponse["benchmark_series"]): number {
+  if (currentOilPrice != null && Number.isFinite(currentOilPrice)) {
+    return currentOilPrice;
+  }
   for (const item of series ?? []) {
     if (item.latest_value != null && Number.isFinite(item.latest_value)) {
       return item.latest_value;
