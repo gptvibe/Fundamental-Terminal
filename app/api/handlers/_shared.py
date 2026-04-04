@@ -1827,6 +1827,7 @@ def latest_model_evaluation(
     serialized_run = serialize_model_evaluation_run(run)
     summary = serialized_run.get("summary") if isinstance(serialized_run.get("summary"), dict) else {}
     provenance_mode = str(summary.get("provenance_mode") or "historical_cache")
+    evaluation_focus = str(summary.get("evaluation_focus") or "general")
     as_of_value = summary.get("latest_as_of")
     last_refreshed_at = run.completed_at or run.created_at
 
@@ -1840,6 +1841,58 @@ def latest_model_evaluation(
             )
         ]
         confidence_flags = ["synthetic_fixture_suite"]
+    elif evaluation_focus == "oil_overlay":
+        usages = [
+            SourceUsage(
+                source_id="ft_model_evaluation_harness",
+                role="derived",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="ft_oil_scenario_overlay",
+                role="derived",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="ft_model_engine",
+                role="supplemental",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="sec_edgar",
+                role="primary",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="sec_companyfacts",
+                role="primary",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="eia_petroleum_spot_prices",
+                role="primary",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="eia_steo",
+                role="primary",
+                as_of=as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+            SourceUsage(
+                source_id="yahoo_finance",
+                role="fallback",
+                as_of=summary.get("latest_future_as_of") or as_of_value,
+                last_refreshed_at=last_refreshed_at,
+            ),
+        ]
+        confidence_flags = []
     else:
         usages = [
             SourceUsage(

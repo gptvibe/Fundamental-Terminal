@@ -15,11 +15,15 @@ from app.db.session import SessionLocal, get_engine
 from app.services.model_evaluation import (
     FIXTURE_CANDIDATE_LABEL,
     FIXTURE_SUITE_KEY,
+    OIL_OVERLAY_FIXTURE_CANDIDATE_LABEL,
+    OIL_OVERLAY_FIXTURE_SUITE_KEY,
     build_baseline_payload,
     build_fixed_risk_free_provider,
     load_company_bundles,
     load_fixture_bundles,
+    load_oil_overlay_fixture_bundles,
     run_model_evaluation,
+    run_oil_overlay_point_in_time_evaluation,
 )
 
 
@@ -27,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the historical model evaluation harness and optionally compare it with a checked-in baseline")
     parser.add_argument("--fixture", default="", help="Named in-memory fixture suite to evaluate")
     parser.add_argument("--tickers", default="", help="Comma-separated cached tickers to evaluate from PostgreSQL")
+    parser.add_argument("--evaluation-target", default="general", choices=["general", "oil_overlay"], help="Which evaluation harness to run")
     parser.add_argument("--models", default="", help="Comma-separated model names to evaluate")
     parser.add_argument("--suite-key", default="", help="Logical suite key to persist and report")
     parser.add_argument("--candidate-label", default="current", help="Label for the candidate run")
@@ -47,17 +52,23 @@ def main(argv: list[str] | None = None) -> int:
     session = None
     try:
         if args.fixture:
-            suite_key = args.suite_key or args.fixture
-            candidate_label = args.candidate_label if args.candidate_label != "current" else FIXTURE_CANDIDATE_LABEL
-            bundles = load_fixture_bundles(args.fixture)
-            risk_free_provider = build_fixed_risk_free_provider()
+            if args.evaluation_target == "oil_overlay":
+                suite_key = args.suite_key or OIL_OVERLAY_FIXTURE_SUITE_KEY
+                candidate_label = args.candidate_label if args.candidate_label != "current" else OIL_OVERLAY_FIXTURE_CANDIDATE_LABEL
+                bundles = load_oil_overlay_fixture_bundles(suite_key)
+                risk_free_provider = None
+            else:
+                suite_key = args.suite_key or args.fixture
+                candidate_label = args.candidate_label if args.candidate_label != "current" else FIXTURE_CANDIDATE_LABEL
+                bundles = load_fixture_bundles(args.fixture)
+                risk_free_provider = build_fixed_risk_free_provider()
             if args.persist:
                 get_engine()
                 session = SessionLocal()
         else:
             if not tickers:
                 parser.error("Either --fixture or --tickers is required")
-            suite_key = args.suite_key or "postgres_historical_cache"
+            suite_key = args.suite_key or (OIL_OVERLAY_FIXTURE_SUITE_KEY if args.evaluation_target == "oil_overlay" else "postgres_historical_cache")
             candidate_label = args.candidate_label
             get_engine()
             session = SessionLocal()
@@ -67,17 +78,27 @@ def main(argv: list[str] | None = None) -> int:
         if not bundles:
             raise SystemExit("No evaluation bundles were available for the requested suite")
 
-        result = run_model_evaluation(
-            bundles=bundles,
-            suite_key=suite_key,
-            candidate_label=candidate_label,
-            baseline=baseline,
-            model_names=requested_models or None,
-            horizon_days=args.horizon_days,
-            earnings_horizon_days=args.earnings_horizon_days,
-            persist_session=session if args.persist else None,
-            risk_free_rate_provider=risk_free_provider,
-        )
+        if args.evaluation_target == "oil_overlay":
+            result = run_oil_overlay_point_in_time_evaluation(
+                bundles=bundles,
+                suite_key=suite_key,
+                candidate_label=candidate_label,
+                baseline=baseline,
+                horizon_days=args.horizon_days,
+                persist_session=session if args.persist else None,
+            )
+        else:
+            result = run_model_evaluation(
+                bundles=bundles,
+                suite_key=suite_key,
+                candidate_label=candidate_label,
+                baseline=baseline,
+                model_names=requested_models or None,
+                horizon_days=args.horizon_days,
+                earnings_horizon_days=args.earnings_horizon_days,
+                persist_session=session if args.persist else None,
+                risk_free_rate_provider=risk_free_provider,
+            )
 
         if session is not None:
             session.commit()

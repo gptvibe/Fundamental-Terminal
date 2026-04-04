@@ -1729,6 +1729,7 @@ export interface ModelEvaluationRunPayload {
   completed_at: string | null;
   configuration: Record<string, unknown>;
   summary: Record<string, unknown>;
+  artifacts: Record<string, unknown>;
   models: ModelEvaluationMetricPayload[];
   deltas_present: boolean;
 }

@@ -38,6 +38,7 @@ class ModelEvaluationRunPayload(BaseModel):
     completed_at: datetime | None = None
     configuration: dict[str, Any] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
+    artifacts: dict[str, Any] = Field(default_factory=dict)
     models: list[ModelEvaluationMetricPayload] = Field(default_factory=list)
     deltas_present: bool = False
 

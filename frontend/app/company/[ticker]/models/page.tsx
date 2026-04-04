@@ -36,10 +36,12 @@ interface ModelsWorkspaceData {
   capitalStructureData: CompanyCapitalStructureResponse | null;
   oilScenarioOverlayData: CompanyOilScenarioOverlayResponse | null;
   evaluationData: ModelEvaluationResponse | null;
+  oilOverlayEvaluationData: ModelEvaluationResponse | null;
   activeJobId: string | null;
 }
 
 const REFRESH_POLL_INTERVAL_MS = 3000;
+const OIL_OVERLAY_EVALUATION_SUITE_KEY = "oil_overlay_point_in_time_v1";
 
 const InvestmentSummaryPanel = dynamic(
   () => import("@/components/models/investment-summary-panel").then((module) => module.InvestmentSummaryPanel),
@@ -74,6 +76,7 @@ export default function CompanyModelsPage() {
   const [capitalStructureData, setCapitalStructureData] = useState<CompanyCapitalStructureResponse | null>(null);
   const [oilScenarioOverlayData, setOilScenarioOverlayData] = useState<CompanyOilScenarioOverlayResponse | null>(null);
   const [evaluationData, setEvaluationData] = useState<ModelEvaluationResponse | null>(null);
+  const [oilOverlayEvaluationData, setOilOverlayEvaluationData] = useState<ModelEvaluationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -110,6 +113,7 @@ export default function CompanyModelsPage() {
           setCapitalStructureData(workspaceData.capitalStructureData);
           setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
           setEvaluationData(workspaceData.evaluationData);
+          setOilOverlayEvaluationData(workspaceData.oilOverlayEvaluationData);
           setActiveJobId(workspaceData.activeJobId);
         }
       } catch (nextError) {
@@ -155,6 +159,7 @@ export default function CompanyModelsPage() {
         setCapitalStructureData(workspaceData.capitalStructureData);
         setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
         setEvaluationData(workspaceData.evaluationData);
+        setOilOverlayEvaluationData(workspaceData.oilOverlayEvaluationData);
         setActiveJobId(workspaceData.activeJobId);
       })
       .catch((nextError) => {
@@ -196,6 +201,7 @@ export default function CompanyModelsPage() {
         setCapitalStructureData(workspaceData.capitalStructureData);
         setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
         setEvaluationData(workspaceData.evaluationData);
+        setOilOverlayEvaluationData(workspaceData.oilOverlayEvaluationData);
         setActiveJobId(workspaceData.activeJobId);
 
         if (workspaceData.activeJobId !== activeJobId) {
@@ -522,6 +528,7 @@ export default function CompanyModelsPage() {
             strictOfficialMode={strictOfficialMode}
             companySupportStatus={oilSupportStatus}
             companySupportReasons={oilSupportReasons}
+            oilOverlayEvaluation={oilOverlayEvaluationData}
           />
         </Panel>
       ) : (
@@ -630,7 +637,7 @@ export default function CompanyModelsPage() {
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, oilScenarioOverlayResult, evaluationResult] = await Promise.allSettled([
+  const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, oilScenarioOverlayResult, evaluationResult, oilOverlayEvaluationResult] = await Promise.allSettled([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
     getCompanyFinancials(ticker),
     getCompanyMarketContext(ticker),
@@ -638,6 +645,7 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
     getCompanyOilScenarioOverlay(ticker),
     getLatestModelEvaluation(),
+    getLatestModelEvaluation(OIL_OVERLAY_EVALUATION_SUITE_KEY),
   ]);
 
   const modelData = requireModelsWorkspacePayload(modelResult, "Unable to load models");
@@ -647,6 +655,7 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
   const capitalStructureData = optionalModelsWorkspacePayload(capitalStructureResult);
   const oilScenarioOverlayData = optionalModelsWorkspacePayload(oilScenarioOverlayResult);
   const evaluationData = optionalModelsWorkspacePayload(evaluationResult);
+  const oilOverlayEvaluationData = optionalModelsWorkspacePayload(oilOverlayEvaluationResult);
 
   return {
     modelData,
@@ -656,6 +665,7 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
     capitalStructureData,
     oilScenarioOverlayData,
     evaluationData,
+    oilOverlayEvaluationData,
     activeJobId:
       modelData.refresh.job_id ??
       financialData.refresh.job_id ??

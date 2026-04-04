@@ -314,7 +314,12 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         allowed_source_ids=(
             "ft_model_evaluation_harness",
             "ft_model_evaluation_fixture",
+            "ft_oil_scenario_overlay",
+            "ft_model_engine",
+            "sec_edgar",
             "sec_companyfacts",
+            "eia_petroleum_spot_prices",
+            "eia_steo",
             "yahoo_finance",
         ),
         fallback_permitted=True,

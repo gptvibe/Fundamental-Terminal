@@ -21,6 +21,7 @@ import {
 import type {
   CompanyOilScenarioResponse,
   FinancialPayload,
+  ModelEvaluationResponse,
   ModelPayload,
   PriceHistoryPoint,
 } from "@/lib/types";
@@ -34,6 +35,7 @@ interface OilScenarioOverlayPanelProps {
   strictOfficialMode: boolean;
   companySupportStatus: "supported" | "partial" | "unsupported";
   companySupportReasons: string[];
+  oilOverlayEvaluation: ModelEvaluationResponse | null;
 }
 
 type SensitivitySource = "manual" | "dataset";
@@ -48,6 +50,7 @@ export function OilScenarioOverlayPanel({
   strictOfficialMode,
   companySupportStatus,
   companySupportReasons,
+  oilOverlayEvaluation,
 }: OilScenarioOverlayPanelProps) {
   const baseFairValuePerShare = useMemo(() => resolveBaseFairValuePerShare(models), [models]);
   const dilutedShares = useMemo(() => resolveDilutedShares(financials), [financials]);
@@ -71,6 +74,7 @@ export function OilScenarioOverlayPanel({
     : companySupportStatus;
   const supportReasons = overlay?.exposure_profile.oil_support_reasons?.length ? overlay.exposure_profile.oil_support_reasons : companySupportReasons;
   const datasetSensitivity = useMemo(() => resolveDatasetAnnualSensitivity(overlay?.sensitivity), [overlay?.sensitivity]);
+  const directEvidence = overlay?.direct_company_evidence ?? null;
   const defaultSensitivitySource = useMemo<SensitivitySource>(
     () => (datasetSensitivity == null ? "manual" : "dataset"),
     [datasetSensitivity],
@@ -82,6 +86,10 @@ export function OilScenarioOverlayPanel({
   );
   const defaultCustomRealizedSpread = overlay?.user_editable_defaults?.custom_realized_spread;
   const defaultMeanReversionYears = overlay?.user_editable_defaults?.mean_reversion_years ?? 3;
+  const hasOfficialCurve = activeAnnualBaseCurve.length > 0;
+  const blockedReasons = useMemo(() => buildOverlayBlockedReasons(overlay), [overlay]);
+  const availabilityCards = useMemo(() => buildAvailabilityCards(overlay, hasOfficialCurve, datasetSensitivity, dilutedShares), [overlay, hasOfficialCurve, datasetSensitivity, dilutedShares]);
+  const oilEvaluationSummary = useMemo(() => resolveOilOverlayEvaluationSummary(ticker, oilOverlayEvaluation), [ticker, oilOverlayEvaluation]);
 
   const [shortTermCurve, setShortTermCurve] = useState(defaultShortTermCurve);
   const [longTermAnchorInput, setLongTermAnchorInput] = useState(defaultLongTermAnchor == null ? "" : String(defaultLongTermAnchor));
@@ -232,6 +240,100 @@ export function OilScenarioOverlayPanel({
         </div>
       </div>
 
+      {oilEvaluationSummary ? (
+        <div className="filing-link-card workspace-card-stack-tight">
+          <div className="metric-label">Latest Oil Overlay Evaluation</div>
+          <div className="workspace-pill-row">
+            <span className="pill">Samples {oilEvaluationSummary.sampleCount ?? "—"}</span>
+            <span className="pill">MAE Lift {formatSignedNumber(oilEvaluationSummary.maeLift)}</span>
+            <span className="pill">Improvement Rate {formatPercent(oilEvaluationSummary.improvementRate)}</span>
+            <span className="pill">As Of {oilEvaluationSummary.asOf ?? "—"}</span>
+          </div>
+          <div className="text-muted">
+            {oilEvaluationSummary.description}
+          </div>
+          <SourceFreshnessSummary
+            provenance={oilOverlayEvaluation?.provenance}
+            asOf={oilOverlayEvaluation?.as_of}
+            lastRefreshedAt={oilOverlayEvaluation?.last_refreshed_at}
+            sourceMix={oilOverlayEvaluation?.source_mix}
+            confidenceFlags={oilOverlayEvaluation?.confidence_flags}
+            emptyMessage="No persisted oil overlay evaluation summary is available yet."
+          />
+        </div>
+      ) : null}
+
+      <div className="oil-overlay-summary-grid">
+        {availabilityCards.map((card) => (
+          <SummaryCard key={card.label} label={card.label} value={card.value} tone={card.tone} />
+        ))}
+      </div>
+
+      <div className="filing-link-card workspace-card-stack-tight">
+        <div className="metric-label">Input Availability</div>
+        {blockedReasons.length ? (
+          <ul className="oil-overlay-reasons">
+            {blockedReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        ) : (
+          <div className="text-muted">The required overlay inputs are available for interactive modeling.</div>
+        )}
+      </div>
+
+      <div className="filing-link-card workspace-card-stack-tight">
+        <div className="metric-label">Direct Company Evidence</div>
+        <div className="workspace-pill-row">
+          <span className="pill">Disclosed Sensitivity {formatEvidenceStatus(directEvidence?.disclosed_sensitivity?.status)}</span>
+          <span className="pill">Diluted Shares {formatEvidenceStatus(directEvidence?.diluted_shares?.status)}</span>
+          <span className="pill">Realized Spread {formatEvidenceStatus(directEvidence?.realized_price_comparison?.status)}</span>
+        </div>
+        <div className="text-muted">
+          {directEvidence?.disclosed_sensitivity?.status === "available"
+            ? `${String(directEvidence.disclosed_sensitivity.benchmark ?? "benchmark").toUpperCase()} sensitivity is disclosed directly in SEC filings.`
+            : directEvidence?.disclosed_sensitivity?.reason ?? "No disclosed oil sensitivity is cached yet."}
+        </div>
+        {directEvidence?.realized_price_comparison?.rows?.length ? (
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Realized Price</th>
+                <th>Benchmark Price</th>
+                <th>% of Benchmark</th>
+                <th>Spread</th>
+              </tr>
+            </thead>
+            <tbody>
+              {directEvidence.realized_price_comparison.rows.slice(0, 3).map((row) => (
+                <tr key={row.period_label}>
+                  <td>{row.period_label}</td>
+                  <td>{formatCurrency(row.realized_price)}</td>
+                  <td>{formatCurrency(row.benchmark_price)}</td>
+                  <td>{formatPercent(row.realized_percent_of_benchmark != null ? row.realized_percent_of_benchmark / 100 : null)}</td>
+                  <td>{formatSignedCurrency(row.premium_discount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="text-muted">{directEvidence?.realized_price_comparison?.reason ?? "No realized-price-versus-benchmark table is cached yet."}</div>
+        )}
+      </div>
+
+      {hasOfficialCurve ? (
+        <div className="filing-link-card workspace-card-stack-tight">
+          <div className="metric-label">Benchmark Curve View</div>
+          <BenchmarkCurveChart baseCurve={activeAnnualBaseCurve} scenarioCurve={shortTermCurve} />
+        </div>
+      ) : (
+        <div className="filing-link-card workspace-card-stack-tight">
+          <div className="metric-label">Benchmark Curve View</div>
+          <div className="text-muted">No official annual benchmark curve is cached yet, so the interactive overlay stays blocked until EIA inputs are available.</div>
+        </div>
+      )}
+
       <div className="workspace-pill-row">
         <span className="pill">Support {titleCase(supportStatus)}</span>
         <span className="pill">Base Fair Value {formatCurrency(baseFairValuePerShare)}</span>
@@ -244,6 +346,7 @@ export function OilScenarioOverlayPanel({
         </button>
       </div>
 
+      {hasOfficialCurve ? (
       <div className="oil-overlay-controls">
         {benchmarkOptions.length ? (
           <label className="oil-overlay-field">
@@ -347,13 +450,15 @@ export function OilScenarioOverlayPanel({
           </div>
         )}
       </div>
+      ) : null}
 
-      {overlay?.sensitivity_source?.kind === "disclosed" ? (
+      {hasOfficialCurve && overlay?.sensitivity_source?.kind === "disclosed" ? (
         <div className="text-muted oil-overlay-help">
           SEC disclosed sensitivity is benchmark-linked. Realized-spread controls remain visible for context, but benchmark-linked earnings deltas stay anchored to the disclosed benchmark sensitivity unless you switch to manual override.
         </div>
       ) : null}
 
+      {hasOfficialCurve ? (
       <div className="workspace-card-stack-tight">
         <div className="metric-label">Short-Term Curve Editor</div>
         {shortTermCurve.length ? (
@@ -384,13 +489,16 @@ export function OilScenarioOverlayPanel({
           <div className="text-muted">No official annual benchmark points are available for the selected benchmark yet.</div>
         )}
       </div>
+      ) : null}
 
+      {hasOfficialCurve ? (
       <div className="oil-overlay-summary-grid">
         <SummaryCard label="Scenario Fair Value / Share" value={formatCurrency(overlayResult.scenarioFairValuePerShare)} tone="accent" />
         <SummaryCard label="Delta vs Base" value={formatSignedCurrency(overlayResult.deltaVsBasePerShare)} tone="warning" />
         <SummaryCard label="EPS Delta per $1 Oil" value={formatSignedNumber(overlayResult.epsDeltaPerDollarOil)} tone="positive" />
         <SummaryCard label="Upside / Downside" value={formatPercent(overlayResult.impliedUpsideDownside)} tone="cyan" />
       </div>
+      ) : null}
 
       <div className="filing-link-card workspace-card-stack-tight">
         <div className="metric-label">Overlay Status</div>
@@ -411,7 +519,7 @@ export function OilScenarioOverlayPanel({
         )}
       </div>
 
-      {overlayResult.yearlyDeltas.length ? (
+      {hasOfficialCurve && overlayResult.yearlyDeltas.length ? (
         <div className="filing-link-card workspace-card-stack-tight">
           <div className="metric-label">Per-Year Deltas</div>
           <table>
@@ -523,4 +631,154 @@ function describeOilSupportReason(reason: string): string {
     default:
       return reason.includes(":") ? reason.replace(":", ": ") : humanizeFlag(reason);
   }
+}
+
+function buildOverlayBlockedReasons(overlay: CompanyOilScenarioResponse | null): string[] {
+  if (!overlay) {
+    return ["Official oil overlay data has not been cached for this company yet."];
+  }
+  const reasons: string[] = [];
+  const availableSeries = (overlay.benchmark_series ?? []).filter((series) => series.status === "ok");
+  if (!availableSeries.length) {
+    reasons.push("Official EIA benchmark curves are not cached yet for the selected oil benchmark.");
+  }
+  if (overlay.requirements?.manual_sensitivity_required) {
+    reasons.push(overlay.requirements.manual_sensitivity_reason ?? "An annual after-tax oil sensitivity is still required.");
+  }
+  if (overlay.exposure_profile.oil_support_status === "partial") {
+    reasons.push(...(overlay.exposure_profile.oil_support_reasons ?? []).map(describeOilSupportReason));
+  }
+  if (overlay.requirements?.realized_spread_supported === false && overlay.requirements.realized_spread_reason) {
+    reasons.push(overlay.requirements.realized_spread_reason);
+  }
+  return Array.from(new Set(reasons.filter(Boolean)));
+}
+
+function buildAvailabilityCards(
+  overlay: CompanyOilScenarioResponse | null,
+  hasOfficialCurve: boolean,
+  datasetSensitivity: number | null,
+  dilutedShares: number | null,
+): Array<{ label: string; value: string; tone: "accent" | "warning" | "positive" | "cyan" }> {
+  return [
+    {
+      label: "Support Status",
+      value: overlay ? titleCase(overlay.exposure_profile.oil_support_status) : "Unavailable",
+      tone: overlay?.exposure_profile.oil_support_status === "supported" ? "positive" : "warning",
+    },
+    {
+      label: "Official Curve",
+      value: hasOfficialCurve ? "Ready" : "Blocked",
+      tone: hasOfficialCurve ? "positive" : "warning",
+    },
+    {
+      label: "Sensitivity Input",
+      value: datasetSensitivity != null ? formatSignedNumber(datasetSensitivity) : overlay?.requirements?.manual_sensitivity_required ? "Manual Required" : "Pending",
+      tone: datasetSensitivity != null ? "accent" : "warning",
+    },
+    {
+      label: "Diluted Shares",
+      value: formatCompact(dilutedShares),
+      tone: dilutedShares != null ? "cyan" : "warning",
+    },
+  ];
+}
+
+function resolveOilOverlayEvaluationSummary(
+  ticker: string,
+  oilOverlayEvaluation: ModelEvaluationResponse | null,
+): {
+  sampleCount: number | null;
+  maeLift: number | null;
+  improvementRate: number | null;
+  asOf: string | null;
+  description: string;
+} | null {
+  const run = oilOverlayEvaluation?.run;
+  if (!run) {
+    return null;
+  }
+  const summary = asRecord(run.summary);
+  const artifacts = asRecord(run.artifacts);
+  const comparison = asRecord(summary.comparison ?? artifacts.comparison);
+  const companySummaries = asRecord(artifacts.company_summaries);
+  const companySummary = asRecord(companySummaries[ticker]);
+
+  const sampleCount = asNumber(companySummary.sample_count ?? comparison.sample_count);
+  const maeLift = asNumber(companySummary.mean_absolute_error_lift ?? comparison.mean_absolute_error_lift);
+  const improvementRate = asNumber(companySummary.improvement_rate ?? comparison.improvement_rate);
+  const asOf = asString(companySummary.latest_as_of ?? summary.latest_as_of ?? run.completed_at)?.slice(0, 10) ?? null;
+  const description = companySummary.ticker
+    ? `${ticker} point-in-time comparison of the base model versus base-plus-oil-overlay.`
+    : "Latest point-in-time comparison across supported oil names in the historical overlay harness.";
+
+  return { sampleCount, maeLift, improvementRate, asOf, description };
+}
+
+function BenchmarkCurveChart({
+  baseCurve,
+  scenarioCurve,
+}: {
+  baseCurve: Array<{ year: number; price: number }>;
+  scenarioCurve: Array<{ year: number; price: number }>;
+}) {
+  if (!baseCurve.length) {
+    return <div className="text-muted">No benchmark curve points are available yet.</div>;
+  }
+
+  const width = 680;
+  const height = 220;
+  const padding = 24;
+  const points = [...baseCurve, ...scenarioCurve].map((point) => point.price);
+  const minPrice = Math.min(...points);
+  const maxPrice = Math.max(...points);
+  const span = Math.max(maxPrice - minPrice, 1);
+  const xForIndex = (index: number, count: number) => padding + (index * (width - padding * 2)) / Math.max(count - 1, 1);
+  const yForPrice = (price: number) => height - padding - ((price - minPrice) / span) * (height - padding * 2);
+  const linePath = (curve: Array<{ year: number; price: number }>) => curve.map((point, index) => `${index === 0 ? "M" : "L"} ${xForIndex(index, curve.length)} ${yForPrice(point.price)}`).join(" ");
+
+  return (
+    <div className="workspace-card-stack-tight">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Benchmark curve chart" width="100%" height={height}>
+        <rect x="0" y="0" width={width} height={height} fill="rgba(148, 163, 184, 0.08)" rx="16" />
+        {[0, 1, 2, 3].map((step) => {
+          const y = padding + ((height - padding * 2) * step) / 3;
+          return <line key={step} x1={padding} y1={y} x2={width - padding} y2={y} stroke="rgba(148, 163, 184, 0.18)" strokeWidth="1" />;
+        })}
+        <path d={linePath(baseCurve)} fill="none" stroke="#38bdf8" strokeWidth="3" />
+        <path d={linePath(scenarioCurve)} fill="none" stroke="#f59e0b" strokeWidth="3" strokeDasharray="8 6" />
+        {baseCurve.map((point, index) => (
+          <g key={`base-${point.year}`}>
+            <circle cx={xForIndex(index, baseCurve.length)} cy={yForPrice(point.price)} r="4" fill="#38bdf8" />
+            <text x={xForIndex(index, baseCurve.length)} y={height - 6} textAnchor="middle" fontSize="11" fill="currentColor">
+              {point.year}
+            </text>
+          </g>
+        ))}
+      </svg>
+      <div className="workspace-pill-row">
+        <span className="pill">Blue: Official annual benchmark</span>
+        <span className="pill">Amber: Your scenario path</span>
+      </div>
+    </div>
+  );
+}
+
+function formatEvidenceStatus(status: string | null | undefined): string {
+  if (!status) {
+    return "Unavailable";
+  }
+  return humanizeFlag(status).replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.length ? value : null;
 }
