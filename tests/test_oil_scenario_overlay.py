@@ -236,3 +236,23 @@ def test_oil_scenario_overlay_refresh_dedupes_when_dataset_lock_exists(monkeypat
     )
 
     assert written == 0
+
+
+def test_oil_scenario_overlay_placeholder_payload_serializes_nested_datetimes():
+    company = SimpleNamespace(
+        id=7,
+        ticker="CVX",
+        cik="0000093410",
+        name="Chevron Corporation",
+        sector="Petroleum Refining",
+        market_sector="Energy",
+        market_industry="Oil & Gas Integrated",
+    )
+    checked_at = datetime(2026, 4, 4, tzinfo=timezone.utc)
+
+    payload = overlay_service.build_company_oil_scenario_overlay_placeholder(company, checked_at=checked_at)
+
+    assert payload["fetched_at"] == checked_at.isoformat()
+    assert payload["last_refreshed_at"] == checked_at.isoformat()
+    assert payload["provenance"][0]["last_refreshed_at"] == checked_at.isoformat()
+    assert "strict_official_mode" not in payload["confidence_flags"]

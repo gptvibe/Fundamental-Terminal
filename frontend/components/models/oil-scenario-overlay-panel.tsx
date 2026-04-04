@@ -38,6 +38,10 @@ interface OilScenarioOverlayPanelProps {
 
 type SensitivitySource = "manual" | "dataset";
 
+const EXAMPLE_BENCHMARK_ID = "__example_current_oil__";
+const EXAMPLE_BASELINE_OIL_PRICE = 80;
+const EXAMPLE_CURVE_YEARS = 3;
+
 export function OilScenarioOverlayPanel({
   ticker,
   overlay,
@@ -51,15 +55,42 @@ export function OilScenarioOverlayPanel({
   const baseFairValuePerShare = useMemo(() => resolveBaseFairValuePerShare(models), [models]);
   const dilutedShares = useMemo(() => resolveDilutedShares(financials), [financials]);
   const benchmarkOptions = useMemo(() => resolveBenchmarkOptions(overlay?.benchmark_series ?? []), [overlay?.benchmark_series]);
-  const defaultBenchmarkId = benchmarkOptions.find((option) => option.value.toLowerCase().includes("wti"))?.value ?? benchmarkOptions[0]?.value ?? "";
+  const usingExampleBenchmark = benchmarkOptions.length === 0;
+  const exampleBaseOilPrice = useMemo(() => resolveExampleBaseOilPrice(overlay?.benchmark_series ?? []), [overlay?.benchmark_series]);
+  const exampleStartYear = useMemo(() => resolveExampleStartYear(overlay?.as_of), [overlay?.as_of]);
+  const displayBenchmarkOptions = useMemo(
+    () =>
+      benchmarkOptions.length
+        ? benchmarkOptions
+        : [{ value: EXAMPLE_BENCHMARK_ID, label: `Example benchmark (${formatCurrency(exampleBaseOilPrice)}/bbl baseline)` }],
+    [benchmarkOptions, exampleBaseOilPrice],
+  );
+  const defaultBenchmarkId = displayBenchmarkOptions.find((option) => option.value.toLowerCase().includes("wti"))?.value ?? displayBenchmarkOptions[0]?.value ?? "";
   const [benchmarkId, setBenchmarkId] = useState(defaultBenchmarkId);
   const selectedBenchmark = useMemo(
     () => (overlay?.benchmark_series ?? []).find((series) => series.series_id === benchmarkId) ?? null,
     [benchmarkId, overlay?.benchmark_series],
   );
   const annualBaseCurve = useMemo(() => annualizeOilCurveSeries(selectedBenchmark), [selectedBenchmark]);
-  const defaultShortTermCurve = useMemo(() => buildDefaultShortTermCurve(annualBaseCurve), [annualBaseCurve]);
-  const defaultLongTermAnchor = useMemo(() => resolveDefaultLongTermAnchor(annualBaseCurve), [annualBaseCurve]);
+  const exampleBaselineCurve = useMemo(
+    () => buildExampleBaselineCurve(exampleStartYear, exampleBaseOilPrice),
+    [exampleBaseOilPrice, exampleStartYear],
+  );
+  const examplePlusFiveCurve = useMemo(
+    () => buildExampleScenarioCurve(exampleStartYear, exampleBaseOilPrice, 0.05),
+    [exampleBaseOilPrice, exampleStartYear],
+  );
+  const activeAnnualBaseCurve = useMemo(() => {
+    if (annualBaseCurve.length) {
+      return annualBaseCurve;
+    }
+    if (usingExampleBenchmark && benchmarkId === EXAMPLE_BENCHMARK_ID) {
+      return exampleBaselineCurve;
+    }
+    return [];
+  }, [annualBaseCurve, benchmarkId, exampleBaselineCurve, usingExampleBenchmark]);
+  const defaultShortTermCurve = useMemo(() => buildDefaultShortTermCurve(activeAnnualBaseCurve), [activeAnnualBaseCurve]);
+  const defaultLongTermAnchor = useMemo(() => resolveDefaultLongTermAnchor(activeAnnualBaseCurve), [activeAnnualBaseCurve]);
   const latestPrice = priceHistory.at(-1)?.close ?? null;
   const supportStatus = overlay?.exposure_profile.oil_support_status === "supported" || overlay?.exposure_profile.oil_support_status === "partial"
     ? overlay.exposure_profile.oil_support_status
@@ -95,7 +126,7 @@ export function OilScenarioOverlayPanel({
     () =>
       computeOilOverlayScenario({
         baseFairValuePerShare,
-        officialBaseCurve: annualBaseCurve,
+        officialBaseCurve: activeAnnualBaseCurve,
         userEditedShortTermCurve: shortTermCurve,
         userLongTermAnchor: longTermAnchor,
         fadeYears,
@@ -106,7 +137,7 @@ export function OilScenarioOverlayPanel({
         oilSupportStatus: supportStatus,
         confidenceFlags: [...(overlay?.confidence_flags ?? []), ...(overlay?.sensitivity?.confidence_flags ?? [])],
       }),
-    [activeSensitivity, annualBaseCurve, baseFairValuePerShare, currentSharePrice, dilutedShares, fadeYears, longTermAnchor, overlay?.confidence_flags, overlay?.sensitivity?.confidence_flags, shortTermCurve, supportStatus],
+    [activeAnnualBaseCurve, activeSensitivity, baseFairValuePerShare, currentSharePrice, dilutedShares, fadeYears, longTermAnchor, overlay?.confidence_flags, overlay?.sensitivity?.confidence_flags, shortTermCurve, supportStatus],
   );
   const confidenceReasons = useMemo(
     () => Array.from(new Set([...supportReasons, ...(overlay?.confidence_flags ?? []).map(humanizeFlag), ...overlayResult.confidenceFlags.map(humanizeFlag)])).filter(Boolean),
@@ -193,10 +224,15 @@ export function OilScenarioOverlayPanel({
         <label className="oil-overlay-field">
           <span className="metric-label">Benchmark Selector</span>
           <select aria-label="Benchmark Selector" value={benchmarkId} onChange={(event) => setBenchmarkId(event.target.value)}>
-            {benchmarkOptions.map((option) => (
+            {displayBenchmarkOptions.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          {usingExampleBenchmark ? (
+            <span className="text-muted oil-overlay-help">
+              No official benchmark points are cached yet. Example mode uses {formatCurrency(exampleBaseOilPrice)}/bbl as a stand-in current oil price so you can see the expected input format.
+            </span>
+          ) : null}
         </label>
 
         <label className="oil-overlay-field">
@@ -249,6 +285,30 @@ export function OilScenarioOverlayPanel({
 
       <div className="workspace-card-stack-tight">
         <div className="metric-label">Short-Term Curve Editor</div>
+        {usingExampleBenchmark ? (
+          <div className="filing-link-card workspace-card-stack-tight oil-overlay-example-card">
+            <div className="metric-label">Example Input</div>
+            <div>
+              If current oil is {formatCurrency(exampleBaseOilPrice)}/bbl, a +5% scenario is {formatCurrency(examplePlusFiveCurve[0]?.price ?? null)}/bbl.
+            </div>
+            <div className="text-muted">
+              Load a simple example to prefill the editable years, then replace those prices with your own path once you have a view.
+            </div>
+            <div className="oil-overlay-example-actions">
+              <button
+                type="button"
+                className="ticker-button"
+                onClick={() => {
+                  setBenchmarkId(EXAMPLE_BENCHMARK_ID);
+                  setShortTermCurve(examplePlusFiveCurve);
+                  setLongTermAnchorInput(String(exampleBaseOilPrice));
+                }}
+              >
+                Load +5% example
+              </button>
+            </div>
+          </div>
+        ) : null}
         {shortTermCurve.length ? (
           <div className="workspace-card-stack-tight">
             {shortTermCurve.map((point, index) => (
@@ -264,12 +324,12 @@ export function OilScenarioOverlayPanel({
                     setShortTermCurve((current) => current.map((item, currentIndex) => (currentIndex === index && Number.isFinite(nextValue) ? { ...item, price: nextValue } : item)));
                   }}
                 />
-                <span className="text-muted">Official base {formatCurrency(point.price)}</span>
+                <span className="text-muted">{usingExampleBenchmark ? "Example baseline" : "Official base"} {formatCurrency(activeAnnualBaseCurve[index]?.price ?? point.price)}</span>
               </div>
             ))}
             <div>
               <button type="button" className="ticker-button" onClick={() => setShortTermCurve(defaultShortTermCurve)}>
-                Reset to official curve
+                {usingExampleBenchmark ? "Reset to example baseline" : "Reset to official curve"}
               </button>
             </div>
           </div>
@@ -393,4 +453,42 @@ function formatCompact(value: number | null | undefined): string {
     return "—";
   }
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(value);
+}
+
+function resolveExampleBaseOilPrice(series: CompanyOilScenarioOverlayResponse["benchmark_series"]): number {
+  for (const item of series ?? []) {
+    if (item.latest_value != null && Number.isFinite(item.latest_value)) {
+      return item.latest_value;
+    }
+    for (const point of item.points ?? []) {
+      if (point.value != null && Number.isFinite(point.value)) {
+        return point.value;
+      }
+    }
+  }
+  return EXAMPLE_BASELINE_OIL_PRICE;
+}
+
+function resolveExampleStartYear(asOf: string | null | undefined): number {
+  const matched = asOf?.match(/(19|20)\d{2}/);
+  return matched ? Number(matched[0]) : new Date().getUTCFullYear();
+}
+
+function buildExampleBaselineCurve(startYear: number, baselinePrice: number) {
+  return Array.from({ length: EXAMPLE_CURVE_YEARS }, (_value, index) => ({
+    year: startYear + index,
+    price: roundOilPrice(baselinePrice),
+  }));
+}
+
+function buildExampleScenarioCurve(startYear: number, baselinePrice: number, changePercent: number) {
+  const scenarioPrice = roundOilPrice(baselinePrice * (1 + changePercent));
+  return Array.from({ length: EXAMPLE_CURVE_YEARS }, (_value, index) => ({
+    year: startYear + index,
+    price: scenarioPrice,
+  }));
+}
+
+function roundOilPrice(value: number): number {
+  return Math.round(value * 100) / 100;
 }

@@ -214,6 +214,16 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ),
     (
         "GET",
+        "/api/companies/{ticker}/oil-scenario",
+    ): _price_sensitive_contract(
+        "ft_oil_scenario_overlay",
+        "ft_model_engine",
+        "sec_edgar",
+        "eia_steo",
+        "yahoo_finance",
+    ),
+    (
+        "GET",
         "/api/companies/{ticker}/oil-scenario-overlay",
     ): _derived_official_contract(
         "ft_oil_scenario_overlay",

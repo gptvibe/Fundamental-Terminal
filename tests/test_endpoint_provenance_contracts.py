@@ -556,6 +556,124 @@ def test_oil_scenario_overlay_route_includes_registry_backed_provenance(monkeypa
     assert "oil_curve_placeholder" in payload["confidence_flags"]
 
 
+def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
+    import app.services.oil_scenario as oil_scenario_service
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
+    monkeypatch.setattr(
+        main_module,
+        "get_company_oil_scenario_overlay",
+        lambda *_args, **_kwargs: (
+            {
+                "status": "supported",
+                "fetched_at": "2026-04-04T00:00:00+00:00",
+                "as_of": "2026-04-04",
+                "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+                "strict_official_mode": False,
+                "exposure_profile": {
+                    "profile_id": "integrated",
+                    "label": "Integrated",
+                    "oil_exposure_type": "integrated",
+                    "oil_support_status": "supported",
+                    "oil_support_reasons": ["integrated_upstream_supported"],
+                    "relevance_reasons": ["sector: Energy"],
+                    "hedging_signal": "unknown",
+                    "pass_through_signal": "unknown",
+                    "evidence": [],
+                },
+                "benchmark_series": [
+                    {
+                        "series_id": "wti_short_term_baseline",
+                        "label": "WTI short-term official baseline",
+                        "units": "usd_per_barrel",
+                        "status": "ok",
+                        "points": [
+                            {"label": "2026-01", "value": 80.0, "units": "usd_per_barrel", "observation_date": "2026-01"},
+                            {"label": "2027-01", "value": 78.0, "units": "usd_per_barrel", "observation_date": "2027-01"},
+                        ],
+                        "latest_value": 78.0,
+                        "latest_observation_date": "2027-01",
+                    }
+                ],
+                "scenarios": [],
+                "sensitivity": None,
+                "diagnostics": {
+                    "coverage_ratio": 0.0,
+                    "fallback_ratio": 0.0,
+                    "stale_flags": [],
+                    "parser_confidence": None,
+                    "missing_field_flags": ["sensitivity_not_computed"],
+                    "reconciliation_penalty": None,
+                    "reconciliation_disagreement_count": 0,
+                },
+                "confidence_flags": [],
+                "provenance": [
+                    {
+                        "source_id": "sec_edgar",
+                        "source_tier": "official_regulator",
+                        "display_label": "SEC EDGAR",
+                        "url": "https://www.sec.gov/edgar.shtml",
+                        "default_freshness_ttl_seconds": 86400,
+                        "disclosure_note": "Official SEC filing data for issuer disclosures and filing-linked metadata.",
+                        "role": "primary",
+                        "as_of": "2026-04-04",
+                        "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+                    },
+                    {
+                        "source_id": "ft_oil_scenario_overlay",
+                        "source_tier": "derived_from_official",
+                        "display_label": "Fundamental Terminal Oil Scenario Overlay",
+                        "url": "https://github.com/fungk/Fundamental-Terminal",
+                        "default_freshness_ttl_seconds": 21600,
+                        "disclosure_note": "Persisted oil exposure overlays derived from official company metadata and official energy scenario inputs when available.",
+                        "role": "derived",
+                        "as_of": "2026-04-04",
+                        "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+                    },
+                ],
+                "source_mix": {
+                    "source_ids": ["ft_oil_scenario_overlay", "sec_edgar"],
+                    "source_tiers": ["derived_from_official", "official_regulator"],
+                    "primary_source_ids": ["sec_edgar"],
+                    "fallback_source_ids": [],
+                    "official_only": True,
+                },
+            },
+            "fresh",
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_oil_scenario_overlay_last_checked",
+        lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_models",
+        lambda *_args, **_kwargs: [SimpleNamespace(model_name="dcf", result={"fair_value_per_share": 100.0}, created_at=datetime(2026, 4, 4, tzinfo=timezone.utc))],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_financials",
+        lambda *_args, **_kwargs: [SimpleNamespace(weighted_average_diluted_shares=10.0, shares_outstanding=10.0)],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_price_history",
+        lambda *_args, **_kwargs: [SimpleNamespace(close=90.0, trade_date=date(2026, 4, 4))],
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    payload = response.json()
+    _assert_provenance_envelope(payload, {"ft_oil_scenario_overlay", "sec_edgar", "ft_model_engine", "yahoo_finance"})
+    assert payload["source_mix"]["official_only"] is False
+    assert payload["requirements"]["manual_sensitivity_required"] is True
+    assert payload["user_editable_defaults"]["current_share_price"] == 90.0
+
+
 def test_models_route_includes_registry_backed_provenance(monkeypatch):
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])

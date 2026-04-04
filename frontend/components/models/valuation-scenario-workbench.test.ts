@@ -186,4 +186,65 @@ describe("ValuationScenarioWorkbench", () => {
     expect(screen.getByLabelText("Average ROE")).toBeTruthy();
     expect(screen.getByText("Book Equity / Share")).toBeTruthy();
   });
+
+  it("suppresses interactive DCF controls when the backend marks DCF as insufficient data", () => {
+    render(
+      React.createElement(ValuationScenarioWorkbench, {
+        ticker: "CVX",
+        models: [
+          {
+            model_name: "dcf",
+            model_version: "2.2.0",
+            created_at: "2026-04-04T00:00:00Z",
+            input_periods: {},
+            result: {
+              model_status: "insufficient_data",
+              fair_value_per_share: -366.47,
+              enterprise_value: -636756971013.88,
+              equity_value: -680170971013.88,
+              net_debt: 43414000000,
+              explanation: "Required base inputs were not sufficient to produce a directional output.",
+              assumptions: {
+                discount_rate: 0.0938,
+                terminal_growth_rate: 0.0203,
+                starting_growth_rate: -0.1,
+                projection_years: 5,
+              },
+              historical_free_cash_flow: [{ period_end: "2025-12-31", free_cash_flow: -57629000000 }],
+            },
+          },
+        ],
+        financials: [
+          {
+            filing_type: "10-K",
+            statement_type: "annual",
+            period_start: "2025-01-01",
+            period_end: "2025-12-31",
+            source: "sec",
+            last_updated: "2026-04-04T00:00:00Z",
+            last_checked: "2026-04-04T00:00:00Z",
+            revenue: 1000,
+            operating_income: 180,
+            net_income: 120,
+            interest_expense: 20,
+            income_tax_expense: 30,
+            total_assets: 1500,
+            total_liabilities: 800,
+            operating_cash_flow: 190,
+            free_cash_flow: 140,
+            eps: 1.2,
+            shares_outstanding: 100,
+            weighted_average_diluted_shares: 100,
+            segment_breakdown: [],
+          },
+        ] as never,
+        priceHistory: [{ date: "2026-04-04", close: 100, volume: 1000 }],
+      })
+    );
+
+    expect(screen.getByText("DCF scenario analysis unavailable")).toBeTruthy();
+    expect(screen.getByText("Required base inputs were not sufficient to produce a directional output.")).toBeTruthy();
+    expect(screen.queryByLabelText("WACC")).toBeNull();
+    expect(screen.queryByText("Sensitivity table")).toBeNull();
+  });
 });

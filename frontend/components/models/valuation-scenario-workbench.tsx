@@ -236,7 +236,7 @@ export function ValuationScenarioWorkbench({
 
   const overlapRows = useMemo(() => {
     const rows: RangeRow[] = [];
-    if (dcfScenarios) {
+    if (dcfScenarios && supportsScenarioInteraction(modelStatus(dcfModel?.result))) {
       rows.push({
         label: "DCF",
         low: dcfScenarios.bear.perShareValue,
@@ -245,7 +245,7 @@ export function ValuationScenarioWorkbench({
         accent: CASE_COLORS.base,
       });
     }
-    if (residualIncomeScenarios) {
+    if (residualIncomeScenarios && supportsScenarioInteraction(modelStatus(residualIncomeModel?.result))) {
       rows.push({
         label: "Residual Income",
         low: residualIncomeScenarios.bear.intrinsicValuePerShare,
@@ -255,7 +255,7 @@ export function ValuationScenarioWorkbench({
       });
     }
     return rows;
-  }, [dcfScenarios, residualIncomeScenarios]);
+  }, [dcfModel, dcfScenarios, residualIncomeModel, residualIncomeScenarios]);
   const overlapRange = useMemo(() => computeOverlapRange(overlapRows), [overlapRows]);
 
   if (!availableTabs.length) {
@@ -388,8 +388,8 @@ function renderDcfWorkbench({
 }) {
   const result = asRecord(model?.result);
   const status = modelStatus(result);
-  if (status === "unsupported") {
-    return <ScenarioUnavailable title="DCF scenario analysis unsupported" copy={scenarioReason(result)} />;
+  if (!supportsScenarioInteraction(status)) {
+    return <ScenarioUnavailable title={scenarioUnavailableTitle("DCF", status)} copy={scenarioReason(result)} />;
   }
   if (!defaults.ready || !scenarios) {
     return <ScenarioUnavailable title="DCF scenario analysis unavailable" copy={scenarioReason(result)} />;
@@ -545,8 +545,8 @@ function renderReverseDcfWorkbench({
   if (strictOfficialMode) {
     return <ScenarioUnavailable title="Reverse DCF withheld in strict official mode" copy="Reverse DCF depends on a current equity price. This workspace hides that scenario until an official closing-price source is configured." />;
   }
-  if (status === "unsupported") {
-    return <ScenarioUnavailable title="Reverse DCF scenario analysis unsupported" copy={scenarioReason(result)} />;
+  if (!supportsScenarioInteraction(status)) {
+    return <ScenarioUnavailable title={scenarioUnavailableTitle("Reverse DCF", status)} copy={scenarioReason(result)} />;
   }
   if (!defaults.ready || !scenarios) {
     return <ScenarioUnavailable title="Reverse DCF scenario analysis unavailable" copy={scenarioReason(result)} />;
@@ -624,6 +624,10 @@ function renderResidualIncomeWorkbench({
   strictOfficialMode: boolean;
 }) {
   const result = asRecord(model?.result);
+  const status = modelStatus(result);
+  if (!supportsScenarioInteraction(status)) {
+    return <ScenarioUnavailable title={scenarioUnavailableTitle("Residual income", status)} copy={scenarioReason(result)} />;
+  }
   if (!defaults.ready || !scenarios) {
     return <ScenarioUnavailable title="Residual income scenario analysis unavailable" copy={scenarioReason(result)} />;
   }
@@ -1409,6 +1413,19 @@ function buildDcfComparisonRows(
 function buildDcfSensitivityGrid(defaults: DcfDefaults, controls: DcfControls): DcfSensitivityGrid {
   const waccOffsets = [-0.01, 0, 0.01];
   const growthOffsets = [-0.02, -0.01, 0, 0.01, 0.02];
+  const growthRows = growthOffsets.reduce<Array<{ growth: number; isCurrent: boolean }>>((rows, growthOffset) => {
+    const adjustedGrowth = clamp(controls.revenueGrowth + growthOffset, DCF_MIN_GROWTH_RATE, DCF_MAX_GROWTH_RATE);
+    const existing = rows.find((row) => Math.abs(row.growth - adjustedGrowth) <= DCF_INPUT_EPSILON);
+    if (existing) {
+      existing.isCurrent = existing.isCurrent || Math.abs(adjustedGrowth - controls.revenueGrowth) <= DCF_INPUT_EPSILON;
+      return rows;
+    }
+    rows.push({
+      growth: adjustedGrowth,
+      isCurrent: Math.abs(adjustedGrowth - controls.revenueGrowth) <= DCF_INPUT_EPSILON,
+    });
+    return rows;
+  }, []);
 
   return {
     columns: waccOffsets.map((offset) => {
@@ -1418,27 +1435,26 @@ function buildDcfSensitivityGrid(defaults: DcfDefaults, controls: DcfControls): 
         label: `WACC ${formatPercent(wacc)}`,
       };
     }),
-    rows: growthOffsets.map((growthOffset) => {
-      const adjustedGrowth = clamp(controls.revenueGrowth + growthOffset, DCF_MIN_GROWTH_RATE, DCF_MAX_GROWTH_RATE);
+    rows: growthRows.map(({ growth, isCurrent }) => {
       return {
-        key: `growth-${growthOffset}`,
-        label: `Growth ${formatPercent(adjustedGrowth)}`,
+        key: `growth-${growth.toFixed(4)}`,
+        label: `Growth ${formatPercent(growth)}`,
         cells: waccOffsets.map((waccOffset) => {
           const discountRate = clamp(controls.discountRate + waccOffset, 0.05, 0.2);
           const scenario = buildDcfScenario(
             defaults,
             {
               ...controls,
-              revenueGrowth: adjustedGrowth,
+              revenueGrowth: growth,
               discountRate,
               terminalGrowth: Math.min(controls.terminalGrowth, Math.max(discountRate - 0.005, 0)),
             },
             0
           );
           return {
-            key: `${growthOffset}-${waccOffset}`,
+            key: `${growth.toFixed(4)}-${waccOffset}`,
             value: scenario.perShareValue,
-            current: growthOffset === 0 && waccOffset === 0,
+            current: isCurrent && Math.abs(discountRate - controls.discountRate) <= DCF_INPUT_EPSILON,
           };
         }),
       };
@@ -1622,6 +1638,20 @@ function statusLabel(status: string): string {
     return "Unsupported";
   }
   return titleCase(status || "unknown");
+}
+
+function supportsScenarioInteraction(status: string): boolean {
+  return status === "supported" || status === "partial" || status === "proxy";
+}
+
+function scenarioUnavailableTitle(modelName: string, status: string): string {
+  if (status === "unsupported") {
+    return `${modelName} scenario analysis unsupported`;
+  }
+  if (status === "insufficient_data") {
+    return `${modelName} scenario analysis unavailable`;
+  }
+  return `${modelName} scenario analysis unavailable`;
 }
 
 function formatConfidence(value: unknown): string {

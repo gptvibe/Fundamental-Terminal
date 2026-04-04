@@ -6,6 +6,7 @@ from app.api.handlers import models as handlers
 from app.api.source_contracts import add_user_visible_route
 from app.api.schemas.model_evaluations import ModelEvaluationResponse
 from app.api.schemas.models import CompanyModelsResponse
+from app.api.schemas.oil_scenario import CompanyOilScenarioResponse
 from app.api.schemas.oil_scenario import CompanyOilScenarioOverlayResponse
 
 
@@ -17,6 +18,13 @@ def build_router() -> APIRouter:
         handlers.company_models,
         methods=["GET"],
         response_model=CompanyModelsResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/oil-scenario",
+        handlers.company_oil_scenario,
+        methods=["GET"],
+        response_model=CompanyOilScenarioResponse,
     )
     add_user_visible_route(
         router,

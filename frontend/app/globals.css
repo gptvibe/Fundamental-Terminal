@@ -2937,6 +2937,16 @@ select {
   font-size: var(--text-xs);
 }
 
+.oil-overlay-example-card {
+  gap: 10px;
+}
+
+.oil-overlay-example-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .oil-overlay-curve-row {
   display: grid;
   gap: 8px;

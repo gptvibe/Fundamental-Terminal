@@ -204,4 +204,124 @@ describe("OilScenarioOverlayPanel", () => {
     expect(exportRowsToCsv).toHaveBeenCalledTimes(1);
     expect(showAppToast).toHaveBeenCalled();
   });
+
+  it("shows a +5 percent example when official benchmark points are missing", () => {
+    render(
+      React.createElement(OilScenarioOverlayPanel, {
+        ticker: "CVX",
+        strictOfficialMode: false,
+        companySupportStatus: "partial",
+        companySupportReasons: ["refining_margin_exposure_partial_v1"],
+        models: [
+          {
+            model_name: "dcf",
+            model_version: "2.2.0",
+            created_at: "2026-04-04T00:00:00Z",
+            input_periods: {},
+            result: { fair_value_per_share: 100 },
+          },
+        ],
+        financials: [
+          {
+            filing_type: "10-K",
+            statement_type: "annual",
+            period_start: "2025-01-01",
+            period_end: "2025-12-31",
+            source: "sec",
+            last_updated: "2026-04-04T00:00:00Z",
+            last_checked: "2026-04-04T00:00:00Z",
+            revenue: null,
+            gross_profit: null,
+            operating_income: null,
+            net_income: null,
+            total_assets: null,
+            current_assets: null,
+            total_liabilities: null,
+            current_liabilities: null,
+            retained_earnings: null,
+            sga: null,
+            research_and_development: null,
+            interest_expense: null,
+            income_tax_expense: null,
+            inventory: null,
+            cash_and_cash_equivalents: null,
+            short_term_investments: null,
+            cash_and_short_term_investments: null,
+            accounts_receivable: null,
+            accounts_payable: null,
+            goodwill_and_intangibles: null,
+            current_debt: null,
+            long_term_debt: null,
+            stockholders_equity: null,
+            lease_liabilities: null,
+            operating_cash_flow: null,
+            depreciation_and_amortization: null,
+            capex: null,
+            acquisitions: null,
+            debt_changes: null,
+            dividends: null,
+            share_buybacks: null,
+            free_cash_flow: null,
+            eps: null,
+            shares_outstanding: 11,
+            stock_based_compensation: null,
+            weighted_average_diluted_shares: 10,
+            segment_breakdown: [],
+            reconciliation: null,
+          },
+        ],
+        priceHistory: [{ date: "2026-04-04", close: 90, volume: 1000 }],
+        overlay: {
+          company: null,
+          status: "partial",
+          fetched_at: "2026-04-04T00:00:00Z",
+          as_of: "2026-04-04",
+          last_refreshed_at: "2026-04-04T00:00:00Z",
+          strict_official_mode: false,
+          exposure_profile: {
+            profile_id: "refiner",
+            label: "Refiner",
+            oil_exposure_type: "refiner",
+            oil_support_status: "partial",
+            oil_support_reasons: ["refining_margin_exposure_partial_v1"],
+            relevance_reasons: ["refining_margin_exposure_partial_v1"],
+            hedging_signal: "unknown",
+            pass_through_signal: "unknown",
+            evidence: [],
+          },
+          benchmark_series: [],
+          scenarios: [],
+          sensitivity: null,
+          diagnostics: {
+            coverage_ratio: 0,
+            fallback_ratio: 0,
+            stale_flags: [],
+            parser_confidence: null,
+            missing_field_flags: ["official_oil_curve_missing"],
+            reconciliation_penalty: null,
+            reconciliation_disagreement_count: 0,
+          },
+          provenance: [],
+          source_mix: {
+            source_ids: [],
+            source_tiers: [],
+            primary_source_ids: [],
+            fallback_source_ids: [],
+            official_only: true,
+          },
+          confidence_flags: [],
+          refresh: { triggered: false, reason: "fresh", ticker: "CVX", job_id: null },
+        },
+      }),
+    );
+
+    expect(screen.getByText("Load +5% example")).toBeTruthy();
+    expect(screen.getByText(/Example mode uses \$80.00\/bbl/)).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Example benchmark ($80.00/bbl baseline)" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load +5% example" }));
+
+    expect((screen.getByLabelText("Long-term anchor input") as HTMLInputElement).value).toBe("80");
+    expect((screen.getByLabelText("Short-term curve 2026") as HTMLInputElement).value).toBe("84");
+  });
 });

@@ -1,0 +1,236 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+import app.main as main_module
+import app.services.oil_scenario as oil_scenario_service
+from app.db import get_db_session
+from app.main import app
+
+
+def _snapshot(ticker: str = "XOM"):
+    company = SimpleNamespace(
+        id=7,
+        ticker=ticker,
+        cik="0000034088",
+        name="Exxon Mobil Corporation",
+        sector="Energy",
+        market_sector="Energy",
+        market_industry="Oil & Gas Integrated",
+    )
+    return SimpleNamespace(company=company, cache_state="fresh", last_checked=datetime(2026, 4, 4, tzinfo=timezone.utc))
+
+
+def _overlay_payload() -> dict[str, object]:
+    return {
+        "status": "supported",
+        "fetched_at": "2026-04-04T00:00:00+00:00",
+        "as_of": "2026-04-04",
+        "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+        "strict_official_mode": False,
+        "exposure_profile": {
+            "profile_id": "integrated",
+            "label": "Integrated",
+            "oil_exposure_type": "integrated",
+            "oil_support_status": "supported",
+            "oil_support_reasons": ["integrated_upstream_supported"],
+            "relevance_reasons": ["integrated_upstream_supported"],
+            "hedging_signal": "unknown",
+            "pass_through_signal": "unknown",
+            "evidence": [],
+        },
+        "benchmark_series": [
+            {
+                "series_id": "wti_short_term_baseline",
+                "label": "WTI short-term official baseline",
+                "units": "usd_per_barrel",
+                "status": "ok",
+                "points": [
+                    {"label": "2026-01", "value": 80.0, "units": "usd_per_barrel", "observation_date": "2026-01"},
+                    {"label": "2027-01", "value": 78.0, "units": "usd_per_barrel", "observation_date": "2027-01"},
+                    {"label": "2028-01", "value": 76.0, "units": "usd_per_barrel", "observation_date": "2028-01"},
+                ],
+                "latest_value": 76.0,
+                "latest_observation_date": "2028-01",
+            }
+        ],
+        "scenarios": [],
+        "sensitivity": None,
+        "diagnostics": {
+            "coverage_ratio": 0.0,
+            "fallback_ratio": 0.0,
+            "stale_flags": [],
+            "parser_confidence": None,
+            "missing_field_flags": ["sensitivity_not_computed"],
+            "reconciliation_penalty": None,
+            "reconciliation_disagreement_count": 0,
+        },
+        "confidence_flags": [],
+        "provenance": [
+            {
+                "source_id": "sec_edgar",
+                "source_tier": "official_regulator",
+                "display_label": "SEC EDGAR",
+                "url": "https://www.sec.gov/edgar.shtml",
+                "default_freshness_ttl_seconds": 86400,
+                "disclosure_note": "Official SEC filing data for issuer disclosures and filing-linked metadata.",
+                "role": "primary",
+                "as_of": "2026-04-04",
+                "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+            },
+            {
+                "source_id": "ft_oil_scenario_overlay",
+                "source_tier": "derived_from_official",
+                "display_label": "Fundamental Terminal Oil Scenario Overlay",
+                "url": "https://github.com/fungk/Fundamental-Terminal",
+                "default_freshness_ttl_seconds": 21600,
+                "disclosure_note": "Persisted oil exposure overlays derived from official company metadata and official energy scenario inputs when available.",
+                "role": "derived",
+                "as_of": "2026-04-04",
+                "last_refreshed_at": "2026-04-04T00:00:00+00:00",
+            },
+        ],
+        "source_mix": {
+            "source_ids": ["ft_oil_scenario_overlay", "sec_edgar"],
+            "source_tiers": ["derived_from_official", "official_regulator"],
+            "primary_source_ids": ["sec_edgar"],
+            "fallback_source_ids": [],
+            "official_only": True,
+        },
+    }
+
+
+@contextmanager
+def _client():
+    app.dependency_overrides[get_db_session] = lambda: object()
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        main_module._hot_response_cache.clear()
+
+
+def test_oil_scenario_reads_cached_payload_without_live_fetch(monkeypatch):
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "fresh"))
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc))
+    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: pytest.fail("refresh should not queue for fresh cache"))
+    monkeypatch.setattr(main_module, "EdgarClient", lambda: pytest.fail("hot read path should not instantiate SEC client"))
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_models",
+        lambda *_args, **_kwargs: [SimpleNamespace(model_name="dcf", result={"fair_value_per_share": 100.0}, created_at=datetime(2026, 4, 4, tzinfo=timezone.utc))],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_financials",
+        lambda *_args, **_kwargs: [SimpleNamespace(weighted_average_diluted_shares=10.0, shares_outstanding=10.0)],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_price_history",
+        lambda *_args, **_kwargs: [SimpleNamespace(close=90.0, trade_date=date(2026, 4, 4))],
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refresh"] == {"triggered": False, "reason": "fresh", "ticker": "XOM", "job_id": None}
+    assert payload["eligibility"]["eligible"] is True
+    assert payload["official_base_curve"]["benchmark_id"] == "wti_short_term_baseline"
+    assert payload["user_editable_defaults"]["current_share_price"] == 90.0
+    assert payload["overlay_outputs"]["status"] == "insufficient_data"
+
+
+def test_oil_scenario_returns_stale_payload_and_queues_revalidation(monkeypatch):
+    queued: list[tuple[str, bool]] = []
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "stale"))
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: datetime(2026, 4, 3, tzinfo=timezone.utc))
+    monkeypatch.setattr(
+        main_module,
+        "queue_company_refresh",
+        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-stale",
+    )
+    monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(oil_scenario_service, "get_company_price_history", lambda *_args, **_kwargs: [])
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refresh"] == {"triggered": True, "reason": "stale", "ticker": "XOM", "job_id": "job-oil-scenario-stale"}
+    assert "refresh_stale_queued" in payload["diagnostics"]["stale_flags"]
+    assert queued == [("XOM", False)]
+
+
+def test_oil_scenario_returns_placeholder_shell_when_dataset_missing(monkeypatch):
+    queued: list[tuple[str, bool]] = []
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (None, "missing"))
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        main_module,
+        "queue_company_refresh",
+        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-missing",
+    )
+    monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(oil_scenario_service, "get_company_price_history", lambda *_args, **_kwargs: [])
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refresh"] == {"triggered": True, "reason": "missing", "ticker": "XOM", "job_id": "job-oil-scenario-missing"}
+    assert payload["status"] == "supported"
+    assert payload["requirements"]["manual_sensitivity_required"] is True
+    assert "oil_scenario_overlay_missing" in payload["diagnostics"]["missing_field_flags"]
+    assert queued == [("XOM", False)]
+
+
+def test_oil_scenario_strict_official_mode_omits_fallback_price_sources(monkeypatch):
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "fresh"))
+    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc))
+    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: pytest.fail("refresh should not queue for fresh cache"))
+    monkeypatch.setattr(oil_scenario_service, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_models",
+        lambda *_args, **_kwargs: [SimpleNamespace(model_name="dcf", result={"fair_value_per_share": 100.0}, created_at=datetime(2026, 4, 4, tzinfo=timezone.utc))],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_financials",
+        lambda *_args, **_kwargs: [SimpleNamespace(weighted_average_diluted_shares=10.0, shares_outstanding=10.0)],
+    )
+    monkeypatch.setattr(
+        oil_scenario_service,
+        "get_company_price_history",
+        lambda *_args, **_kwargs: pytest.fail("strict official mode should not read fallback-backed price history"),
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/XOM/oil-scenario")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strict_official_mode"] is True
+    assert payload["requirements"]["manual_price_required"] is True
+    assert payload["user_editable_defaults"]["current_share_price"] is None
+    assert "yahoo_finance" not in payload["source_mix"]["source_ids"]
+    assert payload["source_mix"]["official_only"] is True

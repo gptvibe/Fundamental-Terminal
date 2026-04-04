@@ -970,6 +970,97 @@ export interface CompanyOilScenarioOverlayResponse extends ProvenanceEnvelope {
   refresh: RefreshState;
 }
 
+export interface OilCurveYearPointPayload {
+  year: number;
+  price: number | null;
+}
+
+export interface OilScenarioBenchmarkOptionPayload {
+  value: string;
+  label: string;
+}
+
+export interface OilScenarioEligibilityPayload {
+  eligible: boolean;
+  status: string;
+  oil_exposure_type: string;
+  reasons: string[];
+}
+
+export interface OilScenarioOfficialBaseCurvePayload {
+  benchmark_id?: string | null;
+  label?: string | null;
+  units?: string;
+  points?: OilCurveYearPointPayload[];
+  available_benchmarks?: OilScenarioBenchmarkOptionPayload[];
+}
+
+export interface OilScenarioUserEditableDefaultsPayload {
+  benchmark_id?: string | null;
+  benchmark_options?: OilScenarioBenchmarkOptionPayload[];
+  short_term_curve?: OilCurveYearPointPayload[];
+  long_term_anchor?: number | null;
+  fade_years?: number;
+  annual_after_tax_sensitivity?: number | null;
+  base_fair_value_per_share?: number | null;
+  diluted_shares?: number | null;
+  current_share_price?: number | null;
+  current_share_price_source?: string;
+}
+
+export interface OilScenarioSensitivitySourcePayload {
+  kind: "manual" | "disclosed" | "derived_from_official";
+  value?: number | null;
+  metric_basis?: string | null;
+  status?: string | null;
+  confidence_flags?: string[];
+}
+
+export interface OilScenarioOverlayYearResultPayload {
+  year: number;
+  base_oil_price: number | null;
+  scenario_oil_price: number | null;
+  oil_price_delta: number | null;
+  earnings_delta_after_tax: number | null;
+  per_share_delta: number | null;
+  present_value_per_share: number | null;
+  discount_factor: number | null;
+}
+
+export interface OilScenarioOverlayOutputsPayload {
+  status: string;
+  model_status: string;
+  reason: string;
+  base_fair_value_per_share?: number | null;
+  eps_delta_per_dollar_oil?: number | null;
+  overlay_pv_per_share?: number | null;
+  scenario_fair_value_per_share?: number | null;
+  delta_vs_base_per_share?: number | null;
+  delta_vs_base_percent?: number | null;
+  implied_upside_downside?: number | null;
+  yearly_deltas?: OilScenarioOverlayYearResultPayload[];
+  assumptions?: Record<string, unknown>;
+  confidence_flags?: string[];
+}
+
+export interface OilScenarioRequirementsPayload {
+  strict_official_mode: boolean;
+  manual_price_required: boolean;
+  manual_price_reason?: string | null;
+  manual_sensitivity_required: boolean;
+  manual_sensitivity_reason?: string | null;
+  price_input_mode: string;
+}
+
+export interface CompanyOilScenarioResponse extends CompanyOilScenarioOverlayResponse {
+  eligibility?: OilScenarioEligibilityPayload;
+  official_base_curve?: OilScenarioOfficialBaseCurvePayload;
+  user_editable_defaults?: OilScenarioUserEditableDefaultsPayload;
+  sensitivity_source?: OilScenarioSensitivitySourcePayload;
+  overlay_outputs?: OilScenarioOverlayOutputsPayload;
+  requirements?: OilScenarioRequirementsPayload;
+}
+
 export interface MarketCurvePointPayload {
   tenor: string;
   rate: number;

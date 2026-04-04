@@ -95,6 +95,7 @@ from app.services.market_context import (
 )
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
+from app.services.oil_scenario import build_company_oil_scenario_public_payload
 from app.services.oil_scenario_overlay import (
     build_company_oil_scenario_overlay_placeholder,
     get_company_oil_scenario_overlay,
@@ -1681,6 +1682,113 @@ def company_oil_scenario_overlay(
     return response
 
 
+def company_oil_scenario(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyOilScenarioResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    hot_key = f"oil_scenario:{normalized_ticker}"
+    cached_hot = _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        payload_data, is_fresh = cached_hot
+        cached_response = CompanyOilScenarioResponse.model_validate(payload_data)
+        if not is_fresh:
+            stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
+            cached_response = cached_response.model_copy(
+                update={
+                    "refresh": stale_refresh,
+                    "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                    "confidence_flags": sorted(
+                        set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])
+                    ),
+                }
+            )
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=cached_response.company.last_checked if cached_response.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyOilScenarioResponse(
+            company=None,
+            status="insufficient_data",
+            fetched_at=datetime.now(timezone.utc),
+            strict_official_mode=settings.strict_official_mode,
+            exposure_profile=OilExposureProfilePayload(
+                profile_id="not_applicable",
+                label="Not Applicable",
+                hedging_signal="unknown",
+                pass_through_signal="unknown",
+            ),
+            eligibility=OilScenarioEligibilityPayload(eligible=False, status="unsupported", oil_exposure_type="non_oil", reasons=[]),
+            benchmark_series=[],
+            official_base_curve=OilScenarioOfficialBaseCurvePayload(),
+            user_editable_defaults=OilScenarioUserEditableDefaultsPayload(fade_years=2),
+            scenarios=[],
+            sensitivity=None,
+            sensitivity_source=OilScenarioSensitivitySourcePayload(kind="manual", value=None, metric_basis=None, status=None, confidence_flags=[]),
+            overlay_outputs=OilScenarioOverlayOutputsPayload(
+                status="insufficient_data",
+                model_status="insufficient_data",
+                reason="Company cache is missing.",
+            ),
+            requirements=OilScenarioRequirementsPayload(
+                strict_official_mode=settings.strict_official_mode,
+                manual_price_required=True,
+                manual_price_reason="Company cache is missing.",
+                manual_sensitivity_required=True,
+                manual_sensitivity_reason="Company cache is missing.",
+                price_input_mode="manual",
+            ),
+            diagnostics=_build_data_quality_diagnostics(
+                coverage_ratio=0.0,
+                stale_flags=["company_missing", "oil_scenario_missing"],
+                missing_field_flags=["oil_scenario_missing"],
+            ),
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            **_empty_provenance_contract("company_missing", "oil_scenario_missing"),
+        )
+
+    payload, cache_state = get_company_oil_scenario_overlay(session, snapshot.company.id)
+    last_checked = get_company_oil_scenario_overlay_last_checked(session, snapshot.company.id)
+    refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+    default_checked_at = last_checked or snapshot.last_checked or datetime.now(timezone.utc)
+    base_payload = payload or build_company_oil_scenario_overlay_placeholder(snapshot.company, checked_at=default_checked_at)
+    public_payload = build_company_oil_scenario_public_payload(
+        session,
+        snapshot.company,
+        overlay_payload=base_payload,
+        checked_at=default_checked_at,
+    )
+    response = _serialize_oil_scenario_response(
+        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
+        payload=public_payload,
+        refresh=refresh,
+        default_checked_at=default_checked_at,
+        mark_missing=payload is None,
+    )
+    _store_hot_cached_payload(hot_key, response)
+    not_modified = _apply_conditional_headers(
+        request,
+        http_response,
+        response,
+        last_modified=response.company.last_checked if response.company else None,
+    )
+    if not_modified is not None:
+        return not_modified  # type: ignore[return-value]
+    return response
+
+
 def latest_model_evaluation(
     request: Request,
     http_response: Response,
@@ -2044,6 +2152,102 @@ def _serialize_oil_scenario_overlay_response(
         last_refreshed_at=last_refreshed_at,
         source_mix=source_mix,
         confidence_flags=confidence_flags,
+    )
+
+
+def _serialize_oil_scenario_response(
+    *,
+    company: CompanyPayload,
+    payload: dict[str, Any],
+    refresh: RefreshState,
+    default_checked_at: datetime,
+    mark_missing: bool,
+) -> CompanyOilScenarioResponse:
+    diagnostics = _diagnostics_for_oil_scenario(payload, refresh, mark_missing=mark_missing)
+    fetched_at = _parse_datetime_value(payload.get("fetched_at"), default_checked_at)
+    last_refreshed_at = _parse_datetime_value(payload.get("last_refreshed_at"), fetched_at)
+    confidence_flags = sorted(
+        set(
+            [
+                *[flag for flag in payload.get("confidence_flags") or [] if isinstance(flag, str)],
+                *_confidence_flags_from_diagnostics(diagnostics),
+                *_confidence_flags_from_refresh(refresh),
+            ]
+        )
+    )
+    provenance = [
+        ProvenanceEntryPayload.model_validate(entry)
+        for entry in (payload.get("provenance") or [])
+        if isinstance(entry, dict)
+    ]
+    source_mix = SourceMixPayload.model_validate(payload.get("source_mix") or {})
+    benchmark_series = [
+        OilCurveSeriesPayload.model_validate(item)
+        for item in (payload.get("benchmark_series") or [])
+        if isinstance(item, dict)
+    ]
+    scenarios = [
+        OilScenarioCasePayload.model_validate(item)
+        for item in (payload.get("scenarios") or [])
+        if isinstance(item, dict)
+    ]
+    sensitivity_payload = payload.get("sensitivity")
+    sensitivity = OilSensitivityPayload.model_validate(sensitivity_payload) if isinstance(sensitivity_payload, dict) else None
+    exposure_profile = _validated_oil_exposure_profile(payload.get("exposure_profile"))
+
+    return CompanyOilScenarioResponse(
+        company=company,
+        status=str(payload.get("status") or "partial"),
+        fetched_at=fetched_at,
+        strict_official_mode=bool(payload.get("strict_official_mode", settings.strict_official_mode)),
+        exposure_profile=exposure_profile,
+        eligibility=OilScenarioEligibilityPayload.model_validate(payload.get("eligibility") or {}),
+        benchmark_series=benchmark_series,
+        official_base_curve=OilScenarioOfficialBaseCurvePayload.model_validate(payload.get("official_base_curve") or {}),
+        user_editable_defaults=OilScenarioUserEditableDefaultsPayload.model_validate(payload.get("user_editable_defaults") or {}),
+        scenarios=scenarios,
+        sensitivity=sensitivity,
+        sensitivity_source=OilScenarioSensitivitySourcePayload.model_validate(payload.get("sensitivity_source") or {"kind": "manual"}),
+        overlay_outputs=OilScenarioOverlayOutputsPayload.model_validate(
+            payload.get("overlay_outputs") or {"status": "insufficient_data", "model_status": "insufficient_data", "reason": "Oil scenario output is unavailable."}
+        ),
+        requirements=OilScenarioRequirementsPayload.model_validate(
+            payload.get("requirements")
+            or {
+                "strict_official_mode": settings.strict_official_mode,
+                "manual_price_required": True,
+                "manual_sensitivity_required": True,
+                "price_input_mode": "manual",
+            }
+        ),
+        diagnostics=diagnostics,
+        refresh=refresh,
+        provenance=provenance,
+        as_of=_normalize_as_of(payload.get("as_of")),
+        last_refreshed_at=last_refreshed_at,
+        source_mix=source_mix,
+        confidence_flags=confidence_flags,
+    )
+
+
+def _validated_oil_exposure_profile(raw_payload: Any) -> OilExposureProfilePayload:
+    exposure_profile = raw_payload if isinstance(raw_payload, dict) else {}
+    return OilExposureProfilePayload.model_validate(
+        {
+            "profile_id": str(exposure_profile.get("profile_id") or "not_applicable"),
+            "label": str(exposure_profile.get("label") or "Not Applicable"),
+            "oil_exposure_type": str(exposure_profile.get("oil_exposure_type") or "non_oil"),
+            "oil_support_status": str(exposure_profile.get("oil_support_status") or "unsupported"),
+            "oil_support_reasons": [
+                str(reason) for reason in (exposure_profile.get("oil_support_reasons") or []) if isinstance(reason, str)
+            ],
+            "relevance_reasons": [
+                str(reason) for reason in (exposure_profile.get("relevance_reasons") or []) if isinstance(reason, str)
+            ],
+            "hedging_signal": str(exposure_profile.get("hedging_signal") or "unknown"),
+            "pass_through_signal": str(exposure_profile.get("pass_through_signal") or "unknown"),
+            "evidence": [item for item in (exposure_profile.get("evidence") or []) if isinstance(item, dict)],
+        }
     )
 
 
@@ -3680,6 +3884,22 @@ def _diagnostics_for_oil_scenario_overlay(
         reconciliation_penalty=_coerce_number(diagnostics.get("reconciliation_penalty"), None),
         reconciliation_disagreement_count=int(diagnostics.get("reconciliation_disagreement_count") or 0),
     )
+
+
+def _diagnostics_for_oil_scenario(
+    payload: dict[str, Any],
+    refresh: RefreshState,
+    *,
+    mark_missing: bool,
+) -> DataQualityDiagnosticsPayload:
+    diagnostics = _diagnostics_for_oil_scenario_overlay(payload, refresh, mark_missing=mark_missing)
+    requirements = payload.get("requirements") if isinstance(payload.get("requirements"), dict) else {}
+    missing_field_flags = set(diagnostics.missing_field_flags)
+    if bool(requirements.get("manual_sensitivity_required")):
+        missing_field_flags.add("annual_after_tax_sensitivity_manual_required")
+    if bool(requirements.get("manual_price_required")):
+        missing_field_flags.add("current_share_price_manual_required")
+    return diagnostics.model_copy(update={"missing_field_flags": sorted(missing_field_flags)})
 
 
 def _diagnostics_for_filing_insights(

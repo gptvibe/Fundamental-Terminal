@@ -80,7 +80,8 @@ class OilScenarioOverlayDTO:
     source_mix: dict[str, Any] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
-        return {
+        return _json_safe(
+            {
             "status": self.status,
             "fetched_at": self.fetched_at.isoformat(),
             "as_of": self.as_of,
@@ -136,7 +137,22 @@ class OilScenarioOverlayDTO:
             "confidence_flags": list(self.confidence_flags),
             "provenance": list(self.provenance),
             "source_mix": self.source_mix,
-        }
+            }
+        )
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 def get_company_oil_scenario_overlay(
@@ -230,7 +246,9 @@ def _build_placeholder_overlay(company: Company, *, checked_at: datetime) -> Oil
     ]
     provenance = tuple(build_provenance_entries(usages))
     source_mix = build_source_mix(provenance)
-    confidence_flags = ("strict_official_mode", "oil_curve_placeholder", "oil_sensitivity_placeholder")
+    confidence_flags = ["oil_curve_placeholder", "oil_sensitivity_placeholder"]
+    if strict_official_mode:
+        confidence_flags.append("strict_official_mode")
     diagnostics = {
         "coverage_ratio": 0.0,
         "fallback_ratio": 0.0,
@@ -330,7 +348,7 @@ def _build_placeholder_overlay(company: Company, *, checked_at: datetime) -> Oil
             confidence_flags=("sensitivity_not_computed",),
         ),
         diagnostics=diagnostics,
-        confidence_flags=confidence_flags,
+        confidence_flags=tuple(confidence_flags),
         provenance=provenance,
         source_mix=source_mix,
     )
