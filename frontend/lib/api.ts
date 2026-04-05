@@ -39,6 +39,7 @@ import {
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
+  CacheMetricsResponse,
   OfficialScreenerMetadataResponse,
   OfficialScreenerSearchRequest,
   OfficialScreenerSearchResponse,
@@ -837,6 +838,10 @@ export function getWatchlistCalendar(tickers: string[]): Promise<WatchlistCalend
 
 export function getSourceRegistry(): Promise<SourceRegistryResponse> {
   return fetchJson("/source-registry");
+}
+
+export function getCacheMetrics(): Promise<CacheMetricsResponse> {
+  return fetchJson("/internal/cache-metrics");
 }
 
 export async function getCompanyFinancialHistory(

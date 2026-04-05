@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, event, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, DatasetRefreshState
+from app.services.hot_cache import shared_hot_response_cache
 
 DatasetName = Literal[
     "financials",
@@ -27,6 +29,31 @@ DatasetName = Literal[
     "oil_scenario_overlay",
     "company_refresh",
 ]
+
+_SESSION_INVALIDATION_KEY = "shared_hot_cache_invalidations"
+
+
+@dataclass(frozen=True, slots=True)
+class _PendingHotCacheInvalidation:
+    ticker: str | None
+    dataset: str
+    schema_version: str | None
+
+
+@event.listens_for(Session, "after_commit")
+def _flush_hot_cache_invalidations(session: Session) -> None:
+    pending = session.info.pop(_SESSION_INVALIDATION_KEY, [])
+    for invalidation in pending:
+        shared_hot_response_cache.invalidate(
+            ticker=invalidation.ticker,
+            dataset=invalidation.dataset,
+            schema_version=invalidation.schema_version,
+        )
+
+
+@event.listens_for(Session, "after_rollback")
+def _clear_hot_cache_invalidations(session: Session) -> None:
+    session.info.pop(_SESSION_INVALIDATION_KEY, None)
 
 
 def get_dataset_state(session: Session, company_id: int, dataset: DatasetName | str) -> DatasetRefreshState | None:
@@ -70,6 +97,7 @@ def mark_dataset_checked(
     job_id: str | None = None,
     payload_version_hash: str | None = None,
     error: str | None = None,
+    invalidate_hot_cache: bool = False,
 ) -> None:
     normalized_checked_at = _normalize_datetime(checked_at)
     deadline = normalized_checked_at + timedelta(hours=settings.freshness_window_hours)
@@ -115,6 +143,13 @@ def mark_dataset_checked(
         set_=set_values,
     )
     session.execute(statement)
+    if invalidate_hot_cache and success:
+        _queue_hot_cache_invalidation(
+            session,
+            company_id=company_id,
+            dataset=str(dataset),
+            schema_version=payload_version_hash,
+        )
 
 
 def acquire_refresh_lock(
@@ -164,6 +199,7 @@ def release_refresh_lock(
         dataset,
         checked_at=checked_at,
         success=True,
+        invalidate_hot_cache=True,
     )
 
 
@@ -196,3 +232,18 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _queue_hot_cache_invalidation(
+    session: Session,
+    *,
+    company_id: int,
+    dataset: str,
+    schema_version: str | None,
+) -> None:
+    ticker_statement: Select[tuple[str]] = select(Company.ticker).where(Company.id == company_id)
+    ticker = session.execute(ticker_statement).scalar_one_or_none()
+    pending = session.info.setdefault(_SESSION_INVALIDATION_KEY, [])
+    invalidation = _PendingHotCacheInvalidation(ticker=ticker, dataset=dataset, schema_version=schema_version)
+    if invalidation not in pending:
+        pending.append(invalidation)

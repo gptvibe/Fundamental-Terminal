@@ -54,7 +54,7 @@ def recompute_and_persist_company_capital_structure(
     session.execute(delete(CapitalStructureSnapshot).where(CapitalStructureSnapshot.company_id == company_id))
 
     if not snapshots:
-        mark_dataset_checked(session, company_id, "capital_structure", checked_at=timestamp, success=True)
+        mark_dataset_checked(session, company_id, "capital_structure", checked_at=timestamp, success=True, invalidate_hot_cache=True)
         return 0
 
     payloads = [
@@ -97,7 +97,7 @@ def recompute_and_persist_company_capital_structure(
         },
     )
     session.execute(statement)
-    mark_dataset_checked(session, company_id, "capital_structure", checked_at=timestamp, success=True)
+    mark_dataset_checked(session, company_id, "capital_structure", checked_at=timestamp, success=True, invalidate_hot_cache=True)
     return len(payloads)
 
 

@@ -12,6 +12,7 @@ def build_router() -> APIRouter:
     router = APIRouter(tags=["jobs"])
     add_internal_route(router, "/health", handlers.healthcheck, methods=["GET"])
     add_internal_route(router, "/api/internal/cache-metrics", handlers.cache_metrics, methods=["GET"])
+    add_internal_route(router, "/api/internal/cache-metrics/invalidate", handlers.invalidate_cache_metrics, methods=["POST"])
     add_internal_route(router, "/api/internal/performance-audit", handlers.performance_audit_snapshot, methods=["GET"])
     add_internal_route(router, "/api/internal/performance-audit/reset", handlers.reset_performance_audit, methods=["POST"])
     add_user_visible_route(

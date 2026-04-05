@@ -268,7 +268,15 @@ def recompute_and_persist_company_research_brief(
     timestamp = checked_at or datetime.now(timezone.utc)
     response = build_company_research_brief_response(session, company_id, as_of=as_of, generated_at=timestamp)
     if response is None:
-        mark_dataset_checked(session, company_id, "company_research_brief", checked_at=timestamp, success=True, payload_version_hash=BRIEF_SCHEMA_VERSION)
+        mark_dataset_checked(
+            session,
+            company_id,
+            "company_research_brief",
+            checked_at=timestamp,
+            success=True,
+            payload_version_hash=BRIEF_SCHEMA_VERSION,
+            invalidate_hot_cache=True,
+        )
         return None
 
     statement = insert(CompanyResearchBriefSnapshot).values(
@@ -290,7 +298,15 @@ def recompute_and_persist_company_research_brief(
         },
     )
     session.execute(statement)
-    mark_dataset_checked(session, company_id, "company_research_brief", checked_at=timestamp, success=True, payload_version_hash=BRIEF_SCHEMA_VERSION)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "company_research_brief",
+        checked_at=timestamp,
+        success=True,
+        payload_version_hash=BRIEF_SCHEMA_VERSION,
+        invalidate_hot_cache=True,
+    )
     return response
 
 
@@ -621,6 +637,10 @@ def _statement_value(statement: Any, key: str) -> float | int | None:
     value = data.get(key)
     if isinstance(value, (int, float)):
         return value
+    if key == "weighted_average_shares_diluted":
+        alias_value = data.get("weighted_average_diluted_shares")
+        if isinstance(alias_value, (int, float)):
+            return alias_value
     return None
 
 

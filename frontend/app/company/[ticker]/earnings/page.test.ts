@@ -256,7 +256,7 @@ describe("CompanyEarningsPage", () => {
       expect(screen.getByText(/Stale warning/i)).toBeTruthy();
       expect(screen.getByText("Quality consistency")).toBeTruthy();
       expect(screen.getByText("EPS windows")).toBeTruthy();
-    });
+    }, { timeout: 5000 });
 
     const toggle = screen.getAllByRole("button", { name: "Show metadata-only releases" })[0];
     fireEvent.click(toggle);

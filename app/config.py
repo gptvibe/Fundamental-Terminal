@@ -124,6 +124,10 @@ class Settings:
     refresh_lock_timeout_seconds: int = _int_env("REFRESH_LOCK_TIMEOUT_SECONDS", 900, minimum=30)
     hot_response_cache_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1)
     hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
+    hot_response_cache_namespace: str = os.getenv("HOT_RESPONSE_CACHE_NAMESPACE", "ft:hot-cache").strip() or "ft:hot-cache"
+    hot_response_cache_singleflight_lock_seconds: int = _int_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_LOCK_SECONDS", 30, minimum=1)
+    hot_response_cache_singleflight_wait_seconds: float = _float_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_WAIT_SECONDS", 15.0, minimum=0.1)
+    hot_response_cache_singleflight_poll_seconds: float = _float_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_POLL_SECONDS", 0.05, minimum=0.01)
     performance_audit_enabled: bool = _bool_env("PERFORMANCE_AUDIT_ENABLED", False)
     performance_audit_max_records: int = _int_env("PERFORMANCE_AUDIT_MAX_RECORDS", 5000, minimum=100)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()

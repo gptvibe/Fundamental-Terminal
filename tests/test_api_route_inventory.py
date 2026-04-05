@@ -9,6 +9,7 @@ def test_public_route_inventory_remains_stable() -> None:
     expected_routes = {
         ("GET", "/health"),
         ("GET", "/api/internal/cache-metrics"),
+        ("POST", "/api/internal/cache-metrics/invalidate"),
         ("GET", "/api/internal/performance-audit"),
         ("POST", "/api/internal/performance-audit/reset"),
         ("GET", "/api/jobs/{job_id}/events"),

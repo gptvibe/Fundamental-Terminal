@@ -232,6 +232,7 @@ export default function CompanyResearchBriefPage() {
   const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
   const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
   const previousAnnual = annualStatements[1] ?? null;
+  const foreignIssuerStyleFiling = isForeignIssuerAnnualForm(latestFinancial?.filing_type);
   const latestAlertCount = briefData.activityOverview.data?.summary.total ?? 0;
   const topAlerts = useMemo(() => (briefData.activityOverview.data?.alerts ?? []).slice(0, 3), [briefData.activityOverview.data?.alerts]);
   const latestEntries = useMemo(() => (briefData.activityOverview.data?.entries ?? []).slice(0, 4), [briefData.activityOverview.data?.entries]);
@@ -243,6 +244,7 @@ export default function CompanyResearchBriefPage() {
         ownershipSummary: briefData.ownershipSummary.data?.summary ?? null,
         insiderSummary: insiderData?.summary ?? null,
         institutionalHoldings,
+        isForeignIssuerLike: foreignIssuerStyleFiling,
       }),
     [
       briefData.capitalMarketsSummary.data?.summary,
@@ -250,6 +252,7 @@ export default function CompanyResearchBriefPage() {
       briefData.ownershipSummary.data?.summary,
       insiderData?.summary,
       institutionalHoldings,
+      foreignIssuerStyleFiling,
     ]
   );
   const monitorChecklist = useMemo(
@@ -332,6 +335,7 @@ export default function CompanyResearchBriefPage() {
     governanceSummary: briefData.governanceSummary.data,
     ownershipSummary: briefData.ownershipSummary.data,
     insiderSummary: insiderData?.summary ?? null,
+    isForeignIssuerLike: foreignIssuerStyleFiling,
     loading:
       briefData.capitalStructure.loading ||
       briefData.capitalMarketsSummary.loading ||
@@ -1052,7 +1056,11 @@ export default function CompanyResearchBriefPage() {
               kind="empty"
               kicker="Capital & risk"
               title="No control signals yet"
-              message="This table fills in after capital markets, governance, ownership-change, insider, or institutional signals are cached for the company."
+              message={
+                foreignIssuerStyleFiling
+                  ? "This table fills in as capital markets, ownership-change, insider, and institutional signals are cached. U.S. proxy coverage can remain limited for many 20-F and 40-F issuers."
+                  : "This table fills in after capital markets, governance, ownership-change, insider, or institutional signals are cached for the company."
+              }
             />
           )}
         </EvidenceCard>
@@ -1899,6 +1907,7 @@ function buildCapitalRiskNarrative({
   governanceSummary,
   ownershipSummary,
   insiderSummary,
+  isForeignIssuerLike,
   loading,
 }: {
   capitalStructure: CompanyCapitalStructureResponse | null;
@@ -1906,6 +1915,7 @@ function buildCapitalRiskNarrative({
   governanceSummary: CompanyGovernanceSummaryResponse | null;
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse | null;
   insiderSummary: InsiderActivitySummaryPayload | null;
+  isForeignIssuerLike: boolean;
   loading: boolean;
 }): string {
   const latest = capitalStructure?.latest ?? null;
@@ -1922,8 +1932,12 @@ function buildCapitalRiskNarrative({
   const stakeChangeCount = ownershipSummary?.summary.total_filings ?? 0;
   const insiderTone = insiderSummary ? titleCase(insiderSummary.sentiment) : "Pending";
   const registrationFilings = capitalMarketsSummary?.summary.registration_filings ?? 0;
+  const governanceRead =
+    isForeignIssuerLike && proxyCount === 0
+      ? "governance coverage is limited because many 20-F and 40-F issuers do not file U.S. proxy materials"
+      : `governance coverage spans ${proxyCount.toLocaleString()} proxy filing${proxyCount === 1 ? "" : "s"}`;
 
-  return `Near-term debt due is ${formatCompactCurrency(debtDue)}, net dilution is ${formatPercent(netDilution)}, governance coverage spans ${proxyCount.toLocaleString()} proxy filing${proxyCount === 1 ? "" : "s"}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and insider tone currently reads ${insiderTone}. Registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"} so the brief can answer whether capital allocation is supportive or leaking value.`;
+  return `Near-term debt due is ${formatCompactCurrency(debtDue)}, net dilution is ${formatPercent(netDilution)}, ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and insider tone currently reads ${insiderTone}. Registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"} so the brief can answer whether capital allocation is supportive or leaking value.`;
 }
 
 function buildValuationNarrative({
@@ -1995,12 +2009,14 @@ function buildCapitalSignalRows({
   ownershipSummary,
   insiderSummary,
   institutionalHoldings,
+  isForeignIssuerLike,
 }: {
   capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse["summary"] | null;
   governanceSummary: CompanyGovernanceSummaryResponse["summary"] | null;
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse["summary"] | null;
   insiderSummary: InsiderActivitySummaryPayload | null;
   institutionalHoldings: InstitutionalHoldingPayload[];
+  isForeignIssuerLike: boolean;
 }) {
   const rows: Array<{ signal: string; currentRead: string; latestEvidence: string }> = [];
 
@@ -2015,8 +2031,16 @@ function buildCapitalSignalRows({
   if (governanceSummary) {
     rows.push({
       signal: "Governance",
-      currentRead: `${governanceSummary.total_filings.toLocaleString()} proxy filings · ${governanceSummary.filings_with_vote_items.toLocaleString()} with vote items`,
-      latestEvidence: governanceSummary.latest_meeting_date ? formatDate(governanceSummary.latest_meeting_date) : "Pending",
+      currentRead:
+        isForeignIssuerLike && governanceSummary.total_filings === 0
+          ? "U.S. proxy materials may be unavailable for many 20-F and 40-F issuers"
+          : `${governanceSummary.total_filings.toLocaleString()} proxy filings · ${governanceSummary.filings_with_vote_items.toLocaleString()} with vote items`,
+      latestEvidence:
+        isForeignIssuerLike && governanceSummary.total_filings === 0
+          ? "Limited by filing regime"
+          : governanceSummary.latest_meeting_date
+            ? formatDate(governanceSummary.latest_meeting_date)
+            : "Pending",
     });
   }
 
@@ -2254,4 +2278,8 @@ function mapBriefResponseToAsyncState(brief: CompanyResearchBriefResponse): Rese
     models: { data: brief.valuation.models, error: null, loading: false },
     peers: { data: brief.valuation.peers, error: null, loading: false },
   };
+}
+
+function isForeignIssuerAnnualForm(filingType: string | null | undefined) {
+  return filingType === "20-F" || filingType === "40-F";
 }

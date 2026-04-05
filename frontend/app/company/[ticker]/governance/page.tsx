@@ -143,7 +143,7 @@ export default function CompanyGovernancePage() {
         title="Governance"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
-        description="Proxy intelligence stays centered on SEC DEF 14A and DEFA14A filings, surfacing meeting metadata, vote outcomes, and executive compensation tables from cache before refresh jobs complete."
+        description="Proxy intelligence stays centered on SEC DEF 14A and DEFA14A filings, surfacing meeting metadata, vote outcomes, and executive compensation tables from cache before refresh jobs complete. Many 20-F and 40-F issuers may have limited U.S. proxy coverage here."
         freshness={{
           cacheState: pageCompany?.cache_state ?? null,
           refreshState: effectiveRefreshState,
@@ -215,7 +215,7 @@ export default function CompanyGovernancePage() {
             </table>
           </div>
         ) : (
-          <div className="text-muted" style={{ padding: "16px 0" }}>No definitive proxy filings parsed yet.</div>
+          <div className="text-muted" style={{ padding: "16px 0" }}>No definitive proxy filings parsed yet. Many 20-F and 40-F issuers may not publish U.S. proxy materials in the SEC archive.</div>
         )}
       </Panel>
 
@@ -392,7 +392,7 @@ export default function CompanyGovernancePage() {
           <div className="grid-empty-state" style={{ minHeight: 220 }}>
             <div className="grid-empty-kicker">Governance</div>
             <div className="grid-empty-title">No proxy filings yet</div>
-            <div className="grid-empty-copy">This workflow activates when SEC submissions include proxy statements or related proxy materials for the selected company.</div>
+            <div className="grid-empty-copy">This workflow activates when SEC submissions include proxy statements or related proxy materials for the selected company. Many 20-F and 40-F issuers may have limited U.S. proxy coverage here.</div>
           </div>
         )}
       </Panel>

@@ -15,6 +15,7 @@ import {
   getLatestModelEvaluation,
   getCompanyModels,
   getCompanyPeers,
+  getCacheMetrics,
   getSourceRegistry,
   getWatchlistCalendar,
   getWatchlistSummary,
@@ -144,6 +145,52 @@ describe("api route stability", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/source-registry",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("keeps internal cache metrics helper path unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        search_cache: { entries: 0, ttl_seconds: 60 },
+        hot_cache: {
+          backend: "redis",
+          shared: true,
+          namespace: "ft:hot-cache",
+          config: {
+            ttl_seconds: 20,
+            stale_ttl_seconds: 120,
+            singleflight_lock_seconds: 30,
+            singleflight_wait_seconds: 15,
+            singleflight_poll_seconds: 0.05,
+          },
+          overall: {
+            requests: 0,
+            hit_fresh: 0,
+            hit_stale: 0,
+            hits: 0,
+            misses: 0,
+            hit_rate: 0,
+            fills: 0,
+            fill_time_ms_total: 0,
+            avg_fill_time_ms: 0,
+            stale_served_count: 0,
+            invalidation_count: 0,
+            invalidated_keys: 0,
+            coalesced_waits: 0,
+          },
+          routes: {},
+        },
+      }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCacheMetrics();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/internal/cache-metrics",
       expect.objectContaining({ cache: "no-store" })
     );
   });

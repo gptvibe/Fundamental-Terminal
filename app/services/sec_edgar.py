@@ -3400,7 +3400,7 @@ def _touch_company_insider_trades(session: Session, company_id: int, checked_at:
         .where(Company.id == company_id)
         .values(insider_trades_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "insiders", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company_id, "insiders", checked_at=checked_at, success=True, invalidate_hot_cache=True)
 
 
 def _touch_company_form144_filings(session: Session, company_id: int, checked_at: datetime) -> None:
@@ -3414,7 +3414,7 @@ def _touch_company_form144_filings(session: Session, company_id: int, checked_at
         .where(Company.id == company_id)
         .values(form144_filings_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "form144", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company_id, "form144", checked_at=checked_at, success=True, invalidate_hot_cache=True)
 
 
 def _touch_company_earnings_releases(session: Session, company_id: int, checked_at: datetime) -> None:
@@ -3428,7 +3428,7 @@ def _touch_company_earnings_releases(session: Session, company_id: int, checked_
         .where(Company.id == company_id)
         .values(earnings_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "earnings", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company_id, "earnings", checked_at=checked_at, success=True, invalidate_hot_cache=True)
 
 
 def _touch_company_comment_letters(session: Session, company_id: int, checked_at: datetime) -> None:
@@ -3442,7 +3442,7 @@ def _touch_company_comment_letters(session: Session, company_id: int, checked_at
         .where(Company.id == company_id)
         .values(comment_letters_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "comment_letters", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company_id, "comment_letters", checked_at=checked_at, success=True, invalidate_hot_cache=True)
 
 
 def _load_form144_document(client: EdgarClient, cik: str, filing_metadata: FilingMetadata) -> tuple[str, str]:
@@ -4333,7 +4333,7 @@ def _touch_company_statements(session: Session, company_id: int, checked_at: dat
         .values(last_checked=checked_at)
     )
     session.execute(statement)
-    mark_dataset_checked(session, company_id, "financials", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company_id, "financials", checked_at=checked_at, success=True, invalidate_hot_cache=True)
 
 
 def _new_accumulator(
@@ -4770,7 +4770,13 @@ def _iter_monetary_observations(fact_payload: dict[str, Any]) -> list[dict[str, 
         return []
 
     observations: list[dict[str, Any]] = []
-    preferred_units = ["USD"] + [unit for unit in units_root if unit.startswith("USD") and unit != "USD"]
+    preferred_units: list[str] = []
+    if "USD" in units_root:
+        preferred_units.append("USD")
+    preferred_units.extend(unit for unit in units_root if unit.startswith("USD") and unit != "USD")
+    preferred_units.extend(
+        unit for unit in units_root if unit not in preferred_units and _looks_like_monetary_unit(unit)
+    )
     for unit in preferred_units:
         unit_observations = units_root.get(unit)
         if not isinstance(unit_observations, list):
@@ -4778,6 +4784,15 @@ def _iter_monetary_observations(fact_payload: dict[str, Any]) -> list[dict[str, 
         observations.extend({**observation, "unit": unit} for observation in unit_observations if isinstance(observation, dict))
 
     return observations
+
+
+def _looks_like_monetary_unit(unit: str) -> bool:
+    normalized = str(unit or "").strip().upper()
+    if not normalized or "/" in normalized:
+        return False
+    if "SHARE" in normalized or normalized in {"PURE", "RATE", "PERCENT", "PCT"}:
+        return False
+    return re.fullmatch(r"[A-Z]{3}", normalized) is not None
 
 
 def _iter_ratio_observations(fact_payload: dict[str, Any]) -> list[dict[str, Any]]:

@@ -25,7 +25,7 @@ export function GovernanceFilingChart({ filings }: { filings: GovernanceFilingPa
   return (
     <InteractiveChartFrame
       title="Proxy filing mix"
-      subtitle={data.length ? `${filings.length} filings across ${data.length} proxy forms.` : "Awaiting governance filings"}
+      subtitle={data.length ? `${filings.length} filings across ${data.length} proxy forms.` : "Awaiting governance filings. Many 20-F and 40-F issuers may have limited U.S. proxy coverage."}
       inspectorTitle="Proxy filing mix"
       inspectorSubtitle="Governance filings grouped by proxy form across the cached filing record."
       hideInlineHeader
@@ -48,7 +48,7 @@ export function GovernanceFilingChart({ filings }: { filings: GovernanceFilingPa
               kind: "empty",
               kicker: "Governance",
               title: "No proxy filings yet",
-              message: "This chart activates when SEC submissions include proxy statements or related proxy materials for the company.",
+              message: "This chart activates when SEC submissions include proxy statements or related proxy materials for the company. Many 20-F and 40-F issuers may have limited U.S. proxy coverage here.",
             }
       }
       exportState={{
@@ -73,7 +73,7 @@ export function GovernanceFilingChart({ filings }: { filings: GovernanceFilingPa
           <div className="grid-empty-state" style={{ minHeight: 220 }}>
             <div className="grid-empty-kicker">Governance</div>
             <div className="grid-empty-title">No proxy filings yet</div>
-            <div className="grid-empty-copy">This chart activates when SEC submissions include proxy statements or related proxy materials for the company.</div>
+            <div className="grid-empty-copy">This chart activates when SEC submissions include proxy statements or related proxy materials for the company. Many 20-F and 40-F issuers may have limited U.S. proxy coverage here.</div>
           </div>
         )
       }

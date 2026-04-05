@@ -608,7 +608,7 @@ def _touch_company_institutional_holdings(session: Session, company_id: int, che
         .where(Company.id == company_id)
         .values(institutional_holdings_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "institutional", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company_id, "institutional", checked_at=checked_at, success=True, invalidate_hot_cache=True)
 
 
 def _issuer_matches_company(issuer_name: str, company_tokens: set[str]) -> bool:

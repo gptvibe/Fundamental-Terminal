@@ -138,7 +138,7 @@ def upsert_filing_events(
         count += 1
 
     company.filing_events_last_checked = checked_at
-    mark_dataset_checked(session, company.id, "filings", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company.id, "filings", checked_at=checked_at, success=True, invalidate_hot_cache=True)
     return count
 
 

@@ -124,7 +124,7 @@ def upsert_capital_markets_events(
         count += 1
 
     company.capital_markets_last_checked = checked_at
-    mark_dataset_checked(session, company.id, "capital_markets", checked_at=checked_at, success=True)
+    mark_dataset_checked(session, company.id, "capital_markets", checked_at=checked_at, success=True, invalidate_hot_cache=True)
     return count
 
 

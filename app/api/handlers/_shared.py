@@ -118,6 +118,7 @@ from app.services.screener import build_official_screener_filter_catalog, run_of
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
+from app.services.hot_cache import shared_hot_response_cache
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, EdgarClient, FilingMetadata
@@ -189,10 +190,24 @@ FILINGS_TIMELINE_TTL_SECONDS = settings.sec_filings_timeline_ttl_seconds
 SEARCH_RESPONSE_TTL_SECONDS = 60
 _search_response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _search_response_cache_lock = threading.Lock()
-_hot_response_cache: dict[str, tuple[float, float, dict[str, Any]]] = {}
-_hot_response_cache_lock = threading.Lock()
-_cache_metric_counts: dict[str, int] = {}
-_cache_metric_lock = threading.Lock()
+
+
+class _HotCacheCompatProxy:
+    def clear(self) -> None:
+        shared_hot_response_cache.clear()
+
+
+_hot_response_cache = _HotCacheCompatProxy()
+
+HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
+    "search": "search-response-v1",
+    "financials": "financials-response-v1",
+    "capital_structure": "capital-structure-response-v1",
+    "models": "models-response-v1",
+    "oil_scenario_overlay": "oil-scenario-overlay-response-v1",
+    "oil_scenario": "oil-scenario-response-v1",
+    "peers": "peers-response-v1",
+}
 
 PriceCacheState = Literal["fresh", "stale", "missing"]
 PRICE_DEPENDENT_DERIVED_METRIC_KEYS = {"buyback_yield_proxy", "dividend_yield_proxy", "shareholder_yield"}
@@ -200,23 +215,7 @@ PRICE_DEPENDENT_TIMESERIES_METRIC_KEYS = {"buyback_yield", "dividend_yield"}
 
 
 _filings_timeline_cache: dict[str, tuple[float, list[FilingPayload]]] = {}
-try:
-    import redis  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    redis = None
-
-_redis_client = None
-if redis is not None:
-    try:
-        _redis_client = redis.Redis.from_url(
-            settings.redis_url,
-            decode_responses=True,
-            socket_timeout=0.5,
-            socket_connect_timeout=0.5,
-        )
-    except Exception:
-        logging.getLogger(__name__).warning("Redis client unavailable; falling back to process cache")
-        _redis_client = None
+_redis_client = getattr(shared_hot_response_cache, "_redis", None)
 
 
 @app.get("/health")
@@ -225,9 +224,39 @@ def healthcheck() -> dict[str, str]:
 
 
 @app.get("/api/internal/cache-metrics")
-def cache_metrics() -> dict[str, dict[str, int]]:
-    with _cache_metric_lock:
-        return {"metrics": dict(_cache_metric_counts)}
+def cache_metrics() -> dict[str, Any]:
+    return {
+        "search_cache": {
+            "entries": len(_search_response_cache),
+            "ttl_seconds": SEARCH_RESPONSE_TTL_SECONDS,
+        },
+        "hot_cache": shared_hot_response_cache.snapshot_metrics(),
+    }
+
+
+@app.post("/api/internal/cache-metrics/invalidate")
+def invalidate_cache_metrics(
+    ticker: str | None = Query(default=None),
+    dataset: str | None = Query(default=None),
+    schema_version: str | None = Query(default=None),
+    as_of: str | None = Query(default=None),
+) -> dict[str, Any]:
+    normalized_ticker = _normalize_ticker(ticker) if ticker and ticker.strip() else None
+    normalized_dataset = dataset.strip().lower() if dataset and dataset.strip() else None
+    normalized_schema = schema_version.strip() if schema_version and schema_version.strip() else None
+    requested_as_of = (as_of or "").strip()
+    normalized_as_of = None
+    if as_of is not None:
+        normalized_as_of = _normalize_as_of(_validated_as_of(requested_as_of or None)) or "latest"
+    try:
+        return shared_hot_response_cache.invalidate(
+            ticker=normalized_ticker,
+            dataset=normalized_dataset,
+            schema_version=normalized_schema,
+            as_of=normalized_as_of,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 @app.get("/api/internal/performance-audit")
@@ -297,6 +326,11 @@ def search_companies(
 
     normalized_query = _normalize_search_query(raw_query)
     hot_key = f"search:{normalized_query}:refresh={int(refresh)}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=_normalize_ticker(normalized_query) if _looks_like_ticker(normalized_query) else None,
+        datasets=("financials",),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["search"],),
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload, is_fresh = cached_hot
@@ -318,71 +352,67 @@ def search_companies(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    if not refresh:
-        cached_response = _get_cached_search_response(normalized_query)
-        if cached_response is not None:
-            _store_hot_cached_payload(hot_key, cached_response)
-            not_modified = _apply_conditional_headers(
-                request,
-                http_response,
-                cached_response,
-                last_modified=max(
-                    (item.last_checked for item in cached_response.results if item.last_checked is not None),
-                    default=None,
-                ),
-            )
-            if not_modified is not None:
-                return not_modified  # type: ignore[return-value]
-            return cached_response
+    def build_search_payload() -> CompanySearchResponse:
+        if not refresh:
+            cached_response = _get_cached_search_response(normalized_query)
+            if cached_response is not None:
+                return cached_response
 
-    normalized_ticker = _normalize_ticker(normalized_query)
-    normalized_cik = _normalize_cik_query(normalized_query)
-    snapshots = search_company_snapshots(session, normalized_query)
-    exact_match = next(
-        (
-            snapshot
-            for snapshot in snapshots
-            if snapshot.company.ticker == normalized_ticker or (normalized_cik is not None and snapshot.company.cik == normalized_cik)
-        ),
-        None,
-    )
+        normalized_ticker = _normalize_ticker(normalized_query)
+        normalized_cik = _normalize_cik_query(normalized_query)
+        snapshots = search_company_snapshots(session, normalized_query)
+        exact_match = next(
+            (
+                snapshot
+                for snapshot in snapshots
+                if snapshot.company.ticker == normalized_ticker or (normalized_cik is not None and snapshot.company.cik == normalized_cik)
+            ),
+            None,
+        )
 
-    refresh_state = RefreshState()
-    if not refresh:
-        if exact_match is None:
-            refresh_state = RefreshState(
-                triggered=False,
-                reason="none",
-                ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None,
-                job_id=None,
-            )
+        refresh_state = RefreshState()
+        if not refresh:
+            if exact_match is None:
+                refresh_state = RefreshState(
+                    triggered=False,
+                    reason="none",
+                    ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None,
+                    job_id=None,
+                )
+            elif exact_match.cache_state in {"missing", "stale"}:
+                refresh_state = RefreshState(
+                    triggered=False,
+                    reason=exact_match.cache_state,
+                    ticker=exact_match.company.ticker,
+                    job_id=None,
+                )
+            else:
+                refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
+        elif exact_match is None:
+            if not snapshots and _looks_like_ticker(normalized_query):
+                refresh_state = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+            else:
+                refresh_state = RefreshState(triggered=False, reason="none", ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None, job_id=None)
         elif exact_match.cache_state in {"missing", "stale"}:
-            refresh_state = RefreshState(
-                triggered=False,
-                reason=exact_match.cache_state,
-                ticker=exact_match.company.ticker,
-                job_id=None,
-            )
+            refresh_state = _trigger_refresh(background_tasks, exact_match.company.ticker, reason=exact_match.cache_state)
         else:
             refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
-    elif exact_match is None:
-        if not snapshots and _looks_like_ticker(normalized_query):
-            refresh_state = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
-        else:
-            refresh_state = RefreshState(triggered=False, reason="none", ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None, job_id=None)
-    elif exact_match.cache_state in {"missing", "stale"}:
-        refresh_state = _trigger_refresh(background_tasks, exact_match.company.ticker, reason=exact_match.cache_state)
-    else:
-        refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
 
-    payload = CompanySearchResponse(
-        query=normalized_query,
-        results=[_serialize_company(snapshot) for snapshot in snapshots],
-        refresh=refresh_state,
+        payload = CompanySearchResponse(
+            query=normalized_query,
+            results=[_serialize_company(snapshot) for snapshot in snapshots],
+            refresh=refresh_state,
+        )
+        if not refresh:
+            _store_cached_search_response(normalized_query, payload)
+        return payload
+
+    payload = _fill_hot_cached_payload(
+        hot_key,
+        model_type=CompanySearchResponse,
+        tags=hot_tags,
+        fill=build_search_payload,
     )
-    if not refresh:
-        _store_cached_search_response(normalized_query, payload)
-    _store_hot_cached_payload(hot_key, payload)
     not_modified = _apply_conditional_headers(
         request,
         http_response,
@@ -490,7 +520,14 @@ def company_financials(
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = f"financials:{normalized_ticker}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("financials", "prices"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["financials"],),
+        as_of=normalized_as_of,
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -515,52 +552,57 @@ def company_financials(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        payload = CompanyFinancialsResponse(
-            company=None,
-            financials=[],
-            price_history=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
-            **_empty_provenance_contract("company_missing"),
-        )
-        payload = _apply_requested_as_of(payload, requested_as_of)
-        _store_hot_cached_payload(hot_key, payload)
-        return payload
+    def build_financials_payload() -> CompanyFinancialsResponse:
+        snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+        if snapshot is None:
+            payload = CompanyFinancialsResponse(
+                company=None,
+                financials=[],
+                price_history=[],
+                refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+                **_empty_provenance_contract("company_missing"),
+            )
+            return _apply_requested_as_of(payload, requested_as_of)
 
-    financials = _visible_financials_for_company(session, snapshot.company)
-    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
-    price_history = _visible_price_history(session, snapshot.company.id)
-    if parsed_as_of is not None:
-        financials = select_point_in_time_financials(financials, parsed_as_of)
-        price_history = filter_price_history_as_of(price_history, parsed_as_of)
-    serialized_financials = [_serialize_financial(statement) for statement in financials]
-    segment_analysis_payload = build_segment_analysis(serialized_financials)
-    diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
-    payload = CompanyFinancialsResponse(
-        company=_serialize_company(
-            snapshot,
-            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
-            last_checked_prices=price_last_checked,
-            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
-        ),
-        financials=serialized_financials,
-        price_history=[_serialize_price_history(point) for point in price_history],
-        segment_analysis=SegmentAnalysisPayload.model_validate(segment_analysis_payload) if segment_analysis_payload is not None else None,
-        refresh=refresh,
-        diagnostics=diagnostics,
-        **_financials_provenance_contract(
-            financials,
-            price_history,
-            price_last_checked=price_last_checked,
-            diagnostics=diagnostics,
+        financials = _visible_financials_for_company(session, snapshot.company)
+        price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+        refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+        price_history = _visible_price_history(session, snapshot.company.id)
+        if parsed_as_of is not None:
+            financials = select_point_in_time_financials(financials, parsed_as_of)
+            price_history = filter_price_history_as_of(price_history, parsed_as_of)
+        serialized_financials = [_serialize_financial(statement) for statement in financials]
+        segment_analysis_payload = build_segment_analysis(serialized_financials)
+        diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
+        payload = CompanyFinancialsResponse(
+            company=_serialize_company(
+                snapshot,
+                last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+                regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+            ),
+            financials=serialized_financials,
+            price_history=[_serialize_price_history(point) for point in price_history],
+            segment_analysis=SegmentAnalysisPayload.model_validate(segment_analysis_payload) if segment_analysis_payload is not None else None,
             refresh=refresh,
-        ),
+            diagnostics=diagnostics,
+            **_financials_provenance_contract(
+                financials,
+                price_history,
+                price_last_checked=price_last_checked,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    payload = _fill_hot_cached_payload(
+        hot_key,
+        model_type=CompanyFinancialsResponse,
+        tags=hot_tags,
+        fill=build_financials_payload,
     )
-    payload = _apply_requested_as_of(payload, requested_as_of)
-    _store_hot_cached_payload(hot_key, payload)
     not_modified = _apply_conditional_headers(
         request,
         http_response,
@@ -646,7 +688,14 @@ def company_capital_structure(
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = f"capital_structure:{normalized_ticker}:periods={max_periods}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("capital_structure", "financials"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["capital_structure"],),
+        as_of=normalized_as_of,
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -671,48 +720,53 @@ def company_capital_structure(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        payload = CompanyCapitalStructureResponse(
-            company=None,
-            latest=None,
-            history=[],
-            last_capital_structure_check=None,
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
-            **_empty_provenance_contract("company_missing", "capital_structure_missing"),
-        )
-        payload = _apply_requested_as_of(payload, requested_as_of)
-        _store_hot_cached_payload(hot_key, payload)
-        return payload
+    def build_capital_structure_payload() -> CompanyCapitalStructureResponse:
+        snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+        if snapshot is None:
+            payload = CompanyCapitalStructureResponse(
+                company=None,
+                latest=None,
+                history=[],
+                last_capital_structure_check=None,
+                refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
+                **_empty_provenance_contract("company_missing", "capital_structure_missing"),
+            )
+            return _apply_requested_as_of(payload, requested_as_of)
 
-    history = get_company_capital_structure_snapshots(session, snapshot.company.id, limit=max(48, max_periods * 6))
-    last_capital_structure_check = get_company_capital_structure_last_checked(session, snapshot.company.id)
-    if parsed_as_of is not None:
-        floor = datetime.min.replace(tzinfo=timezone.utc)
-        history = [item for item in history if (snapshot_effective_at(item) or floor) <= parsed_as_of]
-    history = history[:max_periods]
-    refresh = _refresh_for_capital_structure(background_tasks, snapshot, last_capital_structure_check, history)
-    serialized_history = [_serialize_capital_structure_snapshot(item) for item in history]
-    latest = serialized_history[0] if serialized_history else None
-    diagnostics = _diagnostics_for_capital_structure(serialized_history, refresh)
-    payload = CompanyCapitalStructureResponse(
-        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_capital_structure_check)),
-        latest=latest,
-        history=serialized_history,
-        last_capital_structure_check=last_capital_structure_check,
-        refresh=refresh,
-        diagnostics=diagnostics,
-        **_capital_structure_provenance_contract(
-            history,
+        history = get_company_capital_structure_snapshots(session, snapshot.company.id, limit=max(48, max_periods * 6))
+        last_capital_structure_check = get_company_capital_structure_last_checked(session, snapshot.company.id)
+        if parsed_as_of is not None:
+            floor = datetime.min.replace(tzinfo=timezone.utc)
+            history = [item for item in history if (snapshot_effective_at(item) or floor) <= parsed_as_of]
+        history = history[:max_periods]
+        refresh = _refresh_for_capital_structure(background_tasks, snapshot, last_capital_structure_check, history)
+        serialized_history = [_serialize_capital_structure_snapshot(item) for item in history]
+        latest = serialized_history[0] if serialized_history else None
+        diagnostics = _diagnostics_for_capital_structure(serialized_history, refresh)
+        payload = CompanyCapitalStructureResponse(
+            company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_capital_structure_check)),
             latest=latest,
+            history=serialized_history,
             last_capital_structure_check=last_capital_structure_check,
-            diagnostics=diagnostics,
             refresh=refresh,
-        ),
+            diagnostics=diagnostics,
+            **_capital_structure_provenance_contract(
+                history,
+                latest=latest,
+                last_capital_structure_check=last_capital_structure_check,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    payload = _fill_hot_cached_payload(
+        hot_key,
+        model_type=CompanyCapitalStructureResponse,
+        tags=hot_tags,
+        fill=build_capital_structure_payload,
     )
-    payload = _apply_requested_as_of(payload, requested_as_of)
-    _store_hot_cached_payload(hot_key, payload)
     not_modified = _apply_conditional_headers(
         request,
         http_response,
@@ -1558,9 +1612,16 @@ def company_models(
     normalized_mode = (dupont_mode or "").lower() or None
     if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = (
         f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
         f":asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    )
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("financials", "prices"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["models"],),
+        as_of=normalized_as_of,
     )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
@@ -1586,89 +1647,94 @@ def company_models(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        payload = CompanyModelsResponse(
-            company=None,
-            requested_models=requested_models,
-            models=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
-            **_empty_provenance_contract("company_missing"),
-        )
-        payload = _apply_requested_as_of(payload, requested_as_of)
-        _store_hot_cached_payload(hot_key, payload)
-        return payload
-
     token = None
     try:
+        def build_models_payload() -> CompanyModelsResponse:
+            snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+            if snapshot is None:
+                payload = CompanyModelsResponse(
+                    company=None,
+                    requested_models=requested_models,
+                    models=[],
+                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+                    **_empty_provenance_contract("company_missing"),
+                )
+                return _apply_requested_as_of(payload, requested_as_of)
+
+            refresh = _refresh_for_snapshot(background_tasks, snapshot)
+            financials = get_company_financials(session, snapshot.company.id)
+            price_last_checked, _price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+            price_history: list[PriceHistory] = []
+            if parsed_as_of is not None:
+                price_history = _visible_price_history(session, snapshot.company.id)
+                financials = select_point_in_time_financials(financials, parsed_as_of)
+                price_history = filter_price_history_as_of(price_history, parsed_as_of)
+
+            if parsed_as_of is None and snapshot.cache_state == "fresh" and requested_models:
+                model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
+                if any(not result.cached for result in model_job_results):
+                    session.commit()
+
+            if parsed_as_of is None:
+                models: list[ModelRun | dict[str, Any]] = get_company_models(
+                    session,
+                    snapshot.company.id,
+                    requested_models or None,
+                    config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+                )
+            else:
+                latest_price = latest_price_as_of(price_history, parsed_as_of)
+                dataset = build_company_dataset(
+                    snapshot.company,
+                    financials,
+                    build_market_snapshot(latest_price),
+                    as_of_date=parsed_as_of,
+                )
+                models = ModelEngine(session).evaluate_models(
+                    dataset,
+                    model_names=requested_models or None,
+                    created_at=datetime.now(timezone.utc),
+                )
+            company_context = _model_company_context(snapshot.company)
+            status_counts: dict[str, int] = {}
+            for model_run in models:
+                result = _model_result_payload(model_run, company_context=company_context)
+                model_status = str(result.get("model_status") or result.get("status") or "insufficient_data")
+                status_counts[model_status] = status_counts.get(model_status, 0) + 1
+            logging.getLogger(__name__).info(
+                "TELEMETRY model_view ticker=%s models=%s status_counts=%s",
+                snapshot.company.ticker,
+                ",".join(requested_models) if requested_models else "all",
+                status_counts,
+            )
+            serialized_models = [_serialize_model_payload(model_run, company_context=company_context) for model_run in models]
+            diagnostics = _diagnostics_for_models(serialized_models, refresh)
+            payload = CompanyModelsResponse(
+                company=_serialize_company(snapshot),
+                requested_models=requested_models,
+                models=serialized_models,
+                refresh=refresh,
+                diagnostics=diagnostics,
+                **_models_provenance_contract(
+                    models,
+                    financials,
+                    price_last_checked=price_last_checked,
+                    diagnostics=diagnostics,
+                    refresh=refresh,
+                ),
+            )
+            return _apply_requested_as_of(payload, requested_as_of)
+
         if normalized_mode is not None:
             token = dupont_model.set_mode_override(normalized_mode)
 
-        refresh = _refresh_for_snapshot(background_tasks, snapshot)
-        financials = get_company_financials(session, snapshot.company.id)
-        price_last_checked, _price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-        price_history: list[PriceHistory] = []
-        if parsed_as_of is not None:
-            price_history = _visible_price_history(session, snapshot.company.id)
-            financials = select_point_in_time_financials(financials, parsed_as_of)
-            price_history = filter_price_history_as_of(price_history, parsed_as_of)
-
-        if parsed_as_of is None and snapshot.cache_state == "fresh" and requested_models:
-            model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
-            if any(not result.cached for result in model_job_results):
-                session.commit()
-
-        if parsed_as_of is None:
-            models: list[ModelRun | dict[str, Any]] = get_company_models(
-                session,
-                snapshot.company.id,
-                requested_models or None,
-                config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
-            )
-        else:
-            latest_price = latest_price_as_of(price_history, parsed_as_of)
-            dataset = build_company_dataset(
-                snapshot.company,
-                financials,
-                build_market_snapshot(latest_price),
-                as_of_date=parsed_as_of,
-            )
-            models = ModelEngine(session).evaluate_models(
-                dataset,
-                model_names=requested_models or None,
-                created_at=datetime.now(timezone.utc),
-            )
-        company_context = _model_company_context(snapshot.company)
-        status_counts: dict[str, int] = {}
-        for model_run in models:
-            result = _model_result_payload(model_run, company_context=company_context)
-            model_status = str(result.get("model_status") or result.get("status") or "insufficient_data")
-            status_counts[model_status] = status_counts.get(model_status, 0) + 1
-        logging.getLogger(__name__).info(
-            "TELEMETRY model_view ticker=%s models=%s status_counts=%s",
-            snapshot.company.ticker,
-            ",".join(requested_models) if requested_models else "all",
-            status_counts,
+        payload = _fill_hot_cached_payload(
+            hot_key,
+            model_type=CompanyModelsResponse,
+            tags=hot_tags,
+            fill=build_models_payload,
         )
-        serialized_models = [_serialize_model_payload(model_run, company_context=company_context) for model_run in models]
-        diagnostics = _diagnostics_for_models(serialized_models, refresh)
-        payload = CompanyModelsResponse(
-            company=_serialize_company(snapshot),
-            requested_models=requested_models,
-            models=serialized_models,
-            refresh=refresh,
-            diagnostics=diagnostics,
-            **_models_provenance_contract(
-                models,
-                financials,
-                price_last_checked=price_last_checked,
-                diagnostics=diagnostics,
-                refresh=refresh,
-            ),
-        )
-        payload = _apply_requested_as_of(payload, requested_as_of)
-        _store_hot_cached_payload(hot_key, payload)
         not_modified = _apply_conditional_headers(
             request,
             http_response,
@@ -1692,6 +1758,11 @@ def company_oil_scenario_overlay(
 ) -> CompanyOilScenarioOverlayResponse:
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario_overlay:{normalized_ticker}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("oil_scenario_overlay", "financials", "prices"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["oil_scenario_overlay"],),
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -1718,46 +1789,53 @@ def company_oil_scenario_overlay(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyOilScenarioOverlayResponse(
-            company=None,
-            status="insufficient_data",
-            fetched_at=datetime.now(timezone.utc),
-            strict_official_mode=settings.strict_official_mode,
-            exposure_profile=OilExposureProfilePayload(
-                profile_id="not_applicable",
-                label="Not Applicable",
-                hedging_signal="unknown",
-                pass_through_signal="unknown",
+    def build_oil_scenario_overlay_payload() -> CompanyOilScenarioOverlayResponse:
+        snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+        if snapshot is None:
+            return CompanyOilScenarioOverlayResponse(
+                company=None,
+                status="insufficient_data",
+                fetched_at=datetime.now(timezone.utc),
+                strict_official_mode=settings.strict_official_mode,
+                exposure_profile=OilExposureProfilePayload(
+                    profile_id="not_applicable",
+                    label="Not Applicable",
+                    hedging_signal="unknown",
+                    pass_through_signal="unknown",
+                ),
+                benchmark_series=[],
+                scenarios=[],
+                sensitivity=None,
+                diagnostics=_build_data_quality_diagnostics(
+                    coverage_ratio=0.0,
+                    stale_flags=["company_missing", "oil_scenario_overlay_missing"],
+                    missing_field_flags=["oil_scenario_overlay_missing"],
+                ),
+                refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                **_empty_provenance_contract("company_missing", "oil_scenario_overlay_missing"),
+            )
+
+        payload, cache_state = get_company_oil_scenario_overlay(session, snapshot.company.id)
+        last_checked = get_company_oil_scenario_overlay_last_checked(session, snapshot.company.id)
+        refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+        return _serialize_oil_scenario_overlay_response(
+            company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
+            payload=payload
+            or build_company_oil_scenario_overlay_placeholder(
+                snapshot.company,
+                checked_at=last_checked or snapshot.last_checked or datetime.now(timezone.utc),
             ),
-            benchmark_series=[],
-            scenarios=[],
-            sensitivity=None,
-            diagnostics=_build_data_quality_diagnostics(
-                coverage_ratio=0.0,
-                stale_flags=["company_missing", "oil_scenario_overlay_missing"],
-                missing_field_flags=["oil_scenario_overlay_missing"],
-            ),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            **_empty_provenance_contract("company_missing", "oil_scenario_overlay_missing"),
+            refresh=refresh,
+            default_checked_at=last_checked or snapshot.last_checked or datetime.now(timezone.utc),
+            mark_missing=payload is None,
         )
 
-    payload, cache_state = get_company_oil_scenario_overlay(session, snapshot.company.id)
-    last_checked = get_company_oil_scenario_overlay_last_checked(session, snapshot.company.id)
-    refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
-    response = _serialize_oil_scenario_overlay_response(
-        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
-        payload=payload
-        or build_company_oil_scenario_overlay_placeholder(
-            snapshot.company,
-            checked_at=last_checked or snapshot.last_checked or datetime.now(timezone.utc),
-        ),
-        refresh=refresh,
-        default_checked_at=last_checked or snapshot.last_checked or datetime.now(timezone.utc),
-        mark_missing=payload is None,
+    response = _fill_hot_cached_payload(
+        hot_key,
+        model_type=CompanyOilScenarioOverlayResponse,
+        tags=hot_tags,
+        fill=build_oil_scenario_overlay_payload,
     )
-    _store_hot_cached_payload(hot_key, response)
     not_modified = _apply_conditional_headers(
         request,
         http_response,
@@ -1778,6 +1856,11 @@ def company_oil_scenario(
 ) -> CompanyOilScenarioResponse:
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario:{normalized_ticker}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("oil_scenario_overlay", "financials", "prices"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["oil_scenario"],),
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -1804,92 +1887,99 @@ def company_oil_scenario(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyOilScenarioResponse(
-            company=None,
-            status="insufficient_data",
-            fetched_at=datetime.now(timezone.utc),
-            strict_official_mode=settings.strict_official_mode,
-            exposure_profile=OilExposureProfilePayload(
-                profile_id="not_applicable",
-                label="Not Applicable",
-                hedging_signal="unknown",
-                pass_through_signal="unknown",
-            ),
-            eligibility=OilScenarioEligibilityPayload(eligible=False, status="unsupported", oil_exposure_type="non_oil", reasons=[]),
-            benchmark_series=[],
-            official_base_curve=OilScenarioOfficialBaseCurvePayload(),
-            user_editable_defaults=OilScenarioUserEditableDefaultsPayload(fade_years=2),
-            scenarios=[],
-            sensitivity=None,
-            sensitivity_source=OilScenarioSensitivitySourcePayload(kind="manual_override", value=None, metric_basis=None, status=None, confidence_flags=[]),
-            phase2_extensions=OilScenarioPhase2ExtensionsPayload(),
-            overlay_outputs=OilScenarioOverlayOutputsPayload(
+    def build_oil_scenario_payload() -> CompanyOilScenarioResponse:
+        snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+        if snapshot is None:
+            return CompanyOilScenarioResponse(
+                company=None,
                 status="insufficient_data",
-                model_status="insufficient_data",
-                reason="Company cache is missing.",
-            ),
-            requirements=OilScenarioRequirementsPayload(
+                fetched_at=datetime.now(timezone.utc),
                 strict_official_mode=settings.strict_official_mode,
-                manual_price_required=True,
-                manual_price_reason="Company cache is missing.",
-                manual_sensitivity_required=True,
-                manual_sensitivity_reason="Company cache is missing.",
-                price_input_mode="manual",
-            ),
-            direct_company_evidence=OilScenarioDirectCompanyEvidencePayload(
-                status="not_available",
-                parser_confidence_flags=["oil_company_evidence_not_available"],
-                disclosed_sensitivity=OilScenarioDisclosedSensitivityEvidencePayload(
-                    status="not_available",
-                    reason="Company cache is missing.",
-                    confidence_flags=["oil_sensitivity_not_available"],
-                    provenance_sources=["sec_edgar"],
+                exposure_profile=OilExposureProfilePayload(
+                    profile_id="not_applicable",
+                    label="Not Applicable",
+                    hedging_signal="unknown",
+                    pass_through_signal="unknown",
                 ),
-                diluted_shares=OilScenarioDilutedSharesEvidencePayload(
-                    status="not_available",
+                eligibility=OilScenarioEligibilityPayload(eligible=False, status="unsupported", oil_exposure_type="non_oil", reasons=[]),
+                benchmark_series=[],
+                official_base_curve=OilScenarioOfficialBaseCurvePayload(),
+                user_editable_defaults=OilScenarioUserEditableDefaultsPayload(fade_years=2),
+                scenarios=[],
+                sensitivity=None,
+                sensitivity_source=OilScenarioSensitivitySourcePayload(kind="manual_override", value=None, metric_basis=None, status=None, confidence_flags=[]),
+                phase2_extensions=OilScenarioPhase2ExtensionsPayload(),
+                overlay_outputs=OilScenarioOverlayOutputsPayload(
+                    status="insufficient_data",
+                    model_status="insufficient_data",
                     reason="Company cache is missing.",
-                    confidence_flags=["diluted_shares_not_available"],
-                    provenance_sources=["sec_companyfacts"],
                 ),
-                realized_price_comparison=OilScenarioRealizedPriceComparisonEvidencePayload(
+                requirements=OilScenarioRequirementsPayload(
+                    strict_official_mode=settings.strict_official_mode,
+                    manual_price_required=True,
+                    manual_price_reason="Company cache is missing.",
+                    manual_sensitivity_required=True,
+                    manual_sensitivity_reason="Company cache is missing.",
+                    price_input_mode="manual",
+                ),
+                direct_company_evidence=OilScenarioDirectCompanyEvidencePayload(
                     status="not_available",
-                    reason="Company cache is missing.",
-                    benchmark=None,
-                    rows=[],
-                    confidence_flags=["realized_vs_benchmark_not_available"],
-                    provenance_sources=["sec_edgar"],
+                    parser_confidence_flags=["oil_company_evidence_not_available"],
+                    disclosed_sensitivity=OilScenarioDisclosedSensitivityEvidencePayload(
+                        status="not_available",
+                        reason="Company cache is missing.",
+                        confidence_flags=["oil_sensitivity_not_available"],
+                        provenance_sources=["sec_edgar"],
+                    ),
+                    diluted_shares=OilScenarioDilutedSharesEvidencePayload(
+                        status="not_available",
+                        reason="Company cache is missing.",
+                        confidence_flags=["diluted_shares_not_available"],
+                        provenance_sources=["sec_companyfacts"],
+                    ),
+                    realized_price_comparison=OilScenarioRealizedPriceComparisonEvidencePayload(
+                        status="not_available",
+                        reason="Company cache is missing.",
+                        benchmark=None,
+                        rows=[],
+                        confidence_flags=["realized_vs_benchmark_not_available"],
+                        provenance_sources=["sec_edgar"],
+                    ),
                 ),
-            ),
-            diagnostics=_build_data_quality_diagnostics(
-                coverage_ratio=0.0,
-                stale_flags=["company_missing", "oil_scenario_missing"],
-                missing_field_flags=["oil_scenario_missing"],
-            ),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            **_empty_provenance_contract("company_missing", "oil_scenario_missing"),
+                diagnostics=_build_data_quality_diagnostics(
+                    coverage_ratio=0.0,
+                    stale_flags=["company_missing", "oil_scenario_missing"],
+                    missing_field_flags=["oil_scenario_missing"],
+                ),
+                refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                **_empty_provenance_contract("company_missing", "oil_scenario_missing"),
+            )
+
+        payload, cache_state = get_company_oil_scenario_overlay(session, snapshot.company.id)
+        last_checked = get_company_oil_scenario_overlay_last_checked(session, snapshot.company.id)
+        refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+        default_checked_at = last_checked or snapshot.last_checked or datetime.now(timezone.utc)
+        base_payload = payload or build_company_oil_scenario_overlay_placeholder(snapshot.company, checked_at=default_checked_at)
+        public_payload = build_company_oil_scenario_public_payload(
+            session,
+            snapshot.company,
+            overlay_payload=base_payload,
+            checked_at=default_checked_at,
+        )
+        return _serialize_oil_scenario_response(
+            company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
+            payload=public_payload,
+            refresh=refresh,
+            default_checked_at=default_checked_at,
+            mark_missing=payload is None,
         )
 
-    payload, cache_state = get_company_oil_scenario_overlay(session, snapshot.company.id)
-    last_checked = get_company_oil_scenario_overlay_last_checked(session, snapshot.company.id)
-    refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
-    default_checked_at = last_checked or snapshot.last_checked or datetime.now(timezone.utc)
-    base_payload = payload or build_company_oil_scenario_overlay_placeholder(snapshot.company, checked_at=default_checked_at)
-    public_payload = build_company_oil_scenario_public_payload(
-        session,
-        snapshot.company,
-        overlay_payload=base_payload,
-        checked_at=default_checked_at,
+    response = _fill_hot_cached_payload(
+        hot_key,
+        model_type=CompanyOilScenarioResponse,
+        tags=hot_tags,
+        fill=build_oil_scenario_payload,
     )
-    response = _serialize_oil_scenario_response(
-        company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
-        payload=public_payload,
-        refresh=refresh,
-        default_checked_at=default_checked_at,
-        mark_missing=payload is None,
-    )
-    _store_hot_cached_payload(hot_key, response)
     not_modified = _apply_conditional_headers(
         request,
         http_response,
@@ -2690,11 +2780,18 @@ def company_peers(
     session: Session = Depends(get_db_session),
 ) -> CompanyPeersResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     selected_tickers = _parse_csv_values(peers)
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = f"peers:{normalized_ticker}:selected={','.join(selected_tickers)}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        tickers=tuple(selected_tickers),
+        datasets=("financials", "prices", "derived_metrics"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["peers"],),
+        as_of=normalized_as_of,
+    )
     cached_hot = _get_hot_cached_payload(hot_key)
     if cached_hot is not None:
         payload_data, is_fresh = cached_hot
@@ -2718,62 +2815,66 @@ def company_peers(
             return not_modified  # type: ignore[return-value]
         return cached_response
 
-    if snapshot is None:
-        payload = CompanyPeersResponse(
-            company=None,
-            peer_basis="Cached peer universe",
-            available_companies=[],
-            selected_tickers=[],
-            peers=[],
-            notes={},
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            **_empty_provenance_contract("company_missing"),
-        )
-        payload = _apply_requested_as_of(payload, requested_as_of)
-        _store_hot_cached_payload(hot_key, payload)
-        return payload
+    def build_peers_payload() -> CompanyPeersResponse:
+        snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+        if snapshot is None:
+            payload = CompanyPeersResponse(
+                company=None,
+                peer_basis="Cached peer universe",
+                available_companies=[],
+                selected_tickers=[],
+                peers=[],
+                notes={},
+                refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                **_empty_provenance_contract("company_missing"),
+            )
+            return _apply_requested_as_of(payload, requested_as_of)
 
-    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-    financials = get_company_financials(session, snapshot.company.id)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
-    payload = build_peer_comparison(session, snapshot.company.ticker, selected_tickers=selected_tickers, as_of=parsed_as_of)
-    logging.getLogger(__name__).info(
-        "TELEMETRY peer_view ticker=%s selected=%s count=%s",
-        snapshot.company.ticker,
-        selected_tickers,
-        len(payload.get("peers") or []) if payload else 0,
-    )
-    if payload is None:
-        empty_payload = CompanyPeersResponse(
-            company=None,
-            peer_basis="Cached peer universe",
-            available_companies=[],
-            selected_tickers=[],
-            peers=[],
-            notes={},
+        price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+        financials = get_company_financials(session, snapshot.company.id)
+        refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+        payload = build_peer_comparison(session, snapshot.company.ticker, selected_tickers=selected_tickers, as_of=parsed_as_of)
+        logging.getLogger(__name__).info(
+            "TELEMETRY peer_view ticker=%s selected=%s count=%s",
+            snapshot.company.ticker,
+            selected_tickers,
+            len(payload.get("peers") or []) if payload else 0,
+        )
+        if payload is None:
+            empty_payload = CompanyPeersResponse(
+                company=None,
+                peer_basis="Cached peer universe",
+                available_companies=[],
+                selected_tickers=[],
+                peers=[],
+                notes={},
+                refresh=refresh,
+                **_empty_provenance_contract("peer_data_missing"),
+            )
+            return _apply_requested_as_of(empty_payload, requested_as_of)
+
+        response_payload = CompanyPeersResponse(
+            company=_serialize_company(
+                payload["company"],
+                last_checked=_merge_last_checked(payload["company"].last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+            ),
+            peer_basis=payload["peer_basis"],
+            available_companies=[PeerOptionPayload(**item) for item in payload["available_companies"]],
+            selected_tickers=payload["selected_tickers"],
+            peers=[PeerMetricsPayload(**item) for item in payload["peers"]],
+            notes=payload["notes"],
             refresh=refresh,
-            **_empty_provenance_contract("peer_data_missing"),
+            **_peers_provenance_contract(payload, price_last_checked=price_last_checked, refresh=refresh),
         )
-        empty_payload = _apply_requested_as_of(empty_payload, requested_as_of)
-        _store_hot_cached_payload(hot_key, empty_payload)
-        return empty_payload
+        return _apply_requested_as_of(response_payload, requested_as_of)
 
-    response_payload = CompanyPeersResponse(
-        company=_serialize_company(
-            payload["company"],
-            last_checked=_merge_last_checked(payload["company"].last_checked, price_last_checked),
-            last_checked_prices=price_last_checked,
-        ),
-        peer_basis=payload["peer_basis"],
-        available_companies=[PeerOptionPayload(**item) for item in payload["available_companies"]],
-        selected_tickers=payload["selected_tickers"],
-        peers=[PeerMetricsPayload(**item) for item in payload["peers"]],
-        notes=payload["notes"],
-        refresh=refresh,
-        **_peers_provenance_contract(payload, price_last_checked=price_last_checked, refresh=refresh),
+    response_payload = _fill_hot_cached_payload(
+        hot_key,
+        model_type=CompanyPeersResponse,
+        tags=hot_tags,
+        fill=build_peers_payload,
     )
-    response_payload = _apply_requested_as_of(response_payload, requested_as_of)
-    _store_hot_cached_payload(hot_key, response_payload)
     not_modified = _apply_conditional_headers(
         request,
         http_response,
@@ -3595,35 +3696,34 @@ def _store_cached_search_response(query: str, response: CompanySearchResponse) -
 
 
 def _get_hot_cached_payload(key: str) -> tuple[dict[str, Any], bool] | None:
-    now = time.monotonic()
-    with _hot_response_cache_lock:
-        cached = _hot_response_cache.get(key)
-        if cached is None:
-            _record_cache_metric("hot_cache.miss")
-            return None
-
-        fresh_until, stale_until, payload = cached
-        if now <= stale_until:
-            _record_cache_metric("hot_cache.hit_fresh" if now <= fresh_until else "hot_cache.hit_stale")
-            return payload, now <= fresh_until
-
-        _hot_response_cache.pop(key, None)
-        _record_cache_metric("hot_cache.expired")
+    cached = shared_hot_response_cache.get(key)
+    if cached is None:
         return None
+    return cached.payload, cached.is_fresh
 
 
-def _store_hot_cached_payload(key: str, payload: BaseModel) -> None:
+def _store_hot_cached_payload(key: str, payload: BaseModel, *, tags: tuple[str, ...] = ()) -> None:
     serialized = payload.model_dump(mode="json")
     if _is_company_missing_payload(serialized):
-        _record_cache_metric("hot_cache.skip_company_missing")
         return
 
-    now = time.monotonic()
-    fresh_until = now + settings.hot_response_cache_ttl_seconds
-    stale_until = fresh_until + settings.hot_response_cache_stale_ttl_seconds
-    with _hot_response_cache_lock:
-        _hot_response_cache[key] = (fresh_until, stale_until, serialized)
-    _record_cache_metric("hot_cache.store")
+    shared_hot_response_cache.store(key, route=_hot_cache_route_name(key), payload=serialized, tags=tags)
+
+
+def _fill_hot_cached_payload(
+    key: str,
+    *,
+    model_type: type[BaseModel],
+    tags: tuple[str, ...],
+    fill: Any,
+) -> BaseModel:
+    payload = shared_hot_response_cache.fill_or_get(
+        key,
+        route=_hot_cache_route_name(key),
+        tags=tags,
+        fill=lambda: _serialize_hot_cache_fill(fill),
+    )
+    return model_type.model_validate(payload)
 
 
 def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
@@ -3673,8 +3773,45 @@ def _apply_conditional_headers(
 
 
 def _record_cache_metric(key: str) -> None:
-    with _cache_metric_lock:
-        _cache_metric_counts[key] = _cache_metric_counts.get(key, 0) + 1
+    if key.startswith("conditional."):
+        return
+
+
+def _serialize_hot_cache_fill(fill: Any) -> tuple[dict[str, Any], bool]:
+    payload = fill()
+    if isinstance(payload, BaseModel):
+        serialized = payload.model_dump(mode="json")
+        return serialized, not _is_company_missing_payload(serialized)
+    return payload, not _is_company_missing_payload(payload)
+
+
+def _hot_cache_route_name(key: str) -> str:
+    prefix, _, _rest = key.partition(":")
+    return prefix or "hot"
+
+
+def _build_hot_cache_tags(
+    *,
+    ticker: str | None = None,
+    datasets: tuple[str, ...] = (),
+    schema_versions: tuple[str, ...] = (),
+    as_of: str | None = None,
+    tickers: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    tags: set[str] = set()
+    if ticker:
+        tags.add(shared_hot_response_cache.build_ticker_tag(ticker))
+    for candidate in tickers:
+        if candidate:
+            tags.add(shared_hot_response_cache.build_ticker_tag(candidate))
+    for dataset in datasets:
+        if dataset:
+            tags.add(shared_hot_response_cache.build_dataset_tag(dataset))
+    for schema_version in schema_versions:
+        if schema_version:
+            tags.add(shared_hot_response_cache.build_schema_tag(schema_version))
+    tags.add(shared_hot_response_cache.build_as_of_tag(as_of))
+    return tuple(sorted(tags))
 
 
 def _company_market_classification(company: Any) -> tuple[str | None, str | None]:

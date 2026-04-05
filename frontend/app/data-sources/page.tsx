@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Panel } from "@/components/ui/panel";
-import { getSourceRegistry } from "@/lib/api";
+import { getCacheMetrics, getSourceRegistry } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { SourceRegistryEntryPayload, SourceRegistryResponse, SourceTier } from "@/lib/types";
+import type { CacheMetricsResponse, SourceRegistryResponse, SourceTier } from "@/lib/types";
 
 type SourceTierSection = {
   tier: SourceTier;
@@ -50,8 +50,10 @@ const SOURCE_TIER_SECTIONS: SourceTierSection[] = [
 export default function DataSourcesPage() {
   const router = useRouter();
   const [data, setData] = useState<SourceRegistryResponse | null>(null);
+  const [cacheMetrics, setCacheMetrics] = useState<CacheMetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cacheError, setCacheError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,16 +62,25 @@ export default function DataSourcesPage() {
       try {
         setLoading(true);
         setError(null);
-        const response = await getSourceRegistry();
+        setCacheError(null);
+        const [sourceRegistryResult, cacheMetricsResult] = await Promise.allSettled([getSourceRegistry(), getCacheMetrics()]);
         if (cancelled) {
           return;
         }
-        setData(response);
-      } catch (nextError) {
-        if (cancelled) {
-          return;
+
+        if (sourceRegistryResult.status === "fulfilled") {
+          setData(sourceRegistryResult.value);
+        } else {
+          setData(null);
+          setError(sourceRegistryResult.reason instanceof Error ? sourceRegistryResult.reason.message : "Unable to load data sources");
         }
-        setError(nextError instanceof Error ? nextError.message : "Unable to load data sources");
+
+        if (cacheMetricsResult.status === "fulfilled") {
+          setCacheMetrics(cacheMetricsResult.value);
+        } else {
+          setCacheMetrics(null);
+          setCacheError(cacheMetricsResult.reason instanceof Error ? cacheMetricsResult.reason.message : "Unable to load shared cache metrics");
+        }
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -133,6 +144,45 @@ export default function DataSourcesPage() {
               <div className="data-sources-health-label">Recent source errors</div>
               <div className="data-sources-health-value">{data.health.sources_with_recent_errors.length}</div>
               <div className="data-sources-health-detail">Rolling {data.health.recent_error_window_hours}h source-error window.</div>
+            </div>
+          </div>
+        ) : null}
+      </Panel>
+
+      <Panel
+        title="Shared Hot Cache"
+        subtitle="Redis-backed hot-path cache visibility for the highest-read backend responses."
+        className="data-sources-health-panel"
+        variant="subtle"
+      >
+        {loading ? <div className="text-muted">Loading shared cache metrics...</div> : null}
+        {cacheError ? <div className="text-muted">{cacheError}</div> : null}
+        {cacheMetrics ? (
+          <div className="data-sources-health-grid">
+            <div className="data-sources-health-card">
+              <div className="data-sources-health-label">Backend</div>
+              <div className="data-sources-health-value">{cacheMetrics.hot_cache.shared ? "Redis" : "Local"}</div>
+              <div className="data-sources-health-detail">Namespace {cacheMetrics.hot_cache.namespace}</div>
+            </div>
+            <div className="data-sources-health-card">
+              <div className="data-sources-health-label">Hit rate</div>
+              <div className="data-sources-health-value">{formatPercent(cacheMetrics.hot_cache.overall.hit_rate)}</div>
+              <div className="data-sources-health-detail">{new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.hits)} hits across {new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.requests)} requests.</div>
+            </div>
+            <div className="data-sources-health-card">
+              <div className="data-sources-health-label">Average fill time</div>
+              <div className="data-sources-health-value">{formatMilliseconds(cacheMetrics.hot_cache.overall.avg_fill_time_ms)}</div>
+              <div className="data-sources-health-detail">Singleflight fill average across {new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.fills)} fills.</div>
+            </div>
+            <div className="data-sources-health-card">
+              <div className="data-sources-health-label">Stale served</div>
+              <div className="data-sources-health-value">{new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.stale_served_count)}</div>
+              <div className="data-sources-health-detail">Responses served during stale-while-revalidate windows.</div>
+            </div>
+            <div className="data-sources-health-card">
+              <div className="data-sources-health-label">Invalidations</div>
+              <div className="data-sources-health-value">{new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.invalidation_count)}</div>
+              <div className="data-sources-health-detail">{new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.invalidated_keys)} shared keys evicted.</div>
             </div>
           </div>
         ) : null}
@@ -211,4 +261,21 @@ function formatDurationFromSeconds(value: number | null | undefined): string {
 
 function humanizeFlag(value: string): string {
   return value.replaceAll("_", " ");
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatMilliseconds(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)}s`;
+  }
+  return `${Math.round(value)}ms`;
 }

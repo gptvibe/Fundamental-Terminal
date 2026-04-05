@@ -92,6 +92,49 @@ export interface SourceRegistryResponse {
   health: SourceRegistryHealthPayload;
 }
 
+export interface HotCacheMetricSummary {
+  requests: number;
+  hit_fresh: number;
+  hit_stale: number;
+  hits: number;
+  misses: number;
+  hit_rate: number;
+  fills: number;
+  fill_time_ms_total: number;
+  avg_fill_time_ms: number;
+  stale_served_count: number;
+  invalidation_count: number;
+  invalidated_keys: number;
+  coalesced_waits: number;
+}
+
+export interface HotCacheConfigPayload {
+  ttl_seconds: number;
+  stale_ttl_seconds: number;
+  singleflight_lock_seconds: number;
+  singleflight_wait_seconds: number;
+  singleflight_poll_seconds: number;
+}
+
+export interface HotCachePayload {
+  backend: string;
+  shared: boolean;
+  namespace: string;
+  config: HotCacheConfigPayload;
+  overall: HotCacheMetricSummary;
+  routes: Record<string, HotCacheMetricSummary>;
+}
+
+export interface SearchCachePayload {
+  entries: number;
+  ttl_seconds: number;
+}
+
+export interface CacheMetricsResponse {
+  search_cache: SearchCachePayload;
+  hot_cache: HotCachePayload;
+}
+
 export interface RegulatedEntityPayload {
   issuer_type: "bank" | "bank_holding_company";
   reporting_basis: "fdic_call_report" | "fr_y9c" | "mixed_regulatory";

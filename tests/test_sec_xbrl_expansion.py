@@ -410,6 +410,106 @@ def test_edgar_normalizer_maps_capital_structure_supplemental_facts():
     assert data["lease_due_thereafter"] == 6
 
 
+def test_edgar_normalizer_maps_non_usd_monetary_units():
+    accn = "0000000000-26-000021"
+    companyfacts = {
+        "facts": {
+            "us-gaap": {
+                "RevenueFromContractWithCustomerExcludingAssessedTax": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "accn": accn,
+                                "form": "20-F",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 32667,
+                            }
+                        ]
+                    }
+                },
+                "OperatingIncomeLoss": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "accn": accn,
+                                "form": "20-F",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 11301,
+                            }
+                        ]
+                    }
+                },
+                "NetIncomeLoss": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "accn": accn,
+                                "form": "20-F",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 9571,
+                            }
+                        ]
+                    }
+                },
+                "NetCashProvidedByUsedInOperatingActivities": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "accn": accn,
+                                "form": "20-F",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": 12658,
+                            }
+                        ]
+                    }
+                },
+                "PaymentsToAcquirePropertyPlantAndEquipment": {
+                    "units": {
+                        "EUR": [
+                            {
+                                "accn": accn,
+                                "form": "20-F",
+                                "start": "2025-01-01",
+                                "end": "2025-12-31",
+                                "filed": "2026-02-20",
+                                "val": -3778,
+                            }
+                        ]
+                    }
+                },
+            }
+        }
+    }
+    filing_index = {
+        accn: FilingMetadata(
+            accession_number=accn,
+            form="20-F",
+            filing_date=date(2026, 2, 20),
+            report_date=date(2025, 12, 31),
+            primary_document="annual.htm",
+        )
+    }
+
+    statements = EdgarNormalizer().normalize("0000123456", companyfacts, filing_index)
+
+    assert len(statements) == 1
+    data = statements[0].data
+    assert data["revenue"] == 32667
+    assert data["operating_income"] == 11301
+    assert data["net_income"] == 9571
+    assert data["operating_cash_flow"] == 12658
+    assert data["capex"] == 3778
+    assert data["free_cash_flow"] == 8880
+
+
 def test_serialize_capital_structure_snapshot_includes_new_sections():
     snapshot = SimpleNamespace(
         accession_number="0000000000-26-000020",

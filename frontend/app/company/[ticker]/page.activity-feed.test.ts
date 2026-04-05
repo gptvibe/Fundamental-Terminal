@@ -293,6 +293,51 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByText("No cached model outputs yet")).toBeTruthy();
     expect(screen.getByText("No active alerts")).toBeTruthy();
   });
+
+  it("explains limited proxy coverage for foreign-issuer annual filings", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      financials: [
+        {
+          ...buildWorkspaceMock().financials[0],
+          filing_type: "20-F",
+        },
+        ...buildWorkspaceMock().financials.slice(1),
+      ],
+      annualStatements: [
+        {
+          ...buildWorkspaceMock().financials[0],
+          filing_type: "20-F",
+        },
+        ...buildWorkspaceMock().financials.slice(1),
+      ],
+      latestFinancial: {
+        ...buildWorkspaceMock().financials[0],
+        filing_type: "20-F",
+      },
+    }));
+    vi.mocked(getCompanyResearchBrief).mockResolvedValue(buildResearchBriefResponse({
+      capital_and_risk: {
+        capital_structure: buildCapitalStructureResponse(),
+        capital_markets_summary: buildCapitalMarketsSummaryResponse(),
+        governance_summary: {
+          ...buildGovernanceSummaryResponse(),
+          summary: {
+            ...buildGovernanceSummaryResponse().summary,
+            total_filings: 0,
+            filings_with_vote_items: 0,
+            latest_meeting_date: null,
+          },
+        },
+        ownership_summary: buildOwnershipSummaryResponse(),
+      },
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByText(/U\.S\. proxy materials may be unavailable for many 20-F and 40-F issuers/i)).toBeTruthy();
+    });
+  });
 });
 
 function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
