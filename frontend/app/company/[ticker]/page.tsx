@@ -28,7 +28,9 @@ import {
   getCompanyMetricsTimeseries,
   getCompanyModels,
   getCompanyPeers,
+  getCompanyResearchBrief,
 } from "@/lib/api";
+import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import {
   toneForAlertLevel,
   toneForAlertSource,
@@ -51,6 +53,7 @@ import type {
   CompanyGovernanceSummaryResponse,
   CompanyModelsResponse,
   CompanyPeersResponse,
+  CompanyResearchBriefResponse,
   FinancialPayload,
   InsiderActivitySummaryPayload,
   InstitutionalHoldingPayload,
@@ -217,6 +220,8 @@ export default function CompanyResearchBriefPage() {
     includeInsiders: true,
     includeInstitutional: true,
     includeChartConsole: true,
+    auditPageRoute: "/company/[ticker]",
+    auditScenario: "company_overview",
   });
 
   const briefData = useResearchBriefData(ticker, reloadKey);
@@ -712,7 +717,7 @@ export default function CompanyResearchBriefPage() {
           copy="Metric, risk, segment, and capital-structure changes from the most recent comparable filing pair."
           className="is-wide"
         >
-          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} />
+          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} initialPayload={briefData.changes.data} />
         </EvidenceCard>
 
         <EvidenceCard
@@ -1287,43 +1292,39 @@ function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefA
     }));
 
     async function load() {
-      const [
-        activityOverviewResult,
-        changesResult,
-        earningsSummaryResult,
-        capitalStructureResult,
-        capitalMarketsSummaryResult,
-        governanceSummaryResult,
-        ownershipSummaryResult,
-        modelsResult,
-        peersResult,
-      ] = await Promise.allSettled([
-        getCompanyActivityOverview(ticker),
-        getCompanyChangesSinceLastFiling(ticker),
-        getCompanyEarningsSummary(ticker),
-        getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
-        getCompanyCapitalMarketsSummary(ticker),
-        getCompanyGovernanceSummary(ticker),
-        getCompanyBeneficialOwnershipSummary(ticker),
-        getCompanyModels(ticker, MODEL_NAMES, { dupontMode: "auto" }),
-        getCompanyPeers(ticker),
-      ]);
+      try {
+        const brief = await withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]",
+            scenario: "company_overview",
+            source: "company-overview:research-brief",
+          },
+          () => getCompanyResearchBrief(ticker)
+        );
 
-      if (cancelled) {
-        return;
+        if (cancelled) {
+          return;
+        }
+
+        setState(mapBriefResponseToAsyncState(brief));
+      } catch (nextError) {
+        if (cancelled) {
+          return;
+        }
+
+        const message = nextError instanceof Error ? nextError.message : "Unable to load research brief";
+        setState({
+          activityOverview: { data: null, error: message, loading: false },
+          changes: { data: null, error: message, loading: false },
+          earningsSummary: { data: null, error: message, loading: false },
+          capitalStructure: { data: null, error: message, loading: false },
+          capitalMarketsSummary: { data: null, error: message, loading: false },
+          governanceSummary: { data: null, error: message, loading: false },
+          ownershipSummary: { data: null, error: message, loading: false },
+          models: { data: null, error: message, loading: false },
+          peers: { data: null, error: message, loading: false },
+        });
       }
-
-      setState((current) => ({
-        activityOverview: resolveAsyncState(current.activityOverview, activityOverviewResult, "Unable to load activity overview"),
-        changes: resolveAsyncState(current.changes, changesResult, "Unable to load filing comparison"),
-        earningsSummary: resolveAsyncState(current.earningsSummary, earningsSummaryResult, "Unable to load earnings summary"),
-        capitalStructure: resolveAsyncState(current.capitalStructure, capitalStructureResult, "Unable to load capital structure intelligence"),
-        capitalMarketsSummary: resolveAsyncState(current.capitalMarketsSummary, capitalMarketsSummaryResult, "Unable to load capital markets summary"),
-        governanceSummary: resolveAsyncState(current.governanceSummary, governanceSummaryResult, "Unable to load governance summary"),
-        ownershipSummary: resolveAsyncState(current.ownershipSummary, ownershipSummaryResult, "Unable to load beneficial ownership summary"),
-        models: resolveAsyncState(current.models, modelsResult, "Unable to load model summary"),
-        peers: resolveAsyncState(current.peers, peersResult, "Unable to load peer snapshot"),
-      }));
     }
 
     void load();
@@ -2239,4 +2240,18 @@ function formatFeedEntryType(type: string): string {
 
 function humanizeToken(value: string): string {
   return value.replaceAll("_", " ");
+}
+
+function mapBriefResponseToAsyncState(brief: CompanyResearchBriefResponse): ResearchBriefAsyncState {
+  return {
+    activityOverview: { data: brief.what_changed.activity_overview, error: null, loading: false },
+    changes: { data: brief.what_changed.changes, error: null, loading: false },
+    earningsSummary: { data: brief.what_changed.earnings_summary, error: null, loading: false },
+    capitalStructure: { data: brief.capital_and_risk.capital_structure, error: null, loading: false },
+    capitalMarketsSummary: { data: brief.capital_and_risk.capital_markets_summary, error: null, loading: false },
+    governanceSummary: { data: brief.capital_and_risk.governance_summary, error: null, loading: false },
+    ownershipSummary: { data: brief.capital_and_risk.ownership_summary, error: null, loading: false },
+    models: { data: brief.valuation.models, error: null, loading: false },
+    peers: { data: brief.valuation.peers, error: null, loading: false },
+  };
 }

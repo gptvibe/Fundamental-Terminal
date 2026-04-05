@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "audit:performance": "node scripts/run-performance-audit.mjs"
   },
   "dependencies": {
     "ag-grid-community": "^33.3.2",

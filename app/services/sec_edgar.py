@@ -2184,6 +2184,7 @@ class EdgarIngestionService:
             _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
             _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
             reporter.complete("Using fresh cached data.")
             session.commit()
             return IngestionResult(
@@ -2379,6 +2380,7 @@ class EdgarIngestionService:
             _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
             _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2613,6 +2615,7 @@ class EdgarIngestionService:
             _refresh_capital_structure_cache(session, company.id, checked_at, reporter)
             _refresh_oil_scenario_overlay_cache(session, company, checked_at, reporter)
             _refresh_earnings_model_cache(session, company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, company.id, checked_at, reporter)
 
             session.commit()
             reporter.complete("Refresh and compute complete.")
@@ -2892,6 +2895,23 @@ def _refresh_earnings_model_cache(
     rows_written = recompute_and_persist_company_earnings_model_points(session, company_id, checked_at=checked_at)
     reporter.step("earnings_models", f"Updated {rows_written} earnings model rows")
     return rows_written
+
+
+def _refresh_company_research_brief_cache(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    reporter: JobReporter,
+) -> int:
+    if not hasattr(session, "get"):
+        return 0
+
+    from app.services.company_research_brief import recompute_and_persist_company_research_brief
+
+    reporter.step("company_research_brief", "Recomputing company research brief cache...")
+    payload = recompute_and_persist_company_research_brief(session, company_id, checked_at=checked_at)
+    reporter.step("company_research_brief", f"Updated {1 if payload is not None else 0} company research brief rows")
+    return 1 if payload is not None else 0
 
 
 def worker_main(argv: list[str] | None = None) -> int:

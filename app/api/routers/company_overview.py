@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from app.api.handlers import market_context as handlers
 from app.api.source_contracts import add_user_visible_route
-from app.api.schemas.company_overview import CompanyPeersResponse
+from app.api.schemas.company_overview import CompanyPeersResponse, CompanyResearchBriefResponse
 
 
 def build_router() -> APIRouter:
@@ -15,5 +15,12 @@ def build_router() -> APIRouter:
         handlers.company_peers,
         methods=["GET"],
         response_model=CompanyPeersResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/brief",
+        handlers.company_brief,
+        methods=["GET"],
+        response_model=CompanyResearchBriefResponse,
     )
     return router

@@ -11,6 +11,7 @@ import {
   invalidateApiReadCacheForTicker,
   refreshCompany,
 } from "@/lib/api";
+import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import { recordRecentCompany } from "@/lib/recent-companies";
 import type {
   CompanyFinancialsResponse,
@@ -26,6 +27,8 @@ interface UseCompanyWorkspaceOptions {
   includeInsiders?: boolean;
   includeInstitutional?: boolean;
   includeChartConsole?: boolean;
+  auditPageRoute?: string;
+  auditScenario?: string;
 }
 
 interface LoadCompanyWorkspaceDataResult {
@@ -44,7 +47,9 @@ export function useCompanyWorkspace(
   {
     includeInsiders = false,
     includeInstitutional = false,
-    includeChartConsole = false
+    includeChartConsole = false,
+    auditPageRoute,
+    auditScenario,
   }: UseCompanyWorkspaceOptions = {}
 ) {
   const [data, setData] = useState<CompanyFinancialsResponse | null>(null);
@@ -83,6 +88,21 @@ export function useCompanyWorkspace(
   );
   const refreshState = data?.refresh ?? institutionalData?.refresh ?? insiderData?.refresh ?? null;
 
+  async function runWithAudit<T>(source: string, work: () => Promise<T>): Promise<T> {
+    if (!auditPageRoute || !auditScenario) {
+      return work();
+    }
+
+    return withPerformanceAuditSource(
+      {
+        pageRoute: auditPageRoute,
+        scenario: auditScenario,
+        source,
+      },
+      work
+    );
+  }
+
   useEffect(() => {
     let cancelled = false;
 
@@ -100,7 +120,9 @@ export function useCompanyWorkspace(
         setSettledJobIds([]);
         setRefreshTick(0);
 
-        const result = await loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional });
+        const result = await runWithAudit("company-workspace:initial-load", () =>
+          loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
+        );
         if (cancelled) {
           return;
         }
@@ -143,7 +165,9 @@ export function useCompanyWorkspace(
     setRefreshTick((current) => current + 1);
     invalidateApiReadCacheForTicker(ticker);
 
-    void loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
+    void runWithAudit("company-workspace:reload-after-refresh", () =>
+      loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
+    )
       .then((result) => {
         if (cancelled) {
           return;
@@ -185,7 +209,9 @@ export function useCompanyWorkspace(
       pending = true;
       try {
         invalidateApiReadCacheForTicker(ticker);
-        const result = await loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional });
+        const result = await runWithAudit("company-workspace:poll-refresh", () =>
+          loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
+        );
         if (cancelled) {
           return;
         }
@@ -261,7 +287,7 @@ export function useCompanyWorkspace(
     try {
       setRefreshing(true);
       invalidateApiReadCacheForTicker(ticker);
-      const response = await refreshCompany(ticker, force);
+      const response = await runWithAudit("company-workspace:queue-refresh", () => refreshCompany(ticker, force));
       setError(null);
       setActiveJobId(response.refresh.job_id);
       setChartConsoleEntries([]);

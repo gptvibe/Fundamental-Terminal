@@ -2169,6 +2169,72 @@ export interface CompanyPeersResponse extends ProvenanceEnvelope {
   refresh: RefreshState;
 }
 
+export interface ResearchBriefSnapshotSummaryPayload {
+  latest_filing_type: string | null;
+  latest_period_end: string | null;
+  annual_statement_count: number;
+  price_history_points: number;
+  latest_revenue: number | null;
+  latest_free_cash_flow: number | null;
+  top_segment_name: string | null;
+  top_segment_share_of_revenue: number | null;
+  alert_count: number;
+}
+
+export interface ResearchBriefBusinessQualitySummaryPayload {
+  latest_period_end: string | null;
+  previous_period_end: string | null;
+  annual_statement_count: number;
+  revenue_growth: number | null;
+  operating_margin: number | null;
+  free_cash_flow_margin: number | null;
+  share_dilution: number | null;
+}
+
+export interface CompanyResearchBriefSnapshotSection extends ProvenanceEnvelope {
+  summary: ResearchBriefSnapshotSummaryPayload;
+}
+
+export interface CompanyResearchBriefWhatChangedSection extends ProvenanceEnvelope {
+  activity_overview: CompanyActivityOverviewResponse;
+  changes: CompanyChangesSinceLastFilingResponse;
+  earnings_summary: CompanyEarningsSummaryResponse;
+}
+
+export interface CompanyResearchBriefBusinessQualitySection extends ProvenanceEnvelope {
+  summary: ResearchBriefBusinessQualitySummaryPayload;
+}
+
+export interface CompanyResearchBriefCapitalAndRiskSection extends ProvenanceEnvelope {
+  capital_structure: CompanyCapitalStructureResponse;
+  capital_markets_summary: CompanyCapitalMarketsSummaryResponse;
+  governance_summary: CompanyGovernanceSummaryResponse;
+  ownership_summary: CompanyBeneficialOwnershipSummaryResponse;
+}
+
+export interface CompanyResearchBriefValuationSection extends ProvenanceEnvelope {
+  models: CompanyModelsResponse;
+  peers: CompanyPeersResponse;
+}
+
+export interface CompanyResearchBriefMonitorSection extends ProvenanceEnvelope {
+  activity_overview: CompanyActivityOverviewResponse;
+}
+
+export interface CompanyResearchBriefResponse {
+  company: CompanyPayload | null;
+  schema_version: string;
+  generated_at: string;
+  as_of: string | null;
+  refresh: RefreshState;
+  snapshot: CompanyResearchBriefSnapshotSection;
+  what_changed: CompanyResearchBriefWhatChangedSection;
+  business_quality: CompanyResearchBriefBusinessQualitySection;
+  capital_and_risk: CompanyResearchBriefCapitalAndRiskSection;
+  valuation: CompanyResearchBriefValuationSection;
+  monitor: CompanyResearchBriefMonitorSection;
+}
+
 export interface RefreshQueuedResponse {
   status: "queued";
   ticker: string;

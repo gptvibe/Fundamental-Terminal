@@ -9,6 +9,8 @@ def test_public_route_inventory_remains_stable() -> None:
     expected_routes = {
         ("GET", "/health"),
         ("GET", "/api/internal/cache-metrics"),
+        ("GET", "/api/internal/performance-audit"),
+        ("POST", "/api/internal/performance-audit/reset"),
         ("GET", "/api/jobs/{job_id}/events"),
         ("GET", "/api/companies/search"),
         ("GET", "/api/companies/resolve"),
@@ -41,6 +43,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/{ticker}/sector-context"),
         ("GET", "/api/market-context"),
         ("GET", "/api/source-registry"),
+        ("GET", "/api/companies/{ticker}/brief"),
         ("GET", "/api/companies/{ticker}/peers"),
         ("GET", "/api/companies/{ticker}/filings"),
         ("GET", "/api/companies/{ticker}/beneficial-ownership"),

@@ -33,6 +33,7 @@ import {
   CompanyModelsResponse,
   CompanyOilScenarioResponse,
   CompanyMarketContextResponse,
+  CompanyResearchBriefResponse,
   CompanySectorContextResponse,
   CompanyMetricsTimeseriesResponse,
   CompanyResolutionResponse,
@@ -47,6 +48,15 @@ import {
   FinancialHistoryPoint,
   RefreshQueuedResponse
 } from "@/lib/types";
+import {
+  beginPerformanceAuditNetworkRequest,
+  endPerformanceAuditNetworkRequest,
+  getCurrentPerformanceAuditContext,
+  isPerformanceAuditEnabled,
+  recordPerformanceAuditRequest,
+  type PerformanceAuditContext,
+  type PerformanceAuditCacheDisposition,
+} from "@/lib/performance-audit";
 
 const API_PREFIX = "/backend/api";
 
@@ -71,6 +81,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/segment-history(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/brief(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/oil-scenario(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/oil-scenario-overlay(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -254,54 +265,73 @@ function withApiPrefix(path: string): string {
 }
 
 async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
-  const response = await fetch(withApiPrefix(path), {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
-    },
-    cache: init?.cache,
-    signal: init?.signal
+  return fetchAndParseWithAudit(path, init, {
+    cacheDisposition: "network",
+    backgroundRevalidate: false,
+    context: getCurrentPerformanceAuditContext(),
   });
-
-  if (!response.ok) {
-    throw new Error(`API request failed: ${response.status} ${response.statusText}`);
-  }
-
-  return (await response.json()) as T;
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const readRequest = isReadRequest(init);
+  const auditContext = getCurrentPerformanceAuditContext();
   if (!readRequest) {
-    return fetchAndParse<T>(path, { ...init, cache: "no-store" });
+    return fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, {
+      cacheDisposition: "cache-bypass",
+      backgroundRevalidate: false,
+      context: auditContext,
+    });
   }
 
   if (shouldBypassReadCache(path)) {
-    return fetchAndParse<T>(path, { ...init, cache: "no-store" });
+    return fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, {
+      cacheDisposition: "cache-bypass",
+      backgroundRevalidate: false,
+      context: auditContext,
+    });
   }
 
   const cacheKey = path;
   const cached = readCachedValue<T>(cacheKey, path);
   if (cached && !cached.stale) {
+    recordCachedAudit(path, "GET", "fresh-cache-hit", auditContext);
     return cached.data;
   }
 
   const currentInflight = inflightReads.get(cacheKey) as Promise<T> | undefined;
   if (currentInflight) {
+    recordCachedAudit(path, "GET", "inflight-dedupe", auditContext);
     return currentInflight;
   }
 
   if (cached?.stale) {
-    void revalidateRead(path, cacheKey);
+    recordCachedAudit(path, "GET", "stale-cache-hit", auditContext);
+    void revalidateRead(path, cacheKey, init, {
+      cacheDisposition: "network",
+      backgroundRevalidate: true,
+      context: auditContext,
+    });
     return cached.data;
   }
 
-  return revalidateRead(path, cacheKey, init);
+  return revalidateRead(path, cacheKey, init, {
+    cacheDisposition: "network",
+    backgroundRevalidate: false,
+    context: auditContext,
+  });
 }
 
-async function revalidateRead<T>(path: string, cacheKey: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
-  const request = fetchAndParse<T>(path, { ...init, cache: "no-store" })
+async function revalidateRead<T>(
+  path: string,
+  cacheKey: string,
+  init?: RequestInit & { signal?: AbortSignal },
+  audit?: {
+    cacheDisposition: PerformanceAuditCacheDisposition;
+    backgroundRevalidate: boolean;
+    context: PerformanceAuditContext | null;
+  }
+): Promise<T> {
+  const request = fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, audit)
     .then((payload) => {
       cacheValue(cacheKey, payload);
       return payload;
@@ -312,6 +342,110 @@ async function revalidateRead<T>(path: string, cacheKey: string, init?: RequestI
 
   inflightReads.set(cacheKey, request);
   return request;
+}
+
+async function fetchAndParseWithAudit<T>(
+  path: string,
+  init: (RequestInit & { signal?: AbortSignal }) | undefined,
+  audit:
+    | {
+        cacheDisposition: PerformanceAuditCacheDisposition;
+        backgroundRevalidate: boolean;
+        context: PerformanceAuditContext | null;
+      }
+    | undefined
+): Promise<T> {
+  const startedAt = new Date().toISOString();
+  const startedPerf = isPerformanceAuditEnabled() ? performance.now() : 0;
+  const method = init?.method?.toUpperCase() ?? "GET";
+
+  if (isPerformanceAuditEnabled()) {
+    beginPerformanceAuditNetworkRequest();
+  }
+
+  try {
+    const response = await fetch(withApiPrefix(path), {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {})
+      },
+      cache: init?.cache,
+      signal: init?.signal
+    });
+
+    const shouldMeasureBytes = isPerformanceAuditEnabled();
+    const textPayload = shouldMeasureBytes ? await response.text() : null;
+    const responseBytes = textPayload != null ? new TextEncoder().encode(textPayload).length : null;
+    const durationMs = shouldMeasureBytes ? performance.now() - startedPerf : 0;
+
+    if (!response.ok) {
+      recordPerformanceAuditRequest({
+        context: audit?.context ?? null,
+        startedAt,
+        method,
+        path,
+        cacheDisposition: audit?.cacheDisposition ?? "network",
+        networkRequest: true,
+        backgroundRevalidate: audit?.backgroundRevalidate ?? false,
+        statusCode: response.status,
+        durationMs,
+        responseBytes,
+        error: `API request failed: ${response.status} ${response.statusText}`,
+      });
+      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+    }
+
+    const payload = textPayload != null
+      ? ((textPayload ? JSON.parse(textPayload) : null) as T)
+      : ((await response.json()) as T);
+
+    if (shouldMeasureBytes) {
+      recordPerformanceAuditRequest({
+        context: audit?.context ?? null,
+        startedAt,
+        method,
+        path,
+        cacheDisposition: audit?.cacheDisposition ?? "network",
+        networkRequest: true,
+        backgroundRevalidate: audit?.backgroundRevalidate ?? false,
+        statusCode: response.status,
+        durationMs,
+        responseBytes,
+        error: null,
+      });
+    }
+
+    return payload;
+  } finally {
+    if (isPerformanceAuditEnabled()) {
+      endPerformanceAuditNetworkRequest();
+    }
+  }
+}
+
+function recordCachedAudit(
+  path: string,
+  method: string,
+  cacheDisposition: PerformanceAuditCacheDisposition,
+  context: PerformanceAuditContext | null
+): void {
+  if (!isPerformanceAuditEnabled()) {
+    return;
+  }
+
+  recordPerformanceAuditRequest({
+    context,
+    method,
+    path,
+    cacheDisposition,
+    networkRequest: false,
+    backgroundRevalidate: false,
+    statusCode: null,
+    durationMs: 0,
+    responseBytes: null,
+    error: null,
+  });
 }
 
 export function invalidateApiReadCache(prefix = "", options?: { emitCrossTab?: boolean }): void {
@@ -651,6 +785,16 @@ export function getCompanySectorContext(ticker: string): Promise<CompanySectorCo
 
 export function getGlobalMarketContext(): Promise<CompanyMarketContextResponse> {
   return fetchJson("/market-context");
+}
+
+export function getCompanyResearchBrief(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyResearchBriefResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/brief${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyPeers(

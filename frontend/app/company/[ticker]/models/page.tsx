@@ -26,6 +26,7 @@ import { MODEL_NAMES } from "@/lib/constants";
 import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { describeOilOverlayAvailability, describeOilSupportReason, resolveOilOverlayEvaluationSummary, supportsOilWorkspace } from "@/lib/oil-workspace";
+import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
@@ -106,7 +107,14 @@ export default function CompanyModelsPage() {
         setLoading(true);
         setError(null);
         setSettledJobIds([]);
-        const workspaceData = await loadModelsWorkspaceData(ticker, dupontMode);
+        const workspaceData = await withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]/models",
+            scenario: "models_page",
+            source: "models:workspace-load",
+          },
+          () => loadModelsWorkspaceData(ticker, dupontMode)
+        );
         if (!cancelled) {
           setData(workspaceData.modelData);
           setFinancialData(workspaceData.financialData);
@@ -148,7 +156,14 @@ export default function CompanyModelsPage() {
     let cancelled = false;
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
 
-    void loadModelsWorkspaceData(ticker, dupontMode)
+    void withPerformanceAuditSource(
+      {
+        pageRoute: "/company/[ticker]/models",
+        scenario: "models_page",
+        source: "models:reload-after-refresh",
+      },
+      () => loadModelsWorkspaceData(ticker, dupontMode)
+    )
       .then((workspaceData) => {
         if (cancelled) {
           return;
@@ -190,7 +205,14 @@ export default function CompanyModelsPage() {
 
       pending = true;
       try {
-        const workspaceData = await loadModelsWorkspaceData(ticker, dupontMode);
+        const workspaceData = await withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]/models",
+            scenario: "models_page",
+            source: "models:poll-refresh",
+          },
+          () => loadModelsWorkspaceData(ticker, dupontMode)
+        );
         if (cancelled) {
           return;
         }
@@ -278,7 +300,14 @@ export default function CompanyModelsPage() {
   async function queueRefresh() {
     try {
       setRefreshing(true);
-      const response = await refreshCompany(ticker, true);
+      const response = await withPerformanceAuditSource(
+        {
+          pageRoute: "/company/[ticker]/models",
+          scenario: "models_page",
+          source: "models:queue-refresh",
+        },
+        () => refreshCompany(ticker, true)
+      );
       setError(null);
       setSettledJobIds([]);
       setActiveJobId(response.refresh.job_id);

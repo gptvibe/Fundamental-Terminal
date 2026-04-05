@@ -7,6 +7,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
+from app.performance_audit import install_sqlalchemy_instrumentation
 
 
 engine: Engine | None = None
@@ -25,6 +26,7 @@ def get_engine() -> Engine:
             pool_recycle=settings.db_pool_recycle_seconds,
         )
         SessionLocal.configure(bind=engine)
+        install_sqlalchemy_instrumentation(engine)
     return engine
 
 

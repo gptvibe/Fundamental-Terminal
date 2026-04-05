@@ -258,6 +258,26 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ),
     (
         "GET",
+        "/api/companies/{ticker}/brief",
+    ): _price_sensitive_contract(
+        "ft_company_research_brief",
+        "ft_activity_overview",
+        "ft_changes_since_last_filing",
+        "ft_capital_structure_intelligence",
+        "ft_peer_comparison",
+        "ft_model_engine",
+        "sec_companyfacts",
+        "sec_edgar",
+        "sec_edgar_corresp",
+        "fdic_bankfind_financials",
+        "federal_reserve_fr_y9c",
+        "us_treasury_daily_par_yield_curve",
+        "us_treasury_fiscaldata",
+        "fred",
+        "yahoo_finance",
+    ),
+    (
+        "GET",
         "/api/companies/{ticker}/metrics-timeseries",
     ): _price_sensitive_contract(
         "ft_derived_metrics_engine",

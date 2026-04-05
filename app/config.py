@@ -124,6 +124,8 @@ class Settings:
     refresh_lock_timeout_seconds: int = _int_env("REFRESH_LOCK_TIMEOUT_SECONDS", 900, minimum=30)
     hot_response_cache_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1)
     hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
+    performance_audit_enabled: bool = _bool_env("PERFORMANCE_AUDIT_ENABLED", False)
+    performance_audit_max_records: int = _int_env("PERFORMANCE_AUDIT_MAX_RECORDS", 5000, minimum=100)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()
     valuation_workbench_enabled: bool = os.getenv("VALUATION_WORKBENCH_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
 

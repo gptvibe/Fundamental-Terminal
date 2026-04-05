@@ -17,19 +17,31 @@ import type {
 interface ChangesSinceLastFilingCardProps {
   ticker: string;
   reloadKey?: string | number;
+  initialPayload?: CompanyChangesSinceLastFilingResponse | null;
 }
 
-export function ChangesSinceLastFilingCard({ ticker, reloadKey }: ChangesSinceLastFilingCardProps) {
-  const [payload, setPayload] = useState<CompanyChangesSinceLastFilingResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+export function ChangesSinceLastFilingCard({ ticker, reloadKey, initialPayload = null }: ChangesSinceLastFilingCardProps) {
+  const [payload, setPayload] = useState<CompanyChangesSinceLastFilingResponse | null>(initialPayload);
+  const [loading, setLoading] = useState(initialPayload === null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialPayload) {
+      return;
+    }
+    setPayload(initialPayload);
+    setLoading(false);
+    setError(null);
+  }, [initialPayload]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        setLoading(true);
+        if (initialPayload === null) {
+          setLoading(true);
+        }
         setError(null);
         const next = await getCompanyChangesSinceLastFiling(ticker);
         if (!cancelled) {
@@ -40,7 +52,7 @@ export function ChangesSinceLastFilingCard({ ticker, reloadKey }: ChangesSinceLa
           setError(nextError instanceof Error ? nextError.message : "Unable to load filing changes");
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && initialPayload === null) {
           setLoading(false);
         }
       }
@@ -50,7 +62,7 @@ export function ChangesSinceLastFilingCard({ ticker, reloadKey }: ChangesSinceLa
     return () => {
       cancelled = true;
     };
-  }, [reloadKey, ticker]);
+  }, [initialPayload, reloadKey, ticker]);
 
   const topMetricDeltas = useMemo(() => (payload?.metric_deltas ?? []).slice(0, 4), [payload?.metric_deltas]);
   const topRiskIndicators = useMemo(() => (payload?.new_risk_indicators ?? []).slice(0, 4), [payload?.new_risk_indicators]);

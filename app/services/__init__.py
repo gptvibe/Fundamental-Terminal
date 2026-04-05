@@ -42,11 +42,26 @@ from app.services.filing_changes import build_changes_since_last_filing
 from app.services.sec_edgar import EdgarIngestionService, run_refresh_job
 from app.services.status_stream import JobReporter, status_broker
 
+
+def __getattr__(name: str):
+    if name in {
+        "BRIEF_SCHEMA_VERSION",
+        "build_company_research_brief_response",
+        "get_company_research_brief_snapshot",
+        "recompute_and_persist_company_research_brief",
+    }:
+        from app.services import company_research_brief as brief_service
+
+        return getattr(brief_service, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 __all__ = [
     "CompanyCacheSnapshot",
+    "BRIEF_SCHEMA_VERSION",
     "EdgarIngestionService",
     "JobReporter",
     "build_changes_since_last_filing",
+    "build_company_research_brief_response",
     "get_company_beneficial_ownership_reports",
     "get_company_capital_markets_cache_status",
     "get_company_coverage_counts",
@@ -67,6 +82,7 @@ __all__ = [
     "get_company_financials",
     "get_company_filing_insights",
     "get_company_regulated_bank_financials",
+    "get_company_research_brief_snapshot",
     "get_company_form144_cache_status",
     "get_company_form144_filings",
     "get_company_insider_trade_cache_status",
@@ -83,6 +99,7 @@ __all__ = [
     "get_company_snapshots_by_ticker",
     "get_company_snapshot_by_cik",
     "queue_company_refresh",
+    "recompute_and_persist_company_research_brief",
     "run_refresh_job",
     "search_company_snapshots",
     "status_broker",

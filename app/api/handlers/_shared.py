@@ -31,6 +31,8 @@ from app.model_engine.output_normalization import normalize_model_status, standa
 from app.model_engine.models import dupont as dupont_model
 from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
 from app.models.dataset_refresh_state import DatasetRefreshState
+from app.performance_audit import reset as reset_performance_audit_store
+from app.performance_audit import snapshot as snapshot_performance_audit_store
 from app.source_registry import SOURCE_REGISTRY, SourceTier, SourceUsage, build_provenance_entries, build_source_mix, get_source_definition, infer_source_id
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
@@ -39,15 +41,15 @@ from app.services.ownership_analytics import build_ownership_analytics
 from app.services.peer_comparison import build_peer_comparison
 from app.services.capital_structure_intelligence import snapshot_effective_at
 from app.services.segment_analysis import build_segment_analysis
-from app.services import (
+from app.services.cache_queries import (
     CompanyCacheSnapshot,
-    build_changes_since_last_filing,
     get_company_capital_markets_events,
     get_company_comment_letters,
     get_company_comment_letters_cache_status,
     get_company_capital_structure_last_checked,
     get_company_capital_structure_snapshots,
     get_company_coverage_counts,
+    get_company_filing_events_cache_status,
     get_company_earnings_cache_status,
     get_company_earnings_model_cache_status,
     get_company_earnings_model_points,
@@ -74,17 +76,19 @@ from app.services import (
     get_company_snapshot,
     get_company_snapshot_by_cik,
     get_company_snapshots_by_ticker,
-    queue_company_refresh,
     search_company_snapshots,
-    status_broker,
-)
-from app.services.cache_queries import (
     filter_price_history_as_of,
     get_company_beneficial_ownership_reports,
     latest_price_as_of,
     select_point_in_time_financials,
 )
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
+from app.services.company_research_brief import (
+    BRIEF_SCHEMA_VERSION,
+    build_company_research_brief_response,
+    get_company_research_brief_snapshot,
+    recompute_and_persist_company_research_brief,
+)
 from app.services.derived_metrics_mart import (
     build_derived_metric_points,
     build_summary_payload,
@@ -101,6 +105,8 @@ from app.services.market_context import (
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
 from app.services.oil_scenario import build_company_oil_scenario_public_payload
+from app.services.fetch_trigger import queue_company_refresh
+from app.services.filing_changes import build_changes_since_last_filing
 from app.services.oil_scenario_overlay import (
     build_company_oil_scenario_overlay_placeholder,
     get_company_oil_scenario_overlay,
@@ -115,6 +121,7 @@ from app.services.earnings_intelligence import build_earnings_alerts, build_earn
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, EdgarClient, FilingMetadata
+from app.services.status_stream import status_broker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -221,6 +228,16 @@ def healthcheck() -> dict[str, str]:
 def cache_metrics() -> dict[str, dict[str, int]]:
     with _cache_metric_lock:
         return {"metrics": dict(_cache_metric_counts)}
+
+
+@app.get("/api/internal/performance-audit")
+def performance_audit_snapshot() -> dict[str, Any]:
+    return snapshot_performance_audit_store()
+
+
+@app.post("/api/internal/performance-audit/reset")
+def reset_performance_audit() -> dict[str, Any]:
+    return reset_performance_audit_store()
 
 
 @app.get("/api/jobs/{job_id}/events")
@@ -2491,6 +2508,174 @@ def company_sector_context(
         last_refreshed_at=payload.get("last_refreshed_at"),
         source_mix=dict(payload.get("source_mix") or {}),
         confidence_flags=list(payload.get("confidence_flags") or []),
+    )
+
+
+@app.get("/api/companies/{ticker}/brief", response_model=CompanyResearchBriefResponse)
+def company_brief(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyResearchBriefResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        return _empty_company_brief_response(refresh=refresh, as_of=requested_as_of)
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    stored = get_company_research_brief_snapshot(session, snapshot.company.id, as_of=parsed_as_of, schema_version=BRIEF_SCHEMA_VERSION)
+    payload = CompanyResearchBriefResponse.model_validate(stored.payload) if stored is not None else None
+    if payload is None:
+        payload = recompute_and_persist_company_research_brief(session, snapshot.company.id, checked_at=datetime.now(timezone.utc), as_of=parsed_as_of)
+        session.commit()
+
+    if payload is None:
+        return _empty_company_brief_response(refresh=refresh, as_of=requested_as_of)
+
+    return payload.model_copy(update={"refresh": refresh, "as_of": requested_as_of or payload.as_of})
+
+
+def _empty_company_brief_response(*, refresh: RefreshState, as_of: str | None) -> CompanyResearchBriefResponse:
+    empty_activity = CompanyActivityOverviewResponse(
+        company=None,
+        entries=[],
+        alerts=[],
+        summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+        market_context_status=get_cached_market_context_status(),
+        refresh=refresh,
+        error=None,
+        **_empty_provenance_contract("company_missing"),
+    )
+    empty_changes = CompanyChangesSinceLastFilingResponse(
+        company=None,
+        current_filing=None,
+        previous_filing=None,
+        summary=ChangesSinceLastFilingSummaryPayload(),
+        metric_deltas=[],
+        new_risk_indicators=[],
+        segment_shifts=[],
+        share_count_changes=[],
+        capital_structure_changes=[],
+        amended_prior_values=[],
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        **_empty_provenance_contract("company_missing"),
+    )
+    empty_earnings = CompanyEarningsSummaryResponse(
+        company=None,
+        summary=EarningsSummaryPayload(
+            total_releases=0,
+            parsed_releases=0,
+            metadata_only_releases=0,
+            releases_with_guidance=0,
+            releases_with_buybacks=0,
+            releases_with_dividends=0,
+            latest_filing_date=None,
+            latest_report_date=None,
+            latest_reported_period_end=None,
+            latest_revenue=None,
+            latest_operating_income=None,
+            latest_net_income=None,
+            latest_diluted_eps=None,
+        ),
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        error=None,
+    )
+    empty_capital_structure = CompanyCapitalStructureResponse(
+        company=None,
+        latest=None,
+        history=[],
+        last_capital_structure_check=None,
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
+        **_empty_provenance_contract("company_missing", "capital_structure_missing"),
+    )
+    empty_capital_markets = CompanyCapitalMarketsSummaryResponse(
+        company=None,
+        summary=CapitalMarketsSummaryPayload(
+            total_filings=0,
+            late_filer_notices=0,
+            registration_filings=0,
+            prospectus_filings=0,
+            latest_filing_date=None,
+            max_offering_amount=None,
+        ),
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        error=None,
+    )
+    empty_governance = CompanyGovernanceSummaryResponse(
+        company=None,
+        summary=GovernanceSummaryPayload(
+            total_filings=0,
+            definitive_proxies=0,
+            supplemental_proxies=0,
+            filings_with_meeting_date=0,
+            filings_with_exec_comp=0,
+            filings_with_vote_items=0,
+            latest_meeting_date=None,
+            max_vote_item_count=0,
+        ),
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        error=None,
+    )
+    empty_ownership = CompanyBeneficialOwnershipSummaryResponse(
+        company=None,
+        summary=BeneficialOwnershipSummaryPayload(
+            total_filings=0,
+            initial_filings=0,
+            amendments=0,
+            unique_reporting_persons=0,
+            latest_filing_date=None,
+            latest_event_date=None,
+            max_reported_percent=None,
+            chains_with_amendments=0,
+            amendments_with_delta=0,
+            ownership_increase_events=0,
+            ownership_decrease_events=0,
+            ownership_unchanged_events=0,
+            largest_increase_pp=None,
+            largest_decrease_pp=None,
+        ),
+        refresh=refresh,
+        error=None,
+    )
+    empty_models = CompanyModelsResponse(
+        company=None,
+        requested_models=[],
+        models=[],
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        **_empty_provenance_contract("company_missing"),
+    )
+    empty_peers = CompanyPeersResponse(
+        company=None,
+        peer_basis="Cached peer universe",
+        available_companies=[],
+        selected_tickers=[],
+        peers=[],
+        notes={},
+        refresh=refresh,
+        **_empty_provenance_contract("company_missing"),
+    )
+    return CompanyResearchBriefResponse(
+        company=None,
+        schema_version=BRIEF_SCHEMA_VERSION,
+        generated_at=datetime.now(timezone.utc),
+        as_of=as_of,
+        refresh=refresh,
+        snapshot=CompanyResearchBriefSnapshotSection(summary=ResearchBriefSnapshotSummaryPayload(), **_empty_provenance_contract("company_missing")),
+        what_changed=CompanyResearchBriefWhatChangedSection(activity_overview=empty_activity, changes=empty_changes, earnings_summary=empty_earnings, **_empty_provenance_contract("company_missing")),
+        business_quality=CompanyResearchBriefBusinessQualitySection(summary=ResearchBriefBusinessQualitySummaryPayload(), **_empty_provenance_contract("company_missing")),
+        capital_and_risk=CompanyResearchBriefCapitalAndRiskSection(capital_structure=empty_capital_structure, capital_markets_summary=empty_capital_markets, governance_summary=empty_governance, ownership_summary=empty_ownership, **_empty_provenance_contract("company_missing")),
+        valuation=CompanyResearchBriefValuationSection(models=empty_models, peers=empty_peers, **_empty_provenance_contract("company_missing")),
+        monitor=CompanyResearchBriefMonitorSection(activity_overview=empty_activity, **_empty_provenance_contract("company_missing")),
     )
 
 

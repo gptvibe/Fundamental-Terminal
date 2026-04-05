@@ -8,6 +8,7 @@ import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { getWatchlistCalendar, getWatchlistSummary, refreshCompany } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
 import { formatDate, formatPercent } from "@/lib/format";
+import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import type { WatchlistCalendarEventPayload, WatchlistSummaryItemPayload } from "@/lib/types";
 
 type WatchlistFilter = "all" | "attention" | "stale" | "no-note" | "undervalued" | "quality" | "capital-return" | "balance-risk";
@@ -73,10 +74,18 @@ export default function WatchlistPage() {
         setCalendarLoading(true);
         setError(null);
         setCalendarError(null);
-        const [summaryResult, calendarResult] = await Promise.allSettled([
-          getWatchlistSummary(watchlistTickers),
-          getWatchlistCalendar(watchlistTickers),
-        ]);
+        const [summaryResult, calendarResult] = await withPerformanceAuditSource(
+          {
+            pageRoute: "/watchlist",
+            scenario: "watchlist_page",
+            source: "watchlist:initial-load",
+          },
+          () =>
+            Promise.allSettled([
+              getWatchlistSummary(watchlistTickers),
+              getWatchlistCalendar(watchlistTickers),
+            ])
+        );
         if (cancelled) {
           return;
         }
@@ -123,10 +132,18 @@ export default function WatchlistPage() {
 
       pending = true;
       try {
-        const [summaryResult, calendarResult] = await Promise.allSettled([
-          getWatchlistSummary(watchlistTickers),
-          getWatchlistCalendar(watchlistTickers),
-        ]);
+        const [summaryResult, calendarResult] = await withPerformanceAuditSource(
+          {
+            pageRoute: "/watchlist",
+            scenario: "watchlist_page",
+            source: "watchlist:poll-refresh",
+          },
+          () =>
+            Promise.allSettled([
+              getWatchlistSummary(watchlistTickers),
+              getWatchlistCalendar(watchlistTickers),
+            ])
+        );
         if (cancelled) {
           return;
         }
@@ -198,12 +215,27 @@ export default function WatchlistPage() {
   async function handleRefresh(ticker: string) {
     try {
       setRefreshingTicker(ticker);
-      await refreshCompany(ticker);
+      await withPerformanceAuditSource(
+        {
+          pageRoute: "/watchlist",
+          scenario: "watchlist_page",
+          source: "watchlist:queue-refresh",
+        },
+        () => refreshCompany(ticker)
+      );
       showAppToast({ message: `${ticker} refresh queued.`, tone: "info" });
-      const [summaryResult, calendarResult] = await Promise.allSettled([
-        getWatchlistSummary(watchlistTickers),
-        getWatchlistCalendar(watchlistTickers),
-      ]);
+      const [summaryResult, calendarResult] = await withPerformanceAuditSource(
+        {
+          pageRoute: "/watchlist",
+          scenario: "watchlist_page",
+          source: "watchlist:post-refresh-reload",
+        },
+        () =>
+          Promise.allSettled([
+            getWatchlistSummary(watchlistTickers),
+            getWatchlistCalendar(watchlistTickers),
+          ])
+      );
       if (summaryResult.status === "fulfilled") {
         setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
         setError(null);

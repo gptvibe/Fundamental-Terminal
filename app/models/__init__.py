@@ -6,6 +6,7 @@ from app.models.comment_letter import CommentLetter
 from app.models.company import Company
 from app.models.company_macro_snapshot import CompanyMacroSnapshot
 from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
+from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
 from app.models.company_sector_snapshot import CompanySectorSnapshot
 from app.models.dataset_refresh_state import DatasetRefreshState
 from app.models.derived_metric_point import DerivedMetricPoint
@@ -37,6 +38,7 @@ __all__ = [
     "Company",
     "CompanyMacroSnapshot",
     "CompanyOilScenarioOverlaySnapshot",
+    "CompanyResearchBriefSnapshot",
     "CompanySectorSnapshot",
     "DatasetRefreshState",
     "DerivedMetricPoint",

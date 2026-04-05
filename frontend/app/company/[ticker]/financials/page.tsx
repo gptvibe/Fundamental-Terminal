@@ -108,7 +108,7 @@ export default function CompanyFinancialsTabPage() {
     connectionState,
     queueRefresh,
     reloadKey
-  } = useCompanyWorkspace(ticker);
+  } = useCompanyWorkspace(ticker, { auditPageRoute: "/company/[ticker]/financials", auditScenario: "financials_page" });
   const bankMode = Boolean(company?.regulated_entity && financials.some((statement) => statement.regulated_bank));
   const periodSelection = usePeriodSelection(financials);
   const pageFinancials = periodSelection.visibleFinancials;

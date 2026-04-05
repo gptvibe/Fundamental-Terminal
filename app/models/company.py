@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.models.capital_markets_event import CapitalMarketsEvent
     from app.models.capital_structure_snapshot import CapitalStructureSnapshot
     from app.models.comment_letter import CommentLetter
+    from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
     from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
     from app.models.derived_metric_point import DerivedMetricPoint
     from app.models.dataset_refresh_state import DatasetRefreshState
@@ -102,6 +103,11 @@ class Company(Base):
         passive_deletes=True,
     )
     comment_letters: Mapped[list["CommentLetter"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    research_brief_snapshots: Mapped[list["CompanyResearchBriefSnapshot"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

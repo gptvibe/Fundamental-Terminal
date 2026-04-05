@@ -8,13 +8,35 @@ from fastapi import FastAPI
 
 from app.api import register_routers
 from app.api.handlers import _shared as _legacy_api
+from app.performance_audit import PerformanceAuditJSONResponse, begin_request, complete_request, end_request, is_enabled, should_skip_path
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Financial Cache API", version="1.1.0")
+    app = FastAPI(title="Financial Cache API", version="1.1.0", default_response_class=PerformanceAuditJSONResponse)
+
+    @app.middleware("http")
+    async def performance_audit_middleware(request, call_next):
+        if not is_enabled() or should_skip_path(request.url.path):
+            return await call_next(request)
+
+        metrics, token = begin_request(request)
+        response = None
+        try:
+            response = await call_next(request)
+            body = getattr(response, "body", None)
+            if metrics.response_bytes is None and isinstance(body, (bytes, bytearray)):
+                metrics.response_bytes = len(body)
+            complete_request(request, metrics, status_code=response.status_code)
+            return response
+        except Exception as exc:
+            complete_request(request, metrics, status_code=getattr(response, "status_code", 500), error_type=type(exc).__name__)
+            raise
+        finally:
+            end_request(token)
+
     register_routers(app)
     return app
 

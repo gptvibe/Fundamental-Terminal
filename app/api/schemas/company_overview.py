@@ -6,6 +6,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.api.schemas.common import CompanyPayload, Number, ProvenanceEnvelope, RefreshState
+from app.api.schemas.events import CompanyActivityOverviewResponse, CompanyCapitalMarketsSummaryResponse
+from app.api.schemas.financials import CompanyCapitalStructureResponse, CompanyChangesSinceLastFilingResponse
+from app.api.schemas.governance import CompanyGovernanceSummaryResponse
+from app.api.schemas.models import CompanyModelsResponse
+from app.api.schemas.ownership import CompanyBeneficialOwnershipSummaryResponse
+from app.api.schemas.workspace import CompanyEarningsSummaryResponse
 
 
 class PeerOptionPayload(BaseModel):
@@ -62,3 +68,69 @@ class CompanyPeersResponse(ProvenanceEnvelope):
     peers: list[PeerMetricsPayload]
     notes: dict[str, str]
     refresh: RefreshState
+
+
+class ResearchBriefSnapshotSummaryPayload(BaseModel):
+    latest_filing_type: str | None = None
+    latest_period_end: DateType | None = None
+    annual_statement_count: int = 0
+    price_history_points: int = 0
+    latest_revenue: Number = None
+    latest_free_cash_flow: Number = None
+    top_segment_name: str | None = None
+    top_segment_share_of_revenue: Number = None
+    alert_count: int = 0
+
+
+class ResearchBriefBusinessQualitySummaryPayload(BaseModel):
+    latest_period_end: DateType | None = None
+    previous_period_end: DateType | None = None
+    annual_statement_count: int = 0
+    revenue_growth: Number = None
+    operating_margin: Number = None
+    free_cash_flow_margin: Number = None
+    share_dilution: Number = None
+
+
+class CompanyResearchBriefSnapshotSection(ProvenanceEnvelope):
+    summary: ResearchBriefSnapshotSummaryPayload = Field(default_factory=ResearchBriefSnapshotSummaryPayload)
+
+
+class CompanyResearchBriefWhatChangedSection(ProvenanceEnvelope):
+    activity_overview: CompanyActivityOverviewResponse
+    changes: CompanyChangesSinceLastFilingResponse
+    earnings_summary: CompanyEarningsSummaryResponse
+
+
+class CompanyResearchBriefBusinessQualitySection(ProvenanceEnvelope):
+    summary: ResearchBriefBusinessQualitySummaryPayload = Field(default_factory=ResearchBriefBusinessQualitySummaryPayload)
+
+
+class CompanyResearchBriefCapitalAndRiskSection(ProvenanceEnvelope):
+    capital_structure: CompanyCapitalStructureResponse
+    capital_markets_summary: CompanyCapitalMarketsSummaryResponse
+    governance_summary: CompanyGovernanceSummaryResponse
+    ownership_summary: CompanyBeneficialOwnershipSummaryResponse
+
+
+class CompanyResearchBriefValuationSection(ProvenanceEnvelope):
+    models: CompanyModelsResponse
+    peers: CompanyPeersResponse
+
+
+class CompanyResearchBriefMonitorSection(ProvenanceEnvelope):
+    activity_overview: CompanyActivityOverviewResponse
+
+
+class CompanyResearchBriefResponse(BaseModel):
+    company: CompanyPayload | None
+    schema_version: str
+    generated_at: datetime
+    as_of: str | None = None
+    refresh: RefreshState
+    snapshot: CompanyResearchBriefSnapshotSection
+    what_changed: CompanyResearchBriefWhatChangedSection
+    business_quality: CompanyResearchBriefBusinessQualitySection
+    capital_and_risk: CompanyResearchBriefCapitalAndRiskSection
+    valuation: CompanyResearchBriefValuationSection
+    monitor: CompanyResearchBriefMonitorSection

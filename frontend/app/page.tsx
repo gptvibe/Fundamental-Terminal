@@ -14,6 +14,7 @@ import { getGlobalMarketContext, getSourceRegistry, getWatchlistSummary, resolve
 import { showAppToast } from "@/lib/app-toast";
 import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
 import { formatDate, formatPercent, titleCase } from "@/lib/format";
+import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import {
   readRecentCompanies,
   recordRecentCompany,
@@ -260,7 +261,14 @@ export default function HomePage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await searchCompanies(searchQuery, { refresh: false, signal });
+      const response = await withPerformanceAuditSource(
+        {
+          pageRoute: "/",
+          scenario: "homepage_search",
+          source: "home:autocomplete-search",
+        },
+        () => searchCompanies(searchQuery, { refresh: false, signal })
+      );
       setData(response);
       setActiveSuggestionIndex(0);
     } catch (nextError) {
@@ -316,7 +324,14 @@ export default function HomePage() {
     }
 
     try {
-      const resolution = await resolveCompanyIdentifier(trimmedSearchText);
+      const resolution = await withPerformanceAuditSource(
+        {
+          pageRoute: "/",
+          scenario: "homepage_search",
+          source: "home:resolve-company",
+        },
+        () => resolveCompanyIdentifier(trimmedSearchText)
+      );
       if (resolution.resolved && resolution.ticker) {
         setQuery(resolution.ticker);
         goToTicker(resolution.ticker, destination, {

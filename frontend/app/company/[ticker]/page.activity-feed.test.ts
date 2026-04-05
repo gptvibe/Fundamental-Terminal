@@ -7,15 +7,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import CompanyResearchBriefPage from "@/app/company/[ticker]/page";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import {
-  getCompanyActivityOverview,
-  getCompanyBeneficialOwnershipSummary,
-  getCompanyCapitalMarketsSummary,
-  getCompanyCapitalStructure,
-  getCompanyChangesSinceLastFiling,
-  getCompanyEarningsSummary,
-  getCompanyGovernanceSummary,
-  getCompanyModels,
-  getCompanyPeers,
+  getCompanyResearchBrief,
 } from "@/lib/api";
 
 vi.mock("next/navigation", () => ({
@@ -125,15 +117,7 @@ vi.mock("@/components/models/investment-summary-panel", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
-  getCompanyActivityOverview: vi.fn(),
-  getCompanyBeneficialOwnershipSummary: vi.fn(),
-  getCompanyCapitalMarketsSummary: vi.fn(),
-  getCompanyCapitalStructure: vi.fn(),
-  getCompanyChangesSinceLastFiling: vi.fn(),
-  getCompanyEarningsSummary: vi.fn(),
-  getCompanyGovernanceSummary: vi.fn(),
-  getCompanyModels: vi.fn(),
-  getCompanyPeers: vi.fn(),
+  getCompanyResearchBrief: vi.fn(),
 }));
 
 const refresh = { triggered: false, reason: "fresh", ticker: "ACME", job_id: null } as const;
@@ -188,15 +172,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
   vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock());
-  vi.mocked(getCompanyActivityOverview).mockResolvedValue(buildActivityOverviewResponse());
-  vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue(buildChangesResponse());
-  vi.mocked(getCompanyEarningsSummary).mockResolvedValue(buildEarningsSummaryResponse());
-  vi.mocked(getCompanyCapitalStructure).mockResolvedValue(buildCapitalStructureResponse());
-  vi.mocked(getCompanyCapitalMarketsSummary).mockResolvedValue(buildCapitalMarketsSummaryResponse());
-  vi.mocked(getCompanyGovernanceSummary).mockResolvedValue(buildGovernanceSummaryResponse());
-  vi.mocked(getCompanyBeneficialOwnershipSummary).mockResolvedValue(buildOwnershipSummaryResponse());
-  vi.mocked(getCompanyModels).mockResolvedValue(buildModelsResponse());
-  vi.mocked(getCompanyPeers).mockResolvedValue(buildPeersResponse());
+  vi.mocked(getCompanyResearchBrief).mockResolvedValue(buildResearchBriefResponse());
 });
 
 describe("CompanyResearchBriefPage", () => {
@@ -262,39 +238,51 @@ describe("CompanyResearchBriefPage", () => {
         segment_analysis: null,
       },
     }));
-    vi.mocked(getCompanyActivityOverview).mockResolvedValue({
-      ...buildActivityOverviewResponse(),
-      entries: [],
-      alerts: [],
-      summary: { total: 0, high: 0, medium: 0, low: 0 },
-    });
-    vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue({
-      ...buildChangesResponse(),
-      current_filing: null,
-      previous_filing: null,
-      metric_deltas: [],
-      new_risk_indicators: [],
-      segment_shifts: [],
-      share_count_changes: [],
-      capital_structure_changes: [],
-      amended_prior_values: [],
-      summary: {
-        filing_type: null,
-        current_period_start: null,
-        current_period_end: null,
-        previous_period_start: null,
-        previous_period_end: null,
-        metric_delta_count: 0,
-        new_risk_indicator_count: 0,
-        segment_shift_count: 0,
-        share_count_change_count: 0,
-        capital_structure_change_count: 0,
-        amended_prior_value_count: 0,
+    vi.mocked(getCompanyResearchBrief).mockResolvedValue(buildResearchBriefResponse({
+      what_changed: {
+        activity_overview: {
+          ...buildActivityOverviewResponse(),
+          entries: [],
+          alerts: [],
+          summary: { total: 0, high: 0, medium: 0, low: 0 },
+        },
+        changes: {
+          ...buildChangesResponse(),
+          current_filing: null,
+          previous_filing: null,
+          metric_deltas: [],
+          new_risk_indicators: [],
+          segment_shifts: [],
+          share_count_changes: [],
+          capital_structure_changes: [],
+          amended_prior_values: [],
+          summary: {
+            filing_type: null,
+            current_period_start: null,
+            current_period_end: null,
+            previous_period_start: null,
+            previous_period_end: null,
+            metric_delta_count: 0,
+            new_risk_indicator_count: 0,
+            segment_shift_count: 0,
+            share_count_change_count: 0,
+            capital_structure_change_count: 0,
+            amended_prior_value_count: 0,
+          },
+        },
+        earnings_summary: buildEarningsSummaryResponse(),
       },
-    });
-    vi.mocked(getCompanyCapitalStructure).mockResolvedValue(buildCapitalStructureResponse());
-    vi.mocked(getCompanyModels).mockResolvedValue({ ...buildModelsResponse(), models: [] });
-    vi.mocked(getCompanyPeers).mockResolvedValue({ ...buildPeersResponse(), peers: [] });
+      capital_and_risk: {
+        capital_structure: buildCapitalStructureResponse(),
+        capital_markets_summary: buildCapitalMarketsSummaryResponse(),
+        governance_summary: buildGovernanceSummaryResponse(),
+        ownership_summary: buildOwnershipSummaryResponse(),
+      },
+      valuation: {
+        models: { ...buildModelsResponse(), models: [] },
+        peers: { ...buildPeersResponse(), peers: [] },
+      },
+    }));
 
     render(React.createElement(CompanyResearchBriefPage));
 
@@ -413,6 +401,89 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
     connectionState: "open",
     queueRefresh: vi.fn(),
     reloadKey: "brief-1",
+    ...overrides,
+  };
+}
+
+function buildResearchBriefResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    company: { ticker: "ACME", name: "Acme Corp", cache_state: "fresh" },
+    schema_version: "company_research_brief_v1",
+    generated_at: "2026-03-10T00:00:00Z",
+    as_of: "2025-12-31",
+    refresh,
+    snapshot: {
+      summary: {
+        latest_filing_type: "10-K",
+        latest_period_end: "2025-12-31",
+        annual_statement_count: 2,
+        price_history_points: 3,
+        latest_revenue: 6200,
+        latest_free_cash_flow: 1280,
+        top_segment_name: "Core Platform",
+        top_segment_share_of_revenue: 0.661,
+        alert_count: 3,
+      },
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    what_changed: {
+      activity_overview: buildActivityOverviewResponse(),
+      changes: buildChangesResponse(),
+      earnings_summary: buildEarningsSummaryResponse(),
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    business_quality: {
+      summary: {
+        latest_period_end: "2025-12-31",
+        previous_period_end: "2024-12-31",
+        annual_statement_count: 2,
+        revenue_growth: 0.0877,
+        operating_margin: 0.2258,
+        free_cash_flow_margin: 0.2064,
+        share_dilution: 0.01,
+      },
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    capital_and_risk: {
+      capital_structure: buildCapitalStructureResponse(),
+      capital_markets_summary: buildCapitalMarketsSummaryResponse(),
+      governance_summary: buildGovernanceSummaryResponse(),
+      ownership_summary: buildOwnershipSummaryResponse(),
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    valuation: {
+      models: buildModelsResponse(),
+      peers: buildPeersResponse(),
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    monitor: {
+      activity_overview: buildActivityOverviewResponse(),
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
     ...overrides,
   };
 }

@@ -310,6 +310,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Latest-versus-prior filing comparison derived from cached SEC statements and amendment history.",
     ),
+    "ft_company_research_brief": SourceDefinition(
+        source_id="ft_company_research_brief",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Company Research Brief",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Server-composed company brief assembled from persisted official-derived summaries and labeled price-sensitive sections.",
+    ),
     "ft_snapshot_history": SourceDefinition(
         source_id="ft_snapshot_history",
         tier="derived_from_official",
