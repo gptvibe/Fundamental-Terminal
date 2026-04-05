@@ -14,6 +14,7 @@ import {
   getLatestModelEvaluation,
   getCompanyModels,
   getCompanyPeers,
+  getSourceRegistry,
   getWatchlistCalendar,
   getWatchlistSummary,
 } from "@/lib/api";
@@ -115,6 +116,27 @@ describe("api route stability", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/watchlist/calendar?tickers=AAPL&tickers=MSFT",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("keeps source registry helper path unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        strict_official_mode: false,
+        generated_at: "2026-04-05T00:00:00Z",
+        sources: [],
+        health: { total_companies_cached: 0, average_data_age_seconds: null, recent_error_window_hours: 72, sources_with_recent_errors: [] },
+      }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSourceRegistry();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/source-registry",
       expect.objectContaining({ cache: "no-store" })
     );
   });

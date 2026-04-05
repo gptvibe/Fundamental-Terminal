@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.api.source_contracts import ConfidencePenaltyRule, SourceContract, UIDisclosureRequirement
+from app.source_registry import SOURCE_REGISTRY
 
 
 EndpointKey = tuple[str, str]
@@ -147,6 +148,16 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ("GET", "/api/jobs/{job_id}/events"): _control_plane_contract(),
     ("GET", "/api/companies/search"): _official_only_contract("sec_edgar", "fdic_bankfind_institutions"),
     ("GET", "/api/companies/resolve"): _official_only_contract("sec_edgar"),
+    (
+        "GET",
+        "/api/source-registry",
+    ): SourceContract(
+        allowed_source_ids=tuple(sorted(SOURCE_REGISTRY.keys())),
+        fallback_permitted=True,
+        strict_official_behavior="not_applicable",
+        confidence_penalty_rules=(),
+        ui_disclosure_requirements=(),
+    ),
     (
         "GET",
         "/api/screener/filters",

@@ -56,6 +56,42 @@ export interface ProvenanceEnvelope {
   confidence_flags: string[];
 }
 
+export interface SourceRegistryEntryPayload {
+  source_id: string;
+  source_tier: SourceTier;
+  display_label: string;
+  url: string;
+  default_freshness_ttl_seconds: number;
+  disclosure_note: string;
+  strict_official_mode_state: "available" | "disabled";
+  strict_official_mode_note: string;
+}
+
+export interface SourceRegistryErrorPayload {
+  source_id: string;
+  source_tier: SourceTier;
+  display_label: string;
+  affected_dataset_ids: string[];
+  affected_company_count: number;
+  failure_count: number;
+  last_error: string;
+  last_error_at: string;
+}
+
+export interface SourceRegistryHealthPayload {
+  total_companies_cached: number;
+  average_data_age_seconds: number | null;
+  recent_error_window_hours: number;
+  sources_with_recent_errors: SourceRegistryErrorPayload[];
+}
+
+export interface SourceRegistryResponse {
+  strict_official_mode: boolean;
+  generated_at: string;
+  sources: SourceRegistryEntryPayload[];
+  health: SourceRegistryHealthPayload;
+}
+
 export interface RegulatedEntityPayload {
   issuer_type: "bank" | "bank_holding_company";
   reporting_basis: "fdic_call_report" | "fr_y9c" | "mixed_regulatory";

@@ -15,6 +15,7 @@ from app.api.routers.ownership import build_router as build_ownership_router
 from app.api.routers.screener import build_router as build_screener_router
 from app.api.routers.search import build_router as build_search_router
 from app.api.routers.sector_context import build_router as build_sector_context_router
+from app.api.routers.source_registry import build_router as build_source_registry_router
 from app.api.routers.workspace import build_router as build_workspace_router
 
 
@@ -31,6 +32,7 @@ ROUTER_BUILDERS = (
     build_models_router,
     build_market_context_router,
     build_sector_context_router,
+    build_source_registry_router,
     build_workspace_router,
 )
 

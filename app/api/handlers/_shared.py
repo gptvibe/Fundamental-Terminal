@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import *
@@ -29,7 +30,8 @@ from app.model_engine.engine import ModelEngine, build_company_dataset, build_ma
 from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
 from app.model_engine.models import dupont as dupont_model
 from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
-from app.source_registry import SourceTier, SourceUsage, build_provenance_entries, build_source_mix, infer_source_id
+from app.models.dataset_refresh_state import DatasetRefreshState
+from app.source_registry import SOURCE_REGISTRY, SourceTier, SourceUsage, build_provenance_entries, build_source_mix, get_source_definition, infer_source_id
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -112,7 +114,7 @@ from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
-from app.services.sec_edgar import EdgarClient, FilingMetadata
+from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, EdgarClient, FilingMetadata
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -145,6 +147,33 @@ MAX_FILING_TIMELINE_ITEMS = 60
 WATCHLIST_CALENDAR_WINDOW_DAYS = 90
 WATCHLIST_PROJECTED_FILING_FORMS = {"10-K", "10-Q"}
 DEFAULT_FILING_LAG_DAYS = {"10-Q": 40, "10-K": 60}
+SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS = 72
+STRICT_OFFICIAL_DISABLED_SOURCE_TIERS = {"commercial_fallback", "manual_override"}
+SOURCE_REGISTRY_TIER_ORDER: dict[SourceTier, int] = {
+    "official_regulator": 0,
+    "official_statistical": 1,
+    "official_treasury_or_fed": 2,
+    "derived_from_official": 3,
+    "commercial_fallback": 4,
+    "manual_override": 5,
+}
+SOURCE_REGISTRY_DATASET_SOURCE_IDS: dict[str, tuple[str, ...]] = {
+    "financials": ("sec_companyfacts",),
+    "prices": ("yahoo_finance",),
+    "insiders": ("sec_edgar",),
+    "form144": ("sec_edgar",),
+    "earnings": ("sec_edgar",),
+    "earnings_models": ("ft_model_engine",),
+    "institutional": ("sec_edgar",),
+    "beneficial_ownership": ("sec_edgar",),
+    "filings": ("sec_edgar",),
+    "capital_markets": ("sec_edgar",),
+    "comment_letters": ("sec_edgar_corresp",),
+    "proxy": ("sec_edgar",),
+    "derived_metrics": ("ft_derived_metrics_mart",),
+    "oil_scenario_overlay": ("ft_oil_scenario_overlay",),
+    "capital_structure": ("ft_capital_structure_intelligence",),
+}
 ALLOWED_SEC_EMBED_HOSTS = {"www.sec.gov", "sec.gov", "data.sec.gov"}
 ALLOWED_SEC_EMBED_MIME_PREFIXES = ("text/html", "application/html", "application/xhtml+xml", "text/plain")
 ALLOWED_SEC_EMBED_EXTENSIONS = (".htm", ".html", ".xhtml", ".txt")
@@ -3079,6 +3108,21 @@ def watchlist_calendar(
         window_start=window_start,
         window_end=window_end,
         events=events,
+    )
+
+
+@app.get("/api/source-registry", response_model=SourceRegistryResponse)
+def source_registry(
+    session: Session = Depends(get_db_session),
+) -> SourceRegistryResponse:
+    generated_at = datetime.now(timezone.utc)
+    sources = [_build_source_registry_entry_payload(source_id) for source_id in _sorted_source_registry_ids()]
+    health = _build_source_registry_health_payload(session, now=generated_at)
+    return SourceRegistryResponse(
+        strict_official_mode=settings.strict_official_mode,
+        generated_at=generated_at,
+        sources=sources,
+        health=health,
     )
 
 
@@ -7260,6 +7304,159 @@ def _normalize_watchlist_tickers(raw_tickers: list[str]) -> list[str]:
 
 def _watchlist_calendar_today() -> DateType:
     return datetime.now(timezone.utc).date()
+
+
+def _sorted_source_registry_ids() -> list[str]:
+    return sorted(
+        SOURCE_REGISTRY.keys(),
+        key=lambda source_id: (
+            SOURCE_REGISTRY_TIER_ORDER.get(SOURCE_REGISTRY[source_id].tier, 99),
+            SOURCE_REGISTRY[source_id].display_label,
+            source_id,
+        ),
+    )
+
+
+def _build_source_registry_entry_payload(source_id: str) -> SourceRegistryEntryPayload:
+    definition = SOURCE_REGISTRY[source_id]
+    disabled_in_current_mode = settings.strict_official_mode and definition.tier in STRICT_OFFICIAL_DISABLED_SOURCE_TIERS
+    if disabled_in_current_mode:
+        strict_note = "Strict official mode is enabled, so this fallback source is currently suppressed."
+    elif settings.strict_official_mode:
+        strict_note = "Strict official mode is enabled and this source remains available because it is official/public or derived from official inputs."
+    else:
+        strict_note = "Strict official mode is disabled, so this source is currently available."
+    return SourceRegistryEntryPayload(
+        source_id=definition.source_id,
+        source_tier=definition.tier,
+        display_label=definition.display_label,
+        url=definition.url,
+        default_freshness_ttl_seconds=definition.default_freshness_ttl_seconds,
+        disclosure_note=definition.disclosure_note,
+        strict_official_mode_state="disabled" if disabled_in_current_mode else "available",
+        strict_official_mode_note=strict_note,
+    )
+
+
+def _build_source_registry_health_payload(
+    session: Session,
+    *,
+    now: datetime,
+) -> SourceRegistryHealthPayload:
+    cached_company_checks = [last_checked for last_checked in session.execute(select(_source_registry_latest_checks_subquery().c.last_checked)).scalars() if last_checked is not None]
+    normalized_checks = [_normalize_utc_datetime(last_checked) for last_checked in cached_company_checks]
+    ages = [max((now - last_checked).total_seconds(), 0.0) for last_checked in normalized_checks if last_checked is not None]
+    average_age_seconds = (sum(ages) / len(ages)) if ages else None
+    return SourceRegistryHealthPayload(
+        total_companies_cached=len(ages),
+        average_data_age_seconds=average_age_seconds,
+        recent_error_window_hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
+        sources_with_recent_errors=_build_source_registry_error_payloads(session, now=now),
+    )
+
+
+def _build_source_registry_error_payloads(
+    session: Session,
+    *,
+    now: datetime,
+) -> list[SourceRegistryErrorPayload]:
+    cutoff = now - timedelta(hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS)
+    rows = session.execute(
+        select(
+            DatasetRefreshState.dataset,
+            DatasetRefreshState.company_id,
+            DatasetRefreshState.failure_count,
+            DatasetRefreshState.last_error,
+            DatasetRefreshState.updated_at,
+        ).where(
+            DatasetRefreshState.last_error.is_not(None),
+            DatasetRefreshState.updated_at >= cutoff,
+        )
+    ).all()
+
+    aggregates: dict[str, dict[str, Any]] = {}
+    for dataset_id, company_id, failure_count, last_error, updated_at in rows:
+        for source_id in SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(str(dataset_id), ()): 
+            definition = get_source_definition(source_id)
+            if definition is None or not last_error:
+                continue
+            aggregate = aggregates.setdefault(
+                source_id,
+                {
+                    "source_id": source_id,
+                    "source_tier": definition.tier,
+                    "display_label": definition.display_label,
+                    "affected_dataset_ids": set(),
+                    "affected_company_ids": set(),
+                    "failure_count": 0,
+                    "last_error": str(last_error),
+                    "last_error_at": _normalize_utc_datetime(updated_at),
+                },
+            )
+            aggregate["affected_dataset_ids"].add(str(dataset_id))
+            aggregate["affected_company_ids"].add(int(company_id))
+            aggregate["failure_count"] += int(failure_count or 1)
+            normalized_updated_at = _normalize_utc_datetime(updated_at)
+            if normalized_updated_at >= aggregate["last_error_at"]:
+                aggregate["last_error_at"] = normalized_updated_at
+                aggregate["last_error"] = str(last_error)
+
+    return [
+        SourceRegistryErrorPayload(
+            source_id=str(aggregate["source_id"]),
+            source_tier=aggregate["source_tier"],
+            display_label=str(aggregate["display_label"]),
+            affected_dataset_ids=sorted(str(item) for item in aggregate["affected_dataset_ids"]),
+            affected_company_count=len(aggregate["affected_company_ids"]),
+            failure_count=int(aggregate["failure_count"]),
+            last_error=str(aggregate["last_error"]),
+            last_error_at=aggregate["last_error_at"],
+        )
+        for aggregate in sorted(
+            aggregates.values(),
+            key=lambda item: (
+                -item["last_error_at"].timestamp(),
+                str(item["display_label"]),
+            ),
+        )
+    ]
+
+
+def _source_registry_latest_checks_subquery():
+    statement_checks = (
+        select(
+            FinancialStatement.company_id.label("company_id"),
+            func.max(FinancialStatement.last_checked).label("last_checked"),
+        )
+        .where(FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE)
+        .group_by(FinancialStatement.company_id)
+        .subquery()
+    )
+
+    refresh_checks = (
+        select(
+            DatasetRefreshState.company_id.label("company_id"),
+            func.max(DatasetRefreshState.last_checked).label("last_checked"),
+        )
+        .where(DatasetRefreshState.dataset == "financials")
+        .group_by(DatasetRefreshState.company_id)
+        .subquery()
+    )
+
+    return (
+        select(
+            statement_checks.c.company_id.label("company_id"),
+            func.coalesce(refresh_checks.c.last_checked, statement_checks.c.last_checked).label("last_checked"),
+        )
+        .outerjoin(refresh_checks, refresh_checks.c.company_id == statement_checks.c.company_id)
+        .subquery()
+    )
+
+
+def _normalize_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _build_watchlist_calendar_company_events(

@@ -10,7 +10,7 @@ import { StatusPill } from "@/components/ui/status-pill";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { ACTIVE_JOB_EVENT, clearStoredActiveJob, readStoredActiveJob, type StoredActiveJob } from "@/lib/active-job";
-import { getGlobalMarketContext, getWatchlistSummary, resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
+import { getGlobalMarketContext, getSourceRegistry, getWatchlistSummary, resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
 import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
 import { formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -28,6 +28,7 @@ import type {
   ConsoleEntry,
   MarketFredSeriesPayload,
   RefreshState,
+  SourceRegistryResponse,
   WatchlistSummaryItemPayload,
 } from "@/lib/types";
 
@@ -53,6 +54,12 @@ interface HomeMacroCard {
   detail: string;
 }
 
+interface HomeDataHealthCard {
+  label: string;
+  value: string;
+  detail: string;
+}
+
 export default function HomePage() {
   const router = useRouter();
   const homeSearchFormRef = useRef<HTMLFormElement>(null);
@@ -66,6 +73,8 @@ export default function HomePage() {
   const [recentJob, setRecentJob] = useState<StoredActiveJob | null>(null);
   const [macroContext, setMacroContext] = useState<CompanyMarketContextResponse | null>(null);
   const [macroError, setMacroError] = useState<string | null>(null);
+  const [sourceRegistry, setSourceRegistry] = useState<SourceRegistryResponse | null>(null);
+  const [sourceRegistryError, setSourceRegistryError] = useState<string | null>(null);
   const [recentLaunches, setRecentLaunches] = useState<RecentCompany[]>([]);
   const [watchlistSummary, setWatchlistSummary] = useState<WatchlistSummaryItemPayload[]>([]);
   const [watchlistSummaryLoading, setWatchlistSummaryLoading] = useState(false);
@@ -92,6 +101,7 @@ export default function HomePage() {
   const savedFocus = useMemo(() => savedCompanies.slice(0, 4), [savedCompanies]);
   const recentChanges = useMemo(() => buildRecentChangeFeed(watchlistSummary, consoleEntries), [watchlistSummary, consoleEntries]);
   const macroSnapshot = useMemo(() => buildMacroSnapshot(macroContext), [macroContext]);
+  const dataHealthSnapshot = useMemo(() => buildDataHealthSnapshot(sourceRegistry), [sourceRegistry]);
   const liveFeedLabel = useMemo(() => getLiveFeedLabel(connectionState, recentJob), [connectionState, recentJob]);
 
   useEffect(() => {
@@ -125,42 +135,47 @@ export default function HomePage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function loadMacroContext() {
-      try {
-        const payload = await getGlobalMarketContext();
-        if (cancelled) {
-          return;
-        }
-        setMacroContext(payload);
+    async function loadTopRailData() {
+      const [macroResult, sourceRegistryResult] = await Promise.allSettled([getGlobalMarketContext(), getSourceRegistry()]);
+      if (cancelled) {
+        return;
+      }
+
+      if (macroResult.status === "fulfilled") {
+        setMacroContext(macroResult.value);
         setMacroError(null);
-      } catch (nextError) {
-        if (cancelled) {
-          return;
-        }
-        setMacroError(nextError instanceof Error ? nextError.message : "Unable to load macro snapshot");
+      } else {
+        setMacroError(macroResult.reason instanceof Error ? macroResult.reason.message : "Unable to load macro snapshot");
+      }
+
+      if (sourceRegistryResult.status === "fulfilled") {
+        setSourceRegistry(sourceRegistryResult.value);
+        setSourceRegistryError(null);
+      } else {
+        setSourceRegistryError(sourceRegistryResult.reason instanceof Error ? sourceRegistryResult.reason.message : "Unable to load data health");
       }
     }
 
     function onVisibilityChange() {
       if (document.visibilityState === "visible") {
-        void loadMacroContext();
+        void loadTopRailData();
       }
     }
 
     function onWindowFocus() {
-      void loadMacroContext();
+      void loadTopRailData();
     }
 
     const intervalId = window.setInterval(() => {
       if (document.visibilityState === "visible") {
-        void loadMacroContext();
+        void loadTopRailData();
       }
     }, MACRO_REFRESH_INTERVAL_MS);
 
     window.addEventListener("focus", onWindowFocus);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
-    void loadMacroContext();
+    void loadTopRailData();
 
     return () => {
       cancelled = true;
@@ -492,6 +507,48 @@ export default function HomePage() {
                 ))}
               </div>
             </div>
+
+            <div className="home-data-health">
+              <div className="home-data-health-head">
+                <div>
+                  <span className="home-section-kicker">Cache coverage</span>
+                  <div className="home-data-health-title">Data Health</div>
+                </div>
+                <button type="button" className="ticker-button home-toolbar-link" onClick={() => router.push("/data-sources")}>
+                  Open Data Sources
+                </button>
+              </div>
+              <div className="home-data-health-copy">
+                Official/public sources drive fundamentals, labeled fallbacks stay constrained, and this summary shows how fresh the cached company base looks right now.
+              </div>
+              {sourceRegistryError ? <div className="text-muted">{sourceRegistryError}</div> : null}
+              <div className="home-data-health-grid">
+                {dataHealthSnapshot.cards.map((card) => (
+                  <div key={card.label} className="home-data-health-card">
+                    <div className="home-data-health-label">{card.label}</div>
+                    <div className="home-data-health-value">{card.value}</div>
+                    <div className="home-data-health-detail">{card.detail}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="home-data-health-errors">
+                <div className="home-data-health-errors-title">Sources with recent errors</div>
+                {dataHealthSnapshot.recentErrors.length ? (
+                  <div className="home-data-health-error-list">
+                    {dataHealthSnapshot.recentErrors.map((error) => (
+                      <div key={error.source_id} className="home-data-health-error-item">
+                        <div className="home-data-health-error-name">{error.display_label}</div>
+                        <div className="home-data-health-error-detail">
+                          {error.failure_count} failures across {error.affected_company_count} companies · {formatRelativeMoment(error.last_error_at)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="home-data-health-empty">No recent source errors in the current monitoring window.</div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -802,6 +859,44 @@ function buildMacroSnapshot(context: CompanyMarketContextResponse | null): { tit
   };
 }
 
+function buildDataHealthSnapshot(sourceRegistry: SourceRegistryResponse | null): {
+  cards: HomeDataHealthCard[];
+  recentErrors: SourceRegistryResponse["health"]["sources_with_recent_errors"];
+} {
+  if (!sourceRegistry) {
+    return {
+      cards: [
+        { label: "Companies cached", value: "—", detail: "Loading cache footprint" },
+        { label: "Average age", value: "—", detail: "Loading cache freshness" },
+        { label: "Recent source errors", value: "—", detail: "Loading source-monitoring state" },
+      ],
+      recentErrors: [],
+    };
+  }
+
+  const recentErrors = sourceRegistry.health.sources_with_recent_errors;
+  return {
+    cards: [
+      {
+        label: "Companies cached",
+        value: new Intl.NumberFormat("en-US").format(sourceRegistry.health.total_companies_cached),
+        detail: "Names with cached financial coverage available for workspaces.",
+      },
+      {
+        label: "Average age",
+        value: formatDurationFromSeconds(sourceRegistry.health.average_data_age_seconds),
+        detail: "Mean age of cached company financial refresh timestamps.",
+      },
+      {
+        label: "Recent source errors",
+        value: String(recentErrors.length),
+        detail: `Rolling ${sourceRegistry.health.recent_error_window_hours}h error window.`,
+      },
+    ],
+    recentErrors,
+  };
+}
+
 function findFredSeries(context: CompanyMarketContextResponse, seriesId: string): MarketFredSeriesPayload | null {
   return context.fred_series.find((item) => item.series_id === seriesId) ?? null;
 }
@@ -843,6 +938,22 @@ function formatRelativeMoment(value: string | null | undefined): string {
 
   const days = Math.round(hours / 24);
   return deltaMs >= 0 ? `${days}d ago` : `In ${days}d`;
+}
+
+function formatDurationFromSeconds(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "—";
+  }
+  const totalMinutes = Math.max(Math.round(value / 60), 0);
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m`;
+  }
+  const totalHours = Math.round(totalMinutes / 60);
+  if (totalHours < 48) {
+    return `${totalHours}h`;
+  }
+  const totalDays = Math.round(totalHours / 24);
+  return `${totalDays}d`;
 }
 
 function toTimestamp(value: string | null | undefined): number {

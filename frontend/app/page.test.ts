@@ -11,6 +11,7 @@ const push = vi.fn();
 const mockUseLocalUserData = vi.fn();
 const mockUseJobStream = vi.fn();
 const getGlobalMarketContext = vi.fn();
+const getSourceRegistry = vi.fn();
 const getWatchlistSummary = vi.fn();
 const resolveCompanyIdentifier = vi.fn();
 const searchCompanies = vi.fn();
@@ -33,6 +34,7 @@ vi.mock("@/hooks/use-job-stream", () => ({
 
 vi.mock("@/lib/api", () => ({
   getGlobalMarketContext: (...args: unknown[]) => getGlobalMarketContext(...args),
+  getSourceRegistry: (...args: unknown[]) => getSourceRegistry(...args),
   getWatchlistSummary: (...args: unknown[]) => getWatchlistSummary(...args),
   resolveCompanyIdentifier: (...args: unknown[]) => resolveCompanyIdentifier(...args),
   searchCompanies: (...args: unknown[]) => searchCompanies(...args),
@@ -59,6 +61,7 @@ beforeEach(() => {
   mockUseLocalUserData.mockReset();
   mockUseJobStream.mockReset();
   getGlobalMarketContext.mockReset();
+  getSourceRegistry.mockReset();
   getWatchlistSummary.mockReset();
   resolveCompanyIdentifier.mockReset();
   searchCompanies.mockReset();
@@ -80,6 +83,7 @@ beforeEach(() => {
     connectionState: "idle",
   });
   getGlobalMarketContext.mockResolvedValue(buildMacroContext());
+  getSourceRegistry.mockResolvedValue(buildSourceRegistry());
   getWatchlistSummary.mockResolvedValue({ tickers: [], companies: [] });
   resolveCompanyIdentifier.mockResolvedValue({ resolved: false, ticker: null, name: null, error: "not_found" });
   searchCompanies.mockResolvedValue({ query: "", results: [], refresh: refreshState });
@@ -197,6 +201,8 @@ describe("HomePage", () => {
     expect(screen.getByText("Recent Changes")).toBeTruthy();
     expect(screen.getByText("Late filer notice")).toBeTruthy();
     expect(screen.getByText("Curve still looks restrictive")).toBeTruthy();
+    expect(screen.getByText("Data Health")).toBeTruthy();
+    expect(screen.getByText("Companies cached")).toBeTruthy();
     expect(getWatchlistSummary).toHaveBeenCalledWith(["MSFT", "NVDA"]);
   });
 
@@ -315,5 +321,41 @@ function buildMacroContext() {
     provenance_details: null,
     fetched_at: "2026-03-22T12:00:00Z",
     refresh: refreshState,
+  };
+}
+
+function buildSourceRegistry() {
+  return {
+    strict_official_mode: false,
+    generated_at: "2026-03-22T12:00:00Z",
+    sources: [
+      {
+        source_id: "sec_companyfacts",
+        source_tier: "official_regulator",
+        display_label: "SEC Company Facts (XBRL)",
+        url: "https://data.sec.gov/api/xbrl/companyfacts/",
+        default_freshness_ttl_seconds: 21600,
+        disclosure_note: "Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
+        strict_official_mode_state: "available",
+        strict_official_mode_note: "Strict official mode is disabled, so this source is currently available.",
+      },
+    ],
+    health: {
+      total_companies_cached: 412,
+      average_data_age_seconds: 5400,
+      recent_error_window_hours: 72,
+      sources_with_recent_errors: [
+        {
+          source_id: "yahoo_finance",
+          source_tier: "commercial_fallback",
+          display_label: "Yahoo Finance",
+          affected_dataset_ids: ["prices"],
+          affected_company_count: 3,
+          failure_count: 5,
+          last_error: "timeout",
+          last_error_at: "2026-03-22T11:00:00Z",
+        },
+      ],
+    },
   };
 }

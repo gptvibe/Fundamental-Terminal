@@ -13,6 +13,7 @@ from app.api.schemas.ownership import *
 from app.api.schemas.screener import *
 from app.api.schemas.search import *
 from app.api.schemas.sector_context import *
+from app.api.schemas.source_registry import *
 from app.api.schemas.workspace import *
 
 __all__ = [name for name in globals() if not name.startswith("_")]

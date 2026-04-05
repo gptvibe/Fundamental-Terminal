@@ -41,6 +41,7 @@ import {
   OfficialScreenerMetadataResponse,
   OfficialScreenerSearchRequest,
   OfficialScreenerSearchResponse,
+  SourceRegistryResponse,
   WatchlistCalendarResponse,
   WatchlistSummaryResponse,
   FinancialHistoryPoint,
@@ -79,6 +80,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/metrics(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/metrics-timeseries(?:\?|$)/, policy: { ttlMs: 60_000, staleMs: 180_000 } },
   { pattern: /^\/market-context(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
+  { pattern: /^\/source-registry(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
   { pattern: /^\/watchlist\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
 ];
 
@@ -687,6 +689,10 @@ export function getWatchlistCalendar(tickers: string[]): Promise<WatchlistCalend
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/watchlist/calendar${suffix}`);
+}
+
+export function getSourceRegistry(): Promise<SourceRegistryResponse> {
+  return fetchJson("/source-registry");
 }
 
 export async function getCompanyFinancialHistory(
