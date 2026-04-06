@@ -44,6 +44,57 @@ def test_search_route_supports_conditional_get(monkeypatch):
     _assert_304_on_second_request(client, "/api/companies/search?query=AAPL&refresh=false")
 
 
+def test_search_route_does_not_trigger_refresh_when_refresh_disabled_on_stale_hot_cache(monkeypatch):
+    trigger_calls: list[str] = []
+
+    monkeypatch.setattr(
+        main_module,
+        "_get_hot_cached_payload",
+        lambda *_args, **_kwargs: (
+            {
+                "query": "O",
+                "results": [
+                    {
+                        "ticker": "ON",
+                        "cik": "0001097864",
+                        "name": "ON SEMICONDUCTOR CORP",
+                        "sector": "Semiconductors & Related Devices",
+                        "market_sector": "Technology",
+                        "market_industry": "Semiconductors",
+                        "oil_exposure_type": "non_oil",
+                        "oil_support_status": "unsupported",
+                        "oil_support_reasons": ["non_energy_classification"],
+                        "regulated_entity": None,
+                        "strict_official_mode": False,
+                        "last_checked": datetime.now(timezone.utc).isoformat(),
+                        "last_checked_financials": datetime.now(timezone.utc).isoformat(),
+                        "last_checked_prices": None,
+                        "last_checked_insiders": None,
+                        "last_checked_institutional": None,
+                        "last_checked_filings": None,
+                        "earnings_last_checked": None,
+                        "cache_state": "stale",
+                    }
+                ],
+                "refresh": {"triggered": False, "reason": "stale", "ticker": "O", "job_id": None},
+            },
+            False,
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_trigger_refresh",
+        lambda *_args, **_kwargs: trigger_calls.append("called") or RefreshState(triggered=True, reason="stale", ticker="O", job_id="job-1"),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/search?query=O&refresh=false")
+
+    assert response.status_code == 200
+    assert response.json()["refresh"] == {"triggered": False, "reason": "stale", "ticker": "O", "job_id": None}
+    assert trigger_calls == []
+
+
 def test_financials_route_supports_conditional_get(monkeypatch):
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])

@@ -335,7 +335,7 @@ def search_companies(
     if cached_hot is not None:
         payload, is_fresh = cached_hot
         cached_response = CompanySearchResponse.model_validate(payload)
-        if not is_fresh and _looks_like_ticker(normalized_query):
+        if refresh and not is_fresh and _looks_like_ticker(normalized_query):
             stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
             cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
 

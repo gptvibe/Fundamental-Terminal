@@ -22,7 +22,6 @@ import type {
   FinancialPayload,
 } from "@/lib/types";
 
-const REFRESH_POLL_INTERVAL_MS = 3000;
 const CAPABILITIES: SnapshotSurfaceCapabilities = {
   supports_selected_period: true,
   supports_compare_mode: true,
@@ -85,10 +84,17 @@ export function CapitalStructureIntelligencePanel({
   }, [initialPayload]);
 
   useEffect(() => {
-    void loadCapitalStructure(initialPayload === null);
+    if (initialPayload !== null) {
+      return;
+    }
+
+    void loadCapitalStructure(true);
   }, [initialPayload, loadCapitalStructure, reloadKey]);
 
   useEffect(() => {
+    if (initialPayload !== null) {
+      return;
+    }
     if (!activeJobId || !lastEvent) {
       return;
     }
@@ -97,20 +103,7 @@ export function CapitalStructureIntelligencePanel({
     }
     invalidateApiReadCacheForTicker(ticker);
     void loadCapitalStructure(false);
-  }, [activeJobId, lastEvent, loadCapitalStructure, ticker]);
-
-  useEffect(() => {
-    if (!activeJobId) {
-      return;
-    }
-    if (lastEvent?.status === "completed" || lastEvent?.status === "failed") {
-      return;
-    }
-    const timerId = window.setInterval(() => {
-      void loadCapitalStructure(false);
-    }, REFRESH_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timerId);
-  }, [activeJobId, lastEvent?.status, loadCapitalStructure]);
+  }, [activeJobId, initialPayload, lastEvent, loadCapitalStructure, ticker]);
 
   const latest = payload?.latest ?? null;
   const history = useMemo(() => payload?.history ?? [], [payload]);

@@ -40,8 +40,6 @@ interface LoadCompanyWorkspaceDataResult {
   activeJobId: string | null;
 }
 
-const REFRESH_POLL_INTERVAL_MS = 3000;
-
 export function useCompanyWorkspace(
   ticker: string,
   {
@@ -65,7 +63,6 @@ export function useCompanyWorkspace(
   const [lastChartKey, setLastChartKey] = useState<string | null>(null);
   const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
-  const { consoleEntries: streamEntries, connectionState, lastEvent } = useJobStream(activeJobId);
 
   const financials = useMemo(() => data?.financials ?? [], [data?.financials]);
   const priceHistory = useMemo(() => data?.price_history ?? [], [data?.price_history]);
@@ -87,6 +84,8 @@ export function useCompanyWorkspace(
     [annualStatements]
   );
   const refreshState = data?.refresh ?? institutionalData?.refresh ?? insiderData?.refresh ?? null;
+  const trackedJobId = activeJobId ?? refreshState?.job_id;
+  const { consoleEntries: streamEntries, connectionState, lastEvent } = useJobStream(trackedJobId);
 
   async function runWithAudit<T>(source: string, work: () => Promise<T>): Promise<T> {
     if (!auditPageRoute || !auditScenario) {
@@ -193,61 +192,6 @@ export function useCompanyWorkspace(
   }, [activeJobId, includeInsiders, includeInstitutional, lastEvent, settledJobIds, ticker]);
 
   useEffect(() => {
-    const trackedJobId = activeJobId ?? refreshState?.job_id;
-    if (!trackedJobId || settledJobIds.includes(trackedJobId)) {
-      return;
-    }
-
-    let cancelled = false;
-    let pending = false;
-
-    const poll = async () => {
-      if (pending) {
-        return;
-      }
-
-      pending = true;
-      try {
-        invalidateApiReadCacheForTicker(ticker);
-        const result = await runWithAudit("company-workspace:poll-refresh", () =>
-          loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional })
-        );
-        if (cancelled) {
-          return;
-        }
-
-        setError(null);
-        setData(result.financialData);
-        setInsiderData(result.insiderData);
-        setInstitutionalData(result.institutionalData);
-        setInsiderError(result.insiderError);
-        setInstitutionalError(result.institutionalError);
-        setActiveJobId(result.activeJobId);
-
-        if (result.activeJobId !== trackedJobId) {
-          setSettledJobIds((current) => (current.includes(trackedJobId) ? current : [...current, trackedJobId]));
-          setRefreshTick((current) => current + 1);
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(asErrorMessage(nextError, "Unable to refresh company workspace"));
-        }
-      } finally {
-        pending = false;
-      }
-    };
-
-    const intervalId = window.setInterval(() => {
-      void poll();
-    }, REFRESH_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [activeJobId, includeInsiders, includeInstitutional, refreshState?.job_id, settledJobIds, ticker]);
-
-  useEffect(() => {
     if (!includeChartConsole) {
       setChartConsoleEntries([]);
       setLastChartKey(null);
@@ -276,12 +220,12 @@ export function useCompanyWorkspace(
   }, [financials, includeChartConsole, lastChartKey, priceHistory, ticker]);
 
   useEffect(() => {
-    if (!activeJobId) {
+    if (!trackedJobId) {
       return;
     }
 
-    rememberActiveJob(activeJobId, ticker);
-  }, [activeJobId, ticker]);
+    rememberActiveJob(trackedJobId, ticker);
+  }, [ticker, trackedJobId]);
 
   async function queueRefresh(force = false) {
     try {
@@ -349,7 +293,7 @@ export function useCompanyWorkspace(
     institutionalError,
     refreshing,
     refreshState,
-    activeJobId,
+    activeJobId: trackedJobId,
     consoleEntries,
     connectionState,
     queueRefresh,

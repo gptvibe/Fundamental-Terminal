@@ -64,6 +64,7 @@ vi.mock("@/lib/api", () => ({
   getCompanyOilScenarioOverlay: vi.fn(),
   getCompanySectorContext: vi.fn(),
   getLatestModelEvaluation: vi.fn(),
+  invalidateApiReadCacheForTicker: vi.fn(),
   refreshCompany: vi.fn(),
 }));
 

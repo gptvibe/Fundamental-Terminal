@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Panel } from "@/components/ui/panel";
+import { useJobStream } from "@/hooks/use-job-stream";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
 import { getCompanyDerivedMetricsSummary, getCompanyFinancialRestatements, invalidateApiReadCacheForTicker } from "@/lib/api";
@@ -15,8 +16,6 @@ import type {
   FinancialPayload,
   ModelPayload,
 } from "@/lib/types";
-
-const REFRESH_POLL_INTERVAL_MS = 3000;
 
 type TrafficLightTone = "green" | "yellow" | "red";
 
@@ -60,6 +59,7 @@ export function ResearchBriefPlainEnglishPanel({
   const [metricsError, setMetricsError] = useState<string | null>(null);
   const [restatementError, setRestatementError] = useState<string | null>(null);
   const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
+  const { lastEvent } = useJobStream(refreshJobId);
 
   const loadPanelData = useCallback(
     async (showLoading: boolean) => {
@@ -104,17 +104,16 @@ export function ResearchBriefPlainEnglishPanel({
   }, [loadPanelData, reloadKey]);
 
   useEffect(() => {
-    if (!refreshJobId) {
+    if (!refreshJobId || !lastEvent) {
+      return;
+    }
+    if (lastEvent.status !== "completed" && lastEvent.status !== "failed") {
       return;
     }
 
-    const timerId = window.setInterval(() => {
-      invalidateApiReadCacheForTicker(ticker);
-      void loadPanelData(false);
-    }, REFRESH_POLL_INTERVAL_MS);
-
-    return () => window.clearInterval(timerId);
-  }, [loadPanelData, refreshJobId, ticker]);
+    invalidateApiReadCacheForTicker(ticker);
+    void loadPanelData(false);
+  }, [lastEvent, loadPanelData, refreshJobId, ticker]);
 
   const sections = useMemo(
     () =>

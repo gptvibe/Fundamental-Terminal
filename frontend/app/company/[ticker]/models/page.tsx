@@ -21,7 +21,7 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import { showAppToast } from "@/lib/app-toast";
-import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanyOilScenarioOverlay, getCompanySectorContext, getLatestModelEvaluation, refreshCompany } from "@/lib/api";
+import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanyOilScenarioOverlay, getCompanySectorContext, getLatestModelEvaluation, invalidateApiReadCacheForTicker, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
@@ -42,7 +42,6 @@ interface ModelsWorkspaceData {
   activeJobId: string | null;
 }
 
-const REFRESH_POLL_INTERVAL_MS = 3000;
 const OIL_OVERLAY_EVALUATION_SUITE_KEY = "oil_overlay_point_in_time_v1";
 
 const InvestmentSummaryPanel = dynamic(
@@ -155,6 +154,7 @@ export default function CompanyModelsPage() {
 
     let cancelled = false;
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
+    invalidateApiReadCacheForTicker(ticker);
 
     void withPerformanceAuditSource(
       {
@@ -189,66 +189,6 @@ export default function CompanyModelsPage() {
       cancelled = true;
     };
   }, [activeJobId, lastEvent, settledJobIds, ticker, dupontMode]);
-
-  useEffect(() => {
-    if (!activeJobId || settledJobIds.includes(activeJobId)) {
-      return;
-    }
-
-    let cancelled = false;
-    let pending = false;
-
-    const poll = async () => {
-      if (pending) {
-        return;
-      }
-
-      pending = true;
-      try {
-        const workspaceData = await withPerformanceAuditSource(
-          {
-            pageRoute: "/company/[ticker]/models",
-            scenario: "models_page",
-            source: "models:poll-refresh",
-          },
-          () => loadModelsWorkspaceData(ticker, dupontMode)
-        );
-        if (cancelled) {
-          return;
-        }
-
-        setError(null);
-        setData(workspaceData.modelData);
-        setFinancialData(workspaceData.financialData);
-        setMarketContextData(workspaceData.marketContextData);
-        setSectorContextData(workspaceData.sectorContextData);
-        setCapitalStructureData(workspaceData.capitalStructureData);
-        setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
-        setEvaluationData(workspaceData.evaluationData);
-        setOilOverlayEvaluationData(workspaceData.oilOverlayEvaluationData);
-        setActiveJobId(workspaceData.activeJobId);
-
-        if (workspaceData.activeJobId !== activeJobId) {
-          setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : "Unable to refresh models");
-        }
-      } finally {
-        pending = false;
-      }
-    };
-
-    const intervalId = window.setInterval(() => {
-      void poll();
-    }, REFRESH_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [activeJobId, dupontMode, settledJobIds, ticker]);
 
   useEffect(() => {
     if (!activeJobId) {

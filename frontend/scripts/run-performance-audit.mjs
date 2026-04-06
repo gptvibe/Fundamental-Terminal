@@ -68,6 +68,13 @@ const PAGE_SCENARIOS = [
   },
 ];
 
+const REQUEST_BUDGETS = {
+  "/company/[ticker]": {
+    cold: { maxRequests: 24, maxNetworkRequests: 10 },
+    warm: { maxRequests: 24, maxNetworkRequests: 8 },
+  },
+};
+
 const HOT_ROUTE_CASES = [
   {
     label: "Company search",
@@ -525,11 +532,34 @@ function buildSummary(config, scenarioResults, benchmarkResults) {
     .sort((left, right) => right.count - left.count)
     .slice(0, 10);
 
+  const requestBudgets = scenarioResults
+    .flatMap((result) => {
+      const budget = REQUEST_BUDGETS[result.label]?.[result.phase];
+      if (!budget) {
+        return [];
+      }
+
+      const withinRequestBudget = result.frontend.requestCount <= budget.maxRequests;
+      const withinNetworkBudget = result.frontend.networkRequestCount <= budget.maxNetworkRequests;
+
+      return [{
+        label: result.label,
+        phase: result.phase,
+        maxRequests: budget.maxRequests,
+        maxNetworkRequests: budget.maxNetworkRequests,
+        actualRequests: result.frontend.requestCount,
+        actualNetworkRequests: result.frontend.networkRequestCount,
+        status: withinRequestBudget && withinNetworkBudget ? "pass" : "fail",
+      }];
+    })
+    .sort((left, right) => left.label.localeCompare(right.label) || left.phase.localeCompare(right.phase));
+
   return {
     generatedAt: new Date().toISOString(),
     command: `npm --prefix frontend run audit:performance -- --ticker ${config.ticker}`,
     config,
     pageFlows: scenarioResults,
+    requestBudgets,
     coldWarmPairs,
     slowestRoutes,
     mostOverFetchedFlows,
@@ -555,6 +585,17 @@ function buildMarkdown(summary) {
   lines.push("- Start the backend with `PERFORMANCE_AUDIT_ENABLED=true`.");
   lines.push("- Start the frontend with `NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED=true`.");
   lines.push("- Keep the services on the default local ports or pass `--frontend-url` / `--backend-url`.");
+  lines.push("");
+  lines.push("## Request Budgets");
+  lines.push("");
+  lines.push("| Flow | Phase | Max Requests | Max Network | Actual Requests | Actual Network | Status |");
+  lines.push("| --- | --- | ---: | ---: | ---: | ---: | --- |");
+  for (const budget of summary.requestBudgets ?? []) {
+    lines.push(`| ${budget.label} | ${budget.phase} | ${budget.maxRequests} | ${budget.maxNetworkRequests} | ${budget.actualRequests} | ${budget.actualNetworkRequests} | ${budget.status.toUpperCase()} |`);
+  }
+  if (!(summary.requestBudgets ?? []).length) {
+    lines.push("No request budgets are configured for the audited flows.");
+  }
   lines.push("");
   lines.push("## Top 10 Slowest Routes");
   lines.push("");

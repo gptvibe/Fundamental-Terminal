@@ -9,6 +9,7 @@ import { getCompanyDerivedMetricsSummary } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   getCompanyDerivedMetricsSummary: vi.fn(),
+  invalidateApiReadCacheForTicker: vi.fn(),
 }));
 
 describe("MetricsExplorerPanel", () => {

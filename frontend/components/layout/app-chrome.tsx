@@ -23,12 +23,14 @@ const AUTOCOMPLETE_DEBOUNCE_MS = 180;
 export function AppChrome({ children }: AppChromeProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const routeTicker = useMemo(() => deriveTicker(pathname), [pathname]);
   const desktopInputRef = useRef<HTMLInputElement>(null);
   const mobileInputRef = useRef<HTMLInputElement>(null);
   const searchFormRef = useRef<HTMLFormElement>(null);
   const mobileSearchRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLElement>(null);
-  const [searchText, setSearchText] = useState(deriveTicker(pathname));
+  const [searchText, setSearchText] = useState(routeTicker);
+  const [searchDirty, setSearchDirty] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [autocompleteResults, setAutocompleteResults] = useState<CompanyPayload[]>([]);
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
@@ -46,18 +48,20 @@ export function AppChrome({ children }: AppChromeProps) {
   const isScreenerRoute = pathname === "/screener";
   const normalizedSearchText = useMemo(() => normalizeSearchText(searchText), [searchText]);
   const trimmedSearchText = normalizedSearchText.trim();
-  const showAutocomplete = autocompleteOpen && trimmedSearchText.length > 0;
+  const allowAutocomplete = trimmedSearchText.length > 0 && (!isCompanyRoute || searchDirty || trimmedSearchText !== routeTicker);
+  const showAutocomplete = autocompleteOpen && allowAutocomplete;
   const activeOptionId = showAutocomplete && autocompleteResults.length ? `app-topbar-autocomplete-option-${activeSuggestionIndex}` : undefined;
   const activeMobileOptionId = showAutocomplete && autocompleteResults.length ? `app-mobile-autocomplete-option-${activeSuggestionIndex}` : undefined;
 
   useEffect(() => {
-    setSearchText(deriveTicker(pathname));
+    setSearchText(routeTicker);
+    setSearchDirty(false);
     setAutocompleteOpen(false);
     setAutocompleteResults([]);
     setActiveSuggestionIndex(0);
     setInvalidMessage(null);
     setMobileSearchOpen(false);
-  }, [pathname]);
+  }, [pathname, routeTicker]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -144,7 +148,7 @@ export function AppChrome({ children }: AppChromeProps) {
   }, []);
 
   useEffect(() => {
-    if (!trimmedSearchText) {
+    if (!allowAutocomplete) {
       setAutocompleteResults([]);
       setAutocompleteLoading(false);
       setActiveSuggestionIndex(0);
@@ -177,7 +181,7 @@ export function AppChrome({ children }: AppChromeProps) {
     }, AUTOCOMPLETE_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [trimmedSearchText]);
+  }, [allowAutocomplete, trimmedSearchText]);
 
   useEffect(() => {
     if (!mobileSearchOpen) {
@@ -199,6 +203,7 @@ export function AppChrome({ children }: AppChromeProps) {
     }
 
     setSearchText(normalized);
+    setSearchDirty(false);
     setAutocompleteOpen(false);
     setMobileSearchOpen(false);
     setInvalidMessage(null);
@@ -326,11 +331,12 @@ export function AppChrome({ children }: AppChromeProps) {
                   value={searchText}
                   onChange={(event) => {
                     setSearchText(event.target.value);
+                    setSearchDirty(true);
                     setAutocompleteOpen(true);
                     setInvalidMessage(null);
                   }}
                   onFocus={() => {
-                    if (trimmedSearchText) {
+                    if (allowAutocomplete) {
                       setAutocompleteOpen(true);
                     }
                   }}
@@ -418,7 +424,7 @@ export function AppChrome({ children }: AppChromeProps) {
               className="app-mobile-command-button"
               onClick={() => {
                 setMobileSearchOpen((current) => !current);
-                setAutocompleteOpen(Boolean(trimmedSearchText));
+                setAutocompleteOpen(allowAutocomplete);
                 setInvalidMessage(null);
               }}
               aria-expanded={mobileSearchOpen}
@@ -447,11 +453,12 @@ export function AppChrome({ children }: AppChromeProps) {
                   value={searchText}
                   onChange={(event) => {
                     setSearchText(event.target.value);
+                    setSearchDirty(true);
                     setAutocompleteOpen(true);
                     setInvalidMessage(null);
                   }}
                   onFocus={() => {
-                    if (trimmedSearchText) {
+                    if (allowAutocomplete) {
                       setAutocompleteOpen(true);
                     }
                   }}

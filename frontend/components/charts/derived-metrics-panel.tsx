@@ -15,7 +15,7 @@ import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useJobStream } from "@/hooks/use-job-stream";
-import { getCompanyMetricsTimeseries } from "@/lib/api";
+import { getCompanyMetricsTimeseries, invalidateApiReadCacheForTicker } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 import type { CompanyMetricsTimeseriesResponse, MetricsValuesPayload } from "@/lib/types";
@@ -63,7 +63,6 @@ const BANK_METRIC_OPTIONS: MetricOption[] = [
 
 const CADENCE_ORDER: Cadence[] = ["quarterly", "annual", "ttm"];
 const MAX_POINTS = 24;
-const REFRESH_POLL_INTERVAL_MS = 3000;
 const STRICT_DISABLED_METRIC_KEYS = new Set<MetricKey>(["buyback_yield", "dividend_yield"]);
 
 interface DerivedMetricsPanelProps {
@@ -143,25 +142,9 @@ export function DerivedMetricsPanel({
     if (lastEvent.status !== "completed" && lastEvent.status !== "failed") {
       return;
     }
+    invalidateApiReadCacheForTicker(ticker);
     void loadMetrics(false);
-  }, [activeJobId, lastEvent, loadMetrics]);
-
-  useEffect(() => {
-    if (!activeJobId) {
-      return;
-    }
-    if (lastEvent?.status === "completed" || lastEvent?.status === "failed") {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      void loadMetrics(false);
-    }, REFRESH_POLL_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [activeJobId, lastEvent?.status, loadMetrics]);
+  }, [activeJobId, lastEvent, loadMetrics, ticker]);
 
   const availableCadences = useMemo(() => CADENCE_ORDER, []);
   const strictOfficialMode = Boolean(payload?.company?.strict_official_mode);

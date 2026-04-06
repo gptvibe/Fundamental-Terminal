@@ -9,6 +9,7 @@ import { getCompanyMetricsTimeseries } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   getCompanyMetricsTimeseries: vi.fn(),
+  invalidateApiReadCacheForTicker: vi.fn(),
 }));
 
 vi.mock("recharts", () => {

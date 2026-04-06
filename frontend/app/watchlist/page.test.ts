@@ -8,8 +8,10 @@ import WatchlistPage from "@/app/watchlist/page";
 
 const push = vi.fn();
 const mockUseLocalUserData = vi.fn();
+const mockUseJobStreams = vi.fn();
 const getWatchlistCalendar = vi.fn();
 const getWatchlistSummary = vi.fn();
+const invalidateApiReadCache = vi.fn();
 const refreshCompany = vi.fn();
 const showAppToast = vi.fn();
 
@@ -21,9 +23,14 @@ vi.mock("@/hooks/use-local-user-data", () => ({
   useLocalUserData: () => mockUseLocalUserData(),
 }));
 
+vi.mock("@/hooks/use-job-stream", () => ({
+  useJobStreams: (...args: unknown[]) => mockUseJobStreams(...args),
+}));
+
 vi.mock("@/lib/api", () => ({
   getWatchlistCalendar: (...args: unknown[]) => getWatchlistCalendar(...args),
   getWatchlistSummary: (...args: unknown[]) => getWatchlistSummary(...args),
+  invalidateApiReadCache: (...args: unknown[]) => invalidateApiReadCache(...args),
   refreshCompany: (...args: unknown[]) => refreshCompany(...args),
 }));
 
@@ -35,10 +42,13 @@ describe("WatchlistPage", () => {
   beforeEach(() => {
     push.mockReset();
     mockUseLocalUserData.mockReset();
+    mockUseJobStreams.mockReset();
     getWatchlistCalendar.mockReset();
     getWatchlistSummary.mockReset();
+    invalidateApiReadCache.mockReset();
     refreshCompany.mockReset();
     showAppToast.mockReset();
+    mockUseJobStreams.mockReturnValue({ lastTerminalEvent: null });
     getWatchlistCalendar.mockResolvedValue({
       tickers: [],
       window_start: "2026-04-04",
@@ -256,41 +266,23 @@ describe("WatchlistPage", () => {
       watchlist: [{ ticker: "AAPL" }],
       notesByTicker: {},
     });
-    getWatchlistSummary
-      .mockResolvedValueOnce({
-        tickers: ["AAPL"],
-        companies: [
-          {
-            ticker: "AAPL",
-            name: "Apple Inc.",
-            sector: "Technology",
-            cik: "1",
-            last_checked: null,
-            refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
-            alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
-            latest_alert: null,
-            latest_activity: null,
-            coverage: { financial_periods: 1, price_points: 1 },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        tickers: ["AAPL"],
-        companies: [
-          {
-            ticker: "AAPL",
-            name: "Apple Inc.",
-            sector: "Technology",
-            cik: "1",
-            last_checked: null,
-            refresh: { triggered: true, reason: "manual", ticker: "AAPL", job_id: "job-1" },
-            alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
-            latest_alert: null,
-            latest_activity: null,
-            coverage: { financial_periods: 1, price_points: 1 },
-          },
-        ],
-      });
+    getWatchlistSummary.mockResolvedValueOnce({
+      tickers: ["AAPL"],
+      companies: [
+        {
+          ticker: "AAPL",
+          name: "Apple Inc.",
+          sector: "Technology",
+          cik: "1",
+          last_checked: null,
+          refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
+          alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
+          latest_alert: null,
+          latest_activity: null,
+          coverage: { financial_periods: 1, price_points: 1 },
+        },
+      ],
+    });
     refreshCompany.mockResolvedValue({ status: "queued", ticker: "AAPL", force: false, refresh: { triggered: true, reason: "manual", ticker: "AAPL", job_id: "job-1" } });
 
     render(React.createElement(WatchlistPage));
@@ -304,7 +296,7 @@ describe("WatchlistPage", () => {
     await waitFor(() => {
       expect(refreshCompany).toHaveBeenCalledWith("AAPL");
     });
-    expect(getWatchlistSummary).toHaveBeenCalledTimes(2);
+    expect(getWatchlistSummary).toHaveBeenCalledTimes(1);
   });
 
   it("supports valuation-oriented filters and sort ordering", async () => {
@@ -392,7 +384,7 @@ describe("WatchlistPage", () => {
     expect(tickerCards[0]).toContain("CCC");
   });
 
-  it("auto-polls queued refresh jobs without manual reload", async () => {
+  it("reloads queued refresh jobs after an SSE terminal event", async () => {
     mockUseLocalUserData.mockReturnValue({
       watchlist: [{ ticker: "AAPL" }],
       notesByTicker: {},
@@ -424,23 +416,6 @@ describe("WatchlistPage", () => {
             name: "Apple Inc.",
             sector: "Technology",
             cik: "1",
-            last_checked: null,
-            refresh: { triggered: true, reason: "manual", ticker: "AAPL", job_id: "job-1" },
-            alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
-            latest_alert: null,
-            latest_activity: null,
-            coverage: { financial_periods: 1, price_points: 1 },
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        tickers: ["AAPL"],
-        companies: [
-          {
-            ticker: "AAPL",
-            name: "Apple Inc.",
-            sector: "Technology",
-            cik: "1",
             last_checked: "2026-03-22T01:00:00Z",
             refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
             alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
@@ -452,7 +427,7 @@ describe("WatchlistPage", () => {
       });
     refreshCompany.mockResolvedValue({ status: "queued", ticker: "AAPL", force: false, refresh: { triggered: true, reason: "manual", ticker: "AAPL", job_id: "job-1" } });
 
-    render(React.createElement(WatchlistPage));
+    const { rerender } = render(React.createElement(WatchlistPage));
 
     await waitFor(() => {
       expect(screen.getByText("Apple Inc.")).toBeTruthy();
@@ -461,13 +436,29 @@ describe("WatchlistPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     await waitFor(() => {
+      expect(refreshCompany).toHaveBeenCalledWith("AAPL");
+    });
+
+    mockUseJobStreams.mockReturnValue({
+      lastTerminalEvent: {
+        job_id: "job-1",
+        trace_id: "trace-1",
+        sequence: 3,
+        timestamp: "2026-03-22T01:00:00Z",
+        ticker: "AAPL",
+        kind: "refresh",
+        stage: "complete",
+        message: "Refresh completed",
+        status: "completed",
+        level: "success",
+      },
+    });
+
+    rerender(React.createElement(WatchlistPage));
+
+    await waitFor(() => {
       expect(getWatchlistSummary).toHaveBeenCalledTimes(2);
     });
-
-    await new Promise((resolve) => setTimeout(resolve, 3200));
-    await waitFor(() => {
-      expect(getWatchlistSummary).toHaveBeenCalledTimes(3);
-    });
-
+    expect(invalidateApiReadCache).toHaveBeenCalledWith("/watchlist/calendar");
   });
 });

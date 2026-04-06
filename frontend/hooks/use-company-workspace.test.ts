@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
@@ -11,12 +11,10 @@ import {
   invalidateApiReadCacheForTicker,
 } from "@/lib/api";
 
+const mockUseJobStream = vi.fn();
+
 vi.mock("@/hooks/use-job-stream", () => ({
-  useJobStream: () => ({
-    consoleEntries: [],
-    connectionState: "open",
-    lastEvent: null,
-  }),
+  useJobStream: (...args: unknown[]) => mockUseJobStream(...args),
 }));
 
 vi.mock("@/lib/active-job", () => ({
@@ -48,15 +46,18 @@ function buildFinancialsResponse(overrides: Record<string, unknown> = {}) {
 
 describe("useCompanyWorkspace", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    mockUseJobStream.mockReturnValue({
+      consoleEntries: [],
+      connectionState: "open",
+      lastEvent: null,
+    });
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
-  it("invalidates ticker read cache before polling an active warmup job", async () => {
+  it("invalidates ticker read cache before reloading after a terminal job event", async () => {
     const fetchFinancials = vi.mocked(getCompanyFinancials);
     const fetchInsiders = vi.mocked(getCompanyInsiderTrades);
     const fetchHoldings = vi.mocked(getCompanyInstitutionalHoldings);
@@ -94,7 +95,7 @@ describe("useCompanyWorkspace", () => {
     fetchInsiders.mockResolvedValue({ company: null, insider_trades: [], refresh: { triggered: false, reason: "none", ticker: "RKLB", job_id: null } } as never);
     fetchHoldings.mockResolvedValue({ company: null, institutional_holdings: [], refresh: { triggered: false, reason: "none", ticker: "RKLB", job_id: null } } as never);
 
-    const { result } = renderHook(() =>
+    const { result, rerender } = renderHook(() =>
       useCompanyWorkspace("RKLB", {
         includeInsiders: true,
         includeInstitutional: true,
@@ -109,15 +110,33 @@ describe("useCompanyWorkspace", () => {
     expect(result.current.loading).toBe(false);
     expect(result.current.activeJobId).toBe("job-rklb");
 
+    mockUseJobStream.mockReturnValue({
+      consoleEntries: [],
+      connectionState: "closed",
+      lastEvent: {
+        job_id: "job-rklb",
+        trace_id: "trace-rklb",
+        sequence: 2,
+        timestamp: "2026-03-31T00:00:01Z",
+        ticker: "RKLB",
+        kind: "refresh",
+        stage: "complete",
+        message: "Refresh completed",
+        status: "completed",
+        level: "success",
+      },
+    });
+
     await act(async () => {
-      vi.advanceTimersByTime(3000);
+      rerender();
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(result.current.company?.name).toBe("Rocket Lab Corp");
+    await waitFor(() => {
+      expect(fetchFinancials).toHaveBeenCalledTimes(2);
+    });
 
-    expect(fetchFinancials).toHaveBeenCalledTimes(2);
     expect(invalidateTickerCache).toHaveBeenCalledWith("RKLB");
     expect(invalidateTickerCache.mock.invocationCallOrder[0]).toBeLessThan(fetchFinancials.mock.invocationCallOrder[1]);
   });

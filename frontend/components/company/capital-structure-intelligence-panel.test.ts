@@ -17,6 +17,47 @@ vi.mock("@/hooks/use-job-stream", () => ({
 }));
 
 describe("CapitalStructureIntelligencePanel", () => {
+  it("does not refetch when an initial payload is already available", async () => {
+    render(
+      React.createElement(CapitalStructureIntelligencePanel, {
+        ticker: "AAPL",
+        initialPayload: {
+          company: null,
+          latest: null,
+          history: [],
+          last_capital_structure_check: null,
+          provenance: [],
+          as_of: null,
+          last_refreshed_at: null,
+          source_mix: {
+            source_ids: [],
+            source_tiers: [],
+            primary_source_ids: [],
+            fallback_source_ids: [],
+            official_only: true,
+          },
+          confidence_flags: [],
+          refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
+          diagnostics: {
+            coverage_ratio: null,
+            fallback_ratio: null,
+            stale_flags: [],
+            parser_confidence: null,
+            missing_field_flags: [],
+            reconciliation_penalty: null,
+            reconciliation_disagreement_count: 0,
+          },
+        },
+      })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/No persisted capital structure intelligence is available yet/i)).toBeTruthy();
+    });
+
+    expect(getCompanyCapitalStructure).not.toHaveBeenCalled();
+  });
+
   it("loads the persisted capital structure route and renders ladder, trend status, and provenance details", async () => {
     vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
       company: {

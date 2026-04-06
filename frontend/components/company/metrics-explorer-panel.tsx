@@ -8,8 +8,6 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { getCompanyDerivedMetricsSummary, invalidateApiReadCacheForTicker } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { CompanyDerivedMetricsSummaryResponse, DerivedMetricValuePayload } from "@/lib/types";
-
-const REFRESH_POLL_INTERVAL_MS = 3000;
 const GENERAL_DISPLAY_KEYS = [
   "revenue_growth",
   "eps_growth",
@@ -86,19 +84,6 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
     invalidateApiReadCacheForTicker(ticker);
     void loadSummary(false);
   }, [activeJobId, lastEvent, loadSummary, ticker]);
-
-  useEffect(() => {
-    if (!activeJobId) {
-      return;
-    }
-    if (lastEvent?.status === "completed" || lastEvent?.status === "failed") {
-      return;
-    }
-    const timerId = window.setInterval(() => {
-      void loadSummary(false);
-    }, REFRESH_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timerId);
-  }, [activeJobId, lastEvent?.status, loadSummary]);
 
   const metricMap = useMemo(() => {
     const map = new Map<string, DerivedMetricValuePayload>();

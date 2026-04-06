@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Panel } from "@/components/ui/panel";
+import { useJobStreams } from "@/hooks/use-job-stream";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
-import { getWatchlistCalendar, getWatchlistSummary, refreshCompany } from "@/lib/api";
+import { getWatchlistCalendar, getWatchlistSummary, invalidateApiReadCache, refreshCompany } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
 import { formatDate, formatPercent } from "@/lib/format";
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
@@ -19,8 +20,6 @@ interface WatchlistRow extends WatchlistSummaryItemPayload {
   hasNote: boolean;
   isStale: boolean;
 }
-
-const REFRESH_POLL_INTERVAL_MS = 3000;
 
 const FILTERS: Array<{ key: WatchlistFilter; label: string }> = [
   { key: "all", label: "All" },
@@ -36,7 +35,7 @@ const FILTERS: Array<{ key: WatchlistFilter; label: string }> = [
 export default function WatchlistPage() {
   const router = useRouter();
   const { watchlist, notesByTicker } = useLocalUserData();
-  const [rows, setRows] = useState<WatchlistRow[]>([]);
+  const [summaryCompanies, setSummaryCompanies] = useState<WatchlistSummaryItemPayload[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<WatchlistCalendarEventPayload[]>([]);
   const [loading, setLoading] = useState(true);
   const [calendarLoading, setCalendarLoading] = useState(true);
@@ -45,136 +44,158 @@ export default function WatchlistPage() {
   const [filter, setFilter] = useState<WatchlistFilter>("all");
   const [refreshingTicker, setRefreshingTicker] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<WatchlistSort>("attention");
+  const [queuedJobIdsByTicker, setQueuedJobIdsByTicker] = useState<Record<string, string>>({});
+  const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
+  const reloadAfterRefreshStateRef = useRef({ inFlight: false, queued: false });
 
   const watchlistTickers = useMemo(
     () => watchlist.map((item) => item.ticker.trim().toUpperCase()).filter(Boolean),
     [watchlist]
   );
-  const hasPendingRefresh = useMemo(
-    () => rows.some((item) => Boolean(item.refresh.triggered && item.refresh.job_id)),
-    [rows]
+  const rows = useMemo(
+    () => toWatchlistRows(summaryCompanies, notesByTicker),
+    [notesByTicker, summaryCompanies]
   );
+  const pendingJobIds = useMemo(
+    () =>
+      [...new Set([
+        ...rows
+          .map((item) => item.refresh.triggered ? item.refresh.job_id : null)
+          .filter((jobId): jobId is string => Boolean(jobId))
+          .filter((jobId) => !settledJobIds.includes(jobId)),
+        ...Object.values(queuedJobIdsByTicker).filter((jobId) => !settledJobIds.includes(jobId)),
+      ])],
+    [queuedJobIdsByTicker, rows, settledJobIds]
+  );
+  const hasPendingRefresh = pendingJobIds.length > 0;
+  const { lastTerminalEvent } = useJobStreams(pendingJobIds);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadSummary() {
+  const loadWatchlistData = useCallback(
+    async (source: string, showLoading: boolean) => {
       if (!watchlistTickers.length) {
-        setRows([]);
+        setSummaryCompanies([]);
         setCalendarEvents([]);
         setError(null);
         setCalendarError(null);
         setLoading(false);
         setCalendarLoading(false);
+        setQueuedJobIdsByTicker({});
+        setSettledJobIds([]);
         return;
       }
 
       try {
-        setLoading(true);
-        setCalendarLoading(true);
+        if (showLoading) {
+          setLoading(true);
+          setCalendarLoading(true);
+        }
         setError(null);
         setCalendarError(null);
+
         const [summaryResult, calendarResult] = await withPerformanceAuditSource(
           {
             pageRoute: "/watchlist",
             scenario: "watchlist_page",
-            source: "watchlist:initial-load",
+            source,
           },
-          () =>
-            Promise.allSettled([
-              getWatchlistSummary(watchlistTickers),
-              getWatchlistCalendar(watchlistTickers),
-            ])
+          () => Promise.allSettled([getWatchlistSummary(watchlistTickers), getWatchlistCalendar(watchlistTickers)])
         );
-        if (cancelled) {
-          return;
-        }
 
         if (summaryResult.status === "fulfilled") {
-          setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
+          setSummaryCompanies(summaryResult.value.companies);
+          setError(null);
+          setQueuedJobIdsByTicker((current) => {
+            const next = { ...current };
+            const liveJobIds = new Set(
+              summaryResult.value.companies
+                .map((item) => item.refresh.triggered ? item.refresh.job_id : null)
+                .filter((jobId): jobId is string => Boolean(jobId))
+            );
+
+            for (const [ticker, jobId] of Object.entries(next)) {
+              if (!liveJobIds.has(jobId)) {
+                delete next[ticker];
+              }
+            }
+
+            return next;
+          });
         } else {
           setError(summaryResult.reason instanceof Error ? summaryResult.reason.message : "Unable to load watchlist summary");
-          setRows([]);
-        }
-
-        if (calendarResult.status === "fulfilled") {
-          setCalendarEvents(sortCalendarEvents(calendarResult.value.events));
-        } else {
-          setCalendarError(calendarResult.reason instanceof Error ? calendarResult.reason.message : "Unable to load events calendar");
-          setCalendarEvents([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-          setCalendarLoading(false);
-        }
-      }
-    }
-
-    void loadSummary();
-    return () => {
-      cancelled = true;
-    };
-  }, [notesByTicker, watchlistTickers]);
-
-  useEffect(() => {
-    if (!watchlistTickers.length || !hasPendingRefresh) {
-      return;
-    }
-
-    let cancelled = false;
-    let pending = false;
-
-    const poll = async () => {
-      if (pending) {
-        return;
-      }
-
-      pending = true;
-      try {
-        const [summaryResult, calendarResult] = await withPerformanceAuditSource(
-          {
-            pageRoute: "/watchlist",
-            scenario: "watchlist_page",
-            source: "watchlist:poll-refresh",
-          },
-          () =>
-            Promise.allSettled([
-              getWatchlistSummary(watchlistTickers),
-              getWatchlistCalendar(watchlistTickers),
-            ])
-        );
-        if (cancelled) {
-          return;
-        }
-
-        if (summaryResult.status === "fulfilled") {
-          setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
-          setError(null);
-        } else {
-          setError(summaryResult.reason instanceof Error ? summaryResult.reason.message : "Unable to auto-refresh watchlist summary");
+          setSummaryCompanies([]);
         }
 
         if (calendarResult.status === "fulfilled") {
           setCalendarEvents(sortCalendarEvents(calendarResult.value.events));
           setCalendarError(null);
         } else {
-          setCalendarError(calendarResult.reason instanceof Error ? calendarResult.reason.message : "Unable to auto-refresh events calendar");
+          setCalendarError(calendarResult.reason instanceof Error ? calendarResult.reason.message : "Unable to load events calendar");
+          setCalendarEvents([]);
         }
       } finally {
-        pending = false;
+        if (showLoading) {
+          setLoading(false);
+          setCalendarLoading(false);
+        }
       }
-    };
+    },
+    [watchlistTickers]
+  );
 
-    const intervalId = window.setInterval(() => {
-      void poll();
-    }, REFRESH_POLL_INTERVAL_MS);
+  const reloadWatchlistAfterRefresh = useCallback(async () => {
+    const reloadState = reloadAfterRefreshStateRef.current;
+    if (reloadState.inFlight) {
+      reloadState.queued = true;
+      return;
+    }
 
+    reloadState.inFlight = true;
+    try {
+      do {
+        reloadState.queued = false;
+        invalidateApiReadCache("/watchlist/calendar");
+        await loadWatchlistData("watchlist:reload-after-refresh", false);
+      } while (reloadState.queued);
+    } finally {
+      reloadState.inFlight = false;
+    }
+  }, [loadWatchlistData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSummary() {
+      if (cancelled) {
+        return;
+      }
+
+      await loadWatchlistData("watchlist:initial-load", true);
+    }
+
+    void loadSummary();
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
     };
-  }, [hasPendingRefresh, notesByTicker, watchlistTickers]);
+  }, [loadWatchlistData]);
+
+  useEffect(() => {
+    if (!lastTerminalEvent || settledJobIds.includes(lastTerminalEvent.job_id)) {
+      return;
+    }
+
+    setSettledJobIds((current) => (current.includes(lastTerminalEvent.job_id) ? current : [...current, lastTerminalEvent.job_id]));
+    setQueuedJobIdsByTicker((current) => {
+      const next = { ...current };
+      for (const [ticker, jobId] of Object.entries(next)) {
+        if (jobId === lastTerminalEvent.job_id) {
+          delete next[ticker];
+        }
+      }
+      return next;
+    });
+
+    void reloadWatchlistAfterRefresh();
+  }, [lastTerminalEvent, reloadWatchlistAfterRefresh, settledJobIds]);
 
   const filteredRows = useMemo(() => {
     if (filter === "all") {
@@ -215,7 +236,7 @@ export default function WatchlistPage() {
   async function handleRefresh(ticker: string) {
     try {
       setRefreshingTicker(ticker);
-      await withPerformanceAuditSource(
+      const response = await withPerformanceAuditSource(
         {
           pageRoute: "/watchlist",
           scenario: "watchlist_page",
@@ -223,27 +244,13 @@ export default function WatchlistPage() {
         },
         () => refreshCompany(ticker)
       );
+      if (response.refresh.job_id) {
+        setQueuedJobIdsByTicker((current) => ({
+          ...current,
+          [ticker]: response.refresh.job_id as string,
+        }));
+      }
       showAppToast({ message: `${ticker} refresh queued.`, tone: "info" });
-      const [summaryResult, calendarResult] = await withPerformanceAuditSource(
-        {
-          pageRoute: "/watchlist",
-          scenario: "watchlist_page",
-          source: "watchlist:post-refresh-reload",
-        },
-        () =>
-          Promise.allSettled([
-            getWatchlistSummary(watchlistTickers),
-            getWatchlistCalendar(watchlistTickers),
-          ])
-      );
-      if (summaryResult.status === "fulfilled") {
-        setRows(toWatchlistRows(summaryResult.value.companies, notesByTicker));
-        setError(null);
-      }
-      if (calendarResult.status === "fulfilled") {
-        setCalendarEvents(sortCalendarEvents(calendarResult.value.events));
-        setCalendarError(null);
-      }
     } catch (nextError) {
       showAppToast({
         message: nextError instanceof Error ? nextError.message : `Unable to refresh ${ticker}`,
