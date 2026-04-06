@@ -16,7 +16,7 @@ services:
       retries: 5
       start_period: 10s
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     networks:
       - fundamental-terminal-net
 
@@ -32,7 +32,7 @@ services:
       retries: 5
       start_period: 5s
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     networks:
       - fundamental-terminal-net
 
@@ -62,7 +62,7 @@ services:
       retries: 5
       start_period: 20s
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     networks:
       - fundamental-terminal-net
 
@@ -124,7 +124,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     networks:
       - fundamental-terminal-net
 

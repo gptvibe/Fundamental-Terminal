@@ -7,6 +7,15 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import CompanyResearchBriefPage from "@/app/company/[ticker]/page";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import {
+  getCompanyActivityOverview,
+  getCompanyBeneficialOwnershipSummary,
+  getCompanyCapitalMarketsSummary,
+  getCompanyCapitalStructure,
+  getCompanyChangesSinceLastFiling,
+  getCompanyEarningsSummary,
+  getCompanyGovernanceSummary,
+  getCompanyModels,
+  getCompanyPeers,
   getCompanyResearchBrief,
 } from "@/lib/api";
 
@@ -117,6 +126,15 @@ vi.mock("@/components/models/investment-summary-panel", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  getCompanyActivityOverview: vi.fn(),
+  getCompanyBeneficialOwnershipSummary: vi.fn(),
+  getCompanyCapitalMarketsSummary: vi.fn(),
+  getCompanyCapitalStructure: vi.fn(),
+  getCompanyChangesSinceLastFiling: vi.fn(),
+  getCompanyEarningsSummary: vi.fn(),
+  getCompanyGovernanceSummary: vi.fn(),
+  getCompanyModels: vi.fn(),
+  getCompanyPeers: vi.fn(),
   getCompanyResearchBrief: vi.fn(),
 }));
 
@@ -172,6 +190,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
   vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock());
+  vi.mocked(getCompanyActivityOverview).mockResolvedValue(buildActivityOverviewResponse());
+  vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue(buildChangesResponse());
+  vi.mocked(getCompanyEarningsSummary).mockResolvedValue(buildEarningsSummaryResponse());
+  vi.mocked(getCompanyCapitalStructure).mockResolvedValue(buildCapitalStructureResponse());
+  vi.mocked(getCompanyCapitalMarketsSummary).mockResolvedValue(buildCapitalMarketsSummaryResponse());
+  vi.mocked(getCompanyGovernanceSummary).mockResolvedValue(buildGovernanceSummaryResponse());
+  vi.mocked(getCompanyBeneficialOwnershipSummary).mockResolvedValue(buildOwnershipSummaryResponse());
+  vi.mocked(getCompanyModels).mockResolvedValue(buildModelsResponse());
+  vi.mocked(getCompanyPeers).mockResolvedValue(buildPeersResponse());
   vi.mocked(getCompanyResearchBrief).mockResolvedValue(buildResearchBriefResponse());
 });
 
@@ -338,6 +365,44 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByText(/U\.S\. proxy materials may be unavailable for many 20-F and 40-F issuers/i)).toBeTruthy();
     });
   });
+
+  it("shows cold-start bootstrap details before the full brief is ready", async () => {
+    vi.mocked(getCompanyResearchBrief).mockResolvedValue(
+      buildResearchBriefResponse({
+        build_state: "building",
+        build_status: "Resolving company records and warming the research brief.",
+        available_sections: ["snapshot"],
+        section_statuses: [
+          { id: "snapshot", title: "Snapshot", state: "ready", available: true, detail: "Available now." },
+          { id: "what_changed", title: "What Changed", state: "building", available: false, detail: "Warming up." },
+          { id: "business_quality", title: "Business Quality", state: "building", available: false, detail: "Warming up." },
+          { id: "capital_and_risk", title: "Capital And Risk", state: "building", available: false, detail: "Warming up." },
+          { id: "valuation", title: "Valuation", state: "building", available: false, detail: "Warming up." },
+        ],
+        stale_summary_cards: [
+          { key: "latest_filing", title: "Latest Filing", value: "10-K", detail: "2025-12-31" },
+          { key: "sector", title: "Sector", value: "Technology", detail: "Software" },
+        ],
+        filing_timeline: [
+          { date: "2025-12-31", form: "10-K", description: "Annual report", accession: "0000001-26-000001" },
+        ],
+      })
+    );
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /Brief warming|Cold start bootstrap/i })).toBeTruthy();
+    });
+
+    expect(screen.getAllByText(/cached brief catches up|warming the research brief/i).length).toBeGreaterThan(0);
+    expect(screen.getByText("Latest filing timeline")).toBeTruthy();
+    expect(screen.getByText("Annual report")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(screen.getByText("High Alerts: 1")).toBeTruthy();
+    });
+  });
 });
 
 function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
@@ -457,6 +522,23 @@ function buildResearchBriefResponse(overrides: Record<string, unknown> = {}) {
     generated_at: "2026-03-10T00:00:00Z",
     as_of: "2025-12-31",
     refresh,
+    build_state: "ready",
+    build_status: "Research brief ready.",
+    available_sections: ["snapshot", "what_changed", "business_quality", "capital_and_risk", "valuation"],
+    section_statuses: [
+      { id: "snapshot", title: "Snapshot", state: "ready", available: true, detail: "Available now." },
+      { id: "what_changed", title: "What Changed", state: "ready", available: true, detail: "Available now." },
+      { id: "business_quality", title: "Business Quality", state: "ready", available: true, detail: "Available now." },
+      { id: "capital_and_risk", title: "Capital And Risk", state: "ready", available: true, detail: "Available now." },
+      { id: "valuation", title: "Valuation", state: "ready", available: true, detail: "Available now." },
+    ],
+    filing_timeline: [
+      { date: "2025-12-31", form: "10-K", description: "Annual report", accession: "0000001-26-000001" },
+    ],
+    stale_summary_cards: [
+      { key: "latest_filing", title: "Latest Filing", value: "10-K", detail: "2025-12-31" },
+      { key: "latest_revenue", title: "Revenue", value: "$6.2K", detail: "2025-12-31" },
+    ],
     snapshot: {
       summary: {
         latest_filing_type: "10-K",

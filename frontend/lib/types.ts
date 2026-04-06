@@ -1389,6 +1389,13 @@ export interface FilingPayload {
   source_url: string;
 }
 
+export interface FilingTimelineItemPayload {
+  date: string | null;
+  form: string;
+  description: string;
+  accession: string | null;
+}
+
 export interface CompanyFilingsResponse {
   company: CompanyPayload | null;
   filings: FilingPayload[];
@@ -2264,12 +2271,35 @@ export interface CompanyResearchBriefMonitorSection extends ProvenanceEnvelope {
   activity_overview: CompanyActivityOverviewResponse;
 }
 
+export type ResearchBriefBuildState = "building" | "partial" | "ready";
+
+export interface ResearchBriefSectionStatusPayload {
+  id: string;
+  title: string;
+  state: ResearchBriefBuildState;
+  available: boolean;
+  detail: string | null;
+}
+
+export interface ResearchBriefSummaryCardPayload {
+  key: string;
+  title: string;
+  value: string;
+  detail: string | null;
+}
+
 export interface CompanyResearchBriefResponse {
   company: CompanyPayload | null;
   schema_version: string;
   generated_at: string;
   as_of: string | null;
   refresh: RefreshState;
+  build_state: ResearchBriefBuildState;
+  build_status: string;
+  available_sections: string[];
+  section_statuses: ResearchBriefSectionStatusPayload[];
+  filing_timeline: FilingTimelineItemPayload[];
+  stale_summary_cards: ResearchBriefSummaryCardPayload[];
   snapshot: CompanyResearchBriefSnapshotSection;
   what_changed: CompanyResearchBriefWhatChangedSection;
   business_quality: CompanyResearchBriefBusinessQualitySection;

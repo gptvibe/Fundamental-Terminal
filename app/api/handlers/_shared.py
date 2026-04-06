@@ -85,9 +85,7 @@ from app.services.cache_queries import (
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
 from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
-    build_company_research_brief_response,
     get_company_research_brief_snapshot,
-    recompute_and_persist_company_research_brief,
 )
 from app.services.derived_metrics_mart import (
     build_derived_metric_points,
@@ -121,7 +119,7 @@ from app.services.earnings_intelligence import build_earnings_alerts, build_earn
 from app.services.hot_cache import shared_hot_response_cache
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
-from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, EdgarClient, FilingMetadata
+from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, CompanyIdentity, EdgarClient, FilingMetadata
 from app.services.status_stream import status_broker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -207,6 +205,22 @@ HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
     "oil_scenario_overlay": "oil-scenario-overlay-response-v1",
     "oil_scenario": "oil-scenario-response-v1",
     "peers": "peers-response-v1",
+}
+
+RESEARCH_BRIEF_SECTION_ORDER = (
+    "snapshot",
+    "what_changed",
+    "business_quality",
+    "capital_and_risk",
+    "valuation",
+)
+
+RESEARCH_BRIEF_SECTION_TITLES = {
+    "snapshot": "Snapshot",
+    "what_changed": "What Changed",
+    "business_quality": "Business Quality",
+    "capital_and_risk": "Capital And Risk",
+    "valuation": "Valuation",
 }
 
 PriceCacheState = Literal["fresh", "stale", "missing"]
@@ -2614,19 +2628,32 @@ def company_brief(
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
         refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
-        return _empty_company_brief_response(refresh=refresh, as_of=requested_as_of)
+        return _build_company_brief_bootstrap_for_missing_ticker(
+            normalized_ticker,
+            refresh=refresh,
+            as_of=requested_as_of,
+        )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
     stored = get_company_research_brief_snapshot(session, snapshot.company.id, as_of=parsed_as_of, schema_version=BRIEF_SCHEMA_VERSION)
     payload = CompanyResearchBriefResponse.model_validate(stored.payload) if stored is not None else None
     if payload is None:
-        payload = recompute_and_persist_company_research_brief(session, snapshot.company.id, checked_at=datetime.now(timezone.utc), as_of=parsed_as_of)
-        session.commit()
+        if not refresh.triggered:
+            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _build_company_brief_bootstrap_for_snapshot(
+            session,
+            snapshot,
+            refresh=refresh,
+            as_of=requested_as_of,
+        )
 
-    if payload is None:
-        return _empty_company_brief_response(refresh=refresh, as_of=requested_as_of)
-
-    return payload.model_copy(update={"refresh": refresh, "as_of": requested_as_of or payload.as_of})
+    return _augment_company_brief_response(
+        session,
+        snapshot,
+        payload,
+        refresh=refresh,
+        as_of=requested_as_of,
+    )
 
 
 def _empty_company_brief_response(*, refresh: RefreshState, as_of: str | None) -> CompanyResearchBriefResponse:
@@ -2760,6 +2787,12 @@ def _empty_company_brief_response(*, refresh: RefreshState, as_of: str | None) -
         generated_at=datetime.now(timezone.utc),
         as_of=as_of,
         refresh=refresh,
+        build_state="building",
+        build_status="Research brief is warming up.",
+        available_sections=[],
+        section_statuses=_build_research_brief_section_statuses([], build_state="building"),
+        filing_timeline=[],
+        stale_summary_cards=[],
         snapshot=CompanyResearchBriefSnapshotSection(summary=ResearchBriefSnapshotSummaryPayload(), **_empty_provenance_contract("company_missing")),
         what_changed=CompanyResearchBriefWhatChangedSection(activity_overview=empty_activity, changes=empty_changes, earnings_summary=empty_earnings, **_empty_provenance_contract("company_missing")),
         business_quality=CompanyResearchBriefBusinessQualitySection(summary=ResearchBriefBusinessQualitySummaryPayload(), **_empty_provenance_contract("company_missing")),
@@ -2767,6 +2800,372 @@ def _empty_company_brief_response(*, refresh: RefreshState, as_of: str | None) -
         valuation=CompanyResearchBriefValuationSection(models=empty_models, peers=empty_peers, **_empty_provenance_contract("company_missing")),
         monitor=CompanyResearchBriefMonitorSection(activity_overview=empty_activity, **_empty_provenance_contract("company_missing")),
     )
+
+
+def _augment_company_brief_response(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    payload: CompanyResearchBriefResponse,
+    *,
+    refresh: RefreshState,
+    as_of: str | None,
+) -> CompanyResearchBriefResponse:
+    available_sections = list(RESEARCH_BRIEF_SECTION_ORDER)
+    filing_timeline = _load_company_brief_filing_timeline(session, snapshot=snapshot)
+    stale_summary_cards = payload.stale_summary_cards or _build_research_brief_summary_cards(
+        company=payload.company or _serialize_company(snapshot),
+        filing_timeline=filing_timeline,
+        snapshot_summary=payload.snapshot.summary,
+    )
+    return payload.model_copy(
+        update={
+            "refresh": refresh,
+            "as_of": as_of or payload.as_of,
+            "build_state": "ready",
+            "build_status": "Research brief ready.",
+            "available_sections": available_sections,
+            "section_statuses": _build_research_brief_section_statuses(available_sections, build_state="ready"),
+            "filing_timeline": filing_timeline,
+            "stale_summary_cards": stale_summary_cards,
+        }
+    )
+
+
+def _build_company_brief_bootstrap_for_snapshot(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    refresh: RefreshState,
+    as_of: str | None,
+) -> CompanyResearchBriefResponse:
+    base = _empty_company_brief_response(refresh=refresh, as_of=as_of)
+    financials = _visible_financials_for_company(session, snapshot.company)
+    latest_statement = financials[0] if financials else None
+    annual_statement_count = len([statement for statement in financials if (statement.filing_type or "").upper() in {"10-K", "20-F", "40-F"}])
+    price_history = _visible_price_history(session, snapshot.company.id)
+    filing_timeline = _load_company_brief_filing_timeline(session, snapshot=snapshot)
+    snapshot_summary = _build_company_brief_snapshot_summary(
+        latest_statement=latest_statement,
+        filing_timeline=filing_timeline,
+        annual_statement_count=annual_statement_count,
+        price_history_points=len(price_history),
+    )
+    company_payload = _serialize_company(snapshot)
+    available_sections = ["snapshot"]
+    return base.model_copy(
+        update={
+            "company": company_payload,
+            "build_state": "partial",
+            "build_status": "Showing cached company basics while the research brief finishes building.",
+            "available_sections": available_sections,
+            "section_statuses": _build_research_brief_section_statuses(available_sections, build_state="partial"),
+            "filing_timeline": filing_timeline,
+            "stale_summary_cards": _build_research_brief_summary_cards(
+                company=company_payload,
+                filing_timeline=filing_timeline,
+                snapshot_summary=snapshot_summary,
+            ),
+            "snapshot": CompanyResearchBriefSnapshotSection(
+                summary=snapshot_summary,
+                **_empty_provenance_contract("brief_building"),
+            ),
+        }
+    )
+
+
+def _build_company_brief_bootstrap_for_missing_ticker(
+    ticker: str,
+    *,
+    refresh: RefreshState,
+    as_of: str | None,
+) -> CompanyResearchBriefResponse:
+    base = _empty_company_brief_response(refresh=refresh, as_of=as_of)
+
+    identity: CompanyIdentity | None = None
+    filing_timeline: list[FilingTimelineItemPayload] = []
+    client = EdgarClient()
+    try:
+        identity = client.resolve_company(ticker)
+        submissions = client.get_submissions(identity.cik)
+        filing_index = client.build_filing_index(submissions)
+        filing_timeline = _filing_timeline_payloads(_serialize_recent_filings(identity.cik, filing_index))
+    except ValueError:
+        return base
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to bootstrap research brief for '%s'", ticker)
+    finally:
+        client.close()
+
+    company_payload = _serialize_company_identity(identity)
+    snapshot_summary = _build_company_brief_snapshot_summary(
+        latest_statement=None,
+        filing_timeline=filing_timeline,
+        annual_statement_count=sum(1 for item in filing_timeline if item.form in {"10-K", "20-F", "40-F"}),
+        price_history_points=0,
+    )
+    available_sections = ["snapshot"] if company_payload is not None else []
+    return base.model_copy(
+        update={
+            "company": company_payload,
+            "build_state": "building",
+            "build_status": "Resolving company records and warming the research brief.",
+            "available_sections": available_sections,
+            "section_statuses": _build_research_brief_section_statuses(available_sections, build_state="building"),
+            "filing_timeline": filing_timeline,
+            "stale_summary_cards": _build_research_brief_summary_cards(
+                company=company_payload,
+                filing_timeline=filing_timeline,
+                snapshot_summary=snapshot_summary,
+            ),
+            "snapshot": CompanyResearchBriefSnapshotSection(
+                summary=snapshot_summary,
+                **_empty_provenance_contract("brief_building"),
+            ),
+        }
+    )
+
+
+def _build_research_brief_section_statuses(
+    available_sections: list[str],
+    *,
+    build_state: Literal["building", "partial", "ready"],
+) -> list[ResearchBriefSectionStatusPayload]:
+    available = set(available_sections)
+    pending_partial = build_state == "partial" and bool(available)
+    statuses: list[ResearchBriefSectionStatusPayload] = []
+    for section_id in RESEARCH_BRIEF_SECTION_ORDER:
+        if section_id in available:
+            state: Literal["building", "partial", "ready"] = "ready"
+            detail = "Available now."
+        elif pending_partial:
+            state = "partial"
+            detail = "Queued next."
+            pending_partial = False
+        else:
+            state = "building"
+            detail = "Warming up."
+        statuses.append(
+            ResearchBriefSectionStatusPayload(
+                id=section_id,
+                title=RESEARCH_BRIEF_SECTION_TITLES[section_id],
+                state=state,
+                available=section_id in available,
+                detail=detail,
+            )
+        )
+    return statuses
+
+
+def _build_company_brief_snapshot_summary(
+    *,
+    latest_statement: FinancialStatement | None,
+    filing_timeline: list[FilingTimelineItemPayload],
+    annual_statement_count: int,
+    price_history_points: int,
+) -> ResearchBriefSnapshotSummaryPayload:
+    latest_filing = filing_timeline[0] if filing_timeline else None
+    return ResearchBriefSnapshotSummaryPayload(
+        latest_filing_type=(latest_statement.filing_type if latest_statement is not None else (latest_filing.form if latest_filing is not None else None)),
+        latest_period_end=(latest_statement.period_end if latest_statement is not None else (latest_filing.date if latest_filing is not None else None)),
+        annual_statement_count=annual_statement_count,
+        price_history_points=price_history_points,
+        latest_revenue=_statement_metric_value(latest_statement, "revenue"),
+        latest_free_cash_flow=_statement_metric_value(latest_statement, "free_cash_flow"),
+        top_segment_name=_top_segment_name_from_statement(latest_statement),
+        top_segment_share_of_revenue=_top_segment_share_from_statement(latest_statement),
+        alert_count=0,
+    )
+
+
+def _build_research_brief_summary_cards(
+    *,
+    company: CompanyPayload | None,
+    filing_timeline: list[FilingTimelineItemPayload],
+    snapshot_summary: ResearchBriefSnapshotSummaryPayload,
+) -> list[ResearchBriefSummaryCardPayload]:
+    cards: list[ResearchBriefSummaryCardPayload] = []
+
+    latest_filing = filing_timeline[0] if filing_timeline else None
+    if latest_filing is not None:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="latest_filing",
+                title="Latest Filing",
+                value=latest_filing.form,
+                detail=latest_filing.date.isoformat() if latest_filing.date is not None else latest_filing.description,
+            )
+        )
+    if snapshot_summary.latest_revenue is not None:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="latest_revenue",
+                title="Revenue",
+                value=_format_research_brief_card_number(snapshot_summary.latest_revenue, currency=True),
+                detail=(snapshot_summary.latest_period_end.isoformat() if snapshot_summary.latest_period_end is not None else None),
+            )
+        )
+    if snapshot_summary.latest_free_cash_flow is not None:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="latest_free_cash_flow",
+                title="Free Cash Flow",
+                value=_format_research_brief_card_number(snapshot_summary.latest_free_cash_flow, currency=True),
+                detail=(snapshot_summary.latest_period_end.isoformat() if snapshot_summary.latest_period_end is not None else None),
+            )
+        )
+    if snapshot_summary.top_segment_name:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="top_segment",
+                title="Top Segment",
+                value=snapshot_summary.top_segment_name,
+                detail=(f"{round(float(snapshot_summary.top_segment_share_of_revenue) * 100)}% of revenue" if snapshot_summary.top_segment_share_of_revenue is not None else None),
+            )
+        )
+    if company is not None and company.sector:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="sector",
+                title="Sector",
+                value=company.sector,
+                detail=(company.market_industry or company.market_sector),
+            )
+        )
+
+    return cards[:4]
+
+
+def _load_company_brief_filing_timeline(
+    session: Session,
+    *,
+    snapshot: CompanyCacheSnapshot | None = None,
+    identity: CompanyIdentity | None = None,
+) -> list[FilingTimelineItemPayload]:
+    cik = snapshot.company.cik if snapshot is not None else (identity.cik if identity is not None else None)
+    if not cik:
+        return []
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(cik)
+        filing_index = client.build_filing_index(submissions)
+        return _filing_timeline_payloads(_serialize_recent_filings(cik, filing_index))
+    except Exception:
+        if snapshot is None:
+            logging.getLogger(__name__).exception("Unable to load bootstrap filing timeline for CIK %s", cik)
+            return []
+        logging.getLogger(__name__).exception("Unable to load SEC filing timeline for '%s'", snapshot.company.ticker)
+        fallback_filings = _serialize_cached_statement_filings(_visible_financials_for_company(session, snapshot.company))
+        return _filing_timeline_payloads(fallback_filings)
+    finally:
+        client.close()
+
+
+def _filing_timeline_payloads(filings: list[FilingPayload]) -> list[FilingTimelineItemPayload]:
+    return [
+        FilingTimelineItemPayload(
+            date=filing.filing_date or filing.report_date,
+            form=filing.form,
+            description=_filing_timeline_description(filing),
+            accession=filing.accession_number,
+        )
+        for filing in filings
+    ]
+
+
+def _serialize_company_identity(identity: CompanyIdentity | None) -> CompanyPayload | None:
+    if identity is None:
+        return None
+    market_sector, market_industry = _company_market_classification(identity)
+    oil_classification = classify_oil_exposure(
+        sector=identity.sector,
+        market_sector=market_sector,
+        market_industry=market_industry,
+    )
+    return CompanyPayload(
+        ticker=identity.ticker,
+        cik=identity.cik,
+        name=identity.name,
+        sector=identity.sector,
+        market_sector=market_sector,
+        market_industry=market_industry,
+        oil_exposure_type=oil_classification.oil_exposure_type,
+        oil_support_status=oil_classification.oil_support_status,
+        oil_support_reasons=list(oil_classification.oil_support_reasons),
+        regulated_entity=None,
+        strict_official_mode=settings.strict_official_mode,
+        last_checked=None,
+        last_checked_financials=None,
+        last_checked_prices=None,
+        last_checked_insiders=None,
+        last_checked_institutional=None,
+        last_checked_filings=None,
+        earnings_last_checked=None,
+        cache_state="missing",
+    )
+
+
+def _statement_metric_value(statement: Any, key: str) -> float | int | None:
+    if statement is None:
+        return None
+    data = getattr(statement, "data", None)
+    if not isinstance(data, dict):
+        return None
+    value = data.get(key)
+    if isinstance(value, (int, float)):
+        return value
+    if key == "weighted_average_shares_diluted":
+        alias_value = data.get("weighted_average_diluted_shares")
+        if isinstance(alias_value, (int, float)):
+            return alias_value
+    return None
+
+
+def _top_segment_name_from_statement(statement: Any) -> str | None:
+    segment = _top_segment_from_statement(statement)
+    if not isinstance(segment, dict):
+        return None
+    name = segment.get("segment_name")
+    return str(name) if name else None
+
+
+def _top_segment_share_from_statement(statement: Any) -> float | int | None:
+    segment = _top_segment_from_statement(statement)
+    if not isinstance(segment, dict):
+        return None
+    value = segment.get("share_of_revenue")
+    return value if isinstance(value, (int, float)) else None
+
+
+def _top_segment_from_statement(statement: Any) -> dict[str, Any] | None:
+    if statement is None:
+        return None
+    data = getattr(statement, "data", None)
+    segments = data.get("segment_breakdown") if isinstance(data, dict) else None
+    if not isinstance(segments, list):
+        return None
+    valid_segments = [item for item in segments if isinstance(item, dict)]
+    if not valid_segments:
+        return None
+    return max(valid_segments, key=lambda item: float(item.get("share_of_revenue") or 0))
+
+
+def _format_research_brief_card_number(value: float | int, *, currency: bool = False) -> str:
+    absolute = abs(float(value))
+    formatted: str
+    if absolute >= 1_000_000_000_000:
+        formatted = f"{float(value) / 1_000_000_000_000:.1f}T"
+    elif absolute >= 1_000_000_000:
+        formatted = f"{float(value) / 1_000_000_000:.1f}B"
+    elif absolute >= 1_000_000:
+        formatted = f"{float(value) / 1_000_000:.1f}M"
+    elif absolute >= 1_000:
+        formatted = f"{float(value) / 1_000:.1f}K"
+    elif absolute >= 100:
+        formatted = f"{float(value):,.0f}"
+    else:
+        formatted = f"{float(value):,.2f}".rstrip("0").rstrip(".")
+    return f"${formatted}" if currency else formatted
 
 
 @app.get("/api/companies/{ticker}/peers", response_model=CompanyPeersResponse)

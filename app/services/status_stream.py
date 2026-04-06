@@ -380,7 +380,7 @@ class SharedStatusBroker:
             statement: Select[tuple[RefreshJob]] = (
                 select(RefreshJob)
                 .where(RefreshJob.status == "queued")
-                .order_by(RefreshJob.requested_at, RefreshJob.id)
+                .order_by(RefreshJob.requested_at.desc(), RefreshJob.id.desc())
                 .limit(1)
                 .with_for_update(skip_locked=True)
             )

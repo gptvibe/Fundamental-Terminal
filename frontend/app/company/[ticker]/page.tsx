@@ -55,10 +55,14 @@ import type {
   CompanyPeersResponse,
   CompanyResearchBriefResponse,
   FinancialPayload,
+  FilingTimelineItemPayload,
   InsiderActivitySummaryPayload,
   InstitutionalHoldingPayload,
   ProvenanceEntryPayload,
   RefreshState,
+  ResearchBriefBuildState,
+  ResearchBriefSectionStatusPayload,
+  ResearchBriefSummaryCardPayload,
   SourceMixPayload,
 } from "@/lib/types";
 
@@ -115,6 +119,18 @@ type ResearchBriefAsyncState = {
   ownershipSummary: AsyncState<CompanyBeneficialOwnershipSummaryResponse>;
   models: AsyncState<CompanyModelsResponse>;
   peers: AsyncState<CompanyPeersResponse>;
+};
+
+type ResearchBriefDataState = ResearchBriefAsyncState & {
+  brief: CompanyResearchBriefResponse | null;
+  error: string | null;
+  loading: boolean;
+  buildState: ResearchBriefBuildState;
+  buildStatus: string | null;
+  availableSections: string[];
+  sectionStatuses: ResearchBriefSectionStatusPayload[];
+  filingTimeline: FilingTimelineItemPayload[];
+  summaryCards: ResearchBriefSummaryCardPayload[];
 };
 
 type ResearchBriefCue = {
@@ -192,6 +208,19 @@ const INITIAL_ASYNC_STATE: ResearchBriefAsyncState = {
   peers: { data: null, error: null, loading: true },
 };
 
+const INITIAL_RESEARCH_BRIEF_DATA_STATE: ResearchBriefDataState = {
+  ...INITIAL_ASYNC_STATE,
+  brief: null,
+  error: null,
+  loading: true,
+  buildState: "building",
+  buildStatus: null,
+  availableSections: [],
+  sectionStatuses: [],
+  filingTimeline: [],
+  summaryCards: [],
+};
+
 export default function CompanyResearchBriefPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
@@ -228,7 +257,7 @@ export default function CompanyResearchBriefPage() {
   const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
   const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker);
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
-  const pageCompany = company ?? data?.company ?? briefData.activityOverview.data?.company ?? briefData.models.data?.company ?? null;
+  const pageCompany = company ?? briefData.brief?.company ?? data?.company ?? briefData.activityOverview.data?.company ?? briefData.models.data?.company ?? null;
   const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
   const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
   const previousAnnual = annualStatements[1] ?? null;
@@ -314,6 +343,8 @@ export default function CompanyResearchBriefPage() {
     latestFinancial,
     topSegment,
     alertCount: latestAlertCount,
+    buildState: briefData.buildState,
+    filingTimeline: briefData.filingTimeline,
     sourceMix: data?.source_mix,
     provenance: data?.provenance,
     loading,
@@ -354,12 +385,17 @@ export default function CompanyResearchBriefPage() {
     company: pageCompany,
     loading: briefData.activityOverview.loading,
   });
+  const bootstrapRevenueValue = findBriefSummaryCardValue(briefData.summaryCards, "Revenue");
+  const bootstrapFreeCashFlowValue = findBriefSummaryCardValue(briefData.summaryCards, "Free Cash Flow");
+  const bootstrapTopSegmentValue = findBriefSummaryCardValue(briefData.summaryCards, "Top Segment");
+  const bootstrapLatestFilingValue = findBriefSummaryCardValue(briefData.summaryCards, "Latest Filing");
   const initialCompanyLoad =
     loading &&
     !pageCompany &&
     !latestFinancial &&
     !financials.length &&
     !priceHistory.length &&
+    !briefData.brief &&
     !briefData.activityOverview.data &&
     !error &&
     !insiderError &&
@@ -487,18 +523,18 @@ export default function CompanyResearchBriefPage() {
         <ResearchBriefHeroSummary
           summary={snapshotNarrative}
           metrics={[
-            { label: "Revenue", value: formatCompactCurrency(latestFinancial?.revenue) },
-            { label: "Free Cash Flow", value: formatCompactCurrency(latestFinancial?.free_cash_flow) },
+            { label: "Revenue", value: latestFinancial ? formatCompactCurrency(latestFinancial.revenue) : bootstrapRevenueValue },
+            { label: "Free Cash Flow", value: latestFinancial ? formatCompactCurrency(latestFinancial.free_cash_flow) : bootstrapFreeCashFlowValue },
             {
               label: "Top Segment",
               value:
                 topSegment && topSegment.share_of_revenue != null
                   ? `${topSegment.segment_name} · ${formatPercent(topSegment.share_of_revenue)}`
-                  : topSegment?.segment_name ?? null,
+                  : topSegment?.segment_name ?? bootstrapTopSegmentValue,
             },
             {
               label: "Latest Filing",
-              value: latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : null,
+              value: latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : bootstrapLatestFilingValue,
             },
           ]}
           metaItems={[
@@ -508,9 +544,27 @@ export default function CompanyResearchBriefPage() {
           ]}
           fallbackLabels={fallbackLabels}
           loading={initialCompanyLoad}
-          loadingMessage={initialCompanyLoad ? "No cached company snapshot exists yet. Fetching the first overview now." : null}
+          loadingMessage={
+            initialCompanyLoad
+              ? "No cached company snapshot exists yet. Fetching the first overview now."
+              : briefData.buildState !== "ready"
+                ? briefData.buildStatus
+                : null
+          }
         />
       </CompanyResearchHeader>
+
+      <ResearchBriefWarmupPanel
+        buildState={briefData.buildState}
+        buildStatus={briefData.buildStatus}
+        sectionStatuses={mergeBusinessQualitySectionStatus(briefData.sectionStatuses, {
+          loading,
+          hasFinancials: Boolean(financials.length || latestFinancial),
+        })}
+        summaryCards={briefData.summaryCards}
+        filingTimeline={briefData.filingTimeline}
+        refreshState={briefData.brief?.refresh ?? refreshState}
+      />
 
       {error || insiderError || institutionalError ? (
         <div className="panel workspace-error-state research-brief-partial-note">
@@ -1281,22 +1335,16 @@ export default function CompanyResearchBriefPage() {
   );
 }
 
-function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefAsyncState {
-  const [state, setState] = useState<ResearchBriefAsyncState>(INITIAL_ASYNC_STATE);
+function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefDataState {
+  const [state, setState] = useState<ResearchBriefDataState>(INITIAL_RESEARCH_BRIEF_DATA_STATE);
 
   useEffect(() => {
     let cancelled = false;
 
     setState((current) => ({
-      activityOverview: { ...current.activityOverview, loading: true, error: null },
-      changes: { ...current.changes, loading: true, error: null },
-      earningsSummary: { ...current.earningsSummary, loading: true, error: null },
-      capitalStructure: { ...current.capitalStructure, loading: true, error: null },
-      capitalMarketsSummary: { ...current.capitalMarketsSummary, loading: true, error: null },
-      governanceSummary: { ...current.governanceSummary, loading: true, error: null },
-      ownershipSummary: { ...current.ownershipSummary, loading: true, error: null },
-      models: { ...current.models, loading: true, error: null },
-      peers: { ...current.peers, loading: true, error: null },
+      ...current,
+      loading: true,
+      error: null,
     }));
 
     async function load() {
@@ -1315,6 +1363,64 @@ function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefA
         }
 
         setState(mapBriefResponseToAsyncState(brief));
+
+        if (brief.build_state === "ready") {
+          return;
+        }
+
+        const whatChangedResults = await Promise.allSettled([
+          getCompanyActivityOverview(ticker),
+          getCompanyChangesSinceLastFiling(ticker),
+          getCompanyEarningsSummary(ticker),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setState((current) =>
+          advanceResearchBriefDataState(current, "what_changed", {
+            activityOverview: resolveAsyncState(current.activityOverview, whatChangedResults[0], "Unable to load activity overview"),
+            changes: resolveAsyncState(current.changes, whatChangedResults[1], "Unable to load changes since last filing"),
+            earningsSummary: resolveAsyncState(current.earningsSummary, whatChangedResults[2], "Unable to load earnings summary"),
+          })
+        );
+
+        const capitalRiskResults = await Promise.allSettled([
+          getCompanyCapitalStructure(ticker),
+          getCompanyCapitalMarketsSummary(ticker),
+          getCompanyGovernanceSummary(ticker),
+          getCompanyBeneficialOwnershipSummary(ticker),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setState((current) =>
+          advanceResearchBriefDataState(current, "capital_and_risk", {
+            capitalStructure: resolveAsyncState(current.capitalStructure, capitalRiskResults[0], "Unable to load capital structure"),
+            capitalMarketsSummary: resolveAsyncState(current.capitalMarketsSummary, capitalRiskResults[1], "Unable to load capital markets summary"),
+            governanceSummary: resolveAsyncState(current.governanceSummary, capitalRiskResults[2], "Unable to load governance summary"),
+            ownershipSummary: resolveAsyncState(current.ownershipSummary, capitalRiskResults[3], "Unable to load beneficial ownership summary"),
+          })
+        );
+
+        const valuationResults = await Promise.allSettled([
+          getCompanyModels(ticker, MODEL_NAMES),
+          getCompanyPeers(ticker),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        setState((current) =>
+          advanceResearchBriefDataState(current, "valuation", {
+            models: resolveAsyncState(current.models, valuationResults[0], "Unable to load models"),
+            peers: resolveAsyncState(current.peers, valuationResults[1], "Unable to load peers"),
+          })
+        );
       } catch (nextError) {
         if (cancelled) {
           return;
@@ -1322,6 +1428,9 @@ function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefA
 
         const message = nextError instanceof Error ? nextError.message : "Unable to load research brief";
         setState({
+          ...INITIAL_RESEARCH_BRIEF_DATA_STATE,
+          error: message,
+          loading: false,
           activityOverview: { data: null, error: message, loading: false },
           changes: { data: null, error: message, loading: false },
           earningsSummary: { data: null, error: message, loading: false },
@@ -1343,6 +1452,91 @@ function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefA
   }, [reloadKey, ticker]);
 
   return state;
+}
+
+function ResearchBriefWarmupPanel({
+  buildState,
+  buildStatus,
+  sectionStatuses,
+  summaryCards,
+  filingTimeline,
+  refreshState,
+}: {
+  buildState: ResearchBriefBuildState;
+  buildStatus: string | null;
+  sectionStatuses: ResearchBriefSectionStatusPayload[];
+  summaryCards: ResearchBriefSummaryCardPayload[];
+  filingTimeline: FilingTimelineItemPayload[];
+  refreshState: RefreshState | null;
+}) {
+  if (buildState === "ready" && !summaryCards.length && !filingTimeline.length) {
+    return null;
+  }
+
+  return (
+    <Panel
+      title={buildState === "ready" ? "Brief status" : buildState === "partial" ? "Brief warming" : "Cold start bootstrap"}
+      subtitle={buildStatus ?? "Preparing the first meaningful screen while the full brief continues to hydrate."}
+      variant="subtle"
+      className={`research-brief-warmup-panel research-brief-warmup-panel-${buildState}`}
+    >
+      <div className="research-brief-warmup-stack">
+        <div className="research-brief-warmup-topline">
+          <span className={`pill research-brief-build-pill research-brief-build-pill-${buildState}`}>{formatResearchBriefBuildState(buildState)}</span>
+          {refreshState?.job_id ? <span className="pill">Refresh queued</span> : null}
+          {refreshState?.reason ? <span className="pill">{titleCase(refreshState.reason)}</span> : null}
+        </div>
+
+        {summaryCards.length ? (
+          <div className="research-brief-summary-card-grid">
+            {summaryCards.map((card) => (
+              <div key={card.key} className="research-brief-summary-card">
+                <div className="research-brief-summary-card-title">{card.title}</div>
+                <div className="research-brief-summary-card-value">{card.value}</div>
+                {card.detail ? <div className="research-brief-summary-card-detail">{card.detail}</div> : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="research-brief-warmup-grid">
+          <div className="research-brief-warmup-section-list">
+            <div className="research-brief-warmup-heading">Section build order</div>
+            <div className="research-brief-warmup-status-grid">
+              {sectionStatuses.map((statusItem) => (
+                <div key={statusItem.id} className={`research-brief-warmup-status-card state-${statusItem.state}`}>
+                  <div className="research-brief-warmup-status-topline">
+                    <span className="research-brief-warmup-status-title">{statusItem.title}</span>
+                    <span className={`pill research-brief-status-pill state-${statusItem.state}`}>{formatResearchBriefBuildState(statusItem.state)}</span>
+                  </div>
+                  {statusItem.detail ? <div className="research-brief-warmup-status-detail">{statusItem.detail}</div> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="research-brief-warmup-section-list">
+            <div className="research-brief-warmup-heading">Latest filing timeline</div>
+            {filingTimeline.length ? (
+              <div className="research-brief-warmup-timeline">
+                {filingTimeline.slice(0, 5).map((item) => (
+                  <div key={`${item.accession ?? item.form}-${item.date ?? "pending"}`} className="research-brief-warmup-timeline-item">
+                    <div className="research-brief-warmup-timeline-topline">
+                      <span className="research-brief-warmup-timeline-form">{item.form}</span>
+                      <span className="text-muted">{item.date ? formatDate(item.date) : "Pending"}</span>
+                    </div>
+                    <div className="research-brief-warmup-timeline-detail">{item.description}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="research-brief-warmup-empty">Recent filings will appear here once the first SEC timeline is resolved.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
 }
 
 function useActiveBriefSection(sectionIds: string[]): string {
@@ -1490,7 +1684,6 @@ function ResearchBriefHeroSummary({
   loadingMessage?: string | null;
 }) {
   const visibleMetaItems = metaItems.filter((item): item is string => Boolean(item));
-  const heroSkeletonWidths = ["72%", "58%", "66%", "80%"];
 
   return (
     <div className="research-brief-hero">
@@ -1506,11 +1699,7 @@ function ResearchBriefHeroSummary({
             <div className="research-brief-hero-metric-label">{item.label}</div>
             <div className="research-brief-hero-metric-value">
               {loading ? (
-                <span
-                  aria-hidden="true"
-                  className="workspace-skeleton research-brief-hero-metric-skeleton"
-                  style={{ width: heroSkeletonWidths[index % heroSkeletonWidths.length] }}
-                />
+                <span aria-hidden="true" className={`workspace-skeleton research-brief-hero-metric-skeleton skeleton-${index % 4}`} />
               ) : (
                 item.value ?? "\u2014"
               )}
@@ -1571,9 +1760,9 @@ function ResearchBriefSectionControls({
       <button
         type="button"
         className="research-brief-section-toggle"
-        aria-expanded={expanded}
         aria-controls={contentId}
         aria-label={`${expanded ? "Collapse" : "Expand"} ${title}`}
+        data-expanded={expanded ? "true" : "false"}
         onClick={onToggle}
       >
         <span>{expanded ? "Collapse" : "Expand"}</span>
@@ -1671,7 +1860,7 @@ function ResearchBriefStateBlock({
   minHeight?: number;
 }) {
   return (
-    <div className={`research-brief-state research-brief-state-${kind}`} style={{ minHeight }}>
+    <div className={`research-brief-state research-brief-state-${kind}${minHeight <= 180 ? " is-compact" : ""}`}>
       <div className="grid-empty-kicker">{kicker}</div>
       <div className="grid-empty-title">{title}</div>
       <div className="grid-empty-copy">{message}</div>
@@ -1756,8 +1945,7 @@ function AlertOrEntryCard({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className={cardClassName}
-        style={{ display: "grid", gap: 8, textDecoration: "none" }}
+        className={`${cardClassName} research-brief-linked-card`}
       >
         {content}
       </a>
@@ -1765,7 +1953,7 @@ function AlertOrEntryCard({
   }
 
   return (
-    <div className={cardClassName} style={{ display: "grid", gap: 8 }}>
+    <div className={`${cardClassName} research-brief-linked-card`}>
       {content}
     </div>
   );
@@ -1820,6 +2008,8 @@ function buildSnapshotNarrative({
   latestFinancial,
   topSegment,
   alertCount,
+  buildState,
+  filingTimeline,
   sourceMix,
   provenance,
   loading,
@@ -1828,11 +2018,17 @@ function buildSnapshotNarrative({
   latestFinancial: FinancialPayload | null;
   topSegment: FinancialPayload["segment_breakdown"][number] | null;
   alertCount: number;
+  buildState: ResearchBriefBuildState;
+  filingTimeline: FilingTimelineItemPayload[];
   sourceMix: SourceMixPayload | null | undefined;
   provenance: ProvenanceEntryPayload[] | null | undefined;
   loading: boolean;
 }): string {
   if (!latestFinancial) {
+    if (company && filingTimeline.length) {
+      const latestFiling = filingTimeline[0];
+      return `${company.name ?? company.ticker ?? "This company"} is in ${buildState === "building" ? "cold-start bootstrap" : "partial brief"} mode. The latest visible SEC filing is ${latestFiling.form} dated ${formatDate(latestFiling.date)} and the rest of the specialist sections will fill in as cached datasets finish warming.`;
+    }
     return loading
       ? "The brief is loading the latest persisted filing, segment mix, and price context before the deeper sections render."
       : "The default brief is waiting for persisted financials and segment disclosures before it can frame the company at a glance.";
@@ -2266,18 +2462,151 @@ function humanizeToken(value: string): string {
   return value.replaceAll("_", " ");
 }
 
-function mapBriefResponseToAsyncState(brief: CompanyResearchBriefResponse): ResearchBriefAsyncState {
+function mapBriefResponseToAsyncState(brief: CompanyResearchBriefResponse): ResearchBriefDataState {
+  const whatChangedAvailable = isBriefSectionAvailable(brief, "what_changed") || brief.build_state === "ready";
+  const capitalRiskAvailable = isBriefSectionAvailable(brief, "capital_and_risk") || brief.build_state === "ready";
+  const valuationAvailable = isBriefSectionAvailable(brief, "valuation") || brief.build_state === "ready";
+
   return {
-    activityOverview: { data: brief.what_changed.activity_overview, error: null, loading: false },
-    changes: { data: brief.what_changed.changes, error: null, loading: false },
-    earningsSummary: { data: brief.what_changed.earnings_summary, error: null, loading: false },
-    capitalStructure: { data: brief.capital_and_risk.capital_structure, error: null, loading: false },
-    capitalMarketsSummary: { data: brief.capital_and_risk.capital_markets_summary, error: null, loading: false },
-    governanceSummary: { data: brief.capital_and_risk.governance_summary, error: null, loading: false },
-    ownershipSummary: { data: brief.capital_and_risk.ownership_summary, error: null, loading: false },
-    models: { data: brief.valuation.models, error: null, loading: false },
-    peers: { data: brief.valuation.peers, error: null, loading: false },
+    brief,
+    error: null,
+    loading: false,
+    buildState: brief.build_state,
+    buildStatus: brief.build_status,
+    availableSections: [...brief.available_sections],
+    sectionStatuses: [...brief.section_statuses],
+    filingTimeline: [...brief.filing_timeline],
+    summaryCards: [...brief.stale_summary_cards],
+    activityOverview: resolveBriefSectionData(whatChangedAvailable, brief.what_changed.activity_overview),
+    changes: resolveBriefSectionData(whatChangedAvailable, brief.what_changed.changes),
+    earningsSummary: resolveBriefSectionData(whatChangedAvailable, brief.what_changed.earnings_summary),
+    capitalStructure: resolveBriefSectionData(capitalRiskAvailable, brief.capital_and_risk.capital_structure),
+    capitalMarketsSummary: resolveBriefSectionData(capitalRiskAvailable, brief.capital_and_risk.capital_markets_summary),
+    governanceSummary: resolveBriefSectionData(capitalRiskAvailable, brief.capital_and_risk.governance_summary),
+    ownershipSummary: resolveBriefSectionData(capitalRiskAvailable, brief.capital_and_risk.ownership_summary),
+    models: resolveBriefSectionData(valuationAvailable, brief.valuation.models),
+    peers: resolveBriefSectionData(valuationAvailable, brief.valuation.peers),
   };
+}
+
+function resolveBriefSectionData<T>(available: boolean, data: T): AsyncState<T> {
+  return {
+    data: available ? data : null,
+    error: null,
+    loading: !available,
+  };
+}
+
+function isBriefSectionAvailable(brief: CompanyResearchBriefResponse, sectionId: string): boolean {
+  return brief.available_sections.includes(sectionId);
+}
+
+function advanceResearchBriefDataState(
+  current: ResearchBriefDataState,
+  sectionId: string,
+  updates: Partial<ResearchBriefAsyncState>
+): ResearchBriefDataState {
+  const availableSections = current.availableSections.includes(sectionId)
+    ? current.availableSections
+    : [...current.availableSections, sectionId];
+
+  return {
+    ...current,
+    ...updates,
+    loading: false,
+    buildState: current.buildState === "building" ? "partial" : current.buildState,
+    buildStatus: buildStatusForAvailableSections(availableSections),
+    availableSections,
+    sectionStatuses: updateResearchBriefSectionStatuses(current.sectionStatuses, availableSections),
+  };
+}
+
+function updateResearchBriefSectionStatuses(
+  currentStatuses: ResearchBriefSectionStatusPayload[],
+  availableSections: string[]
+): ResearchBriefSectionStatusPayload[] {
+  const byId = new Map(currentStatuses.map((item) => [item.id, item]));
+  const available = new Set(availableSections);
+  let partialAssigned = false;
+
+  return ["snapshot", "what_changed", "business_quality", "capital_and_risk", "valuation"].map((sectionId) => {
+    const existing = byId.get(sectionId);
+    let state: ResearchBriefBuildState = "building";
+    let detail = existing?.detail ?? "Warming up.";
+
+    if (available.has(sectionId)) {
+      state = "ready";
+      detail = "Available now.";
+    } else if (!partialAssigned && available.size > 0) {
+      state = "partial";
+      detail = "Queued next.";
+      partialAssigned = true;
+    }
+
+    return {
+      id: sectionId,
+      title: existing?.title ?? titleCase(sectionId.replaceAll("_", " ")),
+      state,
+      available: available.has(sectionId),
+      detail,
+    };
+  });
+}
+
+function buildStatusForAvailableSections(availableSections: string[]): string {
+  if (availableSections.includes("valuation")) {
+    return "Most specialist sections are visible while the cached brief catches up.";
+  }
+  if (availableSections.includes("capital_and_risk")) {
+    return "Capital and risk signals are live. Valuation is loading next.";
+  }
+  if (availableSections.includes("what_changed")) {
+    return "Change summaries are live. Capital and risk is loading next.";
+  }
+  return "Showing the bootstrap snapshot while the rest of the brief hydrates.";
+}
+
+function mergeBusinessQualitySectionStatus(
+  sectionStatuses: ResearchBriefSectionStatusPayload[],
+  { loading, hasFinancials }: { loading: boolean; hasFinancials: boolean }
+): ResearchBriefSectionStatusPayload[] {
+  const nextStatuses = [...sectionStatuses];
+  const sectionId = "business_quality";
+  const index = nextStatuses.findIndex((item) => item.id === sectionId);
+
+  const nextStatus: ResearchBriefSectionStatusPayload = {
+    id: sectionId,
+    title: nextStatuses[index]?.title ?? "Business Quality",
+    state: hasFinancials ? "ready" : loading ? "partial" : nextStatuses[index]?.state ?? "building",
+    available: hasFinancials || nextStatuses[index]?.available || false,
+    detail: hasFinancials
+      ? "Available now."
+      : loading
+        ? "Loading company financial history."
+        : nextStatuses[index]?.detail ?? "Warming up.",
+  };
+
+  if (index >= 0) {
+    nextStatuses[index] = nextStatus;
+    return nextStatuses;
+  }
+
+  nextStatuses.push(nextStatus);
+  return nextStatuses;
+}
+
+function findBriefSummaryCardValue(cards: ResearchBriefSummaryCardPayload[], title: string): string | null {
+  return cards.find((card) => card.title === title)?.value ?? null;
+}
+
+function formatResearchBriefBuildState(state: ResearchBriefBuildState): string {
+  if (state === "ready") {
+    return "Ready";
+  }
+  if (state === "partial") {
+    return "Partial";
+  }
+  return "Building";
 }
 
 function isForeignIssuerAnnualForm(filingType: string | null | undefined) {

@@ -65,3 +65,18 @@ def test_shared_status_broker_persists_jobs_and_prevents_duplicates(monkeypatch)
 
     next_job_id = restarted_broker.create_job(ticker="AAPL", kind="refresh", dataset="company_refresh", force=False)
     assert next_job_id != job_id
+
+
+def test_shared_status_broker_claims_newest_job_first(monkeypatch) -> None:
+    _configure_sqlite_store(monkeypatch)
+    broker = status_stream.SharedStatusBroker(poll_interval_seconds=0.01)
+
+    older_job_id = broker.create_job(ticker="AAPL", kind="refresh", dataset="company_refresh", force=False)
+    newer_job_id = broker.create_job(ticker="MSFT", kind="refresh", dataset="company_refresh", force=False)
+
+    claimed = broker.claim_next_job(worker_id="worker-1")
+
+    assert claimed is not None
+    assert claimed.job_id == newer_job_id
+    assert claimed.ticker == "MSFT"
+    assert claimed.job_id != older_job_id

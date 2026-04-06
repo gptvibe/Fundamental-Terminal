@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.api.schemas.common import CompanyPayload, Number, ProvenanceEnvelope, RefreshState
 from app.api.schemas.events import CompanyActivityOverviewResponse, CompanyCapitalMarketsSummaryResponse
+from app.api.schemas.filings import FilingTimelineItemPayload
 from app.api.schemas.financials import CompanyCapitalStructureResponse, CompanyChangesSinceLastFilingResponse
 from app.api.schemas.governance import CompanyGovernanceSummaryResponse
 from app.api.schemas.models import CompanyModelsResponse
@@ -122,12 +123,33 @@ class CompanyResearchBriefMonitorSection(ProvenanceEnvelope):
     activity_overview: CompanyActivityOverviewResponse
 
 
+class ResearchBriefSummaryCardPayload(BaseModel):
+    key: str
+    title: str
+    value: str
+    detail: str | None = None
+
+
+class ResearchBriefSectionStatusPayload(BaseModel):
+    id: str
+    title: str
+    state: Literal["building", "partial", "ready"]
+    available: bool = True
+    detail: str | None = None
+
+
 class CompanyResearchBriefResponse(BaseModel):
     company: CompanyPayload | None
     schema_version: str
     generated_at: datetime
     as_of: str | None = None
     refresh: RefreshState
+    build_state: Literal["building", "partial", "ready"] = "ready"
+    build_status: str = "Research brief ready."
+    available_sections: list[str] = Field(default_factory=list)
+    section_statuses: list[ResearchBriefSectionStatusPayload] = Field(default_factory=list)
+    filing_timeline: list[FilingTimelineItemPayload] = Field(default_factory=list)
+    stale_summary_cards: list[ResearchBriefSummaryCardPayload] = Field(default_factory=list)
     snapshot: CompanyResearchBriefSnapshotSection
     what_changed: CompanyResearchBriefWhatChangedSection
     business_quality: CompanyResearchBriefBusinessQualitySection
