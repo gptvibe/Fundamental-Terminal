@@ -122,6 +122,8 @@ class Settings:
     db_pool_recycle_seconds: int = _int_env("DB_POOL_RECYCLE_SECONDS", 1800, minimum=30)
     model_engine_max_financial_periods: int = _int_env("MODEL_ENGINE_MAX_FINANCIAL_PERIODS", 16, minimum=4)
     refresh_lock_timeout_seconds: int = _int_env("REFRESH_LOCK_TIMEOUT_SECONDS", 900, minimum=30)
+    refresh_queue_poll_seconds: float = _float_env("REFRESH_QUEUE_POLL_SECONDS", 1.0, minimum=0.1)
+    refresh_status_poll_seconds: float = _float_env("REFRESH_STATUS_POLL_SECONDS", 1.0, minimum=0.1)
     hot_response_cache_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1)
     hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
     hot_response_cache_namespace: str = os.getenv("HOT_RESPONSE_CACHE_NAMESPACE", "ft:hot-cache").strip() or "ft:hot-cache"

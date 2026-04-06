@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from app.models.price_history import PriceHistory
     from app.models.proxy_statement import ProxyStatement
     from app.models.proxy_vote_result import ProxyVoteResult
+    from app.models.refresh_job import RefreshJob
 
 
 class Company(Base):
@@ -157,6 +158,7 @@ class Company(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    refresh_jobs: Mapped[list["RefreshJob"]] = relationship(back_populates="company")
     dataset_refresh_states: Mapped[list["DatasetRefreshState"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",

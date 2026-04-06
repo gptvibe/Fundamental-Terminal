@@ -28,6 +28,8 @@ from app.models.official_data_series import OfficialDataSeries
 from app.models.price_history import PriceHistory
 from app.models.proxy_statement import ProxyStatement
 from app.models.proxy_vote_result import ProxyVoteResult
+from app.models.refresh_job import RefreshJob
+from app.models.refresh_job_event import RefreshJobEvent
 
 __all__ = [
     "BeneficialOwnershipParty",
@@ -60,4 +62,6 @@ __all__ = [
     "PriceHistory",
     "ProxyStatement",
     "ProxyVoteResult",
+    "RefreshJob",
+    "RefreshJobEvent",
 ]

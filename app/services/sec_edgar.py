@@ -2769,9 +2769,15 @@ class EdgarIngestionService:
         )
 
 
-def run_refresh_job(identifier: str, force: bool = False, job_id: str | None = None) -> dict[str, Any]:
+def run_refresh_job(
+    identifier: str,
+    force: bool = False,
+    job_id: str | None = None,
+    *,
+    claim_token: str | None = None,
+) -> dict[str, Any]:
     service = EdgarIngestionService()
-    reporter = JobReporter(job_id)
+    reporter = JobReporter(job_id, claim_token=claim_token)
     emit_structured_log(
         logger,
         "refresh.job.start",

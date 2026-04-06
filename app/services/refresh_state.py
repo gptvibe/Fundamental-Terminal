@@ -152,6 +152,31 @@ def mark_dataset_checked(
         )
 
 
+def set_active_refresh_job(
+    session: Session,
+    *,
+    company_id: int,
+    dataset: DatasetName | str,
+    job_id: str,
+    updated_at: datetime | None = None,
+) -> None:
+    normalized_updated_at = _normalize_datetime(updated_at or datetime.now(timezone.utc))
+    statement = insert(DatasetRefreshState).values(
+        company_id=company_id,
+        dataset=str(dataset),
+        active_job_id=job_id,
+        updated_at=normalized_updated_at,
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_dataset_refresh_state_company_dataset",
+        set_={
+            "active_job_id": job_id,
+            "updated_at": normalized_updated_at,
+        },
+    )
+    session.execute(statement)
+
+
 def acquire_refresh_lock(
     session: Session,
     *,
