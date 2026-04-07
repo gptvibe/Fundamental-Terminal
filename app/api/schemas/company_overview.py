@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.api.schemas.common import CompanyPayload, Number, ProvenanceEnvelope, RefreshState
+from app.api.schemas.equity_claim_risk import EquityClaimRiskSummaryPayload
 from app.api.schemas.events import CompanyActivityOverviewResponse, CompanyCapitalMarketsSummaryResponse
 from app.api.schemas.filings import FilingTimelineItemPayload
 from app.api.schemas.financials import CompanyCapitalStructureResponse, CompanyChangesSinceLastFilingResponse
@@ -112,6 +113,7 @@ class CompanyResearchBriefCapitalAndRiskSection(ProvenanceEnvelope):
     capital_markets_summary: CompanyCapitalMarketsSummaryResponse
     governance_summary: CompanyGovernanceSummaryResponse
     ownership_summary: CompanyBeneficialOwnershipSummaryResponse
+    equity_claim_risk_summary: EquityClaimRiskSummaryPayload = Field(default_factory=EquityClaimRiskSummaryPayload)
 
 
 class CompanyResearchBriefValuationSection(ProvenanceEnvelope):

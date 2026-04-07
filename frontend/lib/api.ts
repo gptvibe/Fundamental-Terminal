@@ -7,6 +7,7 @@ import {
   CompanyCompareResponse,
   CompanyCapitalMarketsSummaryResponse,
   CompanyCapitalStructureResponse,
+  CompanyEquityClaimRiskResponse,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsResponse,
   CompanyEarningsSummaryResponse,
@@ -547,6 +548,16 @@ export function getCompanyCapitalStructure(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-structure${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyEquityClaimRisk(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyEquityClaimRiskResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/equity-claim-risk${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanySegmentHistory(

@@ -87,6 +87,7 @@ from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
     get_company_research_brief_snapshot,
 )
+from app.services.equity_claim_risk import build_company_equity_claim_risk_response
 from app.services.derived_metrics_mart import (
     build_derived_metric_points,
     build_summary_payload,
@@ -790,6 +791,36 @@ def company_capital_structure(
     if not_modified is not None:
         return not_modified  # type: ignore[return-value]
     return payload
+
+
+@app.get("/api/companies/{ticker}/equity-claim-risk", response_model=CompanyEquityClaimRiskResponse)
+def company_equity_claim_risk(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyEquityClaimRiskResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyEquityClaimRiskResponse(
+            company=None,
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "equity_claim_risk_missing"], missing_field_flags=["financials_missing", "capital_structure_missing", "capital_markets_missing", "filing_events_missing"]),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    payload = build_company_equity_claim_risk_response(
+        session,
+        snapshot.company.id,
+        company=_serialize_company(snapshot),
+        refresh=refresh,
+        as_of=parsed_as_of,
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
 
 
 @app.get("/api/companies/{ticker}/filing-insights", response_model=CompanyFilingInsightsResponse)

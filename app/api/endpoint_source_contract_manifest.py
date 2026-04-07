@@ -245,6 +245,15 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "eia_petroleum_spot_prices",
         "eia_steo",
     ),
+    (
+        "GET",
+        "/api/companies/{ticker}/equity-claim-risk",
+    ): _derived_official_contract(
+        "ft_equity_claim_risk_pack",
+        "ft_capital_structure_intelligence",
+        "sec_companyfacts",
+        "sec_edgar",
+    ),
     ("GET", "/api/companies/{ticker}/filing-insights"): _official_only_contract("sec_edgar"),
     (
         "GET",
@@ -264,6 +273,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "ft_activity_overview",
         "ft_changes_since_last_filing",
         "ft_capital_structure_intelligence",
+        "ft_equity_claim_risk_pack",
         "ft_peer_comparison",
         "ft_model_engine",
         "sec_companyfacts",

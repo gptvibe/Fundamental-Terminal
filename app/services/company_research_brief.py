@@ -86,6 +86,7 @@ from app.services.cache_queries import (
     latest_price_as_of,
     select_point_in_time_financials,
 )
+from app.services.equity_claim_risk import build_company_equity_claim_risk_response
 from app.services.filing_changes import build_changes_since_last_filing
 from app.services.market_context import get_cached_market_context_status
 from app.services.oil_exposure import classify_oil_exposure
@@ -151,6 +152,13 @@ def build_company_research_brief_response(
     capital_markets_summary = _build_capital_markets_summary_response(session, snapshot, refresh)
     governance_summary = _build_governance_summary_response(session, snapshot, refresh)
     ownership_summary = _build_ownership_summary_response(session, snapshot, refresh)
+    equity_claim_risk = build_company_equity_claim_risk_response(
+        session,
+        company_id,
+        company=company_payload,
+        refresh=refresh,
+        as_of=as_of,
+    )
     models_response = _build_models_response(session, snapshot, financials, refresh, price_last_checked)
     peers_response = _build_peers_response(session, snapshot, refresh, price_last_checked, as_of)
 
@@ -225,13 +233,15 @@ def build_company_research_brief_response(
             capital_markets_summary=capital_markets_summary,
             governance_summary=governance_summary,
             ownership_summary=ownership_summary,
+            equity_claim_risk_summary=equity_claim_risk.summary,
             **_build_provenance_contract(
                 [
                     SourceUsage(source_id="ft_company_research_brief", role="derived", as_of=capital_structure.as_of, last_refreshed_at=timestamp),
+                    SourceUsage(source_id="ft_equity_claim_risk_pack", role="derived", as_of=equity_claim_risk.as_of, last_refreshed_at=equity_claim_risk.last_refreshed_at),
                 ],
-                as_of=capital_structure.as_of,
-                last_refreshed_at=_merge_last_checked(capital_structure.last_refreshed_at, timestamp),
-                confidence_flags=capital_structure.confidence_flags,
+                as_of=_latest_as_of(capital_structure.as_of, equity_claim_risk.as_of),
+                last_refreshed_at=_merge_last_checked(capital_structure.last_refreshed_at, equity_claim_risk.last_refreshed_at, timestamp),
+                confidence_flags=sorted(set([*capital_structure.confidence_flags, *equity_claim_risk.confidence_flags])),
             ),
         ),
         valuation=CompanyResearchBriefValuationSection(

@@ -1623,6 +1623,120 @@ export interface CompanyCapitalMarketsSummaryResponse {
   error: string | null;
 }
 
+export interface EquityClaimRiskEvidencePayload {
+  category: "capital_structure" | "capital_markets" | "filing_event" | "restatement";
+  title: string;
+  detail: string;
+  form: string | null;
+  filing_date: string | null;
+  accession_number: string | null;
+  source_url: string | null;
+  source_id: string;
+}
+
+export interface EquityClaimRiskSummaryPayload {
+  headline: string;
+  overall_risk_level: "low" | "medium" | "high";
+  dilution_risk_level: "low" | "medium" | "high";
+  financing_risk_level: "low" | "medium" | "high";
+  reporting_risk_level: "low" | "medium" | "high";
+  latest_period_end: string | null;
+  net_dilution_ratio: number | null;
+  sbc_to_revenue: number | null;
+  shelf_capacity_remaining: number | null;
+  recent_atm_activity: boolean;
+  recent_warrant_or_convertible_activity: boolean;
+  debt_due_next_twenty_four_months: number | null;
+  restatement_severity: "none" | "low" | "medium" | "high";
+  internal_control_flag_count: number;
+  key_points: string[];
+}
+
+export interface EquityClaimRiskShareCountBridgePayload {
+  latest_period_end: string | null;
+  bridge: CapitalStructureNetDilutionBridgePayload;
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskShelfCapacityPayload {
+  status: "none" | "available" | "partially_used" | "likely_exhausted";
+  latest_shelf_form: string | null;
+  latest_shelf_filing_date: string | null;
+  gross_capacity: number | null;
+  utilized_capacity: number | null;
+  remaining_capacity: number | null;
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskAtmDependencyPayload {
+  atm_detected: boolean;
+  recent_atm_filing_count: number;
+  latest_atm_filing_date: string | null;
+  financing_dependency_level: "low" | "medium" | "high";
+  negative_free_cash_flow: boolean;
+  cash_runway_years: number | null;
+  debt_due_next_twelve_months: number | null;
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskHybridSecuritiesPayload {
+  warrant_filing_count: number;
+  convertible_filing_count: number;
+  latest_security_filing_date: string | null;
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskSbcAndDilutionPayload {
+  latest_stock_based_compensation: number | null;
+  sbc_to_revenue: number | null;
+  current_net_dilution_ratio: number | null;
+  trailing_three_period_net_dilution_ratio: number | null;
+  weighted_average_diluted_shares_growth: number | null;
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskDebtMaturityWallPayload {
+  total_debt: number | null;
+  debt_due_next_twelve_months: number | null;
+  debt_due_year_two: number | null;
+  debt_due_next_twenty_four_months: number | null;
+  debt_due_next_twenty_four_months_ratio: number | null;
+  interest_coverage_proxy: number | null;
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskKeywordSignalPayload {
+  level: "low" | "medium" | "high";
+  match_count: number;
+  matched_terms: string[];
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface EquityClaimRiskReportingPayload {
+  restatement_count: number;
+  restatement_severity: "none" | "low" | "medium" | "high";
+  high_impact_restatements: number;
+  latest_restatement_date: string | null;
+  internal_control_flag_count: number;
+  internal_control_terms: string[];
+  evidence: EquityClaimRiskEvidencePayload[];
+}
+
+export interface CompanyEquityClaimRiskResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  summary: EquityClaimRiskSummaryPayload;
+  share_count_bridge: EquityClaimRiskShareCountBridgePayload;
+  shelf_registration: EquityClaimRiskShelfCapacityPayload;
+  atm_and_financing_dependency: EquityClaimRiskAtmDependencyPayload;
+  warrants_and_convertibles: EquityClaimRiskHybridSecuritiesPayload;
+  sbc_and_dilution: EquityClaimRiskSbcAndDilutionPayload;
+  debt_maturity_wall: EquityClaimRiskDebtMaturityWallPayload;
+  covenant_risk_signals: EquityClaimRiskKeywordSignalPayload;
+  reporting_and_controls: EquityClaimRiskReportingPayload;
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
 export type EarningsParseState = "parsed" | "metadata_only";
 
 export interface EarningsReleasePayload {
@@ -2260,6 +2374,7 @@ export interface CompanyResearchBriefCapitalAndRiskSection extends ProvenanceEnv
   capital_markets_summary: CompanyCapitalMarketsSummaryResponse;
   governance_summary: CompanyGovernanceSummaryResponse;
   ownership_summary: CompanyBeneficialOwnershipSummaryResponse;
+  equity_claim_risk_summary: EquityClaimRiskSummaryPayload;
 }
 
 export interface CompanyResearchBriefValuationSection extends ProvenanceEnvelope {

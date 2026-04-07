@@ -243,6 +243,60 @@ def test_capital_markets_summary_endpoint_returns_aggregates(monkeypatch):
     assert summary["late_filer_notices"] >= 1
 
 
+def test_equity_claim_risk_endpoint_returns_pack(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(
+        main_module,
+        "build_company_equity_claim_risk_response",
+        lambda *_args, **_kwargs: main_module.CompanyEquityClaimRiskResponse(
+            company=None,
+            summary=main_module.EquityClaimRiskSummaryPayload(
+                headline="Equity claim risk is elevated because dilution and financing pressure remain active.",
+                overall_risk_level="high",
+                dilution_risk_level="high",
+                financing_risk_level="medium",
+                reporting_risk_level="low",
+                net_dilution_ratio=0.08,
+                shelf_capacity_remaining=250_000_000,
+                debt_due_next_twenty_four_months=180_000_000,
+                key_points=["ATM activity was detected in recent SEC filings."],
+            ),
+            refresh=RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+            provenance=[
+                main_module.ProvenanceEntryPayload(
+                    source_id="ft_equity_claim_risk_pack",
+                    source_tier="derived_from_official",
+                    display_label="Fundamental Terminal Equity Claim Risk Pack",
+                    url="https://github.com/gptvibe/Fundamental-Terminal",
+                    default_freshness_ttl_seconds=21600,
+                    disclosure_note="Derived dilution and financing risk pack assembled from SEC evidence.",
+                    role="derived",
+                    as_of="2026-03-23T23:59:59+00:00",
+                )
+            ],
+            as_of="2026-03-23T23:59:59+00:00",
+            source_mix=main_module.SourceMixPayload(
+                source_ids=["ft_equity_claim_risk_pack", "sec_companyfacts", "sec_edgar"],
+                source_tiers=["derived_from_official", "official_regulator"],
+                primary_source_ids=["sec_companyfacts"],
+                fallback_source_ids=[],
+                official_only=True,
+            ),
+            confidence_flags=["atm_activity_detected"],
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/equity-claim-risk")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["overall_risk_level"] == "high"
+    assert payload["summary"]["headline"].startswith("Equity claim risk is elevated")
+    assert payload["source_mix"]["official_only"] is True
+    assert payload["confidence_flags"] == ["atm_activity_detected"]
+
+
 def test_peers_route_returns_default_selected_tickers(monkeypatch):
     _install_common_overrides(monkeypatch, {})
     main_module._hot_response_cache.clear()

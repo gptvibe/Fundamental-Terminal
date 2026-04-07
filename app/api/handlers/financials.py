@@ -4,6 +4,7 @@ from app.api.handlers._dispatch import route_handler
 
 
 company_compare = route_handler("company_compare")
+company_equity_claim_risk = route_handler("company_equity_claim_risk")
 company_financials = route_handler("company_financials")
 company_segment_history = route_handler("company_segment_history")
 company_capital_structure = route_handler("company_capital_structure")
@@ -22,6 +23,7 @@ __all__ = [
     "company_compare",
     "company_derived_metrics",
     "company_derived_metrics_summary",
+    "company_equity_claim_risk",
     "company_filing_insights",
     "company_financial_history",
     "company_financial_restatements",

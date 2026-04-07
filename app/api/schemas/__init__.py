@@ -1,5 +1,6 @@
 from app.api.schemas.common import *
 from app.api.schemas.company_overview import *
+from app.api.schemas.equity_claim_risk import *
 from app.api.schemas.events import *
 from app.api.schemas.filings import *
 from app.api.schemas.financials import *

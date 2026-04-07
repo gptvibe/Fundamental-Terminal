@@ -1,17 +1,20 @@
+// @vitest-environment jsdom
+
 import * as React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CompanyCapitalMarketsPage from "@/app/company/[ticker]/capital-markets/page";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("@/hooks/use-company-workspace", () => ({
   useCompanyWorkspace: () => ({
     company: { ticker: "ACME", name: "Acme Corp", sector: "Tech", last_checked: null },
-    financials: [],
+    financials: [{ debt_changes: 1250000 }],
     loading: false,
     refreshing: false,
     refreshState: null,
@@ -39,49 +42,175 @@ vi.mock("@/components/ui/status-pill", () => ({
   StatusPill: () => React.createElement("span", null, "status"),
 }));
 
-vi.mock("@/components/charts/capital-markets-signal-chart", () => ({
-  CapitalMarketsSignalChart: () => React.createElement("div", null, "capital-signal-chart"),
-}));
-
 vi.mock("@/components/charts/share-dilution-tracker-chart", () => ({
   ShareDilutionTrackerChart: () => React.createElement("div", null, "dilution-chart"),
 }));
 
 vi.mock("@/lib/api", () => ({
-  getCompanyCapitalMarkets: vi.fn(async () => ({
-    company: null,
-    filings: [],
-    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
-    error: null,
-  })),
-  getCompanyCapitalMarketsSummary: vi.fn(async () => ({
-    company: null,
+  getCompanyEquityClaimRisk: vi.fn(async () => ({
+    company: {
+      ticker: "ACME",
+      cik: "0000001",
+      name: "Acme Corp",
+      sector: "Tech",
+      market_sector: "Tech",
+      market_industry: null,
+      oil_exposure_type: "non_oil",
+      oil_support_status: "unsupported",
+      oil_support_reasons: [],
+      strict_official_mode: false,
+      last_checked: null,
+      last_checked_financials: null,
+      last_checked_prices: null,
+      last_checked_insiders: null,
+      last_checked_institutional: null,
+      last_checked_filings: null,
+      cache_state: "fresh",
+    },
     summary: {
-      total_filings: 0,
-      late_filer_notices: 0,
-      max_offering_amount: null,
+      headline: "Capital needs look elevated because dilution, financing, and reporting signals are all active.",
+      overall_risk_level: "high",
+      dilution_risk_level: "high",
+      financing_risk_level: "medium",
+      reporting_risk_level: "medium",
+      latest_period_end: "2025-12-31",
+      net_dilution_ratio: 0.081,
+      sbc_to_revenue: 0.064,
+      shelf_capacity_remaining: 225000000,
+      recent_atm_activity: true,
+      recent_warrant_or_convertible_activity: true,
+      debt_due_next_twenty_four_months: 180000000,
+      restatement_severity: "medium",
+      internal_control_flag_count: 2,
+      key_points: ["ATM activity was detected in recent SEC filings."],
+    },
+    share_count_bridge: {
+      latest_period_end: "2025-12-31",
+      bridge: {
+        opening_shares: 100000000,
+        shares_issued: 9000000,
+        shares_issued_proxy: null,
+        shares_repurchased: 1000000,
+        other_share_change: null,
+        ending_shares: 108000000,
+        weighted_average_diluted_shares: 106000000,
+        net_share_change: 8000000,
+        net_dilution_ratio: 0.08,
+        share_repurchase_cash: null,
+        stock_based_compensation: 42000000,
+        meta: { confidence_score: null, quality_flags: [], source_fields: [] },
+      },
+      evidence: [
+        {
+          category: "capital_structure",
+          title: "Latest share-count bridge",
+          detail: "10-K bridge shows a net share increase during the latest annual period.",
+          form: "10-K",
+          filing_date: "2025-12-31",
+          accession_number: "0000001-26-000001",
+          source_url: "https://example.com/share-bridge",
+          source_id: "sec_companyfacts",
+        },
+      ],
+    },
+    shelf_registration: {
+      status: "partially_used",
+      latest_shelf_form: "S-3",
+      latest_shelf_filing_date: "2026-01-15",
+      gross_capacity: 500000000,
+      utilized_capacity: 275000000,
+      remaining_capacity: 225000000,
+      evidence: [],
+    },
+    atm_and_financing_dependency: {
+      atm_detected: true,
+      recent_atm_filing_count: 2,
+      latest_atm_filing_date: "2026-02-10",
+      financing_dependency_level: "medium",
+      negative_free_cash_flow: true,
+      cash_runway_years: 1.2,
+      debt_due_next_twelve_months: 90000000,
+      evidence: [],
+    },
+    warrants_and_convertibles: {
+      warrant_filing_count: 1,
+      convertible_filing_count: 1,
+      latest_security_filing_date: "2026-02-20",
+      evidence: [],
+    },
+    sbc_and_dilution: {
+      latest_stock_based_compensation: 42000000,
+      sbc_to_revenue: 0.064,
+      current_net_dilution_ratio: 0.081,
+      trailing_three_period_net_dilution_ratio: 0.072,
+      weighted_average_diluted_shares_growth: 0.055,
+      evidence: [],
+    },
+    debt_maturity_wall: {
+      total_debt: 400000000,
+      debt_due_next_twelve_months: 90000000,
+      debt_due_year_two: 90000000,
+      debt_due_next_twenty_four_months: 180000000,
+      debt_due_next_twenty_four_months_ratio: 0.45,
+      interest_coverage_proxy: 1.8,
+      evidence: [],
+    },
+    covenant_risk_signals: {
+      level: "medium",
+      match_count: 2,
+      matched_terms: ["covenant", "waiver"],
+      evidence: [],
+    },
+    reporting_and_controls: {
+      restatement_count: 1,
+      restatement_severity: "medium",
+      high_impact_restatements: 0,
+      latest_restatement_date: "2026-02-28",
+      internal_control_flag_count: 2,
+      internal_control_terms: ["material weakness"],
+      evidence: [],
     },
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
-    error: null,
-  })),
-  getCompanyFilingEvents: vi.fn(async () => ({
-    company: null,
-    events: [],
-    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
-    error: null,
+    diagnostics: {
+      coverage_ratio: 1,
+      fallback_ratio: 0,
+      stale_flags: [],
+      parser_confidence: null,
+      missing_field_flags: [],
+      reconciliation_penalty: null,
+      reconciliation_disagreement_count: 0,
+    },
+    provenance: [],
+    as_of: "2025-12-31",
+    last_refreshed_at: "2026-03-10T00:00:00Z",
+    source_mix: {
+      source_ids: ["ft_equity_claim_risk_pack", "sec_companyfacts", "sec_edgar"],
+      source_tiers: ["derived_from_official", "official_regulator"],
+      primary_source_ids: ["sec_companyfacts"],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: [],
   })),
 }));
 
 describe("CompanyCapitalMarketsPage", () => {
-  it("renders the shared capital-markets workspace header and panels", () => {
-    const html = renderToStaticMarkup(React.createElement(CompanyCapitalMarketsPage));
+  it("renders the equity claim risk pack summary and evidence panels", async () => {
+    render(React.createElement(CompanyCapitalMarketsPage));
 
-    expect(html).toContain("Capital Markets");
-    expect(html).toContain("SEC-first financing workspace covering registration activity");
-    expect(html).toContain("Financing Signal Tracker");
-    expect(html).toContain("Capital Raise Filings");
-    expect(html).toContain("Recent Financing Events");
-    expect(html).toContain("capital-signal-chart");
-    expect(html).toContain("dilution-chart");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Equity Claim Risk Pack" })).toBeTruthy();
+    });
+
+    expect(screen.getByText(/SEC-derived underwriting workspace covering dilution/i)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Investor summary" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Share-count bridge" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Financing capacity and dependency" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Hybrid securities and debt maturity wall" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Covenant, restatement, and control signals" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Provenance and diagnostics" })).toBeTruthy();
+    expect(screen.getByText("Capital needs look elevated because dilution, financing, and reporting signals are all active.")).toBeTruthy();
+    expect(screen.getByText("Latest share-count bridge")).toBeTruthy();
+    expect(screen.getByText("dilution-chart")).toBeTruthy();
   });
 });

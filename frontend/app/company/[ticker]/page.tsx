@@ -17,6 +17,7 @@ import { showAppToast } from "@/lib/app-toast";
 import {
   getCompanyActivityOverview,
   getCompanyBeneficialOwnershipSummary,
+  getCompanyEquityClaimRisk,
   getCompanyCapitalMarketsSummary,
   getCompanyCapitalStructure,
   getCompanyChangesSinceLastFiling,
@@ -50,6 +51,7 @@ import type {
   CompanyCapitalStructureResponse,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsSummaryResponse,
+  EquityClaimRiskSummaryPayload,
   CompanyGovernanceSummaryResponse,
   CompanyModelsResponse,
   CompanyPeersResponse,
@@ -295,6 +297,7 @@ export default function CompanyResearchBriefPage() {
       }),
     [briefData.activityOverview.data, institutionalHoldings, insiderData?.summary, pageCompany, refreshState]
   );
+  const equityClaimRiskSummary = briefData.brief?.capital_and_risk.equity_claim_risk_summary ?? null;
   const snapshotLinks = useMemo(
     () => [
       { href: `/company/${encodeURIComponent(ticker)}/financials`, label: "Financials" },
@@ -318,7 +321,7 @@ export default function CompanyResearchBriefPage() {
   );
   const capitalRiskLinks = useMemo(
     () => [
-      { href: `/company/${encodeURIComponent(ticker)}/capital-markets`, label: "Capital Markets" },
+      { href: `/company/${encodeURIComponent(ticker)}/capital-markets`, label: "Equity Claim Risk Pack" },
       { href: `/company/${encodeURIComponent(ticker)}/governance`, label: "Governance" },
     ],
     [ticker]
@@ -365,6 +368,7 @@ export default function CompanyResearchBriefPage() {
     capitalMarketsSummary: briefData.capitalMarketsSummary.data,
     governanceSummary: briefData.governanceSummary.data,
     ownershipSummary: briefData.ownershipSummary.data,
+    equityClaimRiskSummary,
     insiderSummary: insiderData?.summary ?? null,
     isForeignIssuerLike: foreignIssuerStyleFiling,
     loading:
@@ -414,6 +418,7 @@ export default function CompanyResearchBriefPage() {
         ["earnings_summary", () => getCompanyEarningsSummary(ticker)],
         ["capital_structure", () => getCompanyCapitalStructure(ticker)],
         ["capital_markets_summary", () => getCompanyCapitalMarketsSummary(ticker)],
+        ["equity_claim_risk", () => getCompanyEquityClaimRisk(ticker)],
         ["governance_summary", () => getCompanyGovernanceSummary(ticker)],
         ["beneficial_ownership_summary", () => getCompanyBeneficialOwnershipSummary(ticker)],
         ["models", () => getCompanyModels(ticker, MODEL_NAMES)],
@@ -975,6 +980,14 @@ export default function CompanyResearchBriefPage() {
         summary={capitalRiskNarrative}
         cues={[
           {
+            label: "Equity claim risk pack",
+            asOf: briefData.brief?.capital_and_risk.as_of,
+            lastRefreshedAt: briefData.brief?.capital_and_risk.last_refreshed_at,
+            provenance: briefData.brief?.capital_and_risk.provenance,
+            sourceMix: briefData.brief?.capital_and_risk.source_mix,
+            confidenceFlags: briefData.brief?.capital_and_risk.confidence_flags,
+          },
+          {
             label: "Capital structure",
             asOf: briefData.capitalStructure.data?.as_of,
             lastRefreshedAt: briefData.capitalStructure.data?.last_refreshed_at,
@@ -991,6 +1004,64 @@ export default function CompanyResearchBriefPage() {
         expanded={expandedSections["capital-risk"] ?? true}
         onToggle={() => toggleSection("capital-risk")}
       >
+        <EvidenceCard
+          title="Equity claim risk pack summary"
+          copy="A compact underwriting read on dilution, financing dependency, debt pressure, and reporting-control risk pulled from SEC-derived evidence."
+        >
+          {equityClaimRiskSummary ? (
+            <div className="workspace-card-stack">
+              <div className="workspace-card-row">
+                <div className="workspace-pill-row">
+                  <span className={`pill tone-${toneForRiskLevel(equityClaimRiskSummary.overall_risk_level)}`}>
+                    Overall {titleCase(equityClaimRiskSummary.overall_risk_level)}
+                  </span>
+                  <span className={`pill tone-${toneForRiskLevel(equityClaimRiskSummary.dilution_risk_level)}`}>
+                    Dilution {titleCase(equityClaimRiskSummary.dilution_risk_level)}
+                  </span>
+                  <span className={`pill tone-${toneForRiskLevel(equityClaimRiskSummary.financing_risk_level)}`}>
+                    Financing {titleCase(equityClaimRiskSummary.financing_risk_level)}
+                  </span>
+                  <span className={`pill tone-${toneForRiskLevel(equityClaimRiskSummary.reporting_risk_level)}`}>
+                    Reporting {titleCase(equityClaimRiskSummary.reporting_risk_level)}
+                  </span>
+                </div>
+                <div className="text-muted">
+                  {equityClaimRiskSummary.latest_period_end ? formatDate(equityClaimRiskSummary.latest_period_end) : "Latest period pending"}
+                </div>
+              </div>
+              <div className="workspace-card-title">{equityClaimRiskSummary.headline || "Risk summary is available once the capital-and-risk pack finishes building."}</div>
+              <div className="text-muted workspace-card-copy">
+                Net dilution {formatPercent(equityClaimRiskSummary.net_dilution_ratio)} · SBC / revenue {formatPercent(equityClaimRiskSummary.sbc_to_revenue)} · Shelf remaining {formatCompactCurrency(equityClaimRiskSummary.shelf_capacity_remaining)} · Debt due in 24 months {formatCompactCurrency(equityClaimRiskSummary.debt_due_next_twenty_four_months)}
+              </div>
+              {equityClaimRiskSummary.key_points.length ? (
+                <div className="workspace-card-stack">
+                  {equityClaimRiskSummary.key_points.slice(0, 4).map((point) => (
+                    <div key={point} className="text-muted workspace-card-copy">
+                      {point}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div>
+                <Link href={`/company/${encodeURIComponent(ticker)}/capital-markets`} className="workspace-card-link">
+                  Open the full Equity Claim Risk Pack
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <ResearchBriefStateBlock
+              kind={briefData.loading ? "loading" : "empty"}
+              kicker="Capital & risk"
+              title={briefData.loading ? "Loading equity claim risk summary" : "No equity claim risk summary yet"}
+              message={
+                briefData.loading
+                  ? "Preparing the compact underwriting summary from share-count, financing, debt, and reporting-control signals."
+                  : "This summary appears once the derived Equity Claim Risk Pack is available for the selected company."
+              }
+            />
+          )}
+        </EvidenceCard>
+
         <EvidenceCard
           title="Capital structure intelligence"
           copy="Debt ladders, lease schedules, payout mix, and dilution bridges pulled from persisted SEC extraction rather than route-time recomputation."
@@ -2119,6 +2190,7 @@ function buildCapitalRiskNarrative({
   capitalMarketsSummary,
   governanceSummary,
   ownershipSummary,
+  equityClaimRiskSummary,
   insiderSummary,
   isForeignIssuerLike,
   loading,
@@ -2127,6 +2199,7 @@ function buildCapitalRiskNarrative({
   capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse | null;
   governanceSummary: CompanyGovernanceSummaryResponse | null;
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse | null;
+  equityClaimRiskSummary: EquityClaimRiskSummaryPayload | null;
   insiderSummary: InsiderActivitySummaryPayload | null;
   isForeignIssuerLike: boolean;
   loading: boolean;
@@ -2150,7 +2223,24 @@ function buildCapitalRiskNarrative({
       ? "governance coverage is limited because many 20-F and 40-F issuers do not file U.S. proxy materials"
       : `governance coverage spans ${proxyCount.toLocaleString()} proxy filing${proxyCount === 1 ? "" : "s"}`;
 
+  if (equityClaimRiskSummary) {
+    return `${equityClaimRiskSummary.headline} Net dilution currently reads ${formatPercent(equityClaimRiskSummary.net_dilution_ratio)}, remaining shelf capacity is ${formatCompactCurrency(equityClaimRiskSummary.shelf_capacity_remaining)}, debt due inside 24 months is ${formatCompactCurrency(equityClaimRiskSummary.debt_due_next_twenty_four_months)}, and internal-control flags total ${equityClaimRiskSummary.internal_control_flag_count.toLocaleString()}. ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, insider tone currently reads ${insiderTone}, and registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"}.`;
+  }
+
   return `Near-term debt due is ${formatCompactCurrency(debtDue)}, net dilution is ${formatPercent(netDilution)}, ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and insider tone currently reads ${insiderTone}. Registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"} so the brief can answer whether capital allocation is supportive or leaking value.`;
+}
+
+function toneForRiskLevel(level: "none" | "low" | "medium" | "high"): SemanticTone {
+  switch (level) {
+    case "high":
+      return "red";
+    case "medium":
+      return "gold";
+    case "low":
+      return "green";
+    default:
+      return "cyan";
+  }
 }
 
 function buildValuationNarrative({

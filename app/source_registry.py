@@ -334,6 +334,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Persisted capital structure roll-forwards, maturities, payout mix, and dilution bridges derived from official SEC companyfacts statements.",
     ),
+    "ft_equity_claim_risk_pack": SourceDefinition(
+        source_id="ft_equity_claim_risk_pack",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Equity Claim Risk Pack",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Derived dilution, financing, debt-wall, covenant, and reporting-risk pack assembled from persisted SEC companyfacts, SEC filing metadata, and restatement records.",
+    ),
     "ft_oil_scenario_overlay": SourceDefinition(
         source_id="ft_oil_scenario_overlay",
         tier="derived_from_official",

@@ -12,6 +12,7 @@ import {
   getCompanyCapitalMarketsSummary,
   getCompanyCapitalStructure,
   getCompanyChangesSinceLastFiling,
+  getCompanyEquityClaimRisk,
   getCompanyEarningsSummary,
   getCompanyGovernanceSummary,
   getCompanyModels,
@@ -131,6 +132,7 @@ vi.mock("@/lib/api", () => ({
   getCompanyCapitalMarketsSummary: vi.fn(),
   getCompanyCapitalStructure: vi.fn(),
   getCompanyChangesSinceLastFiling: vi.fn(),
+  getCompanyEquityClaimRisk: vi.fn(),
   getCompanyEarningsSummary: vi.fn(),
   getCompanyGovernanceSummary: vi.fn(),
   getCompanyModels: vi.fn(),
@@ -193,6 +195,7 @@ beforeEach(() => {
   vi.mocked(getCompanyActivityOverview).mockResolvedValue(buildActivityOverviewResponse());
   vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue(buildChangesResponse());
   vi.mocked(getCompanyEarningsSummary).mockResolvedValue(buildEarningsSummaryResponse());
+  vi.mocked(getCompanyEquityClaimRisk).mockResolvedValue(buildEquityClaimRiskResponse());
   vi.mocked(getCompanyCapitalStructure).mockResolvedValue(buildCapitalStructureResponse());
   vi.mocked(getCompanyCapitalMarketsSummary).mockResolvedValue(buildCapitalMarketsSummaryResponse());
   vi.mocked(getCompanyGovernanceSummary).mockResolvedValue(buildGovernanceSummaryResponse());
@@ -225,6 +228,8 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
     expect(screen.getByText("plain-english-brief-panel")).toBeTruthy();
+    expect(screen.getByText("Equity claim risk pack summary")).toBeTruthy();
+    expect(screen.getByText("Dilution pressure remains elevated because recent financing and reporting signals are still active.")).toBeTruthy();
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
   });
@@ -606,6 +611,7 @@ function buildResearchBriefResponse(overrides: Record<string, unknown> = {}) {
       capital_markets_summary: buildCapitalMarketsSummaryResponse(),
       governance_summary: buildGovernanceSummaryResponse(),
       ownership_summary: buildOwnershipSummaryResponse(),
+      equity_claim_risk_summary: buildEquityClaimRiskSummary(),
       provenance,
       as_of: "2025-12-31",
       last_refreshed_at: "2026-03-10T00:00:00Z",
@@ -630,6 +636,129 @@ function buildResearchBriefResponse(overrides: Record<string, unknown> = {}) {
       confidence_flags: [],
     },
     ...overrides,
+  };
+}
+
+function buildEquityClaimRiskSummary() {
+  return {
+    headline: "Dilution pressure remains elevated because recent financing and reporting signals are still active.",
+    overall_risk_level: "high",
+    dilution_risk_level: "high",
+    financing_risk_level: "medium",
+    reporting_risk_level: "medium",
+    latest_period_end: "2025-12-31",
+    net_dilution_ratio: 0.08,
+    sbc_to_revenue: 0.05,
+    shelf_capacity_remaining: 250000000,
+    recent_atm_activity: true,
+    recent_warrant_or_convertible_activity: true,
+    debt_due_next_twenty_four_months: 180000000,
+    restatement_severity: "medium",
+    internal_control_flag_count: 2,
+    key_points: ["ATM activity was detected in recent SEC filings."],
+  };
+}
+
+function buildEquityClaimRiskResponse() {
+  return {
+    company: { ticker: "ACME", name: "Acme Corp" },
+    summary: buildEquityClaimRiskSummary(),
+    share_count_bridge: {
+      latest_period_end: "2025-12-31",
+      bridge: {
+        opening_shares: 100000000,
+        shares_issued: 8000000,
+        shares_issued_proxy: null,
+        shares_repurchased: 1000000,
+        other_share_change: null,
+        ending_shares: 107000000,
+        weighted_average_diluted_shares: 105000000,
+        net_share_change: 7000000,
+        net_dilution_ratio: 0.07,
+        share_repurchase_cash: null,
+        stock_based_compensation: 310,
+        meta: { confidence_score: null, quality_flags: [], source_fields: [] },
+      },
+      evidence: [],
+    },
+    shelf_registration: {
+      status: "partially_used",
+      latest_shelf_form: "S-3",
+      latest_shelf_filing_date: "2026-01-15",
+      gross_capacity: 500000000,
+      utilized_capacity: 250000000,
+      remaining_capacity: 250000000,
+      evidence: [],
+    },
+    atm_and_financing_dependency: {
+      atm_detected: true,
+      recent_atm_filing_count: 2,
+      latest_atm_filing_date: "2026-02-10",
+      financing_dependency_level: "medium",
+      negative_free_cash_flow: false,
+      cash_runway_years: null,
+      debt_due_next_twelve_months: 90000000,
+      evidence: [],
+    },
+    warrants_and_convertibles: {
+      warrant_filing_count: 1,
+      convertible_filing_count: 1,
+      latest_security_filing_date: "2026-02-20",
+      evidence: [],
+    },
+    sbc_and_dilution: {
+      latest_stock_based_compensation: 310,
+      sbc_to_revenue: 0.05,
+      current_net_dilution_ratio: 0.08,
+      trailing_three_period_net_dilution_ratio: 0.07,
+      weighted_average_diluted_shares_growth: 0.03,
+      evidence: [],
+    },
+    debt_maturity_wall: {
+      total_debt: 400000000,
+      debt_due_next_twelve_months: 90000000,
+      debt_due_year_two: 90000000,
+      debt_due_next_twenty_four_months: 180000000,
+      debt_due_next_twenty_four_months_ratio: 0.45,
+      interest_coverage_proxy: 1.9,
+      evidence: [],
+    },
+    covenant_risk_signals: {
+      level: "medium",
+      match_count: 2,
+      matched_terms: ["covenant"],
+      evidence: [],
+    },
+    reporting_and_controls: {
+      restatement_count: 1,
+      restatement_severity: "medium",
+      high_impact_restatements: 0,
+      latest_restatement_date: "2026-02-28",
+      internal_control_flag_count: 2,
+      internal_control_terms: ["material weakness"],
+      evidence: [],
+    },
+    provenance,
+    as_of: "2025-12-31",
+    last_refreshed_at: "2026-03-10T00:00:00Z",
+    source_mix: {
+      source_ids: ["ft_equity_claim_risk_pack", "sec_companyfacts"],
+      source_tiers: ["derived_from_official", "official_regulator"],
+      primary_source_ids: ["sec_companyfacts"],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: [],
+    refresh,
+    diagnostics: {
+      coverage_ratio: 1,
+      fallback_ratio: 0,
+      stale_flags: [],
+      parser_confidence: null,
+      missing_field_flags: [],
+      reconciliation_penalty: null,
+      reconciliation_disagreement_count: 0,
+    },
   };
 }
 
