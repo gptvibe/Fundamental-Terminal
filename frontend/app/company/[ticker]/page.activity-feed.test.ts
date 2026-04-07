@@ -246,6 +246,24 @@ describe("CompanyResearchBriefPage", () => {
     });
   });
 
+  it("keeps the brief rendering when localStorage persistence hits quota", async () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+    });
+
+    try {
+      render(React.createElement(CompanyResearchBriefPage));
+
+      await waitFor(() => {
+        expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+      });
+
+      expect(setItemSpy).toHaveBeenCalled();
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
   it("renders deterministic empty states when persisted brief slices are unavailable", async () => {
     vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
       financials: [],

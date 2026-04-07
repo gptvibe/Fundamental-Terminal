@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -1584,6 +1584,7 @@ function useResearchBriefSectionPreferences(ticker: string): {
   const storageKey = `${RESEARCH_BRIEF_SECTION_STORAGE_PREFIX}:${ticker}`;
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => createDefaultResearchBriefSectionState());
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false);
+  const canPersistPreferencesRef = useRef(true);
 
   useEffect(() => {
     const defaultState = createDefaultResearchBriefSectionState();
@@ -1611,7 +1612,13 @@ function useResearchBriefSectionPreferences(ticker: string): {
       return;
     }
 
-    window.localStorage.setItem(storageKey, JSON.stringify(expandedSections));
+    if (!canPersistPreferencesRef.current) {
+      return;
+    }
+
+    if (!persistResearchBriefSectionState(storageKey, expandedSections)) {
+      canPersistPreferencesRef.current = false;
+    }
   }, [expandedSections, hasLoadedPreferences, storageKey]);
 
   function toggleSection(sectionId: string) {
@@ -1622,6 +1629,16 @@ function useResearchBriefSectionPreferences(ticker: string): {
   }
 
   return { expandedSections, toggleSection };
+}
+
+function persistResearchBriefSectionState(storageKey: string, expandedSections: Record<string, boolean>): boolean {
+  try {
+    const normalizedState = mergeResearchBriefSectionState(createDefaultResearchBriefSectionState(), expandedSections);
+    window.localStorage.setItem(storageKey, JSON.stringify(normalizedState));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function ResearchBriefSection({
