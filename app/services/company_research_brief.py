@@ -73,6 +73,7 @@ from app.services.cache_queries import (
     get_company_earnings_cache_status,
     get_company_earnings_releases,
     get_company_filing_events,
+    get_company_filing_insights,
     get_company_financial_restatements,
     get_company_financials,
     get_company_form144_filings,
@@ -398,7 +399,18 @@ def _build_changes_response(
     restatements = get_company_financial_restatements(session, snapshot.company.id)
     if as_of is not None:
         restatements = [record for record in restatements if _effective_at(record.filing_acceptance_at, record.filing_date, record.period_end) <= as_of]
-    comparison = build_changes_since_last_filing(financials, restatements)
+    parsed_filings = get_company_filing_insights(session, snapshot.company.id, limit=12)
+    if as_of is not None:
+        parsed_filings = select_point_in_time_financials(parsed_filings, as_of)
+    comment_letters = get_company_comment_letters(session, snapshot.company.id, limit=24)
+    if as_of is not None:
+        comment_letters = [letter for letter in comment_letters if _effective_at(letter.filing_date) <= as_of]
+    comparison = build_changes_since_last_filing(
+        financials,
+        restatements,
+        parsed_filings=parsed_filings,
+        comment_letters=comment_letters,
+    )
     comparison_as_of = _normalize_as_of(as_of) or _latest_as_of(
         (comparison.get("current_filing") or {}).get("filing_acceptance_at"),
         (comparison.get("current_filing") or {}).get("period_end"),
@@ -416,6 +428,32 @@ def _build_changes_response(
         ),
         SourceUsage(source_id="sec_companyfacts", role="primary", as_of=comparison_as_of, last_refreshed_at=snapshot.last_checked),
     ]
+    if any(
+        str(source or "").startswith("https://www.sec.gov/Archives/")
+        for source in [
+            *(
+                evidence.get("source")
+                for item in comparison.get("high_signal_changes", [])
+                if isinstance(item, dict)
+                for evidence in item.get("evidence", [])
+                if isinstance(evidence, dict)
+            ),
+            *(getattr(letter, "sec_url", None) for letter in comment_letters),
+        ]
+    ):
+        usages.append(
+            SourceUsage(
+                source_id="sec_edgar",
+                role="supplemental",
+                as_of=comparison_as_of,
+                last_refreshed_at=_merge_last_checked(
+                    snapshot.last_checked,
+                    *(item.last_checked for item in restatements),
+                    *(getattr(item, "last_checked", None) for item in parsed_filings),
+                    *(getattr(item, "last_checked", None) for item in comment_letters),
+                ),
+            )
+        )
     return CompanyChangesSinceLastFilingResponse(
         company=_serialize_company(snapshot),
         current_filing=comparison.get("current_filing"),
@@ -427,12 +465,19 @@ def _build_changes_response(
         share_count_changes=comparison.get("share_count_changes") or [],
         capital_structure_changes=comparison.get("capital_structure_changes") or [],
         amended_prior_values=comparison.get("amended_prior_values") or [],
+        high_signal_changes=comparison.get("high_signal_changes") or [],
+        comment_letter_history=comparison.get("comment_letter_history") or {},
         refresh=refresh,
         diagnostics=DataQualityDiagnosticsPayload(stale_flags=[]),
         **_build_provenance_contract(
             usages,
             as_of=comparison_as_of,
-            last_refreshed_at=_merge_last_checked(snapshot.last_checked, *(item.last_checked for item in restatements)),
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                *(item.last_checked for item in restatements),
+                *(getattr(item, "last_checked", None) for item in parsed_filings),
+                *(getattr(item, "last_checked", None) for item in comment_letters),
+            ),
             confidence_flags=list(comparison.get("confidence_flags") or []),
         ),
     )

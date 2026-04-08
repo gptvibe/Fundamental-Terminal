@@ -661,6 +661,35 @@ export interface FilingParserSegmentPayload {
   revenue: number | null;
 }
 
+export interface FilingParserSectionPayload {
+  key: string;
+  label: string;
+  title: string | null;
+  source: string | null;
+  excerpt: string | null;
+  signal_terms: string[];
+}
+
+export interface FilingParserNonGaapPayload {
+  mention_count: number;
+  terms: string[];
+  reconciliation_mentions: number;
+  has_reconciliation: boolean;
+  source: string | null;
+  excerpt: string | null;
+}
+
+export interface FilingParserControlsPayload {
+  auditor_names: string[];
+  auditor_change_terms: string[];
+  control_terms: string[];
+  material_weakness: boolean;
+  ineffective_controls: boolean;
+  non_reliance: boolean;
+  source: string | null;
+  excerpt: string | null;
+}
+
 export interface FilingParserInsightPayload {
   accession_number: string | null;
   filing_type: string;
@@ -673,6 +702,10 @@ export interface FilingParserInsightPayload {
   net_income: number | null;
   operating_income: number | null;
   segments: FilingParserSegmentPayload[];
+  mdna: FilingParserSectionPayload | null;
+  footnotes: FilingParserSectionPayload[];
+  non_gaap: FilingParserNonGaapPayload;
+  controls: FilingParserControlsPayload;
 }
 
 export interface CompanyFilingInsightsResponse {
@@ -745,6 +778,42 @@ export interface FilingComparisonAmendedValuePayload {
   confidence_flags: string[];
 }
 
+export interface FilingHighSignalEvidencePayload {
+  label: string;
+  excerpt: string;
+  source: string;
+  filing_type: string | null;
+  period_end: string | null;
+}
+
+export interface FilingHighSignalChangePayload {
+  change_key: string;
+  category: "mda" | "footnote" | "non_gaap" | "controls" | "comment_letter";
+  importance: "medium" | "high";
+  title: string;
+  summary: string;
+  why_it_matters: string;
+  signal_tags: string[];
+  current_period_end: string | null;
+  previous_period_end: string | null;
+  evidence: FilingHighSignalEvidencePayload[];
+}
+
+export interface FilingCommentLetterItemPayload {
+  accession_number: string | null;
+  filing_date: string | null;
+  description: string;
+  sec_url: string;
+  is_new_since_current_filing: boolean;
+}
+
+export interface FilingCommentLetterHistoryPayload {
+  total_letters: number;
+  letters_since_previous_filing: number;
+  latest_filing_date: string | null;
+  recent_letters: FilingCommentLetterItemPayload[];
+}
+
 export interface ChangesSinceLastFilingSummaryPayload {
   filing_type: string | null;
   current_period_start: string | null;
@@ -757,6 +826,8 @@ export interface ChangesSinceLastFilingSummaryPayload {
   share_count_change_count: number;
   capital_structure_change_count: number;
   amended_prior_value_count: number;
+  high_signal_change_count: number;
+  comment_letter_count: number;
 }
 
 export interface CompanyChangesSinceLastFilingResponse extends ProvenanceEnvelope {
@@ -770,6 +841,8 @@ export interface CompanyChangesSinceLastFilingResponse extends ProvenanceEnvelop
   share_count_changes: FilingComparisonMetricDeltaPayload[];
   capital_structure_changes: FilingComparisonMetricDeltaPayload[];
   amended_prior_values: FilingComparisonAmendedValuePayload[];
+  high_signal_changes: FilingHighSignalChangePayload[];
+  comment_letter_history: FilingCommentLetterHistoryPayload;
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;
 }

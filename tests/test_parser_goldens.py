@@ -260,6 +260,26 @@ def test_filing_parser_insight_serialization_regression() -> None:
             {"name": "Products", "revenue": 98100000000},
             {"name": "Services", "revenue": 26200000000},
         ],
+        "mdna": None,
+        "footnotes": [],
+        "non_gaap": {
+            "mention_count": 0,
+            "terms": [],
+            "reconciliation_mentions": 0,
+            "has_reconciliation": False,
+            "source": None,
+            "excerpt": None,
+        },
+        "controls": {
+            "auditor_names": [],
+            "auditor_change_terms": [],
+            "control_terms": [],
+            "material_weakness": False,
+            "ineffective_controls": False,
+            "non_reliance": False,
+            "source": None,
+            "excerpt": None,
+        },
     }
 
 

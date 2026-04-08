@@ -306,6 +306,8 @@ describe("CompanyResearchBriefPage", () => {
           share_count_changes: [],
           capital_structure_changes: [],
           amended_prior_values: [],
+          high_signal_changes: [],
+          comment_letter_history: { total_letters: 0, letters_since_previous_filing: 0, latest_filing_date: null, recent_letters: [] },
           summary: {
             filing_type: null,
             current_period_start: null,
@@ -318,6 +320,8 @@ describe("CompanyResearchBriefPage", () => {
             share_count_change_count: 0,
             capital_structure_change_count: 0,
             amended_prior_value_count: 0,
+            high_signal_change_count: 0,
+            comment_letter_count: 0,
           },
         },
         earnings_summary: buildEarningsSummaryResponse(),
@@ -855,6 +859,8 @@ function buildChangesResponse() {
       share_count_change_count: 1,
       capital_structure_change_count: 1,
       amended_prior_value_count: 0,
+      high_signal_change_count: 2,
+      comment_letter_count: 1,
     },
     metric_deltas: [
       {
@@ -895,6 +901,42 @@ function buildChangesResponse() {
     share_count_changes: [],
     capital_structure_changes: [],
     amended_prior_values: [],
+    high_signal_changes: [
+      {
+        change_key: "mda-2025-12-31",
+        category: "mda",
+        importance: "high",
+        title: "MD&A discussion changed materially",
+        summary: "MD&A added emphasis on liquidity and margin pressure versus the prior comparable filing.",
+        why_it_matters: "Management discussion usually surfaces operating pressure before it becomes fully obvious in the statement tables.",
+        signal_tags: ["liquidity", "margin"],
+        current_period_end: "2025-12-31",
+        previous_period_end: "2024-12-31",
+        evidence: [
+          {
+            label: "Latest MD&A excerpt",
+            excerpt: "Liquidity tightened while management highlighted margin pressure.",
+            source: "https://www.sec.gov/Archives/edgar/data/1/current10k.htm",
+            filing_type: "10-K",
+            period_end: "2025-12-31",
+          },
+        ],
+      },
+    ],
+    comment_letter_history: {
+      total_letters: 1,
+      letters_since_previous_filing: 1,
+      latest_filing_date: "2026-03-12",
+      recent_letters: [
+        {
+          accession_number: "0000001-26-000120",
+          filing_date: "2026-03-12",
+          description: "SEC correspondence regarding revenue presentation.",
+          sec_url: "https://www.sec.gov/Archives/edgar/data/1/comment-letter.htm",
+          is_new_since_current_filing: true,
+        },
+      ],
+    },
     provenance: [],
     as_of: "2025-12-31",
     last_refreshed_at: "2026-03-10T00:00:00Z",

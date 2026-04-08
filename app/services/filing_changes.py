@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 from datetime import date, datetime, time, timezone
 from typing import Any
@@ -36,11 +37,64 @@ _CAPITAL_STRUCTURE_DEFINITIONS: tuple[tuple[str, str, str], ...] = (
 )
 
 _AMENDED_VALUE_LIMIT = 12
+_HIGH_SIGNAL_CHANGE_LIMIT = 8
+_TEXT_CHANGE_SIMILARITY_THRESHOLD = 0.88
+_HIGH_IMPORTANCE_TAGS = {
+    "liquidity",
+    "covenant",
+    "impairment",
+    "material weakness",
+    "ineffective",
+    "non-reliance",
+    "auditor_change",
+    "revenue recognition",
+    "contingencies",
+    "convertible",
+}
+_MDNA_SIGNAL_TERMS = (
+    "liquidity",
+    "working capital",
+    "demand",
+    "margin",
+    "pricing",
+    "inventory",
+    "backlog",
+    "restructuring",
+    "impairment",
+    "covenant",
+    "tariff",
+)
+_FOOTNOTE_RISK_TERMS = (
+    "liquidity",
+    "covenant",
+    "convertible",
+    "impairment",
+    "litigation",
+    "contingenc",
+    "deferred revenue",
+    "valuation allowance",
+    "stock compensation",
+    "share based compensation",
+    "revenue recognition",
+)
+_COMMENT_LETTER_HIGH_SIGNAL_TERMS = (
+    "revenue",
+    "recognition",
+    "non-gaap",
+    "non gaap",
+    "internal control",
+    "material weakness",
+    "segment",
+    "tax",
+)
 
 
 def build_changes_since_last_filing(
     financials: list[FinancialStatement],
     restatements: list[FinancialRestatement],
+    *,
+    parsed_filings: list[FinancialStatement] | None = None,
+    comment_letters: list[Any] | None = None,
 ) -> dict[str, Any]:
     comparable = [
         statement
@@ -62,6 +116,8 @@ def build_changes_since_last_filing(
             "share_count_changes": [],
             "capital_structure_changes": [],
             "amended_prior_values": [],
+            "high_signal_changes": [],
+            "comment_letter_history": _empty_comment_letter_history(),
             "confidence_flags": ["current_filing_missing"],
         }
 
@@ -86,6 +142,15 @@ def build_changes_since_last_filing(
     ]
 
     amended_prior_values = _build_amended_prior_values(previous, restatements)
+    parser_current, parser_previous = _select_parser_pair(parsed_filings or [], current, previous)
+    high_signal_changes, parser_flags = _build_high_signal_changes(
+        parser_current=parser_current,
+        parser_previous=parser_previous,
+        comment_letters=comment_letters or [],
+        current_filing=current,
+        previous_filing=previous,
+    )
+    comment_letter_history = _build_comment_letter_history(comment_letters or [], current, previous)
 
     confidence_flags: set[str] = set()
     if previous is None:
@@ -102,6 +167,7 @@ def build_changes_since_last_filing(
         confidence_flags.add("segment_mix_reclassified")
     if current.filing_acceptance_at is None:
         confidence_flags.add("statement_acceptance_time_missing")
+    confidence_flags.update(parser_flags)
 
     return {
         "current_filing": _serialize_statement_reference(current),
@@ -118,6 +184,8 @@ def build_changes_since_last_filing(
             "share_count_change_count": len(share_count_changes),
             "capital_structure_change_count": len(capital_structure_changes),
             "amended_prior_value_count": len(amended_prior_values),
+            "high_signal_change_count": len(high_signal_changes),
+            "comment_letter_count": int(comment_letter_history.get("letters_since_previous_filing") or 0),
         },
         "metric_deltas": metric_deltas,
         "new_risk_indicators": new_risk_indicators,
@@ -125,6 +193,8 @@ def build_changes_since_last_filing(
         "share_count_changes": share_count_changes,
         "capital_structure_changes": capital_structure_changes,
         "amended_prior_values": amended_prior_values,
+        "high_signal_changes": high_signal_changes,
+        "comment_letter_history": comment_letter_history,
         "confidence_flags": sorted(confidence_flags),
     }
 
@@ -142,6 +212,17 @@ def _empty_summary() -> dict[str, Any]:
         "share_count_change_count": 0,
         "capital_structure_change_count": 0,
         "amended_prior_value_count": 0,
+        "high_signal_change_count": 0,
+        "comment_letter_count": 0,
+    }
+
+
+def _empty_comment_letter_history() -> dict[str, Any]:
+    return {
+        "total_letters": 0,
+        "letters_since_previous_filing": 0,
+        "latest_filing_date": None,
+        "recent_letters": [],
     }
 
 
@@ -601,3 +682,405 @@ def _date_sort_value(value: Any) -> datetime:
     if isinstance(value, date):
         return datetime.combine(value, time.max, tzinfo=timezone.utc)
     return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _select_parser_pair(
+    parsed_filings: list[FinancialStatement],
+    current: FinancialStatement,
+    previous: FinancialStatement | None,
+) -> tuple[FinancialStatement | None, FinancialStatement | None]:
+    comparable = [
+        statement
+        for statement in parsed_filings
+        if getattr(statement, "statement_type", None) == "filing_parser"
+        and statement.filing_type == current.filing_type
+        and isinstance(statement.data, dict)
+    ]
+    ordered = sorted(comparable, key=_statement_sort_key, reverse=True)
+    current_match = next((item for item in ordered if item.period_end == current.period_end), ordered[0] if ordered else None)
+    previous_match = None
+    if previous is not None:
+        previous_match = next((item for item in ordered if item.period_end == previous.period_end and item is not current_match), None)
+    if previous_match is None and current_match is not None:
+        previous_match = next((item for item in ordered if item is not current_match), None)
+    return current_match, previous_match
+
+
+def _build_high_signal_changes(
+    *,
+    parser_current: FinancialStatement | None,
+    parser_previous: FinancialStatement | None,
+    comment_letters: list[Any],
+    current_filing: FinancialStatement,
+    previous_filing: FinancialStatement | None,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    rows: list[dict[str, Any]] = []
+    flags: set[str] = set()
+
+    if parser_current is None:
+        flags.add("filing_parser_current_missing")
+    if previous_filing is not None and parser_previous is None:
+        flags.add("filing_parser_previous_missing")
+
+    if parser_current is not None and parser_previous is not None:
+        mdna_change = _build_mdna_change(parser_current, parser_previous)
+        if mdna_change is not None:
+            rows.append(mdna_change)
+        rows.extend(_build_footnote_changes(parser_current, parser_previous))
+        non_gaap_change = _build_non_gaap_change(parser_current, parser_previous)
+        if non_gaap_change is not None:
+            rows.append(non_gaap_change)
+        controls_change = _build_controls_change(parser_current, parser_previous)
+        if controls_change is not None:
+            rows.append(controls_change)
+
+    comment_change = _build_comment_letter_change(comment_letters, current_filing, previous_filing)
+    if comment_change is not None:
+        rows.append(comment_change)
+
+    rows.sort(
+        key=lambda item: (
+            1 if item.get("importance") == "high" else 0,
+            _date_sort_value(item.get("current_period_end") or item.get("previous_period_end")),
+            str(item.get("title") or ""),
+        ),
+        reverse=True,
+    )
+    return rows[:_HIGH_SIGNAL_CHANGE_LIMIT], flags
+
+
+def _build_mdna_change(current: FinancialStatement, previous: FinancialStatement) -> dict[str, Any] | None:
+    current_section = _section_payload(current.data, "mdna")
+    previous_section = _section_payload(previous.data, "mdna")
+    if current_section is None or previous_section is None:
+        return None
+    current_text = str(current_section.get("text") or "")
+    previous_text = str(previous_section.get("text") or "")
+    if not _text_changed_materially(current_text, previous_text):
+        return None
+    current_terms = set(_matched_terms_from_text(current_text, _MDNA_SIGNAL_TERMS))
+    previous_terms = set(_matched_terms_from_text(previous_text, _MDNA_SIGNAL_TERMS))
+    added_terms = sorted(current_terms - previous_terms)
+    tags = added_terms or sorted(current_terms)[:3]
+    importance = "high" if any(term in _HIGH_IMPORTANCE_TAGS for term in tags) else "medium"
+    summary = "MD&A tone shifted materially versus the prior comparable filing"
+    if tags:
+        summary = f"MD&A added emphasis on {', '.join(tags[:3])} versus the prior comparable filing."
+    return _high_signal_change(
+        change_key=f"mda-{current.period_end.isoformat()}",
+        category="mda",
+        importance=importance,
+        title="MD&A discussion changed materially",
+        summary=summary,
+        why_it_matters="Management discussion is usually where operational pressure, liquidity strain, and demand changes show up before they are obvious in headline metrics.",
+        signal_tags=tags,
+        current=current,
+        previous=previous,
+        current_payload=current_section,
+        previous_payload=previous_section,
+        current_label="Latest MD&A excerpt",
+        previous_label="Prior MD&A excerpt",
+    )
+
+
+def _build_footnote_changes(current: FinancialStatement, previous: FinancialStatement) -> list[dict[str, Any]]:
+    current_notes = _footnote_map(current.data)
+    previous_notes = _footnote_map(previous.data)
+    rows: list[dict[str, Any]] = []
+    for key in sorted(set(current_notes) | set(previous_notes)):
+        current_note = current_notes.get(key)
+        previous_note = previous_notes.get(key)
+        current_text = str((current_note or {}).get("text") or "")
+        previous_text = str((previous_note or {}).get("text") or "")
+        if not current_text and not previous_text:
+            continue
+        if previous_note is not None and current_note is not None and not _text_changed_materially(current_text, previous_text):
+            continue
+        tags = sorted(set(_matched_terms_from_text(current_text, _FOOTNOTE_RISK_TERMS)) - set(_matched_terms_from_text(previous_text, _FOOTNOTE_RISK_TERMS)))
+        label = str((current_note or previous_note or {}).get("label") or key.replace("_", " ").title())
+        importance = "high" if key in {"debt", "revenue_recognition", "contingencies", "goodwill_intangibles"} or any(term in _HIGH_IMPORTANCE_TAGS for term in tags) else "medium"
+        summary = f"{label} disclosure changed materially versus the prior comparable filing."
+        if tags:
+            summary = f"{label} disclosure added {', '.join(tags[:3])} language versus the prior comparable filing."
+        rows.append(
+            _high_signal_change(
+                change_key=f"footnote-{key}-{current.period_end.isoformat()}",
+                category="footnote",
+                importance=importance,
+                title=f"{label} footnote changed",
+                summary=summary,
+                why_it_matters=_footnote_why_it_matters(key),
+                signal_tags=tags or [key],
+                current=current,
+                previous=previous,
+                current_payload=current_note,
+                previous_payload=previous_note,
+                current_label=f"Latest {label} note",
+                previous_label=f"Prior {label} note",
+            )
+        )
+    return rows[:4]
+
+
+def _build_non_gaap_change(current: FinancialStatement, previous: FinancialStatement) -> dict[str, Any] | None:
+    current_payload = _dict_payload(current.data, "non_gaap")
+    previous_payload = _dict_payload(previous.data, "non_gaap")
+    current_mentions = int(current_payload.get("mention_count") or 0)
+    previous_mentions = int(previous_payload.get("mention_count") or 0)
+    current_recon = int(current_payload.get("reconciliation_mentions") or 0)
+    previous_recon = int(previous_payload.get("reconciliation_mentions") or 0)
+    if current_mentions == 0 and previous_mentions == 0:
+        return None
+    if current_mentions == previous_mentions and current_recon == previous_recon and set(current_payload.get("terms", [])) == set(previous_payload.get("terms", [])):
+        return None
+    importance = "high" if current_mentions >= 3 and current_recon == 0 else "medium"
+    tags = [str(term) for term in current_payload.get("terms", []) if term][:3]
+    summary = (
+        f"Non-GAAP references moved from {previous_mentions} to {current_mentions}, and reconciliation language moved from {previous_recon} to {current_recon}."
+    )
+    return {
+        "change_key": f"non-gaap-{current.period_end.isoformat()}",
+        "category": "non_gaap",
+        "importance": importance,
+        "title": "Non-GAAP reliance changed",
+        "summary": summary,
+        "why_it_matters": "Heavier reliance on adjusted metrics, especially with weaker reconciliation language, can make period-to-period comparability worse.",
+        "signal_tags": tags,
+        "current_period_end": current.period_end,
+        "previous_period_end": previous.period_end,
+        "evidence": [
+            item
+            for item in [
+                _evidence_payload("Latest non-GAAP excerpt", current_payload, current.filing_type, current.period_end),
+                _evidence_payload("Prior non-GAAP excerpt", previous_payload, previous.filing_type, previous.period_end),
+            ]
+            if item is not None
+        ],
+    }
+
+
+def _build_controls_change(current: FinancialStatement, previous: FinancialStatement) -> dict[str, Any] | None:
+    current_payload = _dict_payload(current.data, "controls")
+    previous_payload = _dict_payload(previous.data, "controls")
+    current_control_terms = set(str(term) for term in current_payload.get("control_terms", []) if term)
+    previous_control_terms = set(str(term) for term in previous_payload.get("control_terms", []) if term)
+    current_auditors = set(str(term) for term in current_payload.get("auditor_names", []) if term)
+    previous_auditors = set(str(term) for term in previous_payload.get("auditor_names", []) if term)
+    auditor_changed = bool(current_auditors and previous_auditors and current_auditors != previous_auditors)
+    new_material_weakness = bool(current_payload.get("material_weakness")) and not bool(previous_payload.get("material_weakness"))
+    new_ineffective = bool(current_payload.get("ineffective_controls")) and not bool(previous_payload.get("ineffective_controls"))
+    new_non_reliance = bool(current_payload.get("non_reliance")) and not bool(previous_payload.get("non_reliance"))
+    added_terms = sorted(current_control_terms - previous_control_terms)
+    if not any((auditor_changed, new_material_weakness, new_ineffective, new_non_reliance, added_terms)):
+        return None
+    tags = added_terms[:3]
+    if auditor_changed:
+        tags.append("auditor_change")
+    importance = "high" if any((auditor_changed, new_material_weakness, new_ineffective, new_non_reliance)) else "medium"
+    summary_parts: list[str] = []
+    if auditor_changed:
+        summary_parts.append("auditor references changed")
+    if new_material_weakness:
+        summary_parts.append("material weakness language appeared")
+    if new_ineffective:
+        summary_parts.append("ineffective controls language appeared")
+    if new_non_reliance:
+        summary_parts.append("non-reliance language appeared")
+    if not summary_parts and tags:
+        summary_parts.append(f"control language added {', '.join(tags[:3])}")
+    return {
+        "change_key": f"controls-{current.period_end.isoformat()}",
+        "category": "controls",
+        "importance": importance,
+        "title": "Auditor or controls disclosure changed",
+        "summary": "; ".join(summary_parts).capitalize() + ".",
+        "why_it_matters": "Changes in auditor or controls language can change confidence in reported numbers even before a restatement happens.",
+        "signal_tags": tags,
+        "current_period_end": current.period_end,
+        "previous_period_end": previous.period_end,
+        "evidence": [
+            item
+            for item in [
+                _evidence_payload("Latest controls excerpt", current_payload, current.filing_type, current.period_end),
+                _evidence_payload("Prior controls excerpt", previous_payload, previous.filing_type, previous.period_end),
+            ]
+            if item is not None
+        ],
+    }
+
+
+def _build_comment_letter_history(
+    comment_letters: list[Any],
+    current_filing: FinancialStatement,
+    previous_filing: FinancialStatement | None,
+) -> dict[str, Any]:
+    if not comment_letters:
+        return _empty_comment_letter_history()
+    previous_cutoff = _effective_letter_date(previous_filing)
+    current_cutoff = _effective_letter_date(current_filing)
+    ordered = sorted(comment_letters, key=lambda item: (_date_sort_value(getattr(item, "filing_date", None)), str(getattr(item, "accession_number", ""))), reverse=True)
+    recent_letters = []
+    letters_since_previous = 0
+    for item in ordered:
+        filing_date = getattr(item, "filing_date", None)
+        if filing_date is not None and filing_date >= previous_cutoff.date():
+            letters_since_previous += 1
+        recent_letters.append(
+            {
+                "accession_number": getattr(item, "accession_number", None),
+                "filing_date": filing_date,
+                "description": str(getattr(item, "description", "SEC correspondence") or "SEC correspondence"),
+                "sec_url": str(getattr(item, "sec_url", "") or ""),
+                "is_new_since_current_filing": bool(filing_date is not None and filing_date >= current_cutoff.date()),
+            }
+        )
+    return {
+        "total_letters": len(ordered),
+        "letters_since_previous_filing": letters_since_previous,
+        "latest_filing_date": getattr(ordered[0], "filing_date", None),
+        "recent_letters": recent_letters[:5],
+    }
+
+
+def _build_comment_letter_change(
+    comment_letters: list[Any],
+    current_filing: FinancialStatement,
+    previous_filing: FinancialStatement | None,
+) -> dict[str, Any] | None:
+    history = _build_comment_letter_history(comment_letters, current_filing, previous_filing)
+    if int(history.get("letters_since_previous_filing") or 0) <= 0:
+        return None
+    recent_letters = history.get("recent_letters") or []
+    latest = recent_letters[0] if recent_letters else None
+    description = str((latest or {}).get("description") or "Recent SEC correspondence is available.")
+    importance = "high" if any(term in description.lower() for term in _COMMENT_LETTER_HIGH_SIGNAL_TERMS) else "medium"
+    return {
+        "change_key": f"comment-letter-{(latest or {}).get('accession_number') or current_filing.period_end.isoformat()}",
+        "category": "comment_letter",
+        "importance": importance,
+        "title": "SEC comment-letter history updated",
+        "summary": f"{history['letters_since_previous_filing']} correspondence filing(s) appeared since the prior comparable filing.",
+        "why_it_matters": "SEC correspondence can highlight disclosure areas the regulator questioned, even when the reported numbers did not visibly change.",
+        "signal_tags": ["comment_letter"],
+        "current_period_end": current_filing.period_end,
+        "previous_period_end": previous_filing.period_end if previous_filing is not None else None,
+        "evidence": [
+            {
+                "label": "Latest SEC correspondence",
+                "excerpt": description,
+                "source": str((latest or {}).get("sec_url") or ""),
+                "filing_type": "CORRESP",
+                "period_end": (latest or {}).get("filing_date"),
+            }
+        ] if latest and (latest or {}).get("sec_url") else [],
+    }
+
+
+def _high_signal_change(
+    *,
+    change_key: str,
+    category: str,
+    importance: str,
+    title: str,
+    summary: str,
+    why_it_matters: str,
+    signal_tags: list[str],
+    current: FinancialStatement,
+    previous: FinancialStatement,
+    current_payload: dict[str, Any] | None,
+    previous_payload: dict[str, Any] | None,
+    current_label: str,
+    previous_label: str,
+) -> dict[str, Any]:
+    return {
+        "change_key": change_key,
+        "category": category,
+        "importance": importance,
+        "title": title,
+        "summary": summary,
+        "why_it_matters": why_it_matters,
+        "signal_tags": signal_tags[:4],
+        "current_period_end": current.period_end,
+        "previous_period_end": previous.period_end,
+        "evidence": [
+            item
+            for item in [
+                _evidence_payload(current_label, current_payload, current.filing_type, current.period_end),
+                _evidence_payload(previous_label, previous_payload, previous.filing_type, previous.period_end),
+            ]
+            if item is not None
+        ],
+    }
+
+
+def _evidence_payload(label: str, payload: dict[str, Any] | None, filing_type: str, period_end: date) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    excerpt = str(payload.get("excerpt") or "").strip()
+    source = str(payload.get("source") or "").strip()
+    if not excerpt or not source:
+        return None
+    return {
+        "label": label,
+        "excerpt": excerpt,
+        "source": source,
+        "filing_type": filing_type,
+        "period_end": period_end,
+    }
+
+
+def _section_payload(data: dict[str, Any], key: str) -> dict[str, Any] | None:
+    payload = data.get(key)
+    return payload if isinstance(payload, dict) else None
+
+
+def _dict_payload(data: dict[str, Any], key: str) -> dict[str, Any]:
+    payload = data.get(key)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _footnote_map(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    payload = data.get("footnotes")
+    rows = [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
+    return {str(item.get("key") or item.get("label") or "unknown"): item for item in rows}
+
+
+def _text_changed_materially(current_text: str, previous_text: str) -> bool:
+    current_normalized = _normalize_text_blob(current_text)
+    previous_normalized = _normalize_text_blob(previous_text)
+    if not current_normalized or not previous_normalized:
+        return bool(current_normalized or previous_normalized)
+    similarity = SequenceMatcher(None, current_normalized, previous_normalized).ratio()
+    if similarity < _TEXT_CHANGE_SIMILARITY_THRESHOLD:
+        return True
+    return abs(len(current_normalized) - len(previous_normalized)) > 600
+
+
+def _normalize_text_blob(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").lower()).strip()
+
+
+def _matched_terms_from_text(text: str, terms: tuple[str, ...]) -> list[str]:
+    normalized = _normalize_text_blob(text)
+    return sorted({term for term in terms if term in normalized})
+
+
+def _footnote_why_it_matters(key: str) -> str:
+    reasons = {
+        "revenue_recognition": "Revenue-recognition note changes can alter how durable or repeatable the top line really is.",
+        "debt": "Debt-note changes can signal refinancing pressure, convert dilution, or covenant risk before it is obvious in leverage ratios.",
+        "stock_compensation": "Stock-compensation note changes can reshape the real cost of labor and future dilution.",
+        "income_taxes": "Tax-footnote changes can materially affect earnings quality and cash taxes.",
+        "goodwill_intangibles": "Goodwill and intangible-note changes often flag acquisition integration issues or impairment risk.",
+        "contingencies": "Contingency-note changes can surface litigation or contractual exposures that are not obvious in headline numbers.",
+        "segments": "Segment-note changes can reveal where the business mix is strengthening, weakening, or being reclassified.",
+        "fair_value": "Fair-value note changes can shift how much of reported value depends on assumptions rather than observable markets.",
+        "inventory": "Inventory-note changes can be an early warning for demand weakness, obsolescence, or margin pressure.",
+    }
+    return reasons.get(key, "Footnote changes can alter the economics behind the headline statements.")
+
+
+def _effective_letter_date(statement: FinancialStatement | None) -> datetime:
+    if statement is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return _statement_effective_at(statement)

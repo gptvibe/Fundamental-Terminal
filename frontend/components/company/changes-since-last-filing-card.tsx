@@ -12,15 +12,23 @@ import type {
   FilingComparisonMetricDeltaPayload,
   FilingComparisonRiskIndicatorPayload,
   FilingComparisonSegmentShiftPayload,
+  FilingCommentLetterItemPayload,
+  FilingHighSignalChangePayload,
 } from "@/lib/types";
 
 interface ChangesSinceLastFilingCardProps {
   ticker: string;
   reloadKey?: string | number;
   initialPayload?: CompanyChangesSinceLastFilingResponse | null;
+  detailMode?: "brief" | "full";
 }
 
-export function ChangesSinceLastFilingCard({ ticker, reloadKey, initialPayload = null }: ChangesSinceLastFilingCardProps) {
+export function ChangesSinceLastFilingCard({
+  ticker,
+  reloadKey,
+  initialPayload = null,
+  detailMode = "brief",
+}: ChangesSinceLastFilingCardProps) {
   const [payload, setPayload] = useState<CompanyChangesSinceLastFilingResponse | null>(initialPayload);
   const [loading, setLoading] = useState(initialPayload === null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +80,14 @@ export function ChangesSinceLastFilingCard({ ticker, reloadKey, initialPayload =
     [payload?.capital_structure_changes, payload?.share_count_changes]
   );
   const amendedPriorValues = useMemo(() => (payload?.amended_prior_values ?? []).slice(0, 3), [payload?.amended_prior_values]);
+  const highSignalChanges = useMemo(
+    () => (payload?.high_signal_changes ?? []).slice(0, detailMode === "brief" ? 4 : 8),
+    [detailMode, payload?.high_signal_changes]
+  );
+  const recentCommentLetters = useMemo(
+    () => (payload?.comment_letter_history.recent_letters ?? []).slice(0, detailMode === "brief" ? 2 : 5),
+    [detailMode, payload?.comment_letter_history.recent_letters]
+  );
 
   if (loading) {
     return <div className="text-muted">Loading latest-versus-prior filing comparison...</div>;
@@ -109,12 +125,26 @@ export function ChangesSinceLastFilingCard({ ticker, reloadKey, initialPayload =
       />
 
       <div className="metric-grid">
+        <MetricCard label="High-Signal Changes" value={String(summary.high_signal_change_count)} />
+        <MetricCard label="Comment Letters" value={String(summary.comment_letter_count)} />
         <MetricCard label="Metric Deltas" value={String(summary.metric_delta_count)} />
         <MetricCard label="New Risk Indicators" value={String(summary.new_risk_indicator_count)} />
-        <MetricCard label="Segment Shifts" value={String(summary.segment_shift_count)} />
-        <MetricCard label="Amended Prior Values" value={String(summary.amended_prior_value_count)} />
       </div>
 
+      <Section title="High-Signal Filing Intelligence" emptyMessage="No high-signal filing changes were detected between the latest and prior comparable filings.">
+        {highSignalChanges.map((item) => (
+          <HighSignalChangeRow key={item.change_key} item={item} />
+        ))}
+      </Section>
+
+      <Section title="Comment-Letter History" emptyMessage="No SEC comment-letter history is cached for this company yet.">
+        {recentCommentLetters.map((item) => (
+          <CommentLetterRow key={`${item.accession_number ?? item.sec_url}-${item.filing_date ?? "pending"}`} item={item} />
+        ))}
+      </Section>
+
+      {detailMode === "full" ? (
+        <>
       <Section title="Headline Deltas" emptyMessage="No primary metric deltas detected between the latest and prior comparable filing.">
         {topMetricDeltas.map((item) => (
           <MetricDeltaRow key={item.metric_key} item={item} />
@@ -144,6 +174,8 @@ export function ChangesSinceLastFilingCard({ ticker, reloadKey, initialPayload =
           <AmendedValueRow key={`${item.metric_key}-${item.accession_number ?? item.source}`} item={item} />
         ))}
       </Section>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -238,6 +270,62 @@ function AmendedValueRow({ item }: { item: FilingComparisonAmendedValuePayload }
         {item.amended_at ? `Amended ${formatDate(item.amended_at)} · ` : ""}
         Change {formatCompactNumber(item.delta)}
         {item.relative_change != null ? ` (${formatPercent(item.relative_change)})` : ""}
+      </div>
+    </a>
+  );
+}
+
+function HighSignalChangeRow({ item }: { item: FilingHighSignalChangePayload }) {
+  return (
+    <div className="filing-link-card" style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <strong>{item.title}</strong>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span className="pill">{item.category.replaceAll("_", " ")}</span>
+          <span className="pill">{item.importance}</span>
+        </div>
+      </div>
+      <div style={{ fontSize: 14, color: "var(--text)" }}>{item.summary}</div>
+      <div className="text-muted" style={{ fontSize: 13 }}>{item.why_it_matters}</div>
+      {item.signal_tags.length ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {item.signal_tags.map((tag) => (
+            <span key={`${item.change_key}-${tag}`} className="pill">{tag}</span>
+          ))}
+        </div>
+      ) : null}
+      {item.evidence.length ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          {item.evidence.slice(0, 2).map((evidence) => (
+            <a
+              key={`${item.change_key}-${evidence.label}-${evidence.source}`}
+              href={evidence.source}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted"
+              style={{ fontSize: 13, lineHeight: 1.6, textDecoration: "none" }}
+            >
+              <strong style={{ color: "var(--text)" }}>{evidence.label}:</strong> {evidence.excerpt}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CommentLetterRow({ item }: { item: FilingCommentLetterItemPayload }) {
+  return (
+    <a href={item.sec_url} target="_blank" rel="noreferrer" className="filing-link-card" style={{ display: "grid", gap: 8, textDecoration: "none" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <strong>{item.description}</strong>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {item.is_new_since_current_filing ? <span className="pill">new</span> : null}
+          <span className="pill">{item.filing_date ? formatDate(item.filing_date) : "Pending"}</span>
+        </div>
+      </div>
+      <div className="text-muted" style={{ fontSize: 13 }}>
+        {item.accession_number ?? "CORRESP"}
       </div>
     </a>
   );

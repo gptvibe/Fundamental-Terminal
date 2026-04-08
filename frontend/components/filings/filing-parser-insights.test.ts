@@ -34,6 +34,42 @@ function makeInsight(partial: Partial<FilingParserInsightPayload>): FilingParser
     net_income: partial.net_income ?? 18000000,
     operating_income: partial.operating_income ?? 22000000,
     segments: partial.segments ?? [{ name: "Cloud", revenue: 70000000 }],
+    mdna: partial.mdna ?? {
+      key: "mda",
+      label: "MD&A",
+      title: "Item 2. Management's Discussion and Analysis",
+      source: "https://www.sec.gov/Archives/edgar/data/1234567/000123456726000999/form10q.htm",
+      excerpt: "Liquidity tightened while management highlighted margin pressure.",
+      signal_terms: ["liquidity", "margin"],
+    },
+    footnotes: partial.footnotes ?? [
+      {
+        key: "debt",
+        label: "Debt And Borrowings",
+        title: "Debt",
+        source: "https://www.sec.gov/Archives/edgar/data/1234567/000123456726000999/debt.htm",
+        excerpt: "The company amended its credit facility.",
+        signal_terms: ["debt", "credit facility"],
+      },
+    ],
+    non_gaap: partial.non_gaap ?? {
+      mention_count: 3,
+      terms: ["non-gaap", "adjusted ebitda"],
+      reconciliation_mentions: 0,
+      has_reconciliation: false,
+      source: "https://www.sec.gov/Archives/edgar/data/1234567/000123456726000999/form10q.htm",
+      excerpt: "Management emphasized adjusted EBITDA without a visible reconciliation.",
+    },
+    controls: partial.controls ?? {
+      auditor_names: ["deloitte"],
+      auditor_change_terms: ["engaged"],
+      control_terms: ["material weakness"],
+      material_weakness: true,
+      ineffective_controls: true,
+      non_reliance: false,
+      source: "https://www.sec.gov/Archives/edgar/data/1234567/000123456726000999/form10q.htm",
+      excerpt: "Disclosure controls were not effective due to a material weakness.",
+    },
   };
 }
 
@@ -49,6 +85,9 @@ describe("FilingParserInsights", () => {
     expect(html).toContain("View SEC source");
     expect(html).toContain("href=\"https://www.sec.gov/Archives/edgar/data/1234567/000123456726000999/form10k.htm\"");
     expect(html).toContain("Cloud");
+    expect(html).toContain("MD&amp;A excerpt");
+    expect(html).toContain("High-signal footnotes");
+    expect(html).toContain("material weakness");
   });
 
   it("renders refresh-aware empty state when no insights exist", () => {

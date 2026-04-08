@@ -71,6 +71,26 @@ export function FilingParserInsights({
     () => segmentRows.reduce((maxValue, segment) => Math.max(maxValue, Math.abs(segment.revenue)), 0),
     [segmentRows]
   );
+  const topFootnotes = useMemo(() => (latest?.footnotes ?? []).slice(0, 4), [latest?.footnotes]);
+  const controlFlags = useMemo(() => {
+    if (!latest) {
+      return [] as string[];
+    }
+    const flags: string[] = [];
+    if (latest.controls.material_weakness) {
+      flags.push("material weakness");
+    }
+    if (latest.controls.ineffective_controls) {
+      flags.push("ineffective controls");
+    }
+    if (latest.controls.non_reliance) {
+      flags.push("non-reliance");
+    }
+    if (latest.controls.auditor_names.length) {
+      flags.push(`auditor ${latest.controls.auditor_names.join(", ")}`);
+    }
+    return flags;
+  }, [latest]);
 
   if (error) {
     return <div className="text-muted">{error}</div>;
@@ -125,6 +145,9 @@ export function FilingParserInsights({
             <Metric label="Operating Income" value={latest?.operating_income} />
             <Metric label="Net Income" value={latest?.net_income} />
           </div>
+          <div className="filing-insights-footnote">
+            Non-GAAP mentions: {latest?.non_gaap.mention_count ?? 0} · Reconciliation mentions: {latest?.non_gaap.reconciliation_mentions ?? 0}
+          </div>
           <div className="filing-insights-footnote">Coverage: {chartData.length} filings</div>
         </div>
 
@@ -177,6 +200,70 @@ export function FilingParserInsights({
           </div>
         ) : (
           <div className="sparkline-note">No segment revenue data was extracted from the latest filing.</div>
+        )}
+      </div>
+
+      <div className="filing-insights-grid">
+        <div className="filing-insights-card">
+          <div className="filing-insights-card-title">MD&amp;A excerpt</div>
+          <div className="filing-insights-card-subtitle">Latest management discussion excerpt from the primary SEC filing document.</div>
+          {latest?.mdna?.excerpt ? (
+            <>
+              <div className="text-muted" style={{ fontSize: 13 }}>{latest.mdna.title ?? latest.mdna.label}</div>
+              <div style={{ fontSize: 14, lineHeight: 1.6 }}>{latest.mdna.excerpt}</div>
+              {latest.mdna.source ? (
+                <a className="filing-link" href={latest.mdna.source} target="_blank" rel="noreferrer">
+                  Open MD&amp;A evidence
+                </a>
+              ) : null}
+            </>
+          ) : (
+            <div className="sparkline-note">No MD&amp;A section was extracted from the latest filing.</div>
+          )}
+        </div>
+
+        <div className="filing-insights-card">
+          <div className="filing-insights-card-title">Controls and non-GAAP signals</div>
+          <div className="filing-insights-card-subtitle">Quick read on adjustment language and reporting-control disclosures.</div>
+          <div className="filing-insights-metrics">
+            <Metric label="Non-GAAP Terms" value={latest?.non_gaap.mention_count ?? 0} />
+            <Metric label="Recon Mentions" value={latest?.non_gaap.reconciliation_mentions ?? 0} />
+            <Metric label="Control Terms" value={latest?.controls.control_terms.length ?? 0} />
+          </div>
+          {latest?.non_gaap.excerpt ? <div className="filing-insights-footnote">{latest.non_gaap.excerpt}</div> : null}
+          {controlFlags.length ? (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {controlFlags.map((flag) => (
+                <span key={flag} className="pill">{flag}</span>
+              ))}
+            </div>
+          ) : null}
+          {latest?.controls.excerpt ? <div className="filing-insights-footnote">{latest.controls.excerpt}</div> : null}
+        </div>
+      </div>
+
+      <div className="filing-insights-card">
+        <div className="filing-insights-card-title">High-signal footnotes</div>
+        <div className="filing-insights-card-subtitle">Selected note sections that usually carry higher underwriting signal than generic boilerplate.</div>
+        {topFootnotes.length ? (
+          <div className="filing-insights-segment-list">
+            {topFootnotes.map((footnote) => (
+              <div key={footnote.key} className="filing-insights-segment is-positive">
+                <div className="filing-insights-segment-row">
+                  <span className="filing-insights-segment-name">{footnote.label}</span>
+                  {footnote.signal_terms.length ? <span className="filing-insights-segment-value">{footnote.signal_terms.slice(0, 2).join(" · ")}</span> : null}
+                </div>
+                {footnote.excerpt ? <div className="filing-insights-footnote">{footnote.excerpt}</div> : null}
+                {footnote.source ? (
+                  <a className="filing-link" href={footnote.source} target="_blank" rel="noreferrer">
+                    Open note evidence
+                  </a>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="sparkline-note">No selected high-signal footnotes were extracted from the latest filing.</div>
         )}
       </div>
     </div>

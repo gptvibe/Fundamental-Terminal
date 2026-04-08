@@ -12,7 +12,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("ChangesSinceLastFilingCard", () => {
-  it("renders metric deltas, risk indicators, and amended prior values", async () => {
+  it("renders curated filing signals in brief mode and full detail in full mode", async () => {
     vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue({
       company: null,
       current_filing: {
@@ -51,6 +51,8 @@ describe("ChangesSinceLastFilingCard", () => {
         share_count_change_count: 1,
         capital_structure_change_count: 1,
         amended_prior_value_count: 1,
+        high_signal_change_count: 2,
+        comment_letter_count: 1,
       },
       metric_deltas: [
         {
@@ -130,6 +132,42 @@ describe("ChangesSinceLastFilingCard", () => {
           confidence_flags: ["amended_sec_filing"],
         },
       ],
+      high_signal_changes: [
+        {
+          change_key: "mda-2025-09-30",
+          category: "mda",
+          importance: "high",
+          title: "MD&A discussion changed materially",
+          summary: "MD&A added emphasis on liquidity and covenant pressure versus the prior comparable filing.",
+          why_it_matters: "Management discussion is usually where operational pressure and liquidity strain show up first.",
+          signal_tags: ["liquidity", "covenant"],
+          current_period_end: "2025-09-30",
+          previous_period_end: "2025-06-30",
+          evidence: [
+            {
+              label: "Latest MD&A excerpt",
+              excerpt: "Liquidity and covenant pressure increased while margins contracted.",
+              source: "https://www.sec.gov/Archives/edgar/data/123456/current10q.htm",
+              filing_type: "10-Q",
+              period_end: "2025-09-30",
+            },
+          ],
+        },
+      ],
+      comment_letter_history: {
+        total_letters: 1,
+        letters_since_previous_filing: 1,
+        latest_filing_date: "2025-11-10",
+        recent_letters: [
+          {
+            accession_number: "0000123456-26-000120",
+            filing_date: "2025-11-10",
+            description: "SEC correspondence regarding revenue presentation.",
+            sec_url: "https://www.sec.gov/Archives/edgar/data/123456/comment-letter.htm",
+            is_new_since_current_filing: true,
+          },
+        ],
+      },
       provenance: [
         {
           source_id: "ft_changes_since_last_filing",
@@ -165,11 +203,15 @@ describe("ChangesSinceLastFilingCard", () => {
       },
     });
 
-    render(React.createElement(ChangesSinceLastFilingCard, { ticker: "AAPL" }));
+    const { rerender } = render(React.createElement(ChangesSinceLastFilingCard, { ticker: "AAPL" }));
 
     await waitFor(() => {
-      expect(screen.getAllByText("Revenue").length).toBeGreaterThan(0);
+      expect(screen.getByText("MD&A discussion changed materially")).toBeTruthy();
     });
+
+    expect(screen.getByText("SEC correspondence regarding revenue presentation.")).toBeTruthy();
+
+    rerender(React.createElement(ChangesSinceLastFilingCard, { ticker: "AAPL", detailMode: "full" }));
 
     expect(screen.getByText("Negative Free Cash Flow")).toBeTruthy();
     expect(screen.getByText("Products")).toBeTruthy();

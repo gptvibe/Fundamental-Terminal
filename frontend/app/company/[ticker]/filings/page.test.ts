@@ -63,6 +63,41 @@ vi.mock("@/lib/api", () => ({
     insights: [],
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
   })),
+  getCompanyChangesSinceLastFiling: vi.fn(async () => ({
+    company: null,
+    current_filing: null,
+    previous_filing: null,
+    summary: {
+      filing_type: null,
+      current_period_start: null,
+      current_period_end: null,
+      previous_period_start: null,
+      previous_period_end: null,
+      metric_delta_count: 0,
+      new_risk_indicator_count: 0,
+      segment_shift_count: 0,
+      share_count_change_count: 0,
+      capital_structure_change_count: 0,
+      amended_prior_value_count: 0,
+      high_signal_change_count: 0,
+      comment_letter_count: 0,
+    },
+    metric_deltas: [],
+    new_risk_indicators: [],
+    segment_shifts: [],
+    share_count_changes: [],
+    capital_structure_changes: [],
+    amended_prior_values: [],
+    high_signal_changes: [],
+    comment_letter_history: { total_letters: 0, letters_since_previous_filing: 0, latest_filing_date: null, recent_letters: [] },
+    provenance: [],
+    as_of: null,
+    last_refreshed_at: null,
+    source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+    confidence_flags: [],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    diagnostics: {} as never,
+  })),
 }));
 
 describe("CompanyFilingsPage", () => {
@@ -73,6 +108,7 @@ describe("CompanyFilingsPage", () => {
     expect(html).toContain("SEC-first filing workflow");
     expect(html).toContain("Recent Filing Timeline");
     expect(html).toContain("Filing Parser Snapshot");
+    expect(html).toContain("High-Signal Filing Changes");
     expect(html).toContain("Filing Viewer");
     expect(html).toContain("Form Coverage");
     expect(html).toContain("timeline");

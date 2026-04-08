@@ -112,6 +112,35 @@ class FilingParserSegmentPayload(BaseModel):
     revenue: Number = None
 
 
+class FilingParserSectionPayload(BaseModel):
+    key: str
+    label: str
+    title: str | None = None
+    source: str | None = None
+    excerpt: str | None = None
+    signal_terms: list[str] = Field(default_factory=list)
+
+
+class FilingParserNonGaapPayload(BaseModel):
+    mention_count: int = 0
+    terms: list[str] = Field(default_factory=list)
+    reconciliation_mentions: int = 0
+    has_reconciliation: bool = False
+    source: str | None = None
+    excerpt: str | None = None
+
+
+class FilingParserControlsPayload(BaseModel):
+    auditor_names: list[str] = Field(default_factory=list)
+    auditor_change_terms: list[str] = Field(default_factory=list)
+    control_terms: list[str] = Field(default_factory=list)
+    material_weakness: bool = False
+    ineffective_controls: bool = False
+    non_reliance: bool = False
+    source: str | None = None
+    excerpt: str | None = None
+
+
 class FilingParserInsightPayload(BaseModel):
     accession_number: str | None = None
     filing_type: str
@@ -124,6 +153,10 @@ class FilingParserInsightPayload(BaseModel):
     net_income: Number = None
     operating_income: Number = None
     segments: list[FilingParserSegmentPayload] = Field(default_factory=list)
+    mdna: FilingParserSectionPayload | None = None
+    footnotes: list[FilingParserSectionPayload] = Field(default_factory=list)
+    non_gaap: FilingParserNonGaapPayload = Field(default_factory=FilingParserNonGaapPayload)
+    controls: FilingParserControlsPayload = Field(default_factory=FilingParserControlsPayload)
 
 
 class FinancialFactReferencePayload(BaseModel):
@@ -561,6 +594,42 @@ class FilingComparisonAmendedValuePayload(BaseModel):
     confidence_flags: list[str] = Field(default_factory=list)
 
 
+class FilingHighSignalEvidencePayload(BaseModel):
+    label: str
+    excerpt: str
+    source: str
+    filing_type: str | None = None
+    period_end: DateType | None = None
+
+
+class FilingHighSignalChangePayload(BaseModel):
+    change_key: str
+    category: Literal["mda", "footnote", "non_gaap", "controls", "comment_letter"]
+    importance: Literal["medium", "high"]
+    title: str
+    summary: str
+    why_it_matters: str
+    signal_tags: list[str] = Field(default_factory=list)
+    current_period_end: DateType | None = None
+    previous_period_end: DateType | None = None
+    evidence: list[FilingHighSignalEvidencePayload] = Field(default_factory=list)
+
+
+class FilingCommentLetterItemPayload(BaseModel):
+    accession_number: str | None = None
+    filing_date: DateType | None = None
+    description: str
+    sec_url: str
+    is_new_since_current_filing: bool = False
+
+
+class FilingCommentLetterHistoryPayload(BaseModel):
+    total_letters: int = 0
+    letters_since_previous_filing: int = 0
+    latest_filing_date: DateType | None = None
+    recent_letters: list[FilingCommentLetterItemPayload] = Field(default_factory=list)
+
+
 class ChangesSinceLastFilingSummaryPayload(BaseModel):
     filing_type: str | None = None
     current_period_start: DateType | None = None
@@ -573,6 +642,8 @@ class ChangesSinceLastFilingSummaryPayload(BaseModel):
     share_count_change_count: int = 0
     capital_structure_change_count: int = 0
     amended_prior_value_count: int = 0
+    high_signal_change_count: int = 0
+    comment_letter_count: int = 0
 
 
 class CompanyChangesSinceLastFilingResponse(ProvenanceEnvelope):
@@ -586,6 +657,8 @@ class CompanyChangesSinceLastFilingResponse(ProvenanceEnvelope):
     share_count_changes: list[FilingComparisonMetricDeltaPayload] = Field(default_factory=list)
     capital_structure_changes: list[FilingComparisonMetricDeltaPayload] = Field(default_factory=list)
     amended_prior_values: list[FilingComparisonAmendedValuePayload] = Field(default_factory=list)
+    high_signal_changes: list[FilingHighSignalChangePayload] = Field(default_factory=list)
+    comment_letter_history: FilingCommentLetterHistoryPayload = Field(default_factory=FilingCommentLetterHistoryPayload)
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 

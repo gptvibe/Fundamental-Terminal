@@ -5232,3 +5232,7 @@ def _primary_supported_form(submissions: dict[str, Any]) -> str:
     return "10-K"
 _ticker_cache: list[dict[str, Any]] | None = None
 _ticker_cache_loaded_at: float | None = None
+
+
+if __name__ == "__main__":
+    raise SystemExit(worker_main())

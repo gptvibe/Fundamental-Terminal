@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { clsx } from "clsx";
 
 import { FilingEventCategoryChart } from "@/components/charts/filing-event-category-chart";
+import { ChangesSinceLastFilingCard } from "@/components/company/changes-since-last-filing-card";
 import { FilingDocumentViewer } from "@/components/filings/filing-document-viewer";
 import { FilingParserInsights } from "@/components/filings/filing-parser-insights";
 import { CompanyFilingsTimeline } from "@/components/filings/company-filings-timeline";
@@ -14,9 +15,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
+import { getCompanyChangesSinceLastFiling, getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingsResponse } from "@/lib/types";
+import type { CompanyChangesSinceLastFilingResponse, CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingsResponse } from "@/lib/types";
 
 export default function CompanyFilingsPage() {
   const params = useParams<{ ticker: string }>();
@@ -42,6 +43,9 @@ export default function CompanyFilingsPage() {
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [changesData, setChangesData] = useState<CompanyChangesSinceLastFilingResponse | null>(null);
+  const [changesLoading, setChangesLoading] = useState(true);
+  const [changesError, setChangesError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +72,34 @@ export default function CompanyFilingsPage() {
     }
 
     void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadChanges() {
+      try {
+        setChangesLoading(true);
+        setChangesError(null);
+        const response = await getCompanyChangesSinceLastFiling(ticker);
+        if (!cancelled) {
+          setChangesData(response);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setChangesError(nextError instanceof Error ? nextError.message : "Unable to load filing changes");
+        }
+      } finally {
+        if (!cancelled) {
+          setChangesLoading(false);
+        }
+      }
+    }
+
+    void loadChanges();
     return () => {
       cancelled = true;
     };
@@ -270,6 +302,16 @@ export default function CompanyFilingsPage() {
           error={insightsError}
           refresh={insightsData?.refresh == null ? refreshState : insightsData.refresh}
         />
+      </Panel>
+
+      <Panel title="High-Signal Filing Changes" subtitle="Curated filing-text changes on the brief, full evidence and supporting deltas here in the drill-down">
+        {changesError && !changesData ? (
+          <div className="text-muted">{changesError}</div>
+        ) : changesLoading && !changesData ? (
+          <div className="text-muted">Loading enriched filing change intelligence...</div>
+        ) : (
+          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} initialPayload={changesData} detailMode="full" />
+        )}
       </Panel>
 
       <Panel title="Filing Viewer" subtitle="Open the selected SEC document inside the workspace without leaving the terminal">

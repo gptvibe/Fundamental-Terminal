@@ -18,11 +18,12 @@ def _statement(
     period_end: date,
     acceptance_at: datetime,
     data: dict,
+    statement_type: str = "canonical_xbrl",
 ):
     return SimpleNamespace(
         id=statement_id,
         filing_type=filing_type,
-        statement_type="canonical_xbrl",
+        statement_type=statement_type,
         period_start=period_start,
         period_end=period_end,
         source=f"https://www.sec.gov/Archives/edgar/data/123456/{statement_id:010d}-26-000001/form.htm",
@@ -178,6 +179,140 @@ def test_build_changes_since_last_filing_summarizes_deltas_and_amendments() -> N
     assert "prior_values_amended" in comparison["confidence_flags"]
 
 
+def test_build_changes_since_last_filing_adds_high_signal_text_changes_and_comment_letters() -> None:
+    current = _statement(
+        10,
+        filing_type="10-Q",
+        period_start=date(2025, 7, 1),
+        period_end=date(2025, 9, 30),
+        acceptance_at=datetime(2025, 11, 2, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 120.0},
+    )
+    previous = _statement(
+        9,
+        filing_type="10-Q",
+        period_start=date(2025, 4, 1),
+        period_end=date(2025, 6, 30),
+        acceptance_at=datetime(2025, 8, 10, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 102.0},
+    )
+    parser_current = _statement(
+        110,
+        filing_type="10-Q",
+        statement_type="filing_parser",
+        period_start=current.period_start,
+        period_end=current.period_end,
+        acceptance_at=current.filing_acceptance_at,
+        data={
+            "mdna": {
+                "key": "mda",
+                "label": "MD&A",
+                "title": "Item 2. Management's Discussion and Analysis",
+                "source": "https://www.sec.gov/Archives/edgar/data/123456/current10q.htm",
+                "excerpt": "Liquidity and covenant pressure increased while margins contracted.",
+                "text": "Liquidity and covenant pressure increased while margins contracted and working capital tightened.",
+            },
+            "footnotes": [
+                {
+                    "key": "debt",
+                    "label": "Debt And Borrowings",
+                    "title": "Debt",
+                    "source": "https://www.sec.gov/Archives/edgar/data/123456/debtnote.htm",
+                    "excerpt": "The company amended its credit facility and added covenant constraints.",
+                    "text": "The company amended its credit facility and added covenant constraints tied to liquidity.",
+                    "signal_terms": ["debt", "credit facility"],
+                }
+            ],
+            "non_gaap": {
+                "mention_count": 4,
+                "terms": ["non-gaap", "adjusted ebitda"],
+                "reconciliation_mentions": 0,
+                "has_reconciliation": False,
+                "source": "https://www.sec.gov/Archives/edgar/data/123456/current10q.htm",
+                "excerpt": "Management emphasized adjusted EBITDA without a visible reconciliation.",
+            },
+            "controls": {
+                "auditor_names": ["deloitte"],
+                "auditor_change_terms": ["engaged"],
+                "control_terms": ["material weakness", "not effective"],
+                "material_weakness": True,
+                "ineffective_controls": True,
+                "non_reliance": False,
+                "source": "https://www.sec.gov/Archives/edgar/data/123456/current10q.htm",
+                "excerpt": "Disclosure controls were not effective due to a material weakness.",
+            },
+        },
+    )
+    parser_previous = _statement(
+        109,
+        filing_type="10-Q",
+        statement_type="filing_parser",
+        period_start=previous.period_start,
+        period_end=previous.period_end,
+        acceptance_at=previous.filing_acceptance_at,
+        data={
+            "mdna": {
+                "key": "mda",
+                "label": "MD&A",
+                "title": "Item 2. Management's Discussion and Analysis",
+                "source": "https://www.sec.gov/Archives/edgar/data/123456/prior10q.htm",
+                "excerpt": "Liquidity remained adequate and margins were stable.",
+                "text": "Liquidity remained adequate and margins were stable.",
+            },
+            "footnotes": [
+                {
+                    "key": "debt",
+                    "label": "Debt And Borrowings",
+                    "title": "Debt",
+                    "source": "https://www.sec.gov/Archives/edgar/data/123456/prior-debtnote.htm",
+                    "excerpt": "Debt facilities remained unchanged.",
+                    "text": "Debt facilities remained unchanged.",
+                    "signal_terms": ["debt"],
+                }
+            ],
+            "non_gaap": {
+                "mention_count": 1,
+                "terms": ["non-gaap"],
+                "reconciliation_mentions": 1,
+                "has_reconciliation": True,
+                "source": "https://www.sec.gov/Archives/edgar/data/123456/prior10q.htm",
+                "excerpt": "Adjusted metrics were reconciled to GAAP.",
+            },
+            "controls": {
+                "auditor_names": ["pwc"],
+                "auditor_change_terms": [],
+                "control_terms": [],
+                "material_weakness": False,
+                "ineffective_controls": False,
+                "non_reliance": False,
+                "source": "https://www.sec.gov/Archives/edgar/data/123456/prior10q.htm",
+                "excerpt": "Controls were effective.",
+            },
+        },
+    )
+    letters = [
+        SimpleNamespace(
+            accession_number="0000123456-26-000120",
+            filing_date=date(2025, 11, 10),
+            description="SEC correspondence regarding revenue recognition and non-GAAP presentation.",
+            sec_url="https://www.sec.gov/Archives/edgar/data/123456/comment-letter.htm",
+            last_checked=datetime(2025, 11, 10, 20, 0, tzinfo=timezone.utc),
+        )
+    ]
+
+    comparison = build_changes_since_last_filing(
+        [current, previous],
+        [],
+        parsed_filings=[parser_current, parser_previous],
+        comment_letters=letters,
+    )
+
+    assert comparison["summary"]["high_signal_change_count"] >= 4
+    assert comparison["summary"]["comment_letter_count"] == 1
+    assert {item["category"] for item in comparison["high_signal_changes"]} >= {"mda", "footnote", "non_gaap", "controls", "comment_letter"}
+    assert comparison["comment_letter_history"]["letters_since_previous_filing"] == 1
+
+
 def test_changes_since_last_filing_route_exposes_provenance_and_as_of(monkeypatch) -> None:
     current = _statement(
         2,
@@ -201,6 +336,8 @@ def test_changes_since_last_filing_route_exposes_provenance_and_as_of(monkeypatc
     monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [current, previous])
     monkeypatch.setattr(main_module, "get_company_financial_restatements", lambda *_args, **_kwargs: [restatement])
+    monkeypatch.setattr(main_module, "get_company_filing_insights", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_comment_letters", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/changes-since-last-filing?as_of=2026-03-20")
@@ -238,6 +375,8 @@ def test_changes_since_last_filing_openapi_contract_includes_as_of() -> None:
         "share_count_changes",
         "capital_structure_changes",
         "amended_prior_values",
+        "high_signal_changes",
+        "comment_letter_history",
         "refresh",
         "diagnostics",
         "provenance",

@@ -878,9 +878,20 @@ def company_changes_since_last_filing(
     restatements = get_company_financial_restatements(session, snapshot.company.id)
     if parsed_as_of is not None:
         restatements = [record for record in restatements if _financial_restatement_effective_at(record) <= parsed_as_of]
+    parsed_filings = get_company_filing_insights(session, snapshot.company.id, limit=12)
+    if parsed_as_of is not None:
+        parsed_filings = select_point_in_time_financials(parsed_filings, parsed_as_of)
+    comment_letters = get_company_comment_letters(session, snapshot.company.id, limit=24)
+    if parsed_as_of is not None:
+        comment_letters = [letter for letter in comment_letters if _effective_at(letter.filing_date) <= parsed_as_of]
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    comparison = build_changes_since_last_filing(financials, restatements)
+    comparison = build_changes_since_last_filing(
+        financials,
+        restatements,
+        parsed_filings=parsed_filings,
+        comment_letters=comment_letters,
+    )
     diagnostics = _diagnostics_for_changes_since_last_filing(comparison, refresh)
     comparison_as_of = requested_as_of or _latest_as_of(
         (comparison.get("current_filing") or {}).get("filing_acceptance_at"),
@@ -914,13 +925,25 @@ def company_changes_since_last_filing(
             (comparison.get("current_filing") or {}).get("source"),
             (comparison.get("previous_filing") or {}).get("source"),
             *(item.get("source") for item in comparison.get("amended_prior_values", [])),
+            *(
+                evidence.get("source")
+                for item in comparison.get("high_signal_changes", [])
+                if isinstance(item, dict)
+                for evidence in item.get("evidence", [])
+                if isinstance(evidence, dict)
+            ),
         ]
     ):
         filing_usage = _source_usage_from_hint(
             "https://www.sec.gov/Archives/",
             role="supplemental",
             as_of=comparison_as_of,
-            last_refreshed_at=_merge_last_checked(snapshot.last_checked, *(item.last_checked for item in restatements)),
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                *(item.last_checked for item in restatements),
+                *(getattr(item, "last_checked", None) for item in parsed_filings),
+                *(getattr(item, "last_checked", None) for item in comment_letters),
+            ),
             default_source_id="sec_edgar",
         )
         if filing_usage is not None:
@@ -946,6 +969,8 @@ def company_changes_since_last_filing(
         share_count_changes=comparison.get("share_count_changes") or [],
         capital_structure_changes=comparison.get("capital_structure_changes") or [],
         amended_prior_values=comparison.get("amended_prior_values") or [],
+        high_signal_changes=comparison.get("high_signal_changes") or [],
+        comment_letter_history=comparison.get("comment_letter_history") or {},
         refresh=refresh,
         diagnostics=diagnostics,
         **_build_provenance_contract(
@@ -956,6 +981,8 @@ def company_changes_since_last_filing(
                 (comparison.get("current_filing") or {}).get("last_checked"),
                 (comparison.get("previous_filing") or {}).get("last_checked"),
                 *(item.last_checked for item in restatements),
+                *(getattr(item, "last_checked", None) for item in parsed_filings),
+                *(getattr(item, "last_checked", None) for item in comment_letters),
             ),
             confidence_flags=sorted(confidence_flags),
         ),
@@ -6115,6 +6142,45 @@ def _serialize_filing_parser_segment(payload: dict[str, Any]) -> FilingParserSeg
     )
 
 
+def _serialize_filing_parser_section(payload: Any) -> FilingParserSectionPayload | None:
+    if not isinstance(payload, dict) or not payload:
+        return None
+    return FilingParserSectionPayload(
+        key=str(payload.get("key") or "section"),
+        label=str(payload.get("label") or payload.get("title") or "Section"),
+        title=payload.get("title"),
+        source=payload.get("source"),
+        excerpt=payload.get("excerpt"),
+        signal_terms=[str(term) for term in payload.get("signal_terms", []) if term],
+    )
+
+
+def _serialize_filing_parser_non_gaap(payload: Any) -> FilingParserNonGaapPayload:
+    data = payload if isinstance(payload, dict) else {}
+    return FilingParserNonGaapPayload(
+        mention_count=int(data.get("mention_count") or 0),
+        terms=[str(term) for term in data.get("terms", []) if term],
+        reconciliation_mentions=int(data.get("reconciliation_mentions") or 0),
+        has_reconciliation=bool(data.get("has_reconciliation")),
+        source=data.get("source"),
+        excerpt=data.get("excerpt"),
+    )
+
+
+def _serialize_filing_parser_controls(payload: Any) -> FilingParserControlsPayload:
+    data = payload if isinstance(payload, dict) else {}
+    return FilingParserControlsPayload(
+        auditor_names=[str(term) for term in data.get("auditor_names", []) if term],
+        auditor_change_terms=[str(term) for term in data.get("auditor_change_terms", []) if term],
+        control_terms=[str(term) for term in data.get("control_terms", []) if term],
+        material_weakness=bool(data.get("material_weakness")),
+        ineffective_controls=bool(data.get("ineffective_controls")),
+        non_reliance=bool(data.get("non_reliance")),
+        source=data.get("source"),
+        excerpt=data.get("excerpt"),
+    )
+
+
 def _serialize_filing_parser_insight(statement: FinancialStatement) -> FilingParserInsightPayload:
     data = statement.data or {}
     return FilingParserInsightPayload(
@@ -6133,6 +6199,16 @@ def _serialize_filing_parser_insight(statement: FinancialStatement) -> FilingPar
             for item in data.get("segments", [])
             if isinstance(item, dict)
         ],
+        mdna=_serialize_filing_parser_section(data.get("mdna")),
+        footnotes=[
+            section
+            for item in data.get("footnotes", [])
+            if isinstance(item, dict)
+            for section in [_serialize_filing_parser_section(item)]
+            if section is not None
+        ],
+        non_gaap=_serialize_filing_parser_non_gaap(data.get("non_gaap")),
+        controls=_serialize_filing_parser_controls(data.get("controls")),
     )
 
 

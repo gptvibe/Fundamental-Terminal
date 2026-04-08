@@ -745,12 +745,12 @@ export default function CompanyResearchBriefPage() {
             <CompanyMetricGrid
               items={[
                 {
-                  label: "Metric Deltas",
-                  value: briefData.changes.data ? String(briefData.changes.data.summary.metric_delta_count) : null,
+                  label: "High-Signal Changes",
+                  value: briefData.changes.data ? String(briefData.changes.data.summary.high_signal_change_count) : null,
                 },
                 {
-                  label: "Risk Indicators",
-                  value: briefData.changes.data ? String(briefData.changes.data.summary.new_risk_indicator_count) : null,
+                  label: "Comment Letters",
+                  value: briefData.changes.data ? String(briefData.changes.data.summary.comment_letter_count) : null,
                 },
                 {
                   label: "Latest EPS",
@@ -777,10 +777,10 @@ export default function CompanyResearchBriefPage() {
 
         <EvidenceCard
           title="Latest filing comparison"
-          copy="Metric, risk, segment, and capital-structure changes from the most recent comparable filing pair."
+          copy="Only the highest-signal filing changes surface here by default; the filings drill-down keeps the broader metric and evidence detail."
           className="is-wide"
         >
-          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} initialPayload={briefData.changes.data} />
+          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} initialPayload={briefData.changes.data} detailMode="brief" />
         </EvidenceCard>
 
         <EvidenceCard
@@ -2154,12 +2154,13 @@ function buildWhatChangedNarrative({
   }
 
   const metricDeltas = changes?.summary.metric_delta_count ?? 0;
-  const capitalStructureChanges = changes?.summary.capital_structure_change_count ?? 0;
+  const highSignalChanges = changes?.summary.high_signal_change_count ?? 0;
+  const commentLetters = changes?.summary.comment_letter_count ?? 0;
   const latestRevenue = earningsSummary?.summary.latest_revenue;
   const latestEps = earningsSummary?.summary.latest_diluted_eps;
   const highAlerts = activityOverview?.summary.high ?? 0;
 
-  return `The latest comparable filing surfaced ${metricDeltas.toLocaleString()} metric delta${metricDeltas === 1 ? "" : "s"} and ${capitalStructureChanges.toLocaleString()} capital-structure change${capitalStructureChanges === 1 ? "" : "s"}; the latest earnings capture reads ${formatCompactCurrency(latestRevenue)} of revenue and ${latestEps != null ? latestEps.toFixed(2) : "—"} diluted EPS; the activity feed is currently carrying ${highAlerts.toLocaleString()} high-priority alert${highAlerts === 1 ? "" : "s"}.`;
+  return `The latest comparable filing surfaced ${highSignalChanges.toLocaleString()} curated high-signal change${highSignalChanges === 1 ? "" : "s"} and ${commentLetters.toLocaleString()} comment-letter update${commentLetters === 1 ? "" : "s"}; the full comparison still retains ${metricDeltas.toLocaleString()} raw metric delta${metricDeltas === 1 ? "" : "s"}; the latest earnings capture reads ${formatCompactCurrency(latestRevenue)} of revenue and ${latestEps != null ? latestEps.toFixed(2) : "—"} diluted EPS; the activity feed is currently carrying ${highAlerts.toLocaleString()} high-priority alert${highAlerts === 1 ? "" : "s"}.`;
 }
 
 function buildBusinessQualityNarrative({
@@ -2373,7 +2374,6 @@ function buildCapitalSignalRows({
         .map((holding) => holding.fund_manager ?? holding.fund_name)
         .filter((value): value is string => Boolean(value))
     ).size;
-
     rows.push({
       signal: "Institutional",
       currentRead: `${uniqueManagers.toLocaleString()} managers in cached 13F history`,
