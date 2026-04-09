@@ -44,7 +44,7 @@ class _PendingHotCacheInvalidation:
 def _flush_hot_cache_invalidations(session: Session) -> None:
     pending = session.info.pop(_SESSION_INVALIDATION_KEY, [])
     for invalidation in pending:
-        shared_hot_response_cache.invalidate(
+        shared_hot_response_cache.invalidate_sync(
             ticker=invalidation.ticker,
             dataset=invalidation.dataset,
             schema_version=invalidation.schema_version,
