@@ -516,6 +516,439 @@ function buildPeersResponse(selectedTickers: string[]) {
   };
 }
 
+function buildResearchBriefResponse(selectedTickers: string[]) {
+  return {
+    company,
+    schema_version: "company_research_brief_v1",
+    generated_at: "2026-05-08T00:00:00Z",
+    as_of: "2025-12-31",
+    refresh,
+    build_state: "ready",
+    build_status: "Research brief ready.",
+    available_sections: ["snapshot", "what_changed", "business_quality", "capital_and_risk", "valuation"],
+    section_statuses: [
+      { id: "snapshot", title: "Snapshot", state: "ready", available: true, detail: "Available now." },
+      { id: "what_changed", title: "What Changed", state: "ready", available: true, detail: "Available now." },
+      { id: "business_quality", title: "Business Quality", state: "ready", available: true, detail: "Available now." },
+      { id: "capital_and_risk", title: "Capital And Risk", state: "ready", available: true, detail: "Available now." },
+      { id: "valuation", title: "Valuation", state: "ready", available: true, detail: "Available now." },
+    ],
+    filing_timeline: [
+      { accession: "0000001-26-000001", form: "10-K", date: "2026-05-08", description: "Annual report posted." },
+      { accession: "0000001-26-000010", form: "8-K", date: "2026-05-07", description: "Quarterly earnings release filed." },
+    ],
+    stale_summary_cards: [
+      { key: "latest_filing", title: "Latest Filing", value: "10-K", detail: "2025-12-31" },
+      { key: "latest_revenue", title: "Revenue", value: "$6.2K", detail: "2025-12-31" },
+      { key: "free_cash_flow", title: "Free Cash Flow", value: "$1.3K", detail: "2025-12-31" },
+      { key: "top_segment", title: "Top Segment", value: "Core Platform · 66%", detail: "Latest reported segment" },
+    ],
+    snapshot: {
+      summary: {
+        latest_filing_type: "10-K",
+        latest_period_end: "2025-12-31",
+        annual_statement_count: 2,
+        price_history_points: priceHistory.length,
+        latest_revenue: 6200,
+        latest_free_cash_flow: 1280,
+        top_segment_name: "Core Platform",
+        top_segment_share_of_revenue: 0.661,
+        alert_count: 1,
+      },
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-05-08T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    what_changed: {
+      activity_overview: {
+        company,
+        entries: [
+          {
+            id: "entry-1",
+            date: "2026-05-07",
+            type: "earnings",
+            badge: "8-K",
+            title: "Q2 earnings filing posted",
+            detail: "Acme filed its Q2 2026 earnings release through an 8-K Item 2.02 current report.",
+            href: "https://www.sec.gov/acme/earnings/q2",
+          },
+        ],
+        alerts: [
+          {
+            id: "alert-1",
+            level: "high",
+            title: "Working capital tightened",
+            detail: "Current ratio compressed quarter over quarter.",
+            source: "derived-metrics",
+            date: "2026-05-07",
+            href: null,
+          },
+        ],
+        summary: { total: 1, high: 1, medium: 0, low: 0 },
+        provenance: [],
+        as_of: "2026-05-08",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        market_context_status: {
+          state: "fresh",
+          label: "Macro context fresh",
+          observation_date: "2026-05-06",
+          source: "Treasury + BLS",
+        },
+        refresh,
+        error: null,
+      },
+      changes: {
+        company,
+        current_filing: {
+          accession_number: "0000001-26-000001",
+          filing_type: "10-K",
+          statement_type: "annual",
+          period_start: "2025-01-01",
+          period_end: "2025-12-31",
+          source: "sec",
+          last_updated: "2026-05-08T00:00:00Z",
+          last_checked: "2026-05-08T00:00:00Z",
+          filing_acceptance_at: "2026-05-08T00:00:00Z",
+          fetch_timestamp: "2026-05-08T00:00:00Z",
+        },
+        previous_filing: {
+          accession_number: "0000001-25-000001",
+          filing_type: "10-K",
+          statement_type: "annual",
+          period_start: "2024-01-01",
+          period_end: "2024-12-31",
+          source: "sec",
+          last_updated: "2025-05-08T00:00:00Z",
+          last_checked: "2025-05-08T00:00:00Z",
+          filing_acceptance_at: "2025-05-08T00:00:00Z",
+          fetch_timestamp: "2025-05-08T00:00:00Z",
+        },
+        summary: {
+          filing_type: "10-K",
+          current_period_start: "2025-01-01",
+          current_period_end: "2025-12-31",
+          previous_period_start: "2024-01-01",
+          previous_period_end: "2024-12-31",
+          high_signal_change_count: 1,
+          comment_letter_count: 0,
+          metric_delta_count: 2,
+          new_risk_indicator_count: 1,
+          segment_shift_count: 1,
+          share_count_change_count: 1,
+          capital_structure_change_count: 1,
+          amended_prior_value_count: 0,
+        },
+        metric_deltas: [],
+        new_risk_indicators: [],
+        segment_shifts: [],
+        share_count_changes: [],
+        capital_structure_changes: [],
+        amended_prior_values: [],
+        high_signal_changes: [
+          {
+            change_key: "mda-2025-12-31",
+            category: "mda",
+            importance: "high",
+            title: "MD&A discussion changed materially",
+            summary: "Management commentary added emphasis on liquidity and margin pressure versus the prior filing.",
+            why_it_matters: "Management discussion often surfaces operating pressure before it is fully obvious in the statement tables.",
+            signal_tags: ["liquidity", "margin"],
+            current_period_end: "2025-12-31",
+            previous_period_end: "2024-12-31",
+            evidence: [
+              {
+                label: "Latest MD&A excerpt",
+                excerpt: "Liquidity tightened while management highlighted margin pressure.",
+                source: "https://www.sec.gov/acme/filings/10k",
+                filing_type: "10-K",
+                period_end: "2025-12-31",
+              },
+            ],
+          },
+        ],
+        comment_letter_history: {
+          total_letters: 0,
+          letters_since_previous_filing: 0,
+          latest_filing_date: null,
+          recent_letters: [],
+        },
+        provenance: [],
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+      },
+      earnings_summary: {
+        company,
+        summary: {
+          total_releases: 2,
+          parsed_releases: 1,
+          metadata_only_releases: 1,
+          releases_with_guidance: 1,
+          releases_with_buybacks: 1,
+          releases_with_dividends: 1,
+          latest_filing_date: "2026-05-07",
+          latest_report_date: "2026-05-07",
+          latest_reported_period_end: "2026-04-30",
+          latest_revenue: 120,
+          latest_operating_income: 35,
+          latest_net_income: 28,
+          latest_diluted_eps: 1.18,
+        },
+        refresh,
+        diagnostics,
+        error: null,
+      },
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-05-08T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    business_quality: {
+      summary: {
+        latest_period_end: "2025-12-31",
+        previous_period_end: "2024-12-31",
+        annual_statement_count: 2,
+        revenue_growth: 0.0877,
+        operating_margin: 0.2258,
+        free_cash_flow_margin: 0.2064,
+        share_dilution: 0.01,
+      },
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-05-08T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    capital_and_risk: {
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-05-08T00:00:00Z",
+      provenance,
+      source_mix: sourceMix,
+      confidence_flags: [],
+      equity_claim_risk_summary: {
+        overall_risk_level: "low",
+        dilution_risk_level: "low",
+        financing_risk_level: "low",
+        reporting_risk_level: "low",
+        latest_period_end: "2025-12-31",
+        headline: "Dilution pressure remains elevated because recent financing and reporting signals are still active.",
+        net_dilution_ratio: 0.03,
+        sbc_to_revenue: 0.04,
+        shelf_capacity_remaining: 500,
+        recent_atm_activity: false,
+        recent_warrant_or_convertible_activity: false,
+        debt_due_next_twenty_four_months: 200,
+        restatement_severity: "low",
+        internal_control_flag_count: 0,
+        key_points: ["Shelf capacity remains ample for near-term needs."],
+      },
+      capital_structure: {
+        company,
+        latest: null,
+        history: [],
+        last_capital_structure_check: null,
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+      },
+      capital_markets_summary: {
+        company,
+        summary: {
+          total_filings: 2,
+          late_filer_notices: 0,
+          registration_filings: 1,
+          prospectus_filings: 1,
+          latest_filing_date: "2026-04-30",
+          max_offering_amount: 500,
+        },
+        refresh,
+        diagnostics,
+        error: null,
+      },
+      governance_summary: {
+        company,
+        summary: {
+          total_filings: 3,
+          definitive_proxies: 1,
+          supplemental_proxies: 2,
+          filings_with_meeting_date: 1,
+          filings_with_exec_comp: 1,
+          filings_with_vote_items: 1,
+          latest_meeting_date: "2026-04-18",
+          max_vote_item_count: 4,
+        },
+        refresh,
+        diagnostics,
+        error: null,
+      },
+      ownership_summary: {
+        company,
+        summary: {
+          total_filings: 2,
+          initial_filings: 1,
+          amendments: 1,
+          unique_reporting_persons: 2,
+          latest_filing_date: "2026-05-02",
+          latest_event_date: "2026-05-02",
+          max_reported_percent: 0.09,
+          chains_with_amendments: 1,
+          amendments_with_delta: 1,
+          ownership_increase_events: 1,
+          ownership_decrease_events: 0,
+          ownership_unchanged_events: 0,
+          largest_increase_pp: 0.02,
+          largest_decrease_pp: null,
+        },
+        refresh,
+        error: null,
+      },
+    },
+    valuation: {
+      models: {
+        company: { ...company, strict_official_mode: false },
+        requested_models: ["dcf", "residual_income", "ratios", "dupont", "piotroski", "altman_z"],
+        models: [
+          {
+            model_name: "dcf",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              fair_value_per_share: 130,
+              net_debt: 420,
+              model_status: "supported",
+            },
+          },
+          {
+            model_name: "residual_income",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              intrinsic_value: { intrinsic_value_per_share: 125 },
+              primary_for_sector: true,
+              model_status: "supported",
+            },
+          },
+          {
+            model_name: "ratios",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              values: {
+                revenue_growth: 0.09,
+                net_margin: 0.18,
+                liabilities_to_assets: 0.44,
+                equity_ratio: 0.56,
+              },
+            },
+          },
+          {
+            model_name: "dupont",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              net_profit_margin: 0.18,
+            },
+          },
+          {
+            model_name: "piotroski",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              score: 8,
+              score_max: 9,
+            },
+          },
+          {
+            model_name: "altman_z",
+            model_version: "v1",
+            created_at: "2026-05-08T00:00:00Z",
+            input_periods: {},
+            result: {
+              z_score_approximate: 4.1,
+            },
+          },
+        ],
+        provenance,
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: sourceMix,
+        confidence_flags: [],
+        refresh,
+        diagnostics,
+      },
+      peers: buildPeersResponse(selectedTickers),
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-05-08T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+    monitor: {
+      activity_overview: {
+        company,
+        entries: [
+          {
+            id: "entry-1",
+            date: "2026-05-07",
+            type: "earnings",
+            badge: "8-K",
+            title: "Q2 earnings filing posted",
+            detail: "Acme filed its Q2 2026 earnings release through an 8-K Item 2.02 current report.",
+            href: "https://www.sec.gov/acme/earnings/q2",
+          },
+        ],
+        alerts: [
+          {
+            id: "alert-1",
+            level: "high",
+            title: "Working capital tightened",
+            detail: "Current ratio compressed quarter over quarter.",
+            source: "derived-metrics",
+            date: "2026-05-07",
+            href: null,
+          },
+        ],
+        summary: { total: 1, high: 1, medium: 0, low: 0 },
+        provenance: [],
+        as_of: "2026-05-08",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        market_context_status: {
+          state: "fresh",
+          label: "Macro context fresh",
+          observation_date: "2026-05-06",
+          source: "Treasury + BLS",
+        },
+        refresh,
+        error: null,
+      },
+      provenance,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-05-08T00:00:00Z",
+      source_mix: sourceMix,
+      confidence_flags: [],
+    },
+  };
+}
+
 function json(route: Route, body: unknown) {
   return route.fulfill({
     status: 200,
@@ -530,6 +963,41 @@ async function installCompanyWorkspaceMocks(page: Page) {
     const path = url.pathname;
     const peersParam = url.searchParams.get("peers");
     const selectedPeers = peersParam ? peersParam.split(",").filter(Boolean) : ["MSFT"];
+
+    if (path.endsWith("/source-registry")) {
+      return json(route, {
+        strict_official_mode: false,
+        generated_at: "2026-05-08T00:00:00Z",
+        sources: [
+          {
+            source_id: "sec_companyfacts",
+            source_tier: "official_regulator",
+            display_label: "SEC Company Facts (XBRL)",
+            url: "https://data.sec.gov/api/xbrl/companyfacts/",
+            default_freshness_ttl_seconds: 21600,
+            disclosure_note: "Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
+            strict_official_mode_state: "available",
+            strict_official_mode_note: "Core fundamentals remain available in strict official mode.",
+          },
+          {
+            source_id: "yahoo_finance",
+            source_tier: "commercial_fallback",
+            display_label: "Yahoo Finance",
+            url: "https://finance.yahoo.com/",
+            default_freshness_ttl_seconds: 3600,
+            disclosure_note: "Commercial fallback used only for price, volume, and market-profile context; never for core fundamentals.",
+            strict_official_mode_state: "disabled",
+            strict_official_mode_note: "Fallback market context is suppressed when strict official mode is enabled.",
+          },
+        ],
+        health: {
+          total_companies_cached: 128,
+          average_data_age_seconds: 5400,
+          recent_error_window_hours: 24,
+          sources_with_recent_errors: [],
+        },
+      });
+    }
 
     if (path.endsWith("/market-context")) {
       return json(route, globalMarketContext);
@@ -557,6 +1025,35 @@ async function installCompanyWorkspaceMocks(page: Page) {
         refresh,
         diagnostics,
         segment_analysis: null,
+      });
+    }
+
+    if (path.endsWith(`/companies/${ticker}/brief`)) {
+      return json(route, buildResearchBriefResponse(selectedPeers));
+    }
+
+    if (path.endsWith(`/companies/${ticker}/financial-restatements`)) {
+      return json(route, {
+        company,
+        summary: {
+          total_restatements: 0,
+          amended_filings: 0,
+          companyfacts_revisions: 0,
+          amended_metric_keys: [],
+          changed_periods: [],
+          high_confidence_impacts: 0,
+          medium_confidence_impacts: 0,
+          low_confidence_impacts: 0,
+          latest_filing_date: null,
+          latest_filing_acceptance_at: null,
+        },
+        restatements: [],
+        provenance: [],
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-05-08T00:00:00Z",
+        source_mix: officialSourceMix,
+        confidence_flags: [],
+        refresh,
       });
     }
 
@@ -639,6 +1136,34 @@ async function installCompanyWorkspaceMocks(page: Page) {
         share_count_changes: [],
         capital_structure_changes: [],
         amended_prior_values: [],
+        high_signal_changes: [
+          {
+            change_key: "mda-2025-12-31",
+            category: "mda",
+            importance: "high",
+            title: "MD&A discussion changed materially",
+            summary: "Management commentary added emphasis on liquidity and margin pressure versus the prior filing.",
+            why_it_matters: "Management discussion often surfaces operating pressure before it is fully obvious in the statement tables.",
+            signal_tags: ["liquidity", "margin"],
+            current_period_end: "2025-12-31",
+            previous_period_end: "2024-12-31",
+            evidence: [
+              {
+                label: "Latest MD&A excerpt",
+                excerpt: "Liquidity tightened while management highlighted margin pressure.",
+                source: "https://www.sec.gov/acme/filings/10k",
+                filing_type: "10-K",
+                period_end: "2025-12-31",
+              },
+            ],
+          },
+        ],
+        comment_letter_history: {
+          total_letters: 0,
+          letters_since_previous_filing: 0,
+          latest_filing_date: null,
+          recent_letters: [],
+        },
         provenance: [],
         as_of: "2025-12-31",
         last_refreshed_at: "2026-05-08T00:00:00Z",
@@ -845,6 +1370,8 @@ async function installCompanyWorkspaceMocks(page: Page) {
         period_type: "ttm",
         latest_period_end: "2025-12-31",
         metrics: [],
+        diagnostics,
+        confidence_flags: [],
         last_metrics_check: "2026-05-08T00:00:00Z",
         last_financials_check: "2026-05-08T00:00:00Z",
         last_price_check: "2026-05-08T00:00:00Z",
@@ -1186,7 +1713,7 @@ test("research brief smoke", async ({ page }) => {
   const snapshotHeading = page.getByRole("heading", { name: "Snapshot", exact: true });
   await snapshotHeading.scrollIntoViewIfNeeded();
   await expect(snapshotHeading).toBeVisible();
-  const whatChangedHeading = page.getByRole("heading", { name: "What Changed", exact: true });
+  const whatChangedHeading = page.getByRole("heading", { name: "What changed", exact: true });
   await whatChangedHeading.scrollIntoViewIfNeeded();
   await expect(whatChangedHeading).toBeVisible();
   await expect(page.getByText("Working capital tightened").first()).toBeVisible();
@@ -1194,7 +1721,8 @@ test("research brief smoke", async ({ page }) => {
   const valuationHeading = page.getByRole("heading", { name: "Valuation", exact: true });
   await valuationHeading.scrollIntoViewIfNeeded();
   await expect(valuationHeading).toBeVisible();
-  await expect(page.locator("#valuation").getByText("Fallback Yahoo Finance", { exact: true }).first()).toBeVisible();
+  await expect(page.locator("#valuation").getByText("Fallback label").first()).toBeVisible();
+  await expect(page.locator("#valuation").getByText("Yahoo Finance").first()).toBeVisible();
 });
 
 test("peers workspace smoke", async ({ page }) => {

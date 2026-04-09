@@ -19,12 +19,10 @@ export function CommercialFallbackNotice({
   const joinedSources = sourceLabels.join(", ");
 
   return (
-    <div className="filing-link-card" style={{ display: "grid", gap: 8 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <span className="pill">commercial_fallback</span>
-        <span className="pill">{joinedSources}</span>
-      </div>
-      <div className="text-muted" style={{ fontSize: "var(--text-sm)", lineHeight: 1.55 }}>
+    <div className="commercial-fallback-notice">
+      <div className="commercial-fallback-notice-label">Fallback label</div>
+      <div className="commercial-fallback-notice-value">{joinedSources}</div>
+      <div className="commercial-fallback-notice-copy">
         {subject} includes a labeled commercial fallback from {joinedSources}. Core fundamentals remain sourced from official filings and public datasets.
       </div>
     </div>

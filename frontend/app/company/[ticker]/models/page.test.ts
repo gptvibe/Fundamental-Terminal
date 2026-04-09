@@ -511,9 +511,9 @@ describe("CompanyModelsPage", () => {
     expect(screen.queryByText("Sector Exposure Context")).toBeNull();
     expect(screen.queryByText("market-context-panel")).toBeNull();
     expect(screen.getByText(/Suite historical_fixture_v1/i)).toBeTruthy();
-    expect(screen.getByText("Fundamental Terminal Model Engine")).toBeTruthy();
-    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
-    expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Fundamental Terminal Model Engine").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("SEC Company Facts (XBRL)").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Fallback label").length).toBeGreaterThan(0);
     expect(screen.getByText(/Price-sensitive valuation outputs on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
 
     const panelHeadings = Array.from(document.querySelectorAll("section > h2"), (node) => node.textContent ?? "");

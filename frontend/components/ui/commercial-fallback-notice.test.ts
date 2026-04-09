@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { CommercialFallbackNotice, resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
 
 describe("CommercialFallbackNotice", () => {
-  it("renders a stable labeled fallback badge snapshot", () => {
+  it("renders a stable labeled fallback notice", () => {
     const { container } = render(
       React.createElement(CommercialFallbackNotice, {
         provenance: [
@@ -44,13 +44,46 @@ describe("CommercialFallbackNotice", () => {
       })
     );
 
-    const normalizedText = Array.from(container.querySelectorAll(".pill, .text-muted"))
+    const normalizedText = Array.from(
+      container.querySelectorAll(
+        ".commercial-fallback-notice-label, .commercial-fallback-notice-value, .commercial-fallback-notice-copy"
+      )
+    )
       .map((element) => element.textContent?.replace(/\s+/g, " ").trim() ?? "")
       .join(" ");
 
-    expect(normalizedText).toMatchInlineSnapshot(
-      '"commercial_fallback Yahoo Finance Price or market profile data on this surface includes a labeled commercial fallback from Yahoo Finance. Core fundamentals remain sourced from official filings and public datasets."'
+    expect(normalizedText).toBe(
+      "Fallback label Yahoo Finance Price or market profile data on this surface includes a labeled commercial fallback from Yahoo Finance. Core fundamentals remain sourced from official filings and public datasets."
     );
+  });
+
+  it("renders the fallback label in a non-pill presentation", () => {
+    const { container } = render(
+      React.createElement(CommercialFallbackNotice, {
+        provenance: [
+          {
+            source_id: "yahoo_finance",
+            source_tier: "commercial_fallback",
+            display_label: "Yahoo Finance",
+            url: "https://finance.yahoo.com/",
+            default_freshness_ttl_seconds: 3600,
+            disclosure_note: "Commercial fallback used only for price, volume, and market-profile context; never for core fundamentals.",
+            role: "fallback",
+            as_of: "2026-03-21",
+            last_refreshed_at: "2026-03-22T00:00:00Z",
+          },
+        ],
+        sourceMix: {
+          source_ids: ["yahoo_finance"],
+          source_tiers: ["commercial_fallback"],
+          primary_source_ids: [],
+          fallback_source_ids: ["yahoo_finance"],
+          official_only: false,
+        },
+      })
+    );
+
+    expect(container.querySelectorAll(".pill")).toHaveLength(0);
   });
 
   it("resolves fallback labels from provenance tiers and source mix ids", () => {

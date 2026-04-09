@@ -11,6 +11,7 @@ import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/co
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
+import { EvidenceMetaBlock } from "@/components/ui/evidence-meta-block";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { showAppToast } from "@/lib/app-toast";
@@ -1747,8 +1748,12 @@ function ResearchBriefSection({
         className="research-brief-section-panel"
       >
         <div className="research-brief-section-stack">
-          {summary ? <p className="research-brief-section-summary">{summary}</p> : null}
-          <ResearchBriefFreshness cues={cues} />
+          {summary || cues.length ? (
+            <div className="research-brief-section-intro">
+              {summary ? <p className="research-brief-section-summary">{summary}</p> : null}
+              <ResearchBriefFreshness cues={cues} />
+            </div>
+          ) : null}
           <div className="research-brief-evidence-grid">{children}</div>
         </div>
       </Panel>
@@ -1780,35 +1785,40 @@ function ResearchBriefHeroSummary({
           {loadingMessage}
         </div>
       ) : null}
-      <p className="research-brief-hero-summary">{summary}</p>
-      <div className="research-brief-hero-metrics">
-        {metrics.map((item, index) => (
-          <div key={item.label} className="research-brief-hero-metric">
-            <div className="research-brief-hero-metric-label">{item.label}</div>
-            <div className="research-brief-hero-metric-value">
-              {loading ? (
-                <span aria-hidden="true" className={`workspace-skeleton research-brief-hero-metric-skeleton skeleton-${index % 4}`} />
-              ) : (
-                item.value ?? "\u2014"
-              )}
+      <div className="research-brief-hero-main">
+        <div className="research-brief-hero-copy">
+          <p className="research-brief-hero-summary">{summary}</p>
+          {visibleMetaItems.length ? (
+            <div className="research-brief-hero-meta" aria-label="Brief metadata">
+              {visibleMetaItems.map((item) => (
+                <span key={item} className="research-brief-hero-meta-item">
+                  {item}
+                </span>
+              ))}
             </div>
-          </div>
-        ))}
-      </div>
-      {visibleMetaItems.length ? (
-        <div className="research-brief-hero-meta" aria-label="Brief metadata">
-          {visibleMetaItems.map((item) => (
-            <span key={item} className="research-brief-hero-meta-item">
-              {item}
-            </span>
+          ) : null}
+          {fallbackLabels.length ? (
+            <div className="research-brief-hero-note">
+              Price history and market profile context includes a labeled commercial fallback from {fallbackLabels.join(", ")}. Core fundamentals remain sourced from official filings and public datasets.
+            </div>
+          ) : null}
+        </div>
+
+        <div className="research-brief-hero-metrics">
+          {metrics.map((item, index) => (
+            <div key={item.label} className={`research-brief-hero-metric${index < 2 ? " is-primary" : " is-secondary"}`}>
+              <div className="research-brief-hero-metric-label">{item.label}</div>
+              <div className="research-brief-hero-metric-value">
+                {loading ? (
+                  <span aria-hidden="true" className={`workspace-skeleton research-brief-hero-metric-skeleton skeleton-${index % 4}`} />
+                ) : (
+                  item.value ?? "\u2014"
+                )}
+              </div>
+            </div>
           ))}
         </div>
-      ) : null}
-      {fallbackLabels.length ? (
-        <div className="research-brief-hero-note">
-          Price history and market profile context includes a labeled commercial fallback from {fallbackLabels.join(", ")}. Core fundamentals remain sourced from official filings and public datasets.
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
@@ -1884,27 +1894,29 @@ function ResearchBriefFreshness({ cues }: { cues: ResearchBriefCue[] }) {
   return (
     <div className="research-brief-freshness-grid">
       {visibleCues.map((cue) => {
-        const sourceMixLabel = formatSourceMixLabel(cue.sourceMix, cue.provenance);
-        const fallbackLabels = resolveCommercialFallbackLabels(cue.provenance, cue.sourceMix);
+        const sourceSummary = formatEvidenceSourceSummary(cue.sourceMix, cue.provenance);
+        const fallbackLabel = formatEvidenceFallbackLabel(cue.provenance, cue.sourceMix);
         const confidenceFlags = (cue.confidenceFlags ?? []).slice(0, 2);
 
         return (
           <div key={cue.label} className="research-brief-freshness-card">
-            <div className="research-brief-freshness-title-row">
+            <div className="research-brief-freshness-head">
               <div className="research-brief-freshness-title">{cue.label}</div>
-              {sourceMixLabel ? <span className="pill">{sourceMixLabel}</span> : null}
+              {confidenceFlags.length ? <div className="research-brief-freshness-flags">Flags: {confidenceFlags.map(humanizeToken).join(", ")}</div> : null}
             </div>
-            <div className="research-brief-freshness-meta">
-              {cue.asOf ? <span className="pill">As of {formatDate(cue.asOf)}</span> : null}
-              {cue.lastRefreshedAt ? <span className="pill">Refreshed {formatDate(cue.lastRefreshedAt)}</span> : null}
-              {!cue.lastRefreshedAt && cue.lastChecked ? <span className="pill">Last checked {formatDate(cue.lastChecked)}</span> : null}
-              {fallbackLabels.length ? <span className="pill">Fallback {fallbackLabels.join(", ")}</span> : null}
-              {confidenceFlags.map((flag) => (
-                <span key={`${cue.label}-${flag}`} className="pill">
-                  {humanizeToken(flag)}
-                </span>
-              ))}
-            </div>
+            <EvidenceMetaBlock
+              items={[
+                { label: "Source", value: sourceSummary, emphasized: true },
+                { label: "As of", value: cue.asOf ? formatDate(cue.asOf) : "Pending" },
+                { label: "Freshness", value: formatBriefEvidenceFreshness(cue.lastRefreshedAt, cue.lastChecked) },
+                { label: "Fallback label", value: fallbackLabel },
+              ]}
+            />
+            {cue.provenance?.length ? (
+              <div className="research-brief-freshness-note">
+                {cue.provenance.length.toLocaleString()} registry source{cue.provenance.length === 1 ? "" : "s"} backing this section.
+              </div>
+            ) : null}
           </div>
         );
       })}
@@ -2527,18 +2539,49 @@ function formatSourceMixLabel(sourceMix: SourceMixPayload | null | undefined, pr
   const fallbackLabels = resolveCommercialFallbackLabels(provenance, sourceMix);
 
   if (sourceMix?.official_only) {
-    return "official/public only";
+    return "Official/public only";
   }
 
   if (fallbackLabels.length) {
-    return "official + labeled fallback";
+    return "Official + labeled fallback";
   }
 
   if (provenance?.length) {
-    return "cached source mix";
+    return "Cached source mix";
   }
 
   return null;
+}
+
+function formatEvidenceSourceSummary(sourceMix: SourceMixPayload | null | undefined, provenance: ProvenanceEntryPayload[] | null | undefined): string {
+  return formatSourceMixLabel(sourceMix, provenance) ?? "Pending";
+}
+
+function formatEvidenceFallbackLabel(
+  provenance: ProvenanceEntryPayload[] | null | undefined,
+  sourceMix: SourceMixPayload | null | undefined,
+): string {
+  const fallbackLabels = resolveCommercialFallbackLabels(provenance, sourceMix);
+
+  if (fallbackLabels.length) {
+    return fallbackLabels.join(", ");
+  }
+
+  if (sourceMix?.official_only || provenance?.length) {
+    return "Official only";
+  }
+
+  return "Pending";
+}
+
+function formatBriefEvidenceFreshness(lastRefreshedAt: string | null | undefined, lastChecked: string | null | undefined): string {
+  if (lastRefreshedAt) {
+    return `Refreshed ${formatDate(lastRefreshedAt)}`;
+  }
+  if (lastChecked) {
+    return `Checked ${formatDate(lastChecked)}`;
+  }
+  return "Pending";
 }
 
 function formatCompactCurrency(value: number | null | undefined): string {

@@ -2,7 +2,8 @@
 
 import { useId, useState } from "react";
 
-import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
+import { CommercialFallbackNotice, resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
+import { EvidenceMetaBlock } from "@/components/ui/evidence-meta-block";
 import { formatDate } from "@/lib/format";
 import type { ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
 
@@ -25,6 +26,7 @@ export function SourceFreshnessSummary({
 }: SourceFreshnessSummaryProps) {
   const entries = provenance ?? [];
   const flags = confidenceFlags ?? [];
+  const fallbackLabels = resolveCommercialFallbackLabels(entries, sourceMix);
   const drawerId = useId();
   const [drawerOpen, setDrawerOpen] = useState(true);
 
@@ -33,28 +35,29 @@ export function SourceFreshnessSummary({
   }
 
   return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {asOf ? <span className="pill">As of {formatDate(asOf)}</span> : null}
-        {lastRefreshedAt ? <span className="pill">Refreshed {formatDate(lastRefreshedAt)}</span> : null}
-        <span className="pill">{formatSourceMix(sourceMix, entries)}</span>
-        <span className="pill">Sources {entries.length}</span>
-      </div>
+    <div className="source-freshness-summary">
+      <EvidenceMetaBlock
+        className="source-freshness-summary-overview"
+        items={[
+          { label: "Source", value: formatSourceMix(sourceMix, entries), emphasized: true },
+          { label: "As of", value: asOf ? formatDate(asOf) : "Pending" },
+          { label: "Freshness", value: formatFreshness(lastRefreshedAt, null) },
+          { label: "Fallback label", value: fallbackLabels.length ? fallbackLabels.join(", ") : entries.length || sourceMix?.official_only ? "Official only" : "Pending" },
+        ]}
+      />
 
       <CommercialFallbackNotice provenance={entries} sourceMix={sourceMix} />
 
       {flags.length ? (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {flags.map((flag) => (
-            <span key={flag} className="pill">{humanizeFlag(flag)}</span>
-          ))}
+        <div className="source-freshness-flags">
+          Confidence flags: {flags.map(humanizeFlag).join(", ")}
         </div>
       ) : null}
 
       {entries.length ? (
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <div className="text-muted" style={{ fontSize: "var(--text-sm)" }}>
+        <div className="source-freshness-stack">
+          <div className="source-freshness-topline">
+            <div className="source-freshness-note">
               Registry-backed provenance details for this surface.
             </div>
             <button
@@ -69,28 +72,36 @@ export function SourceFreshnessSummary({
           </div>
 
           {drawerOpen ? (
-            <div id={drawerId} aria-label="Provenance drawer" style={{ display: "grid", gap: 10 }}>
+            <div id={drawerId} aria-label="Provenance drawer" className="source-freshness-entry-list">
               {entries.map((entry) => (
-                <div key={entry.source_id} className="filing-link-card" style={{ display: "grid", gap: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                    <div style={{ display: "grid", gap: 4 }}>
-                      <strong>{entry.display_label}</strong>
-                      <div className="text-muted" style={{ fontSize: "var(--text-xs)" }}>{entry.source_id}</div>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <span className="pill">{humanizeFlag(entry.role)}</span>
-                      <span className="pill">{humanizeFlag(entry.source_tier)}</span>
-                      <span className="pill">TTL {formatTtl(entry.default_freshness_ttl_seconds)}</span>
+                <div key={entry.source_id} className="source-freshness-entry">
+                  <div className="source-freshness-entry-head">
+                    <div className="source-freshness-entry-heading">
+                      <strong className="source-freshness-entry-title">{entry.display_label}</strong>
+                      <div className="source-freshness-entry-subtitle">
+                        {entry.source_id} · {humanizeFlag(entry.role)} · {humanizeFlag(entry.source_tier)}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="text-muted" style={{ fontSize: "var(--text-sm)", lineHeight: 1.55 }}>
-                    {entry.disclosure_note}
-                  </div>
+                  <EvidenceMetaBlock
+                    items={[
+                      { label: "Source", value: entry.display_label, emphasized: true },
+                      { label: "As of", value: entry.as_of ? formatDate(entry.as_of) : "Pending" },
+                      {
+                        label: "Freshness",
+                        value: formatFreshness(entry.last_refreshed_at, entry.default_freshness_ttl_seconds),
+                      },
+                      {
+                        label: "Fallback label",
+                        value: entry.source_tier === "commercial_fallback" || entry.role === "fallback" ? entry.display_label : "Official only",
+                      },
+                    ]}
+                  />
 
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                    {entry.as_of ? <span className="text-muted">As of {formatDate(entry.as_of)}</span> : null}
-                    {entry.last_refreshed_at ? <span className="text-muted">Refreshed {formatDate(entry.last_refreshed_at)}</span> : null}
+                  <div className="source-freshness-entry-copy">{entry.disclosure_note}</div>
+
+                  <div className="source-freshness-entry-actions">
                     <a href={entry.url} target="_blank" rel="noreferrer" className="ticker-button" style={{ width: "fit-content" }}>
                       Open source
                     </a>
@@ -107,7 +118,7 @@ export function SourceFreshnessSummary({
 
 function formatSourceMix(sourceMix: SourceMixPayload | null | undefined, entries: ProvenanceEntryPayload[]): string {
   if (!entries.length) {
-    return "No source mix";
+    return "Pending";
   }
   if (sourceMix?.official_only) {
     return "Official/public only";
@@ -132,6 +143,19 @@ function formatTtl(ttlSeconds: number): string {
     return `${ttlSeconds / 60}m`;
   }
   return `${ttlSeconds}s`;
+}
+
+function formatFreshness(lastRefreshedAt: string | null | undefined, ttlSeconds: number | null | undefined): string {
+  if (lastRefreshedAt && typeof ttlSeconds === "number") {
+    return `Refreshed ${formatDate(lastRefreshedAt)} · TTL ${formatTtl(ttlSeconds)}`;
+  }
+  if (lastRefreshedAt) {
+    return `Refreshed ${formatDate(lastRefreshedAt)}`;
+  }
+  if (typeof ttlSeconds === "number") {
+    return `TTL ${formatTtl(ttlSeconds)}`;
+  }
+  return "Pending";
 }
 
 function humanizeFlag(value: string): string {

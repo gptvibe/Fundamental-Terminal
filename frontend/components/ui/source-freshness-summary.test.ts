@@ -47,16 +47,16 @@ describe("SourceFreshnessSummary", () => {
       })
     );
 
-    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    expect(screen.getAllByText("SEC Company Facts (XBRL)").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
     expect(screen.getByText("Official + labeled fallback")).toBeTruthy();
-    expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Fallback label").length).toBeGreaterThan(0);
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Hide provenance drawer" })).toBeTruthy();
     expect(screen.getByLabelText("Provenance drawer")).toBeTruthy();
-    expect(screen.getByText("commercial fallback present")).toBeTruthy();
-    expect(screen.getByText("TTL 6h")).toBeTruthy();
-    expect(screen.getByText("TTL 1h")).toBeTruthy();
+    expect(screen.getByText(/Confidence flags: commercial fallback present, partial model inputs/i)).toBeTruthy();
+    expect(screen.getByText("Refreshed Mar 22, 2026 · TTL 6h")).toBeTruthy();
+    expect(screen.getByText("Refreshed Mar 22, 2026 · TTL 1h")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Hide provenance drawer" }));
 
