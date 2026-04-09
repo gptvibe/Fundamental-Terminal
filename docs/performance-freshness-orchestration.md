@@ -48,6 +48,20 @@ The script runs warm-cache benchmark cases for:
 - peers payload
 - metrics-timeseries payload
 
+CI regression gate:
+
+```bash
+python scripts/run_performance_regression_gate.py --baseline-file scripts/performance_regression_baseline.json --fail-on-regression --json-out artifacts/performance/backend-performance-summary.json --markdown-out artifacts/performance/backend-performance-summary.md
+```
+
+The gate runs deterministic in-process benchmarks against synthetic route fixtures so CI can enforce explicit budgets for:
+- request count
+- p50 latency
+- p95 latency
+- average payload size
+
+It covers the warm-cache hot read routes above and the `/api/companies/{ticker}/brief` route under simulated concurrency. The JSON and Markdown outputs are uploaded from CI as build artifacts.
+
 Model-computation benchmark:
 
 ```bash

@@ -1,0 +1,186 @@
+{
+  "generated_at": "2026-04-09T04:09:04.198288+00:00",
+  "schema_version": "performance_regression_baseline_v1",
+  "suites": {
+    "company_brief_concurrency": {
+      "cases": {
+        "company_brief_ready": {
+          "latency_ms": {
+            "p50": {
+              "baseline": 9.3,
+              "budget": 16.74,
+              "max_regression_pct": 60.0
+            },
+            "p95": {
+              "baseline": 12.57,
+              "budget": 25.14,
+              "max_regression_pct": 60.0
+            }
+          },
+          "payload_bytes": {
+            "avg": {
+              "baseline": 10640.0,
+              "budget": 13300.0,
+              "max_regression_pct": 20.0
+            }
+          },
+          "request_count": {
+            "expected": 24
+          },
+          "status_codes": [
+            200
+          ]
+        }
+      },
+      "config": {
+        "concurrency": 6,
+        "requests_per_worker": 4,
+        "ticker": "AAPL",
+        "total_requests": 24
+      }
+    },
+    "hot_endpoints": {
+      "cases": {
+        "company_search": {
+          "latency_ms": {
+            "p50": {
+              "baseline": 1.32,
+              "budget": 4.32,
+              "max_regression_pct": 60.0
+            },
+            "p95": {
+              "baseline": 2.37,
+              "budget": 8.37,
+              "max_regression_pct": 60.0
+            }
+          },
+          "payload_bytes": {
+            "avg": {
+              "baseline": 766.0,
+              "budget": 1022.0,
+              "max_regression_pct": 20.0
+            }
+          },
+          "request_count": {
+            "expected": 12
+          },
+          "status_codes": [
+            200
+          ]
+        },
+        "financials_payload": {
+          "latency_ms": {
+            "p50": {
+              "baseline": 1.48,
+              "budget": 4.48,
+              "max_regression_pct": 60.0
+            },
+            "p95": {
+              "baseline": 1.85,
+              "budget": 7.85,
+              "max_regression_pct": 60.0
+            }
+          },
+          "payload_bytes": {
+            "avg": {
+              "baseline": 4040.0,
+              "budget": 5050.0,
+              "max_regression_pct": 20.0
+            }
+          },
+          "request_count": {
+            "expected": 12
+          },
+          "status_codes": [
+            200
+          ]
+        },
+        "metrics_timeseries_payload": {
+          "latency_ms": {
+            "p50": {
+              "baseline": 1.39,
+              "budget": 4.39,
+              "max_regression_pct": 60.0
+            },
+            "p95": {
+              "baseline": 1.64,
+              "budget": 7.64,
+              "max_regression_pct": 60.0
+            }
+          },
+          "payload_bytes": {
+            "avg": {
+              "baseline": 3615.0,
+              "budget": 4518.75,
+              "max_regression_pct": 20.0
+            }
+          },
+          "request_count": {
+            "expected": 12
+          },
+          "status_codes": [
+            200
+          ]
+        },
+        "models_payload": {
+          "latency_ms": {
+            "p50": {
+              "baseline": 1.51,
+              "budget": 4.51,
+              "max_regression_pct": 60.0
+            },
+            "p95": {
+              "baseline": 1.73,
+              "budget": 7.73,
+              "max_regression_pct": 60.0
+            }
+          },
+          "payload_bytes": {
+            "avg": {
+              "baseline": 5158.0,
+              "budget": 6447.5,
+              "max_regression_pct": 20.0
+            }
+          },
+          "request_count": {
+            "expected": 12
+          },
+          "status_codes": [
+            200
+          ]
+        },
+        "peers_payload": {
+          "latency_ms": {
+            "p50": {
+              "baseline": 1.34,
+              "budget": 4.34,
+              "max_regression_pct": 60.0
+            },
+            "p95": {
+              "baseline": 1.49,
+              "budget": 7.49,
+              "max_regression_pct": 60.0
+            }
+          },
+          "payload_bytes": {
+            "avg": {
+              "baseline": 3631.0,
+              "budget": 4538.75,
+              "max_regression_pct": 20.0
+            }
+          },
+          "request_count": {
+            "expected": 12
+          },
+          "status_codes": [
+            200
+          ]
+        }
+      },
+      "config": {
+        "rounds": 12,
+        "ticker": "AAPL"
+      }
+    }
+  }
+}

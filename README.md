@@ -201,6 +201,7 @@ API composition notes:
 - Run `python scripts/check_architecture_boundaries.py` to verify routers and services still respect the documented import boundaries.
 - Pull requests and pushes to `main` also run `.github/workflows/ci.yml`, which checks the import boundaries and the targeted backend/frontend compatibility tests.
 - The same CI workflow also runs a deterministic historical model-evaluation gate against `scripts/model_evaluation_baseline.json`; intentional model changes should update that baseline in the same change.
+- CI also runs a deterministic backend performance regression gate against `scripts/performance_regression_baseline.json`; intentional hot-route or company-brief latency changes should update that baseline in the same change.
 
 ## Run the Next.js frontend
 
@@ -394,6 +395,7 @@ Run targeted reliability checks:
 python -m pytest tests/test_hot_endpoint_contracts.py tests/test_parser_goldens.py tests/test_observability.py tests/test_benchmark_infrastructure.py
 python scripts/benchmark_hot_endpoints.py --base-url http://127.0.0.1:8000 --ticker AAPL --rounds 20
 python scripts/benchmark_model_computation.py --models dcf,reverse_dcf,roic,ratios --rounds 10
+python scripts/run_performance_regression_gate.py --baseline-file scripts/performance_regression_baseline.json --fail-on-regression --json-out artifacts/performance/backend-performance-summary.json --markdown-out artifacts/performance/backend-performance-summary.md
 ```
 
 Run the one-shot Docker prewarm job after the stack is up:
