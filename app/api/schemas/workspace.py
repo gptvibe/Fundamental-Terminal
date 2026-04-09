@@ -189,6 +189,30 @@ class WatchlistCoveragePayload(BaseModel):
     price_points: int
 
 
+class WatchlistMaterialChangeHighlightPayload(BaseModel):
+    title: str
+    summary: str
+    why_it_matters: str | None = None
+    importance: Literal["medium", "high"] | None = None
+    category: str | None = None
+    signal_tags: list[str] = Field(default_factory=list)
+
+
+class WatchlistMaterialChangePayload(BaseModel):
+    status: Literal["ready", "warming"]
+    headline: str
+    detail: str | None = None
+    current_filing_type: str | None = None
+    current_period_end: DateType | None = None
+    previous_period_end: DateType | None = None
+    high_signal_change_count: int = 0
+    new_risk_indicator_count: int = 0
+    share_count_change_count: int = 0
+    capital_structure_change_count: int = 0
+    comment_letter_count: int = 0
+    highlights: list[WatchlistMaterialChangeHighlightPayload] = Field(default_factory=list)
+
+
 class WatchlistSummaryItemPayload(BaseModel):
     ticker: str
     name: str | None = None
@@ -209,6 +233,7 @@ class WatchlistSummaryItemPayload(BaseModel):
     valuation_band_percentile: Number = None
     balance_sheet_risk: Number = None
     market_context_status: dict[str, Any] | None = None
+    material_change: WatchlistMaterialChangePayload | None = None
 
 
 class WatchlistSummaryResponse(BaseModel):

@@ -13,9 +13,23 @@ export interface LocalCompanyNote {
   updatedAt: string;
 }
 
+import {
+  buildDefaultMonitoringEntry,
+  DEFAULT_WATCHLIST_VIEW_CRITERIA,
+  isWatchlistMonitoringProfileKey,
+  isWatchlistPrimaryFilter,
+  isWatchlistSort,
+  isWatchlistTriageState,
+  type LocalWatchlistMonitoringEntry,
+  type LocalWatchlistSavedView,
+  type WatchlistSavedViewCriteria,
+} from "@/lib/watchlist-monitoring";
+
 export interface LocalUserData {
   watchlist: LocalWatchlistItem[];
   notes: Record<string, LocalCompanyNote>;
+  monitoring: Record<string, LocalWatchlistMonitoringEntry>;
+  savedWatchlistViews: LocalWatchlistSavedView[];
 }
 
 export interface LocalCompanySnapshot {
@@ -31,7 +45,9 @@ export const LOCAL_USER_DATA_EVENT = "ft:local-user-data";
 
 const EMPTY_USER_DATA: LocalUserData = {
   watchlist: [],
-  notes: {}
+  notes: {},
+  monitoring: {},
+  savedWatchlistViews: [],
 };
 
 function normalizeTicker(value: string): string {
@@ -43,6 +59,15 @@ function canUseStorage() {
 }
 
 function sanitizeText(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function sanitizeIsoString(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -118,6 +143,102 @@ function normalizeNotes(notes: unknown): Record<string, LocalCompanyNote> {
   }, {});
 }
 
+function normalizeMonitoring(value: unknown): Record<string, LocalWatchlistMonitoringEntry> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.entries(value).reduce<Record<string, LocalWatchlistMonitoringEntry>>((result, [rawTicker, rawEntry]) => {
+    if (!rawEntry || typeof rawEntry !== "object") {
+      return result;
+    }
+
+    const candidate = rawEntry as Partial<LocalWatchlistMonitoringEntry>;
+    const ticker = normalizeTicker(candidate.ticker ?? rawTicker);
+    if (!ticker) {
+      return result;
+    }
+
+    result[ticker] = {
+      ticker,
+      triageState: isWatchlistTriageState(candidate.triageState) ? candidate.triageState : "inbox",
+      profileKey: isWatchlistMonitoringProfileKey(candidate.profileKey) ? candidate.profileKey : null,
+      rationale: typeof candidate.rationale === "string" ? candidate.rationale.trim() : "",
+      lastReviewedAt: sanitizeIsoString(candidate.lastReviewedAt),
+      nextReviewAt: sanitizeIsoString(candidate.nextReviewAt),
+      snoozedUntil: sanitizeIsoString(candidate.snoozedUntil),
+      holdUntil: sanitizeIsoString(candidate.holdUntil),
+      updatedAt: sanitizeIsoString(candidate.updatedAt) ?? new Date(0).toISOString(),
+    };
+    return result;
+  }, {});
+}
+
+function normalizeSavedViewCriteria(value: unknown): WatchlistSavedViewCriteria {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return DEFAULT_WATCHLIST_VIEW_CRITERIA;
+  }
+
+  const candidate = value as Partial<WatchlistSavedViewCriteria>;
+  const triageStates = Array.isArray(candidate.triageStates)
+    ? candidate.triageStates.filter((item): item is WatchlistSavedViewCriteria["triageStates"][number] => isWatchlistTriageState(item))
+    : [];
+
+  return {
+    primaryFilter: isWatchlistPrimaryFilter(candidate.primaryFilter) ? candidate.primaryFilter : DEFAULT_WATCHLIST_VIEW_CRITERIA.primaryFilter,
+    triageStates: [...new Set(triageStates)],
+    sortBy: isWatchlistSort(candidate.sortBy) ? candidate.sortBy : DEFAULT_WATCHLIST_VIEW_CRITERIA.sortBy,
+    searchText: typeof candidate.searchText === "string" ? candidate.searchText.trim() : "",
+    profileKey: isWatchlistMonitoringProfileKey(candidate.profileKey) ? candidate.profileKey : null,
+  };
+}
+
+function slugifySavedViewName(value: string): string {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "watchlist-view";
+}
+
+function normalizeSavedWatchlistViews(value: unknown): LocalWatchlistSavedView[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return value.reduce<LocalWatchlistSavedView[]>((result, rawView, index) => {
+    if (!rawView || typeof rawView !== "object") {
+      return result;
+    }
+
+    const candidate = rawView as Partial<LocalWatchlistSavedView>;
+    const name = typeof candidate.name === "string" ? candidate.name.trim() : "";
+    if (!name) {
+      return result;
+    }
+
+    let id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    if (!id) {
+      id = `${slugifySavedViewName(name)}-${index + 1}`;
+    }
+    if (seen.has(id)) {
+      return result;
+    }
+    seen.add(id);
+
+    result.push({
+      id,
+      name,
+      criteria: normalizeSavedViewCriteria(candidate.criteria),
+      createdAt: sanitizeIsoString(candidate.createdAt) ?? new Date(0).toISOString(),
+      updatedAt: sanitizeIsoString(candidate.updatedAt) ?? new Date(0).toISOString(),
+    });
+    return result;
+  }, []);
+}
+
 function normalizeLocalUserData(value: unknown): LocalUserData {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return EMPTY_USER_DATA;
@@ -126,7 +247,9 @@ function normalizeLocalUserData(value: unknown): LocalUserData {
   const candidate = value as Partial<LocalUserData>;
   return {
     watchlist: normalizeWatchlist(candidate.watchlist),
-    notes: normalizeNotes(candidate.notes)
+    notes: normalizeNotes(candidate.notes),
+    monitoring: normalizeMonitoring(candidate.monitoring),
+    savedWatchlistViews: normalizeSavedWatchlistViews(candidate.savedWatchlistViews),
   };
 }
 
@@ -232,6 +355,8 @@ export function importLocalUserData(rawJson: string, options?: { mode?: LocalImp
       : updateLocalUserData((current) => ({
           watchlist: normalizeWatchlist([...current.watchlist, ...incoming.watchlist]),
           notes: normalizeNotes({ ...current.notes, ...incoming.notes }),
+          monitoring: normalizeMonitoring({ ...current.monitoring, ...incoming.monitoring }),
+          savedWatchlistViews: normalizeSavedWatchlistViews([...current.savedWatchlistViews, ...incoming.savedWatchlistViews]),
         }));
 
   if (mode === "replace") {
@@ -301,6 +426,62 @@ export function saveCompanyNote(snapshot: LocalCompanySnapshot, note: string): L
   });
 }
 
+export function saveWatchlistMonitoringEntry(entry: LocalWatchlistMonitoringEntry): LocalUserData {
+  const normalizedTicker = normalizeTicker(entry.ticker);
+  if (!normalizedTicker) {
+    return readLocalUserData();
+  }
+
+  return updateLocalUserData((current) => ({
+    ...current,
+    monitoring: {
+      ...current.monitoring,
+      [normalizedTicker]: {
+        ...buildDefaultMonitoringEntry(normalizedTicker),
+        ...normalizeMonitoring({ [normalizedTicker]: entry })[normalizedTicker],
+        ticker: normalizedTicker,
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  }));
+}
+
+export function saveWatchlistSavedView(view: { id?: string; name: string; criteria: WatchlistSavedViewCriteria }): LocalUserData {
+  const name = view.name.trim();
+  if (!name) {
+    return readLocalUserData();
+  }
+
+  return updateLocalUserData((current) => {
+    const now = new Date().toISOString();
+    const normalizedView: LocalWatchlistSavedView = {
+      id: view.id?.trim() || `${slugifySavedViewName(name)}-${current.savedWatchlistViews.length + 1}`,
+      name,
+      criteria: normalizeSavedViewCriteria(view.criteria),
+      createdAt: current.savedWatchlistViews.find((item) => item.id === view.id)?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    const remaining = current.savedWatchlistViews.filter((item) => item.id !== normalizedView.id);
+    return {
+      ...current,
+      savedWatchlistViews: [...remaining, normalizedView].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    };
+  });
+}
+
+export function deleteWatchlistSavedView(id: string): LocalUserData {
+  const normalizedId = id.trim();
+  if (!normalizedId) {
+    return readLocalUserData();
+  }
+
+  return updateLocalUserData((current) => ({
+    ...current,
+    savedWatchlistViews: current.savedWatchlistViews.filter((item) => item.id !== normalizedId),
+  }));
+}
+
 export function clearCompanyNote(ticker: string): LocalUserData {
   const normalizedTicker = normalizeTicker(ticker);
   return updateLocalUserData((current) => {
@@ -338,7 +519,9 @@ export function syncLocalCompanyMetadata(snapshot: LocalCompanySnapshot): LocalU
 
     return {
       watchlist: nextWatchlist,
-      notes: nextNotes
+      notes: nextNotes,
+      monitoring: current.monitoring,
+      savedWatchlistViews: current.savedWatchlistViews,
     };
   });
 }

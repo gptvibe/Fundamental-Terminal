@@ -4390,56 +4390,342 @@ select {
   gap: 12px;
 }
 
-.watchlist-toolbar {
+.watchlist-intro,
+.watchlist-intro-copy,
+.watchlist-toolbar,
+.watchlist-toolbar-section,
+.watchlist-calendar-copy,
+.watchlist-calendar-body,
+.watchlist-calendar-list,
+.watchlist-cell-stack,
+.watchlist-field,
+.watchlist-highlight-list,
+.watchlist-highlight-item,
+.watchlist-saved-view-shell {
   display: grid;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 10px;
 }
 
-.watchlist-filter-row {
+.watchlist-intro {
+  gap: 16px;
+}
+
+.watchlist-intro-kicker,
+.watchlist-summary-label,
+.watchlist-toolbar-label,
+.watchlist-field-label,
+.watchlist-preset-name,
+.watchlist-saved-view-name,
+.watchlist-calendar-date,
+.watchlist-calendar-item-title,
+.watchlist-calendar-ticker,
+.watchlist-table-ticker,
+.watchlist-highlight-title {
+  font-family: var(--mono);
+}
+
+.watchlist-intro-kicker,
+.watchlist-summary-label,
+.watchlist-toolbar-label,
+.watchlist-field-label {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.watchlist-intro-title,
+.watchlist-calendar-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--surface-strong-text);
+}
+
+.watchlist-intro-text,
+.watchlist-summary-detail,
+.watchlist-toolbar-copy,
+.watchlist-cell-detail,
+.watchlist-calendar-text,
+.watchlist-calendar-item-detail,
+.watchlist-preset-detail,
+.watchlist-saved-view-detail {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.watchlist-intro-actions,
+.watchlist-filter-row,
+.watchlist-toolbar-meta,
+.watchlist-alert-row,
+.watchlist-review-actions,
+.watchlist-calendar-pill-row,
+.watchlist-table-actions,
+.watchlist-table-meta,
+.watchlist-preset-row,
+.watchlist-saved-view-form,
+.watchlist-saved-view-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
 }
 
-.watchlist-filter-row .ticker-button.is-active {
-  border-color: color-mix(in srgb, var(--action-accent) 48%, var(--panel-border));
-  color: var(--surface-strong-text);
-  background: color-mix(in srgb, var(--action-accent) 10%, var(--surface-soft));
-}
-
-.watchlist-card-grid {
+.watchlist-summary-strip {
   display: grid;
-  gap: 14px;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
-.watchlist-company-card {
-  gap: 14px;
+.watchlist-summary-metric,
+.watchlist-preset-card,
+.watchlist-saved-view-card,
+.watchlist-material-card,
+.watchlist-highlight-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 88%, transparent);
 }
 
-.watchlist-alert-row {
+.watchlist-summary-value {
+  font-family: var(--mono);
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--surface-strong-text);
+}
+
+.watchlist-toolbar {
+  gap: 14px;
+  margin: 18px 0 14px;
+}
+
+.watchlist-controls-grid,
+.watchlist-workflow-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.watchlist-field-input,
+.watchlist-sort-select,
+.watchlist-inline-select,
+.watchlist-inline-input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 92%, transparent);
+  color: var(--text);
+  font: inherit;
+}
+
+.watchlist-inline-input::placeholder,
+.watchlist-field-input::placeholder {
+  color: var(--text-muted);
+}
+
+.watchlist-filter-row .ticker-button.is-active,
+.watchlist-preset-card.is-active,
+.watchlist-saved-view-card.is-active {
+  border-color: color-mix(in srgb, var(--action-accent) 48%, var(--panel-border));
+  background: color-mix(in srgb, var(--action-accent) 10%, var(--surface-soft));
+  color: var(--surface-strong-text);
+}
+
+.watchlist-preset-card {
+  min-width: 210px;
+  text-align: left;
+}
+
+.watchlist-preset-name,
+.watchlist-saved-view-name,
+.watchlist-material-headline,
+.watchlist-highlight-title,
+.watchlist-table-name {
+  color: var(--surface-strong-text);
+  font-weight: 600;
+}
+
+.watchlist-saved-view-header {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
 }
 
-.watchlist-latest-stack {
+.watchlist-saved-view-input {
+  min-width: min(280px, 100%);
+  flex: 1 1 280px;
+}
+
+.watchlist-saved-view-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  min-width: 220px;
+}
+
+.watchlist-saved-view-apply,
+.watchlist-saved-view-delete,
+.watchlist-company-link,
+.watchlist-calendar-ticker {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.watchlist-saved-view-apply,
+.watchlist-company-link {
   display: grid;
-  gap: 8px;
+  gap: 4px;
+  text-align: left;
 }
 
-.watchlist-latest-item {
+.watchlist-saved-view-delete {
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  font-size: 0.85rem;
-  line-height: 1.5;
 }
 
-.watchlist-latest-item strong {
+.watchlist-toolbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 88%, transparent);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.watchlist-toolbar-chip.is-live {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--panel-border));
+  color: var(--surface-strong-text);
+}
+
+.watchlist-table-shell {
+  overflow: auto;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 84%, transparent);
+}
+
+.watchlist-table {
+  width: 100%;
+  min-width: 1780px;
+  border-collapse: collapse;
+}
+
+.watchlist-table th,
+.watchlist-table td {
+  padding: 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 110%, transparent);
+}
+
+.watchlist-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--panel) 94%, rgba(10, 10, 11, 0.9));
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.watchlist-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.watchlist-table tbody tr.is-stale {
+  background: color-mix(in srgb, var(--warning) 5%, transparent);
+}
+
+.watchlist-table tbody tr.is-review-due {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.watchlist-table-note,
+.watchlist-cell-note {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.watchlist-table-note.has-note {
   color: var(--text);
 }
 
-.watchlist-action-row {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.watchlist-table-ticker {
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 86%, white);
+}
+
+.watchlist-number-cell {
+  min-width: 190px;
+}
+
+.watchlist-metric-line {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.watchlist-metric-line strong {
+  color: var(--surface-strong-text);
+}
+
+.watchlist-material-card.is-warming {
+  background: color-mix(in srgb, var(--warning) 5%, var(--panel-alt));
+}
+
+.watchlist-highlight-list {
+  gap: 8px;
+}
+
+.watchlist-highlight-title {
+  font-size: var(--text-xs);
+}
+
+.watchlist-review-banner {
+  display: grid;
+  gap: 6px;
+}
+
+.pill.tone-due,
+.pill.tone-scheduled,
+.pill.tone-unplanned,
+.pill.tone-snoozed,
+.pill.tone-hold {
+  border-width: 1px;
+  border-style: solid;
+}
+
+.pill.tone-due {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-soft));
+}
+
+.pill.tone-scheduled,
+.pill.tone-unplanned {
+  border-color: color-mix(in srgb, var(--panel-border) 118%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 88%, transparent);
+}
+
+.pill.tone-snoozed,
+.pill.tone-hold {
+  border-color: color-mix(in srgb, var(--warning) 38%, var(--panel-border));
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-soft));
 }
 
 .watchlist-empty-state {
@@ -4465,26 +4751,6 @@ select {
   align-items: start;
 }
 
-.watchlist-calendar-copy,
-.watchlist-calendar-body,
-.watchlist-calendar-list {
-  display: grid;
-  gap: 8px;
-}
-
-.watchlist-calendar-title {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  color: var(--surface-strong-text);
-}
-
-.watchlist-calendar-text,
-.watchlist-calendar-item-detail {
-  font-size: var(--text-sm);
-  line-height: 1.55;
-  color: var(--text-muted);
-}
-
 .watchlist-calendar-list {
   gap: 10px;
 }
@@ -4497,29 +4763,10 @@ select {
   background: color-mix(in srgb, var(--panel-alt) 86%, transparent);
 }
 
-.watchlist-calendar-date,
-.watchlist-calendar-item-title,
-.watchlist-calendar-ticker {
-  font-family: var(--mono);
-}
-
 .watchlist-calendar-date {
   font-size: var(--text-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.watchlist-calendar-pill-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.watchlist-calendar-item-title {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--surface-strong-text);
 }
 
 .watchlist-calendar-ticker {
@@ -4530,13 +4777,28 @@ select {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--action-accent) 48%, var(--panel-border));
   background: color-mix(in srgb, var(--action-accent) 10%, var(--surface-soft));
-  color: var(--surface-strong-text);
   font-size: var(--text-xs);
-  cursor: pointer;
 }
 
 .watchlist-calendar-empty-state {
   min-height: 0;
+}
+
+@media (max-width: 900px) {
+  .watchlist-saved-view-header,
+  .watchlist-calendar-header {
+    grid-template-columns: 1fr;
+  }
+
+  .watchlist-controls-grid,
+  .watchlist-workflow-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .watchlist-preset-card,
+  .watchlist-saved-view-card {
+    min-width: 100%;
+  }
 }
 
 .models-page-grid {

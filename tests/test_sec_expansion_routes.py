@@ -1622,6 +1622,9 @@ def test_watchlist_summary_endpoint_tolerates_activity_data_failures(monkeypatch
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
     monkeypatch.setattr(main_module, "_load_company_activity_data", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(main_module, "get_company_research_brief_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_visible_price_history", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)
     response = client.post("/api/watchlist/summary", json={"tickers": ["aapl"]})
@@ -1641,6 +1644,79 @@ def test_watchlist_summary_endpoint_tolerates_activity_data_failures(monkeypatch
     assert item["alert_summary"] == {"total": 0, "high": 0, "medium": 0, "low": 0}
     assert item["latest_alert"] is None
     assert item["latest_activity"] is None
+
+
+def test_watchlist_summary_endpoint_includes_research_brief_material_change_digest(monkeypatch):
+    snap = _snapshot("AAPL", "0000320193")
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snap})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_load_company_activity_data",
+        lambda *_args, **_kwargs: {
+            "beneficial_filings": [],
+            "capital_filings": [],
+            "insider_trades": [],
+            "institutional_holdings": [],
+            "filings": [],
+            "filing_events": [],
+            "governance_filings": [],
+            "form144_filings": [],
+        },
+    )
+    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_visible_price_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "get_company_research_brief_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            payload={
+                "what_changed": {
+                    "changes": {
+                        "summary": {
+                            "filing_type": "10-Q",
+                            "current_period_end": "2026-03-31",
+                            "previous_period_end": "2025-12-31",
+                            "high_signal_change_count": 2,
+                            "new_risk_indicator_count": 1,
+                            "share_count_change_count": 0,
+                            "capital_structure_change_count": 1,
+                            "comment_letter_count": 0,
+                        },
+                        "high_signal_changes": [
+                            {
+                                "title": "Demand language softened",
+                                "summary": "Management added softer demand language in MD&A.",
+                                "why_it_matters": "Margin and revenue assumptions may need to compress.",
+                                "importance": "high",
+                                "category": "mda",
+                                "signal_tags": ["demand", "margin"],
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["AAPL"]})
+
+    assert response.status_code == 200
+    item = response.json()["companies"][0]
+    assert item["material_change"]["headline"] == "2 high-signal changes since the last filing"
+    assert item["material_change"]["new_risk_indicator_count"] == 1
+    assert item["material_change"]["capital_structure_change_count"] == 1
+    assert item["material_change"]["highlights"][0]["title"] == "Demand language softened"
 
 
 def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monkeypatch):

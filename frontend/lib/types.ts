@@ -2302,6 +2302,30 @@ export interface WatchlistCoveragePayload {
   price_points: number;
 }
 
+export interface WatchlistMaterialChangeHighlightPayload {
+  title: string;
+  summary: string;
+  why_it_matters: string | null;
+  importance: "medium" | "high" | null;
+  category: string | null;
+  signal_tags: string[];
+}
+
+export interface WatchlistMaterialChangePayload {
+  status: "ready" | "warming";
+  headline: string;
+  detail: string | null;
+  current_filing_type: string | null;
+  current_period_end: string | null;
+  previous_period_end: string | null;
+  high_signal_change_count: number;
+  new_risk_indicator_count: number;
+  share_count_change_count: number;
+  capital_structure_change_count: number;
+  comment_letter_count: number;
+  highlights: WatchlistMaterialChangeHighlightPayload[];
+}
+
 export interface WatchlistSummaryItemPayload {
   ticker: string;
   name: string | null;
@@ -2322,6 +2346,7 @@ export interface WatchlistSummaryItemPayload {
   valuation_band_percentile: number | null;
   balance_sheet_risk: number | null;
   market_context_status?: MarketContextStatusPayload | null;
+  material_change: WatchlistMaterialChangePayload | null;
 }
 
 export interface WatchlistSummaryResponse {

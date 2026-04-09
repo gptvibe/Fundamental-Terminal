@@ -5,11 +5,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   clearAllLocalUserData,
   clearCompanyNote,
+  deleteWatchlistSavedView,
   exportLocalUserData,
   importLocalUserData,
   readLocalUserData,
   removeWatchlistCompany,
   saveCompanyNote,
+  saveWatchlistMonitoringEntry,
+  saveWatchlistSavedView,
   subscribeLocalUserData,
   syncLocalCompanyMetadata,
   toggleWatchlistCompany,
@@ -19,6 +22,7 @@ import {
   type LocalImportMode,
   type LocalWatchlistItem
 } from "@/lib/local-user-data";
+import type { LocalWatchlistMonitoringEntry, LocalWatchlistSavedView, WatchlistSavedViewCriteria } from "@/lib/watchlist-monitoring";
 
 export interface LocalSavedCompany {
   ticker: string;
@@ -35,6 +39,8 @@ export interface LocalSavedCompany {
 interface UseLocalUserDataResult {
   watchlist: LocalWatchlistItem[];
   notesByTicker: Record<string, LocalCompanyNote>;
+  monitoringByTicker: Record<string, LocalWatchlistMonitoringEntry>;
+  savedWatchlistViews: LocalWatchlistSavedView[];
   savedCompanies: LocalSavedCompany[];
   watchlistCount: number;
   noteCount: number;
@@ -45,6 +51,9 @@ interface UseLocalUserDataResult {
   removeFromWatchlist: (ticker: string) => void;
   saveNote: (snapshot: LocalCompanySnapshot, note: string) => void;
   clearNote: (ticker: string) => void;
+  saveMonitoringEntry: (entry: LocalWatchlistMonitoringEntry) => void;
+  saveWatchlistView: (view: { id?: string; name: string; criteria: WatchlistSavedViewCriteria }) => void;
+  deleteWatchlistView: (id: string) => void;
   exportData: () => LocalUserData;
   importData: (rawJson: string, options?: { mode?: LocalImportMode }) => LocalUserData;
   clearAll: () => void;
@@ -53,7 +62,9 @@ interface UseLocalUserDataResult {
 
 const EMPTY_DATA: LocalUserData = {
   watchlist: [],
-  notes: {}
+  notes: {},
+  monitoring: {},
+  savedWatchlistViews: [],
 };
 
 export function useLocalUserData(): UseLocalUserDataResult {
@@ -68,6 +79,8 @@ export function useLocalUserData(): UseLocalUserDataResult {
 
   const watchlist = data.watchlist;
   const notesByTicker = data.notes;
+  const monitoringByTicker = data.monitoring;
+  const savedWatchlistViews = data.savedWatchlistViews;
 
   const watchlistMap = useMemo(
     () => new Map(watchlist.map((item) => [item.ticker, item])),
@@ -115,6 +128,15 @@ export function useLocalUserData(): UseLocalUserDataResult {
   const clearNote = useCallback((ticker: string) => {
     clearCompanyNote(ticker);
   }, []);
+  const saveMonitoringEntry = useCallback((entry: LocalWatchlistMonitoringEntry) => {
+    saveWatchlistMonitoringEntry(entry);
+  }, []);
+  const saveWatchlistView = useCallback((view: { id?: string; name: string; criteria: WatchlistSavedViewCriteria }) => {
+    saveWatchlistSavedView(view);
+  }, []);
+  const deleteWatchlistView = useCallback((id: string) => {
+    deleteWatchlistSavedView(id);
+  }, []);
   const exportData = useCallback(() => exportLocalUserData(), []);
   const importData = useCallback((rawJson: string, options?: { mode?: LocalImportMode }) => importLocalUserData(rawJson, options), []);
   const clearAll = useCallback(() => {
@@ -127,6 +149,8 @@ export function useLocalUserData(): UseLocalUserDataResult {
   return {
     watchlist,
     notesByTicker,
+    monitoringByTicker,
+    savedWatchlistViews,
     savedCompanies,
     watchlistCount: watchlist.length,
     noteCount: Object.keys(notesByTicker).length,
@@ -137,6 +161,9 @@ export function useLocalUserData(): UseLocalUserDataResult {
     removeFromWatchlist,
     saveNote,
     clearNote,
+    saveMonitoringEntry,
+    saveWatchlistView,
+    deleteWatchlistView,
     exportData,
     importData,
     clearAll,

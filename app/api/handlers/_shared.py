@@ -8546,6 +8546,7 @@ def _build_watchlist_summary_item(
 
     models: dict[str, ModelRun] = {}
     latest_price = None
+    material_change = None
     try:
         models = {
             model.model_name.lower(): model
@@ -8559,6 +8560,12 @@ def _build_watchlist_summary_item(
         latest_price = latest_price_series[-1].close if latest_price_series else None
     except Exception:
         logging.getLogger(__name__).exception("Unable to load watchlist model metrics for '%s'", snapshot.company.ticker)
+
+    try:
+        brief_snapshot = get_company_research_brief_snapshot(session, snapshot.company.id, schema_version=BRIEF_SCHEMA_VERSION)
+        material_change = _build_watchlist_material_change_payload(brief_snapshot.payload if brief_snapshot is not None else None, refresh=refresh)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load watchlist material-change summary for '%s'", snapshot.company.ticker)
 
     dcf_result = _sanitize_model_result_for_strict_official_mode(
         "dcf",
@@ -8615,6 +8622,7 @@ def _build_watchlist_summary_item(
         valuation_band_percentile=_coerce_number(reverse_result.get("valuation_band_percentile"), None),
         balance_sheet_risk=_coerce_number(ratios_values.get("net_debt_to_fcf") if isinstance(ratios_values, dict) else None, None),
         market_context_status=get_cached_market_context_status(),
+        material_change=material_change,
     )
 
 
@@ -8639,6 +8647,11 @@ def _build_missing_watchlist_summary_item(background_tasks: BackgroundTasks, tic
         valuation_band_percentile=None,
         balance_sheet_risk=None,
         market_context_status=get_cached_market_context_status(),
+        material_change=WatchlistMaterialChangePayload(
+            status="warming",
+            headline="Research Brief change digest warming.",
+            detail="Material filing deltas will appear after the first Research Brief build completes.",
+        ),
     )
 
 
@@ -8678,6 +8691,83 @@ def _serialize_watchlist_latest_activity(entry: ActivityFeedEntryPayload | None)
         title=entry.title,
         date=entry.date,
         href=entry.href,
+    )
+
+
+def _build_watchlist_material_change_payload(
+    payload: dict[str, Any] | None,
+    *,
+    refresh: RefreshState,
+) -> WatchlistMaterialChangePayload:
+    if not isinstance(payload, dict):
+        return WatchlistMaterialChangePayload(
+            status="warming",
+            headline="Research Brief change digest warming.",
+            detail="Material filing deltas will appear after the first Research Brief build completes.",
+        )
+
+    what_changed = payload.get("what_changed") if isinstance(payload.get("what_changed"), dict) else {}
+    changes = what_changed.get("changes") if isinstance(what_changed.get("changes"), dict) else {}
+    summary = changes.get("summary") if isinstance(changes.get("summary"), dict) else {}
+    high_signal_changes = changes.get("high_signal_changes") if isinstance(changes.get("high_signal_changes"), list) else []
+
+    high_signal_count = int(summary.get("high_signal_change_count") or len(high_signal_changes) or 0)
+    new_risk_count = int(summary.get("new_risk_indicator_count") or 0)
+    share_count_change_count = int(summary.get("share_count_change_count") or 0)
+    capital_structure_change_count = int(summary.get("capital_structure_change_count") or 0)
+    comment_letter_count = int(summary.get("comment_letter_count") or 0)
+
+    if high_signal_count > 0:
+        headline = f"{high_signal_count} high-signal change{'s' if high_signal_count != 1 else ''} since the last filing"
+    elif any(count > 0 for count in (new_risk_count, share_count_change_count, capital_structure_change_count, comment_letter_count)):
+        active_labels = [
+            f"{new_risk_count} new risk" if new_risk_count else None,
+            f"{share_count_change_count} share-count move" if share_count_change_count else None,
+            f"{capital_structure_change_count} capital structure change" if capital_structure_change_count else None,
+            f"{comment_letter_count} comment letter" if comment_letter_count else None,
+        ]
+        headline = " · ".join(label for label in active_labels if label)
+    else:
+        headline = "No material filing changes flagged by the Research Brief model."
+
+    highlights: list[WatchlistMaterialChangeHighlightPayload] = []
+    for item in high_signal_changes[:2]:
+        if not isinstance(item, dict):
+            continue
+        highlights.append(
+            WatchlistMaterialChangeHighlightPayload(
+                title=str(item.get("title") or "Material change"),
+                summary=str(item.get("summary") or "No summary available."),
+                why_it_matters=str(item.get("why_it_matters") or "") or None,
+                importance=item.get("importance") if item.get("importance") in {"medium", "high"} else None,
+                category=str(item.get("category") or "") or None,
+                signal_tags=[str(tag) for tag in item.get("signal_tags") or [] if isinstance(tag, str) and tag],
+            )
+        )
+
+    detail_parts = [
+        f"Latest filing {summary.get('filing_type')}" if summary.get("filing_type") else None,
+        f"Refreshed {refresh.reason}" if refresh.reason != "fresh" else None,
+    ]
+
+    if highlights:
+        detail = highlights[0].why_it_matters or highlights[0].summary
+    else:
+        detail = " · ".join(part for part in detail_parts if part) or "Research Brief filing-delta model is current."
+
+    return WatchlistMaterialChangePayload(
+        status="ready",
+        headline=headline,
+        detail=detail,
+        current_filing_type=summary.get("filing_type"),
+        current_period_end=summary.get("current_period_end"),
+        previous_period_end=summary.get("previous_period_end"),
+        high_signal_change_count=high_signal_count,
+        new_risk_indicator_count=new_risk_count,
+        share_count_change_count=share_count_change_count,
+        capital_structure_change_count=capital_structure_change_count,
+        comment_letter_count=comment_letter_count,
+        highlights=highlights,
     )
 
 
