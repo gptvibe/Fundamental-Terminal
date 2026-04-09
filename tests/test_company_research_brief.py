@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from fastapi import BackgroundTasks
 
 import app.main as main_module
-from app.services.sec_edgar import CompanyIdentity, FilingMetadata
 from app.services.company_research_brief import _statement_value
 
 
@@ -17,37 +16,6 @@ def test_statement_value_supports_legacy_weighted_share_alias():
 
 
 def test_company_brief_returns_bootstrap_payload_for_uncached_ticker(monkeypatch):
-    class FakeEdgarClient:
-        def resolve_company(self, ticker: str) -> CompanyIdentity:
-            assert ticker == "ACME"
-            return CompanyIdentity(
-                cik="0000123456",
-                ticker="ACME",
-                name="Acme Corp",
-                sector="Technology",
-                market_sector="Technology",
-                market_industry="Software",
-            )
-
-        def get_submissions(self, cik: str):
-            assert cik == "0000123456"
-            return {"filings": "ok"}
-
-        def build_filing_index(self, submissions):
-            assert submissions == {"filings": "ok"}
-            return {
-                "10-k": FilingMetadata(
-                    accession_number="0000123456-26-000001",
-                    form="10-K",
-                    filing_date=date(2026, 3, 10),
-                    report_date=date(2025, 12, 31),
-                    primary_doc_description="Annual report",
-                )
-            }
-
-        def close(self) -> None:
-            return None
-
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda session, ticker: None)
     monkeypatch.setattr(
         main_module,
@@ -59,22 +27,17 @@ def test_company_brief_returns_bootstrap_payload_for_uncached_ticker(monkeypatch
             job_id="job-bootstrap",
         ),
     )
-    monkeypatch.setattr(main_module, "EdgarClient", FakeEdgarClient)
 
     response = main_module.company_brief("acme", BackgroundTasks(), as_of=None, session=object())
 
     assert response.build_state == "building"
-    assert response.build_status == "Resolving company records and warming the research brief."
-    assert response.company is not None
-    assert response.company.ticker == "ACME"
-    assert response.available_sections == ["snapshot"]
-    assert response.section_statuses[0].id == "snapshot"
-    assert response.section_statuses[0].state == "ready"
-    assert response.filing_timeline[0].form == "10-K"
-    assert response.filing_timeline[0].description == "Annual report"
+    assert response.build_status == "No persisted company snapshot is available yet. A refresh has been queued to build the first brief."
+    assert response.company is None
+    assert response.available_sections == []
+    assert response.filing_timeline == []
 
 
-def test_company_brief_returns_partial_payload_when_cached_company_exists_but_brief_missing(monkeypatch):
+def test_company_brief_returns_composite_payload_when_cached_company_exists(monkeypatch):
     snapshot = SimpleNamespace(
         company=SimpleNamespace(
             id=1,
@@ -117,30 +80,48 @@ def test_company_brief_returns_partial_payload_when_cached_company_exists_but_br
             job_id=None,
         ),
     )
-    monkeypatch.setattr(main_module, "get_company_research_brief_snapshot", lambda *args, **kwargs: None)
+    built_payload = main_module._empty_company_brief_response(
+        refresh=main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None),
+        as_of=None,
+    ).model_copy(
+        update={
+            "company": main_module._serialize_company(snapshot),
+            "build_state": "ready",
+            "build_status": "Research brief ready.",
+        }
+    )
     monkeypatch.setattr(
         main_module,
-        "_trigger_refresh",
-        lambda background_tasks, ticker, reason: main_module.RefreshState(
-            triggered=True,
-            reason=reason,
-            ticker=ticker,
-            job_id="job-missing-brief",
+        "get_company_research_brief_snapshot",
+        lambda *args, **kwargs: SimpleNamespace(payload=built_payload.model_dump(mode="json")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_augment_company_brief_response",
+        lambda session, snapshot, payload, refresh, as_of: payload.model_copy(
+            update={
+                "available_sections": list(main_module.RESEARCH_BRIEF_SECTION_ORDER),
+                "section_statuses": main_module._build_research_brief_section_statuses(list(main_module.RESEARCH_BRIEF_SECTION_ORDER), build_state="ready"),
+                "filing_timeline": filing_timeline,
+                "stale_summary_cards": [
+                    main_module.ResearchBriefSummaryCardPayload(
+                        key="latest_revenue",
+                        title="Revenue",
+                        value="$6.2K",
+                        detail="2025-12-31",
+                    )
+                ],
+            }
         ),
     )
-    monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda session, company: [latest_statement])
-    monkeypatch.setattr(main_module, "_visible_price_history", lambda session, company_id: [SimpleNamespace(), SimpleNamespace()])
-    monkeypatch.setattr(main_module, "_load_company_brief_filing_timeline", lambda session, snapshot=None, identity=None: filing_timeline)
 
     response = main_module.company_brief("ACME", BackgroundTasks(), as_of=None, session=object())
 
-    assert response.build_state == "partial"
-    assert response.build_status == "Showing cached company basics while the research brief finishes building."
+    assert response.build_state == "ready"
+    assert response.build_status == "Research brief ready."
     assert response.company is not None
     assert response.company.ticker == "ACME"
-    assert response.available_sections == ["snapshot"]
-    assert response.snapshot.summary.latest_revenue == 6200
-    assert response.snapshot.summary.top_segment_name == "Core Platform"
+    assert response.available_sections == list(main_module.RESEARCH_BRIEF_SECTION_ORDER)
     assert response.section_statuses[1].id == "what_changed"
-    assert response.section_statuses[1].state == "partial"
+    assert response.section_statuses[1].state == "ready"
     assert any(card.title == "Revenue" for card in response.stale_summary_cards)

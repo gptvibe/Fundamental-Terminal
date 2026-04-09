@@ -1,17 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 
 import { Panel } from "@/components/ui/panel";
-import { useJobStream } from "@/hooks/use-job-stream";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
-import { getCompanyDerivedMetricsSummary, getCompanyFinancialRestatements, invalidateApiReadCacheForTicker } from "@/lib/api";
 import { formatPercent } from "@/lib/format";
 import { resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type {
-  CompanyDerivedMetricsSummaryResponse,
-  CompanyFinancialRestatementsResponse,
   DataQualityDiagnosticsPayload,
   FinancialPayload,
   ModelPayload,
@@ -51,86 +47,22 @@ export function ResearchBriefPlainEnglishPanel({
   diagnostics = null,
   confidenceFlags = null,
   strictOfficialMode = false,
-  reloadKey,
 }: ResearchBriefPlainEnglishPanelProps) {
-  const [metricsSummary, setMetricsSummary] = useState<CompanyDerivedMetricsSummaryResponse | null>(null);
-  const [restatements, setRestatements] = useState<CompanyFinancialRestatementsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
-  const [restatementError, setRestatementError] = useState<string | null>(null);
-  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
-  const { lastEvent } = useJobStream(refreshJobId);
-
-  const loadPanelData = useCallback(
-    async (showLoading: boolean) => {
-      if (showLoading) {
-        setLoading(true);
-      }
-
-      const [metricsResult, restatementResult] = await Promise.allSettled([
-        getCompanyDerivedMetricsSummary(ticker, { periodType: "ttm" }),
-        getCompanyFinancialRestatements(ticker),
-      ]);
-
-      if (metricsResult.status === "fulfilled") {
-        setMetricsSummary(metricsResult.value);
-        setMetricsError(null);
-      } else {
-        setMetricsError(metricsResult.reason instanceof Error ? metricsResult.reason.message : "Unable to load derived metrics summary");
-      }
-
-      if (restatementResult.status === "fulfilled") {
-        setRestatements(restatementResult.value);
-        setRestatementError(null);
-      } else {
-        setRestatementError(restatementResult.reason instanceof Error ? restatementResult.reason.message : "Unable to load filing-quality summary");
-      }
-
-      const nextJobId =
-        (metricsResult.status === "fulfilled" ? metricsResult.value.refresh.job_id : null) ??
-        (restatementResult.status === "fulfilled" ? restatementResult.value.refresh.job_id : null) ??
-        null;
-      setRefreshJobId(nextJobId);
-
-      if (showLoading) {
-        setLoading(false);
-      }
-    },
-    [ticker]
-  );
-
-  useEffect(() => {
-    void loadPanelData(true);
-  }, [loadPanelData, reloadKey]);
-
-  useEffect(() => {
-    if (!refreshJobId || !lastEvent) {
-      return;
-    }
-    if (lastEvent.status !== "completed" && lastEvent.status !== "failed") {
-      return;
-    }
-
-    invalidateApiReadCacheForTicker(ticker);
-    void loadPanelData(false);
-  }, [lastEvent, loadPanelData, refreshJobId, ticker]);
-
   const sections = useMemo(
     () =>
       buildSections({
         models,
         latestFinancial,
         previousAnnual,
-        metricsSummary,
-        restatements,
         diagnostics,
         confidenceFlags: confidenceFlags ?? [],
         strictOfficialMode,
       }),
-    [confidenceFlags, diagnostics, latestFinancial, metricsSummary, models, previousAnnual, restatements, strictOfficialMode]
+    [confidenceFlags, diagnostics, latestFinancial, models, previousAnnual, strictOfficialMode]
   );
+  const loading = modelsLoading && !models.length && latestFinancial === null;
 
-  const errorMessages = [modelsError, metricsError, restatementError].filter((value): value is string => Boolean(value));
+  const errorMessages = [modelsError].filter((value): value is string => Boolean(value));
 
   return (
     <Panel
@@ -167,8 +99,6 @@ function buildSections({
   models,
   latestFinancial,
   previousAnnual,
-  metricsSummary,
-  restatements,
   diagnostics,
   confidenceFlags,
   strictOfficialMode,
@@ -176,8 +106,6 @@ function buildSections({
   models: ModelPayload[];
   latestFinancial: FinancialPayload | null;
   previousAnnual: FinancialPayload | null;
-  metricsSummary: CompanyDerivedMetricsSummaryResponse | null;
-  restatements: CompanyFinancialRestatementsResponse | null;
   diagnostics: DataQualityDiagnosticsPayload | null;
   confidenceFlags: string[];
   strictOfficialMode: boolean;
@@ -187,25 +115,22 @@ function buildSections({
   const altmanResult = asRecord(modelMap.get("altman_z")?.result);
   const altmanZ = asNumber(altmanResult.z_score_approximate);
 
-  const metricMap = new Map((metricsSummary?.metrics ?? []).map((metric) => [metric.metric_key, metric.metric_value]));
-  const aggregatedMetricFlags = Array.from(new Set((metricsSummary?.metrics ?? []).flatMap((metric) => metric.quality_flags)));
+  const revenueGrowth = growthRate(latestFinancial?.revenue ?? null, previousAnnual?.revenue ?? null);
+  const operatingMargin = safeDivide(latestFinancial?.operating_income ?? null, latestFinancial?.revenue ?? null);
+  const fcfMargin = safeDivide(latestFinancial?.free_cash_flow ?? null, latestFinancial?.revenue ?? null);
+  const roic = null;
+  const currentRatio = safeDivide(latestFinancial?.current_assets ?? null, latestFinancial?.current_liabilities ?? null);
+  const leverageRatio = safeDivide(latestFinancial?.total_liabilities ?? null, latestFinancial?.total_assets ?? null);
+  const shareholderYield = null;
+  const buybackYield = null;
+  const dividendYield = null;
+  const shareDilution = growthRate(latestFinancial?.weighted_average_diluted_shares ?? null, previousAnnual?.weighted_average_diluted_shares ?? null);
 
-  const revenueGrowth = metricValue(metricMap, "revenue_growth") ?? growthRate(latestFinancial?.revenue ?? null, previousAnnual?.revenue ?? null);
-  const operatingMargin = metricValue(metricMap, "operating_margin") ?? safeDivide(latestFinancial?.operating_income ?? null, latestFinancial?.revenue ?? null);
-  const fcfMargin = metricValue(metricMap, "fcf_margin") ?? safeDivide(latestFinancial?.free_cash_flow ?? null, latestFinancial?.revenue ?? null);
-  const roic = metricValue(metricMap, "roic_proxy");
-  const currentRatio = metricValue(metricMap, "current_ratio") ?? safeDivide(latestFinancial?.current_assets ?? null, latestFinancial?.current_liabilities ?? null);
-  const leverageRatio = metricValue(metricMap, "leverage_ratio") ?? safeDivide(latestFinancial?.total_liabilities ?? null, latestFinancial?.total_assets ?? null);
-  const shareholderYield = metricValue(metricMap, "shareholder_yield");
-  const buybackYield = metricValue(metricMap, "buyback_yield");
-  const dividendYield = metricValue(metricMap, "dividend_yield");
-  const shareDilution = metricValue(metricMap, "share_dilution");
-
-  const coverageRatio = metricsSummary?.diagnostics.coverage_ratio ?? diagnostics?.coverage_ratio ?? null;
-  const fallbackRatio = metricsSummary?.diagnostics.fallback_ratio ?? diagnostics?.fallback_ratio ?? null;
-  const staleFlags = Array.from(new Set([...(metricsSummary?.diagnostics.stale_flags ?? []), ...(diagnostics?.stale_flags ?? [])]));
-  const combinedConfidenceFlags = Array.from(new Set([...(metricsSummary?.confidence_flags ?? []), ...confidenceFlags, ...aggregatedMetricFlags]));
-  const restatementCount = restatements?.summary.total_restatements ?? 0;
+  const coverageRatio = diagnostics?.coverage_ratio ?? null;
+  const fallbackRatio = diagnostics?.fallback_ratio ?? null;
+  const staleFlags = Array.from(new Set(diagnostics?.stale_flags ?? []));
+  const combinedConfidenceFlags = Array.from(new Set(confidenceFlags));
+  const restatementCount = combinedConfidenceFlags.some((flag) => flag.includes("restatement")) ? 1 : 0;
 
   const businessTone = toneFromCounts(
     [isAtLeast(revenueGrowth, 0.08), isAtLeast(operatingMargin, 0.15), isAtLeast(roic, 0.12), isAtLeast(fcfMargin, 0.1)],
@@ -297,10 +222,6 @@ function buildSections({
       ],
     },
   ];
-}
-
-function metricValue(metricMap: Map<string, number | null>, key: string): number | null {
-  return metricMap.get(key) ?? null;
 }
 
 function toneFromCounts(positives: boolean[], negatives: boolean[]): TrafficLightTone {

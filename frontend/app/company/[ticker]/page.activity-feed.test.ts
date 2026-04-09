@@ -224,7 +224,7 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
     expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
     expect(screen.getAllByText("high")[0]?.className).toContain("tone-red");
-    expect(screen.getByText("Insider watch").closest(".research-brief-checklist-card")?.className).toContain("tone-green");
+    expect(screen.getByText("Ownership watch").closest(".research-brief-checklist-card")?.className).toContain("tone-cyan");
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
     expect(screen.getByText("plain-english-brief-panel")).toBeTruthy();
@@ -232,6 +232,15 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByText("Dilution pressure remains elevated because recent financing and reporting signals are still active.")).toBeTruthy();
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
+    expect(getCompanyActivityOverview).not.toHaveBeenCalled();
+    expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
+    expect(getCompanyEarningsSummary).not.toHaveBeenCalled();
+    expect(getCompanyCapitalStructure).not.toHaveBeenCalled();
+    expect(getCompanyCapitalMarketsSummary).not.toHaveBeenCalled();
+    expect(getCompanyGovernanceSummary).not.toHaveBeenCalled();
+    expect(getCompanyBeneficialOwnershipSummary).not.toHaveBeenCalled();
+    expect(getCompanyModels).not.toHaveBeenCalled();
+    expect(getCompanyPeers).not.toHaveBeenCalled();
   });
 
   it("hydrates collapsed brief sections from localStorage", async () => {
@@ -425,10 +434,9 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getAllByText(/cached brief catches up|warming the research brief/i).length).toBeGreaterThan(0);
     expect(screen.getByText("Latest filing timeline")).toBeTruthy();
     expect(screen.getByText("Annual report")).toBeTruthy();
-
-    await waitFor(() => {
-      expect(screen.getByText("High Alerts: 1")).toBeTruthy();
-    });
+    expect(getCompanyActivityOverview).not.toHaveBeenCalled();
+    expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
+    expect(getCompanyEarningsSummary).not.toHaveBeenCalled();
   });
 });
 

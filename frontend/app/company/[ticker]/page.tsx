@@ -59,8 +59,6 @@ import type {
   CompanyResearchBriefResponse,
   FinancialPayload,
   FilingTimelineItemPayload,
-  InsiderActivitySummaryPayload,
-  InstitutionalHoldingPayload,
   ProvenanceEntryPayload,
   RefreshState,
   ResearchBriefBuildState,
@@ -235,13 +233,8 @@ export default function CompanyResearchBriefPage() {
     priceHistory,
     fundamentalsTrendData,
     latestFinancial,
-    insiderData,
-    insiderTrades,
-    institutionalHoldings,
     loading,
     error,
-    insiderError,
-    institutionalError,
     refreshing,
     refreshState,
     consoleEntries,
@@ -249,8 +242,8 @@ export default function CompanyResearchBriefPage() {
     queueRefresh,
     reloadKey,
   } = useCompanyWorkspace(ticker, {
-    includeInsiders: true,
-    includeInstitutional: true,
+    includeInsiders: false,
+    includeInstitutional: false,
     includeChartConsole: true,
     auditPageRoute: "/company/[ticker]",
     auditScenario: "company_overview",
@@ -268,22 +261,21 @@ export default function CompanyResearchBriefPage() {
   const latestAlertCount = briefData.activityOverview.data?.summary.total ?? 0;
   const topAlerts = useMemo(() => (briefData.activityOverview.data?.alerts ?? []).slice(0, 3), [briefData.activityOverview.data?.alerts]);
   const latestEntries = useMemo(() => (briefData.activityOverview.data?.entries ?? []).slice(0, 4), [briefData.activityOverview.data?.entries]);
+  const equityClaimRiskSummary = briefData.brief?.capital_and_risk.equity_claim_risk_summary ?? null;
   const capitalSignalRows = useMemo(
     () =>
       buildCapitalSignalRows({
         capitalMarketsSummary: briefData.capitalMarketsSummary.data?.summary ?? null,
         governanceSummary: briefData.governanceSummary.data?.summary ?? null,
         ownershipSummary: briefData.ownershipSummary.data?.summary ?? null,
-        insiderSummary: insiderData?.summary ?? null,
-        institutionalHoldings,
+        equityClaimRiskSummary,
         isForeignIssuerLike: foreignIssuerStyleFiling,
       }),
     [
       briefData.capitalMarketsSummary.data?.summary,
       briefData.governanceSummary.data?.summary,
       briefData.ownershipSummary.data?.summary,
-      insiderData?.summary,
-      institutionalHoldings,
+      equityClaimRiskSummary,
       foreignIssuerStyleFiling,
     ]
   );
@@ -293,12 +285,17 @@ export default function CompanyResearchBriefPage() {
         refreshState,
         activityOverview: briefData.activityOverview.data,
         company: pageCompany,
-        insiderSummary: insiderData?.summary ?? null,
-        institutionalHoldings,
+        ownershipSummary: briefData.ownershipSummary.data?.summary ?? null,
+        capitalMarketsSummary: briefData.capitalMarketsSummary.data?.summary ?? null,
       }),
-    [briefData.activityOverview.data, institutionalHoldings, insiderData?.summary, pageCompany, refreshState]
+    [
+      briefData.activityOverview.data,
+      briefData.capitalMarketsSummary.data?.summary,
+      briefData.ownershipSummary.data?.summary,
+      pageCompany,
+      refreshState,
+    ]
   );
-  const equityClaimRiskSummary = briefData.brief?.capital_and_risk.equity_claim_risk_summary ?? null;
   const snapshotLinks = useMemo(
     () => [
       { href: `/company/${encodeURIComponent(ticker)}/financials`, label: "Financials" },
@@ -370,7 +367,6 @@ export default function CompanyResearchBriefPage() {
     governanceSummary: briefData.governanceSummary.data,
     ownershipSummary: briefData.ownershipSummary.data,
     equityClaimRiskSummary,
-    insiderSummary: insiderData?.summary ?? null,
     isForeignIssuerLike: foreignIssuerStyleFiling,
     loading:
       briefData.capitalStructure.loading ||
@@ -403,8 +399,7 @@ export default function CompanyResearchBriefPage() {
     !briefData.brief &&
     !briefData.activityOverview.data &&
     !error &&
-    !insiderError &&
-    !institutionalError;
+    !briefData.error;
 
   async function handleExportResearchPackage() {
     try {
@@ -516,7 +511,7 @@ export default function CompanyResearchBriefPage() {
           loading,
           hasData: Boolean(pageCompany || latestFinancial || financials.length || priceHistory.length),
           lastChecked: pageCompany?.last_checked ?? null,
-          errors: [error, insiderError, institutionalError],
+          errors: [error, briefData.error],
           detailLines: [
             `Annual filings cached: ${annualStatements.length.toLocaleString()}`,
             `Price history points: ${priceHistory.length.toLocaleString()}`,
@@ -572,14 +567,14 @@ export default function CompanyResearchBriefPage() {
         refreshState={briefData.brief?.refresh ?? refreshState}
       />
 
-      {error || insiderError || institutionalError ? (
+      {error || briefData.error ? (
         <div className="panel workspace-error-state research-brief-partial-note">
           <h2 className="workspace-state-title">Some brief inputs are still warming</h2>
           <p className="text-muted workspace-state-copy">
             The brief keeps specialist routes and cached section fallbacks visible even when one workspace payload is delayed. Refreshing the company will usually backfill the missing slice.
           </p>
           <div className="research-brief-partial-errors">
-            {[error, insiderError, institutionalError].filter(Boolean).map((message) => (
+            {[error, briefData.error].filter(Boolean).map((message) => (
               <span key={message} className="pill">
                 {message}
               </span>
@@ -998,7 +993,7 @@ export default function CompanyResearchBriefPage() {
           },
           {
             label: "Governance and stake signals",
-            lastChecked: pageCompany?.last_checked_insiders,
+            lastChecked: pageCompany?.last_checked_filings,
           },
         ]}
         links={capitalRiskLinks}
@@ -1126,9 +1121,7 @@ export default function CompanyResearchBriefPage() {
           briefData.governanceSummary.error &&
           !briefData.governanceSummary.data &&
           briefData.ownershipSummary.error &&
-          !briefData.ownershipSummary.data &&
-          !insiderData &&
-          !institutionalHoldings.length ? (
+          !briefData.ownershipSummary.data ? (
             <ResearchBriefStateBlock
               kind="error"
               kicker="Capital & risk"
@@ -1137,8 +1130,6 @@ export default function CompanyResearchBriefPage() {
                 briefData.capitalMarketsSummary.error ??
                 briefData.governanceSummary.error ??
                 briefData.ownershipSummary.error ??
-                insiderError ??
-                institutionalError ??
                 "Control and ownership signals are temporarily unavailable."
               }
             />
@@ -1147,14 +1138,12 @@ export default function CompanyResearchBriefPage() {
             briefData.governanceSummary.loading &&
             !briefData.governanceSummary.data &&
             briefData.ownershipSummary.loading &&
-            !briefData.ownershipSummary.data &&
-            !insiderData &&
-            !institutionalHoldings.length ? (
+            !briefData.ownershipSummary.data ? (
             <ResearchBriefStateBlock
               kind="loading"
               kicker="Capital & risk"
               title="Loading control signals"
-              message="Bringing together persisted financing, proxy, ownership-change, insider, and institutional context."
+              message="Bringing together persisted financing, proxy, and ownership-change context."
             />
           ) : capitalSignalRows.length ? (
             <div className="company-data-table-shell">
@@ -1184,8 +1173,8 @@ export default function CompanyResearchBriefPage() {
               title="No control signals yet"
               message={
                 foreignIssuerStyleFiling
-                  ? "This table fills in as capital markets, ownership-change, insider, and institutional signals are cached. U.S. proxy coverage can remain limited for many 20-F and 40-F issuers."
-                  : "This table fills in after capital markets, governance, ownership-change, insider, or institutional signals are cached for the company."
+                  ? "This table fills in as capital markets and ownership-change signals are cached. U.S. proxy coverage can remain limited for many 20-F and 40-F issuers."
+                  : "This table fills in after capital markets, governance, or ownership-change signals are cached for the company."
               }
             />
           )}
@@ -1435,64 +1424,6 @@ function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefD
         }
 
         setState(mapBriefResponseToAsyncState(brief));
-
-        if (brief.build_state === "ready") {
-          return;
-        }
-
-        const whatChangedResults = await Promise.allSettled([
-          getCompanyActivityOverview(ticker),
-          getCompanyChangesSinceLastFiling(ticker),
-          getCompanyEarningsSummary(ticker),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setState((current) =>
-          advanceResearchBriefDataState(current, "what_changed", {
-            activityOverview: resolveAsyncState(current.activityOverview, whatChangedResults[0], "Unable to load activity overview"),
-            changes: resolveAsyncState(current.changes, whatChangedResults[1], "Unable to load changes since last filing"),
-            earningsSummary: resolveAsyncState(current.earningsSummary, whatChangedResults[2], "Unable to load earnings summary"),
-          })
-        );
-
-        const capitalRiskResults = await Promise.allSettled([
-          getCompanyCapitalStructure(ticker),
-          getCompanyCapitalMarketsSummary(ticker),
-          getCompanyGovernanceSummary(ticker),
-          getCompanyBeneficialOwnershipSummary(ticker),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setState((current) =>
-          advanceResearchBriefDataState(current, "capital_and_risk", {
-            capitalStructure: resolveAsyncState(current.capitalStructure, capitalRiskResults[0], "Unable to load capital structure"),
-            capitalMarketsSummary: resolveAsyncState(current.capitalMarketsSummary, capitalRiskResults[1], "Unable to load capital markets summary"),
-            governanceSummary: resolveAsyncState(current.governanceSummary, capitalRiskResults[2], "Unable to load governance summary"),
-            ownershipSummary: resolveAsyncState(current.ownershipSummary, capitalRiskResults[3], "Unable to load beneficial ownership summary"),
-          })
-        );
-
-        const valuationResults = await Promise.allSettled([
-          getCompanyModels(ticker, MODEL_NAMES),
-          getCompanyPeers(ticker),
-        ]);
-
-        if (cancelled) {
-          return;
-        }
-
-        setState((current) =>
-          advanceResearchBriefDataState(current, "valuation", {
-            models: resolveAsyncState(current.models, valuationResults[0], "Unable to load models"),
-            peers: resolveAsyncState(current.peers, valuationResults[1], "Unable to load peers"),
-          })
-        );
       } catch (nextError) {
         if (cancelled) {
           return;
@@ -2204,7 +2135,6 @@ function buildCapitalRiskNarrative({
   governanceSummary,
   ownershipSummary,
   equityClaimRiskSummary,
-  insiderSummary,
   isForeignIssuerLike,
   loading,
 }: {
@@ -2213,15 +2143,14 @@ function buildCapitalRiskNarrative({
   governanceSummary: CompanyGovernanceSummaryResponse | null;
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse | null;
   equityClaimRiskSummary: EquityClaimRiskSummaryPayload | null;
-  insiderSummary: InsiderActivitySummaryPayload | null;
   isForeignIssuerLike: boolean;
   loading: boolean;
 }): string {
   const latest = capitalStructure?.latest ?? null;
 
-  if (!latest && !capitalMarketsSummary && !governanceSummary && !ownershipSummary && !insiderSummary) {
+  if (!latest && !capitalMarketsSummary && !governanceSummary && !ownershipSummary) {
     return loading
-      ? "The brief is loading persisted debt, governance, ownership, and insider signals before it judges whether the equity claim is protected."
+      ? "The brief is loading persisted debt, governance, and ownership signals before it judges whether the equity claim is protected."
       : "This section will summarize debt burden, dilution risk, governance coverage, and ownership pressure once the persisted control signals are available.";
   }
 
@@ -2229,7 +2158,6 @@ function buildCapitalRiskNarrative({
   const netDilution = latest?.summary.net_dilution_ratio;
   const proxyCount = governanceSummary?.summary.total_filings ?? 0;
   const stakeChangeCount = ownershipSummary?.summary.total_filings ?? 0;
-  const insiderTone = insiderSummary ? titleCase(insiderSummary.sentiment) : "Pending";
   const registrationFilings = capitalMarketsSummary?.summary.registration_filings ?? 0;
   const governanceRead =
     isForeignIssuerLike && proxyCount === 0
@@ -2237,10 +2165,10 @@ function buildCapitalRiskNarrative({
       : `governance coverage spans ${proxyCount.toLocaleString()} proxy filing${proxyCount === 1 ? "" : "s"}`;
 
   if (equityClaimRiskSummary) {
-    return `${equityClaimRiskSummary.headline} Net dilution currently reads ${formatPercent(equityClaimRiskSummary.net_dilution_ratio)}, remaining shelf capacity is ${formatCompactCurrency(equityClaimRiskSummary.shelf_capacity_remaining)}, debt due inside 24 months is ${formatCompactCurrency(equityClaimRiskSummary.debt_due_next_twenty_four_months)}, and internal-control flags total ${equityClaimRiskSummary.internal_control_flag_count.toLocaleString()}. ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, insider tone currently reads ${insiderTone}, and registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"}.`;
+    return `${equityClaimRiskSummary.headline} Net dilution currently reads ${formatPercent(equityClaimRiskSummary.net_dilution_ratio)}, remaining shelf capacity is ${formatCompactCurrency(equityClaimRiskSummary.shelf_capacity_remaining)}, debt due inside 24 months is ${formatCompactCurrency(equityClaimRiskSummary.debt_due_next_twenty_four_months)}, and internal-control flags total ${equityClaimRiskSummary.internal_control_flag_count.toLocaleString()}. ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"}.`;
   }
 
-  return `Near-term debt due is ${formatCompactCurrency(debtDue)}, net dilution is ${formatPercent(netDilution)}, ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and insider tone currently reads ${insiderTone}. Registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"} so the brief can answer whether capital allocation is supportive or leaking value.`;
+  return `Near-term debt due is ${formatCompactCurrency(debtDue)}, net dilution is ${formatPercent(netDilution)}, ${governanceRead}, stake-change monitoring covers ${stakeChangeCount.toLocaleString()} major-holder filing${stakeChangeCount === 1 ? "" : "s"}, and registration activity counts ${registrationFilings.toLocaleString()} financing filing${registrationFilings === 1 ? "" : "s"} so the brief can answer whether capital allocation is supportive or leaking value.`;
 }
 
 function toneForRiskLevel(level: "none" | "low" | "medium" | "high"): SemanticTone {
@@ -2323,15 +2251,13 @@ function buildCapitalSignalRows({
   capitalMarketsSummary,
   governanceSummary,
   ownershipSummary,
-  insiderSummary,
-  institutionalHoldings,
+  equityClaimRiskSummary,
   isForeignIssuerLike,
 }: {
   capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse["summary"] | null;
   governanceSummary: CompanyGovernanceSummaryResponse["summary"] | null;
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse["summary"] | null;
-  insiderSummary: InsiderActivitySummaryPayload | null;
-  institutionalHoldings: InstitutionalHoldingPayload[];
+  equityClaimRiskSummary: EquityClaimRiskSummaryPayload | null;
   isForeignIssuerLike: boolean;
 }) {
   const rows: Array<{ signal: string; currentRead: string; latestEvidence: string }> = [];
@@ -2368,28 +2294,11 @@ function buildCapitalSignalRows({
     });
   }
 
-  if (insiderSummary) {
+  if (equityClaimRiskSummary) {
     rows.push({
-      signal: "Insiders",
-      currentRead: `${titleCase(insiderSummary.sentiment)} · net ${formatCompactCurrency(insiderSummary.metrics.net_value)}`,
-      latestEvidence: `${insiderSummary.metrics.unique_insiders_buying.toLocaleString()} buyers / ${insiderSummary.metrics.unique_insiders_selling.toLocaleString()} sellers`,
-    });
-  }
-
-  if (institutionalHoldings.length) {
-    const latestReportingDate = institutionalHoldings.reduce<string | null>(
-      (latest, holding) => (!latest || holding.reporting_date > latest ? holding.reporting_date : latest),
-      null
-    );
-    const uniqueManagers = new Set(
-      institutionalHoldings
-        .map((holding) => holding.fund_manager ?? holding.fund_name)
-        .filter((value): value is string => Boolean(value))
-    ).size;
-    rows.push({
-      signal: "Institutional",
-      currentRead: `${uniqueManagers.toLocaleString()} managers in cached 13F history`,
-      latestEvidence: latestReportingDate ? formatDate(latestReportingDate) : "Pending",
+      signal: "Equity claim",
+      currentRead: `${titleCase(equityClaimRiskSummary.overall_risk_level)} risk · net dilution ${formatPercent(equityClaimRiskSummary.net_dilution_ratio)}`,
+      latestEvidence: equityClaimRiskSummary.latest_period_end ? formatDate(equityClaimRiskSummary.latest_period_end) : "Pending",
     });
   }
 
@@ -2400,14 +2309,14 @@ function buildMonitorChecklist({
   refreshState,
   activityOverview,
   company,
-  insiderSummary,
-  institutionalHoldings,
+  ownershipSummary,
+  capitalMarketsSummary,
 }: {
   refreshState: RefreshState | null;
   activityOverview: CompanyActivityOverviewResponse | null;
   company: BriefCompany | null;
-  insiderSummary: InsiderActivitySummaryPayload | null;
-  institutionalHoldings: InstitutionalHoldingPayload[];
+  ownershipSummary: CompanyBeneficialOwnershipSummaryResponse["summary"] | null;
+  capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse["summary"] | null;
 }): MonitorChecklistItem[] {
   const items: MonitorChecklistItem[] = [];
 
@@ -2444,26 +2353,23 @@ function buildMonitorChecklist({
     }
   }
 
-  if (insiderSummary) {
+  if (ownershipSummary) {
     items.push({
-      title: "Insider watch",
-      detail: `Insider tone is ${titleCase(insiderSummary.sentiment)} with net open-market value of ${formatCompactCurrency(insiderSummary.metrics.net_value)}.`,
-      tone: toneForInsiderSentiment(insiderSummary.sentiment),
+      title: "Ownership watch",
+      detail: ownershipSummary.latest_event_date
+        ? `${ownershipSummary.total_filings.toLocaleString()} major-holder filing${ownershipSummary.total_filings === 1 ? "" : "s"} are cached through ${formatDate(ownershipSummary.latest_event_date)}.`
+        : "Major-holder change monitoring is enabled, but the latest dated filing is still pending.",
+      tone: ownershipSummary.ownership_decrease_events > 0 ? "gold" : "cyan",
     });
   }
 
-  if (institutionalHoldings.length) {
-    const latestReportingDate = institutionalHoldings.reduce<string | null>(
-      (latest, holding) => (!latest || holding.reporting_date > latest ? holding.reporting_date : latest),
-      null
-    );
-
+  if (capitalMarketsSummary) {
     items.push({
-      title: "13F watch",
-      detail: latestReportingDate
-        ? `Institutional history is current through ${formatDate(latestReportingDate)} and should be revisited after the next reporting quarter posts.`
-        : "Institutional history is cached but not yet tied to a latest reporting quarter.",
-      tone: "cyan",
+      title: "Financing watch",
+      detail: capitalMarketsSummary.latest_filing_date
+        ? `${capitalMarketsSummary.registration_filings.toLocaleString()} registration filing${capitalMarketsSummary.registration_filings === 1 ? "" : "s"} are cached through ${formatDate(capitalMarketsSummary.latest_filing_date)}.`
+        : "No recent financing filing date is cached yet.",
+      tone: capitalMarketsSummary.registration_filings > 0 ? "gold" : "cyan",
     });
   }
 

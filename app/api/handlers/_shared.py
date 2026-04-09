@@ -85,6 +85,7 @@ from app.services.cache_queries import (
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
 from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
+    build_company_research_brief_response,
     get_company_research_brief_snapshot,
 )
 from app.services.equity_claim_risk import build_company_equity_claim_risk_response
@@ -2683,7 +2684,7 @@ def company_brief(
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
     if snapshot is None:
         refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
         return _build_company_brief_bootstrap_for_missing_ticker(
@@ -2693,8 +2694,11 @@ def company_brief(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    stored = get_company_research_brief_snapshot(session, snapshot.company.id, as_of=parsed_as_of, schema_version=BRIEF_SCHEMA_VERSION)
-    payload = CompanyResearchBriefResponse.model_validate(stored.payload) if stored is not None else None
+    if hasattr(session, "get") and hasattr(session, "execute"):
+        payload = build_company_research_brief_response(session, snapshot.company.id, as_of=parsed_as_of)
+    else:
+        stored = get_company_research_brief_snapshot(session, snapshot.company.id, as_of=parsed_as_of, schema_version=BRIEF_SCHEMA_VERSION)
+        payload = CompanyResearchBriefResponse.model_validate(stored.payload) if stored is not None else None
     if payload is None:
         if not refresh.triggered:
             refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
@@ -2938,47 +2942,10 @@ def _build_company_brief_bootstrap_for_missing_ticker(
     as_of: str | None,
 ) -> CompanyResearchBriefResponse:
     base = _empty_company_brief_response(refresh=refresh, as_of=as_of)
-
-    identity: CompanyIdentity | None = None
-    filing_timeline: list[FilingTimelineItemPayload] = []
-    client = EdgarClient()
-    try:
-        identity = client.resolve_company(ticker)
-        submissions = client.get_submissions(identity.cik)
-        filing_index = client.build_filing_index(submissions)
-        filing_timeline = _filing_timeline_payloads(_serialize_recent_filings(identity.cik, filing_index))
-    except ValueError:
-        return base
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to bootstrap research brief for '%s'", ticker)
-    finally:
-        client.close()
-
-    company_payload = _serialize_company_identity(identity)
-    snapshot_summary = _build_company_brief_snapshot_summary(
-        latest_statement=None,
-        filing_timeline=filing_timeline,
-        annual_statement_count=sum(1 for item in filing_timeline if item.form in {"10-K", "20-F", "40-F"}),
-        price_history_points=0,
-    )
-    available_sections = ["snapshot"] if company_payload is not None else []
     return base.model_copy(
         update={
-            "company": company_payload,
             "build_state": "building",
-            "build_status": "Resolving company records and warming the research brief.",
-            "available_sections": available_sections,
-            "section_statuses": _build_research_brief_section_statuses(available_sections, build_state="building"),
-            "filing_timeline": filing_timeline,
-            "stale_summary_cards": _build_research_brief_summary_cards(
-                company=company_payload,
-                filing_timeline=filing_timeline,
-                snapshot_summary=snapshot_summary,
-            ),
-            "snapshot": CompanyResearchBriefSnapshotSection(
-                summary=snapshot_summary,
-                **_empty_provenance_contract("brief_building"),
-            ),
+            "build_status": "No persisted company snapshot is available yet. A refresh has been queued to build the first brief.",
         }
     )
 
@@ -3099,24 +3066,37 @@ def _load_company_brief_filing_timeline(
     snapshot: CompanyCacheSnapshot | None = None,
     identity: CompanyIdentity | None = None,
 ) -> list[FilingTimelineItemPayload]:
-    cik = snapshot.company.cik if snapshot is not None else (identity.cik if identity is not None else None)
-    if not cik:
+    if snapshot is None:
         return []
 
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(cik)
-        filing_index = client.build_filing_index(submissions)
-        return _filing_timeline_payloads(_serialize_recent_filings(cik, filing_index))
-    except Exception:
-        if snapshot is None:
-            logging.getLogger(__name__).exception("Unable to load bootstrap filing timeline for CIK %s", cik)
-            return []
-        logging.getLogger(__name__).exception("Unable to load SEC filing timeline for '%s'", snapshot.company.ticker)
-        fallback_filings = _serialize_cached_statement_filings(_visible_financials_for_company(session, snapshot.company))
-        return _filing_timeline_payloads(fallback_filings)
-    finally:
-        client.close()
+    filing_events = get_company_filing_events(session, snapshot.company.id, limit=MAX_FILING_TIMELINE_ITEMS * 4)
+    timeline: list[FilingTimelineItemPayload] = []
+    seen_keys: set[tuple[str | None, str, DateType | None]] = set()
+
+    for event in filing_events:
+        form = (event.form or "").upper()
+        if not form:
+            continue
+        event_date = event.filing_date or event.report_date
+        key = (event.accession_number, form, event_date)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        timeline.append(
+            FilingTimelineItemPayload(
+                date=event_date,
+                form=form,
+                description=event.primary_doc_description or event.summary or event.category.replace("_", " ").title(),
+                accession=event.accession_number,
+            )
+        )
+
+    if timeline:
+        timeline.sort(key=lambda item: (item.date or DateType.min, item.form, item.accession or ""), reverse=True)
+        return timeline[:MAX_FILING_TIMELINE_ITEMS]
+
+    fallback_filings = _serialize_cached_statement_filings(_visible_financials_for_company(session, snapshot.company))
+    return _filing_timeline_payloads(fallback_filings)
 
 
 def _filing_timeline_payloads(filings: list[FilingPayload]) -> list[FilingTimelineItemPayload]:
@@ -4276,6 +4256,12 @@ def _company_market_classification(company: Any) -> tuple[str | None, str | None
         return getattr(company, "market_sector", None), getattr(company, "market_industry", None)
     profile = resolve_sec_sic_profile(None, getattr(company, "sector", None))
     return profile.market_sector, profile.market_industry
+
+
+def _resolve_company_brief_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:
+    if hasattr(session, "execute"):
+        return get_company_snapshot(session, ticker)
+    return _resolve_cached_company_snapshot(session, ticker)
 
 
 def _visible_price_cache_status(session: Session, company_id: int) -> tuple[datetime | None, PriceCacheState]:

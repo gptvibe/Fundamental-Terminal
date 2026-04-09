@@ -89,7 +89,7 @@ from app.services.cache_queries import (
 )
 from app.services.equity_claim_risk import build_company_equity_claim_risk_response
 from app.services.filing_changes import build_changes_since_last_filing
-from app.services.market_context import get_cached_market_context_status
+from app.services.macro_persistence import read_global_macro_snapshot_with_meta
 from app.services.oil_exposure import classify_oil_exposure
 from app.services.peer_comparison import build_peer_comparison
 from app.services.refresh_state import mark_dataset_checked
@@ -363,7 +363,7 @@ def _build_activity_overview_response(session: Session, snapshot: CompanyCacheSn
         snapshot.company.institutional_holdings_last_checked,
         snapshot.company.comment_letters_last_checked,
     )
-    market_context_status = get_cached_market_context_status()
+    market_context_status = _get_persisted_market_context_status(session)
     return CompanyActivityOverviewResponse(
         company=_serialize_company(snapshot),
         entries=entries,
@@ -381,12 +381,49 @@ def _build_activity_overview_response(session: Session, snapshot: CompanyCacheSn
             [
                 SourceUsage(source_id="ft_activity_overview", role="derived", as_of=max((entry.date for entry in entries if entry.date is not None), default=None), last_refreshed_at=last_refreshed_at),
                 SourceUsage(source_id="sec_edgar", role="primary", as_of=max((entry.date for entry in entries if entry.date is not None), default=None), last_refreshed_at=last_refreshed_at),
+                SourceUsage(
+                    source_id="us_treasury_daily_par_yield_curve",
+                    role="supplemental",
+                    as_of=market_context_status.get("observation_date") if isinstance(market_context_status, dict) else None,
+                    last_refreshed_at=last_refreshed_at,
+                ) if market_context_status else None,
             ],
             as_of=max((entry.date for entry in entries if entry.date is not None), default=None),
             last_refreshed_at=last_refreshed_at,
             confidence_flags=["activity_feed_empty"] if not entries else [],
         ),
     )
+
+
+def _get_persisted_market_context_status(session: Session) -> dict[str, object]:
+    payload, is_stale = read_global_macro_snapshot_with_meta(session)
+    if not payload:
+        return {
+            "state": "missing",
+            "label": "Market context unavailable",
+            "observation_date": None,
+            "source": "none",
+        }
+
+    curve_points = payload.get("curve_points") if isinstance(payload.get("curve_points"), list) else []
+    fred_series = payload.get("fred_series") if isinstance(payload.get("fred_series"), list) else []
+    treasury_details = payload.get("treasury") if isinstance(payload.get("treasury"), dict) else {}
+
+    observation_dates = [
+        str(item.get("observation_date"))
+        for item in curve_points
+        if isinstance(item, dict) and item.get("observation_date")
+    ]
+    observation_date = max(observation_dates) if observation_dates else None
+    treasury_status = str(treasury_details.get("status") or ("stale" if is_stale else "ok"))
+
+    return {
+        "state": "stale" if is_stale else str(payload.get("status") or "ready"),
+        "label": "Treasury + FRED" if fred_series else "Treasury only",
+        "observation_date": observation_date,
+        "source": "U.S. Treasury Daily Par Yield Curve",
+        "treasury_status": treasury_status,
+    }
 
 
 def _build_changes_response(
