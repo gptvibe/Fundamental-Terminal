@@ -236,6 +236,8 @@ describe("HomePage", () => {
       expect(push).toHaveBeenCalledWith("/company/MSFT");
     });
 
+    expect(resolveCompanyIdentifier).not.toHaveBeenCalled();
+
     const recentCompanies = JSON.parse(window.localStorage.getItem(RECENT_COMPANIES_STORAGE_KEY) ?? "[]");
     expect(recentCompanies[0]).toMatchObject({ ticker: "MSFT", name: "Microsoft Corp." });
     expect(syncMetadata).toHaveBeenCalledWith({ ticker: "MSFT", name: "Microsoft Corp.", sector: "Technology" });

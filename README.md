@@ -325,7 +325,20 @@ Changes since last filing:
    - `postgres` -> PostgreSQL on port `5432`
    - `redis` -> short-term cache on port `6379`
 
+   Local compose defaults are intentionally conservative for small Docker hosts:
+
+   - backend and worker DB pools default to `DB_POOL_SIZE=5` and `DB_MAX_OVERFLOW=5`
+   - the worker polls the refresh queue every `5` seconds by default
+   - the worker waits `45` seconds before startup work and does not auto-enqueue its seed ticker set unless you opt back in
+
+   Those defaults reduce startup contention and make the browser-facing Next.js proxy less likely to see `socket hang up` errors while the stack is still warming.
+
 The stack uses environment variables for database and cache connectivity via `DATABASE_URL` and `REDIS_URL`, and all services communicate over the `fundamental-terminal-net` compose network.
+
+Health endpoints:
+
+- `GET /health` is the backward-compatible liveness check
+- `GET /readyz` is the DB-aware readiness check used by Docker Compose before it routes traffic to dependent services
 
 API endpoints:
 
@@ -424,6 +437,11 @@ Additional environment variables:
 - `TREASURY_HQM_CSV_URLS` (optional) comma-separated fallback URLs for Treasury HQM corporate bond yields; defaults to official Treasury paths
 - `TREASURY_MAX_RETRIES=3` and `TREASURY_RETRY_BACKOFF_SECONDS=0.5` for Treasury fetch retries
 - `VALUATION_WORKBENCH_ENABLED=true` to enable reverse DCF/ROIC/capital-allocation model surfaces
+- `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, and `DB_POOL_TIMEOUT_SECONDS` to tune SQLAlchemy connection pool pressure for constrained deployments
+- `REFRESH_QUEUE_POLL_SECONDS` to slow the background worker poll loop on small hosts
+- `DATA_FETCHER_STARTUP_DELAY_SECONDS` to defer background fetcher startup after the API becomes ready
+- `DATA_FETCHER_ENQUEUE_ON_STARTUP=false` to keep the worker focused on user-triggered refreshes instead of immediately seeding the queue
+- `DATA_FETCHER_RUN_MACRO_WORKER=false` to disable the separate macro refresh loop when you want the smallest local footprint
 
 To pin a specific release, change these in `.env`:
 

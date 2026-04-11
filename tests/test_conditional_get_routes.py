@@ -35,6 +35,8 @@ def _assert_304_on_second_request(client: TestClient, url: str) -> None:
 
 
 def test_search_route_supports_conditional_get(monkeypatch):
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main_module, "search_company_snapshots", lambda *_args, **_kwargs: [_snapshot()])
     monkeypatch.setattr(
         main_module,
@@ -44,6 +46,190 @@ def test_search_route_supports_conditional_get(monkeypatch):
 
     client = TestClient(app)
     _assert_304_on_second_request(client, "/api/companies/search?query=AAPL&refresh=false")
+
+
+def test_search_route_uses_fresh_hot_cache_without_opening_session(monkeypatch):
+    payload = {
+        "query": "AAPL",
+        "results": [
+            {
+                "ticker": "AAPL",
+                "cik": "0000320193",
+                "name": "Apple Inc.",
+                "sector": "Technology",
+                "market_sector": "Technology",
+                "market_industry": "Consumer Electronics",
+                "oil_exposure_type": "non_oil",
+                "oil_support_status": "unsupported",
+                "oil_support_reasons": ["non_energy_classification"],
+                "regulated_entity": None,
+                "strict_official_mode": False,
+                "last_checked": datetime.now(timezone.utc).isoformat(),
+                "last_checked_financials": datetime.now(timezone.utc).isoformat(),
+                "last_checked_prices": None,
+                "last_checked_insiders": None,
+                "last_checked_institutional": None,
+                "last_checked_filings": None,
+                "earnings_last_checked": None,
+                "cache_state": "fresh",
+            }
+        ],
+        "refresh": {"triggered": False, "reason": "fresh", "ticker": "AAPL", "job_id": None},
+    }
+
+    async def _get_cached(*_args, **_kwargs):
+        return HotCacheLookup(
+            content=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            etag='W/"cached-search-fresh"',
+            last_modified=None,
+            is_fresh=True,
+        )
+
+    def _unexpected_session_scope():
+        raise AssertionError("search route should not open a DB session on fresh hot-cache hits")
+
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
+    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/search?query=AAPL&refresh=false")
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["ticker"] == "AAPL"
+
+
+def test_search_route_uses_in_memory_cache_without_opening_session(monkeypatch):
+    cached_response = main_module.CompanySearchResponse.model_validate(
+        {
+            "query": "AAPL",
+            "results": [
+                {
+                    "ticker": "AAPL",
+                    "cik": "0000320193",
+                    "name": "Apple Inc.",
+                    "sector": "Technology",
+                    "market_sector": "Technology",
+                    "market_industry": "Consumer Electronics",
+                    "oil_exposure_type": "non_oil",
+                    "oil_support_status": "unsupported",
+                    "oil_support_reasons": ["non_energy_classification"],
+                    "regulated_entity": None,
+                    "strict_official_mode": False,
+                    "last_checked": datetime.now(timezone.utc).isoformat(),
+                    "last_checked_financials": datetime.now(timezone.utc).isoformat(),
+                    "last_checked_prices": None,
+                    "last_checked_insiders": None,
+                    "last_checked_institutional": None,
+                    "last_checked_filings": None,
+                    "earnings_last_checked": None,
+                    "cache_state": "fresh",
+                }
+            ],
+            "refresh": {"triggered": False, "reason": "fresh", "ticker": "AAPL", "job_id": None},
+        }
+    )
+
+    async def _no_hot_cache(*_args, **_kwargs):
+        return None
+
+    async def _store_hot_cache(*_args, **_kwargs):
+        return None
+
+    def _unexpected_session_scope():
+        raise AssertionError("search route should not open a DB session on in-memory cache hits")
+
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
+    monkeypatch.setattr(main_module, "_get_cached_search_response", lambda *_args, **_kwargs: cached_response)
+    monkeypatch.setattr(main_module, "_store_hot_cached_payload", _store_hot_cache)
+    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/search?query=AAPL&refresh=false")
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["ticker"] == "AAPL"
+
+
+def test_search_route_prioritizes_exact_ticker_and_skips_contains_fallback(monkeypatch):
+    search_calls: list[bool] = []
+    exact_snapshot = _snapshot("AAPL", "0000320193")
+
+    def _search_company_snapshots(*_args, **kwargs):
+        search_calls.append(kwargs["allow_contains_fallback"])
+        return [_snapshot("AAPLW", "0000000001")]
+
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: exact_snapshot)
+    monkeypatch.setattr(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main_module, "search_company_snapshots", _search_company_snapshots)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/search?query=AAPL&refresh=false")
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["ticker"] == "AAPL"
+    assert search_calls == [False]
+
+
+def test_search_route_prioritizes_exact_cik_and_skips_contains_fallback(monkeypatch):
+    search_calls: list[bool] = []
+    exact_snapshot = _snapshot("AAPL", "0000320193")
+
+    def _search_company_snapshots(*_args, **kwargs):
+        search_calls.append(kwargs["allow_contains_fallback"])
+        return []
+
+    monkeypatch.setattr(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: exact_snapshot)
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main_module, "search_company_snapshots", _search_company_snapshots)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/search?query=320193&refresh=false")
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["ticker"] == "AAPL"
+    assert search_calls == [False]
+
+
+def test_readyz_returns_ok_when_database_is_usable(monkeypatch):
+    class _HealthySession:
+        async def execute(self, _statement):
+            return None
+
+    class _HealthyScope:
+        async def __aenter__(self):
+            return _HealthySession()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(main_module, "_session_scope", lambda: _HealthyScope())
+
+    client = TestClient(app)
+    response = client.get("/readyz")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_readyz_returns_503_when_database_is_unavailable(monkeypatch):
+    class _BrokenSession:
+        async def execute(self, _statement):
+            raise RuntimeError("db unavailable")
+
+    class _BrokenScope:
+        async def __aenter__(self):
+            return _BrokenSession()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(main_module, "_session_scope", lambda: _BrokenScope())
+
+    client = TestClient(app)
+    response = client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "database not ready"
 
 
 def test_search_route_does_not_trigger_refresh_when_refresh_disabled_on_stale_hot_cache(monkeypatch):

@@ -4,6 +4,7 @@ from app.api.handlers._dispatch import route_handler
 
 
 healthcheck = route_handler("healthcheck")
+readiness_check = route_handler("readiness_check")
 cache_metrics = route_handler("cache_metrics")
 invalidate_cache_metrics = route_handler("invalidate_cache_metrics")
 performance_audit_snapshot = route_handler("performance_audit_snapshot")
@@ -19,6 +20,7 @@ __all__ = [
     "invalidate_cache_metrics",
     "performance_audit_snapshot",
     "pool_status",
+    "readiness_check",
     "refresh_company",
     "reset_performance_audit",
     "stream_job_events",

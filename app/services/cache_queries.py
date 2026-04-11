@@ -50,6 +50,7 @@ def search_company_snapshots(
     ticker_query: str,
     *,
     limit: int = 20,
+    allow_contains_fallback: bool = True,
 ) -> list[CompanyCacheSnapshot]:
     latest_checks = _latest_checks_subquery()
     normalized_query = ticker_query.strip()
@@ -101,7 +102,7 @@ def search_company_snapshots(
     )
 
     rows = session.execute(statement).all()
-    if len(rows) >= limit or len(normalized_query) < 3:
+    if not allow_contains_fallback or len(rows) >= limit or len(normalized_query) < 3:
         return [_build_snapshot(company, last_checked) for company, last_checked in rows]
 
     seen_ids = {company.id for company, _ in rows}

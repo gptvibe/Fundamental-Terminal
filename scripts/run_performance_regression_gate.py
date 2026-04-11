@@ -531,6 +531,8 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
     with ExitStack() as stack:
         stack.enter_context(patch.object(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: []))
         stack.enter_context(patch.object(main_module, "search_company_snapshots", lambda *_args, **_kwargs: [snapshot]))
+        stack.enter_context(patch.object(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot))
+        stack.enter_context(patch.object(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: snapshot))
         stack.enter_context(patch.object(main_module, "_trigger_refresh", _fresh_trigger))
         stack.enter_context(patch.object(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot))
         stack.enter_context(patch.object(main_module, "get_company_financials", lambda *_args, **_kwargs: [financial_statement]))

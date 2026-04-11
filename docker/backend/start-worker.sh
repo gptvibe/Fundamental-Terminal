@@ -1,9 +1,34 @@
 #!/bin/sh
 set -eu
 
+is_truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ENABLED="${DATA_FETCHER_ENABLED:-true}"
+STARTUP_DELAY="${DATA_FETCHER_STARTUP_DELAY_SECONDS:-0}"
+ENQUEUE_ON_STARTUP="${DATA_FETCHER_ENQUEUE_ON_STARTUP:-true}"
+RUN_MACRO_WORKER="${DATA_FETCHER_RUN_MACRO_WORKER:-true}"
 INTERVAL="${WORKER_INTERVAL_SECONDS:-3600}"
 IDENTIFIERS="${WORKER_IDENTIFIERS:-AAPL MSFT NVDA}"
 QUEUE_POLL_INTERVAL="${REFRESH_QUEUE_POLL_SECONDS:-1}"
+
+if ! is_truthy "${ENABLED}"; then
+  echo "[worker] data fetcher disabled by DATA_FETCHER_ENABLED=${ENABLED}"
+  exit 0
+fi
+
+if [ "${STARTUP_DELAY}" != "0" ] && [ "${STARTUP_DELAY}" != "0.0" ]; then
+  echo "[worker] delaying startup for ${STARTUP_DELAY}s"
+  sleep "${STARTUP_DELAY}"
+fi
 
 echo "[worker] starting durable refresh queue consumer"
 python -m app.worker --queue-worker --poll-interval "${QUEUE_POLL_INTERVAL}" &
@@ -15,13 +40,25 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-while true; do
-  echo "[worker] enqueueing scheduled refresh tickers: ${IDENTIFIERS}"
-  # shellcheck disable=SC2086
-  python -m app.worker --enqueue ${IDENTIFIERS} || true
+FIRST_CYCLE=true
 
-  echo "[worker] refreshing market context (FRED/BEA/BLS/Treasury)"
-  python -m app.macro_worker || true
+while true; do
+  if [ "${FIRST_CYCLE}" = "true" ] && ! is_truthy "${ENQUEUE_ON_STARTUP}"; then
+    echo "[worker] skipping initial enqueue because DATA_FETCHER_ENQUEUE_ON_STARTUP=${ENQUEUE_ON_STARTUP}"
+  else
+    echo "[worker] enqueueing scheduled refresh tickers: ${IDENTIFIERS}"
+    # shellcheck disable=SC2086
+    python -m app.worker --enqueue ${IDENTIFIERS} || true
+  fi
+
+  if is_truthy "${RUN_MACRO_WORKER}"; then
+    echo "[worker] refreshing market context (FRED/BEA/BLS/Treasury)"
+    python -m app.macro_worker || true
+  else
+    echo "[worker] skipping macro refresh because DATA_FETCHER_RUN_MACRO_WORKER=${RUN_MACRO_WORKER}"
+  fi
+
+  FIRST_CYCLE=false
 
   echo "[worker] sleeping for ${INTERVAL}s"
   sleep "${INTERVAL}"

@@ -93,6 +93,27 @@ def test_source_registry_endpoint_returns_sources_and_health(monkeypatch):
     assert "suppressed" in sources["yahoo_finance"]["strict_official_mode_note"].lower()
 
 
+def test_source_registry_endpoint_degrades_when_health_query_fails(monkeypatch):
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=False))
+    monkeypatch.setattr(
+        main_module,
+        "_build_source_registry_health_payload",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("pool busy")),
+    )
+
+    with _client(object()) as client:
+        response = client.get("/api/source-registry")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["health"] == {
+        "total_companies_cached": 0,
+        "average_data_age_seconds": None,
+        "recent_error_window_hours": 72,
+        "sources_with_recent_errors": [],
+    }
+
+
 def test_build_source_registry_health_payload_computes_average_age(monkeypatch):
     now = datetime(2026, 1, 20, 12, 0, tzinfo=timezone.utc)
     session = _FakeHealthSession(

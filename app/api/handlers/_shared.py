@@ -241,6 +241,18 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/readyz")
+async def readiness_check() -> dict[str, str]:
+    try:
+        async with _session_scope() as session:
+            result = session.execute(select(1))
+            if inspect.isawaitable(result):
+                await result
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database not ready") from exc
+    return {"status": "ok"}
+
+
 @app.get("/api/internal/cache-metrics")
 async def cache_metrics() -> dict[str, Any]:
     return {
@@ -353,18 +365,34 @@ async def search_companies(
         datasets=("financials",),
         schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["search"],),
     )
-    async with _session_scope() as session:
-        cached_hot = await _get_hot_cached_payload(hot_key)
-        if cached_hot is not None:
-            if cached_hot.is_fresh:
-                return _hot_cache_json_response(request, http_response, cached_hot)
+    cached_hot = await _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        if cached_hot.is_fresh:
+            return _hot_cache_json_response(request, http_response, cached_hot)
 
-            payload = _decode_hot_cache_payload(cached_hot)
-            cached_response = CompanySearchResponse.model_validate(payload)
-            if refresh and _looks_like_ticker(normalized_query):
-                stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
-                cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+        payload = _decode_hot_cache_payload(cached_hot)
+        cached_response = CompanySearchResponse.model_validate(payload)
+        if refresh and _looks_like_ticker(normalized_query):
+            stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
+            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
 
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=max(
+                (item.last_checked for item in cached_response.results if item.last_checked is not None),
+                default=None,
+            ),
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
+    if not refresh:
+        cached_response = _get_cached_search_response(normalized_query)
+        if cached_response is not None:
+            await _store_hot_cached_payload(hot_key, cached_response, tags=hot_tags)
             not_modified = _apply_conditional_headers(
                 request,
                 http_response,
@@ -378,23 +406,10 @@ async def search_companies(
                 return not_modified  # type: ignore[return-value]
             return cached_response
 
+    async with _session_scope() as session:
         def build_search_payload(sync_session: Session) -> CompanySearchResponse:
-            if not refresh:
-                cached_response = _get_cached_search_response(normalized_query)
-                if cached_response is not None:
-                    return cached_response
-
+            snapshots, exact_match = _resolve_search_snapshots(sync_session, normalized_query)
             normalized_ticker = _normalize_ticker(normalized_query)
-            normalized_cik = _normalize_cik_query(normalized_query)
-            snapshots = search_company_snapshots(sync_session, normalized_query)
-            exact_match = next(
-                (
-                    snapshot
-                    for snapshot in snapshots
-                    if snapshot.company.ticker == normalized_ticker or (normalized_cik is not None and snapshot.company.cik == normalized_cik)
-                ),
-                None,
-            )
 
             refresh_state = RefreshState()
             if not refresh:
@@ -3946,11 +3961,18 @@ def watchlist_summary(
     if len(normalized_tickers) > 50:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A maximum of 50 tickers is allowed")
 
-    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
-    coverage_counts = get_company_coverage_counts(
-        session,
-        [snapshot.company.id for snapshot in snapshots_by_ticker.values()],
-    )
+    try:
+        snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+        coverage_counts = get_company_coverage_counts(
+            session,
+            [snapshot.company.id for snapshot in snapshots_by_ticker.values()],
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load watchlist summary snapshots")
+        return WatchlistSummaryResponse(
+            tickers=normalized_tickers,
+            companies=[_build_missing_watchlist_summary_item(background_tasks, ticker) for ticker in normalized_tickers],
+        )
 
     companies: list[WatchlistSummaryItemPayload] = []
     for ticker in normalized_tickers:
@@ -4030,7 +4052,11 @@ def source_registry(
 ) -> SourceRegistryResponse:
     generated_at = datetime.now(timezone.utc)
     sources = [_build_source_registry_entry_payload(source_id) for source_id in _sorted_source_registry_ids()]
-    health = _build_source_registry_health_payload(session, now=generated_at)
+    try:
+        health = _build_source_registry_health_payload(session, now=generated_at)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to build source registry health payload")
+        health = _empty_source_registry_health_payload()
     return SourceRegistryResponse(
         strict_official_mode=settings.strict_official_mode,
         generated_at=generated_at,
@@ -4362,6 +4388,53 @@ def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
             return True
 
     return False
+
+
+def _resolve_search_snapshots(session: Session, query: str) -> tuple[list[CompanyCacheSnapshot], CompanyCacheSnapshot | None]:
+    normalized_ticker = _normalize_ticker(query)
+    normalized_cik = _normalize_cik_query(query) if _looks_like_cik_query(query) else None
+    use_exact_fast_path = _looks_like_ticker(query) or normalized_cik is not None
+    exact_match = _find_exact_search_snapshot(session, query, normalized_ticker=normalized_ticker, normalized_cik=normalized_cik)
+    snapshots = search_company_snapshots(session, query, allow_contains_fallback=not use_exact_fast_path)
+    if exact_match is None:
+        exact_match = next(
+            (
+                snapshot
+                for snapshot in snapshots
+                if snapshot.company.ticker == normalized_ticker or (normalized_cik is not None and snapshot.company.cik == normalized_cik)
+            ),
+            None,
+        )
+    if exact_match is None:
+        return snapshots, None
+    return _prioritize_snapshot(exact_match, snapshots), exact_match
+
+
+def _find_exact_search_snapshot(
+    session: Session,
+    query: str,
+    *,
+    normalized_ticker: str,
+    normalized_cik: str | None,
+) -> CompanyCacheSnapshot | None:
+    if normalized_cik is not None:
+        snapshot = get_company_snapshot_by_cik(session, normalized_cik)
+        if snapshot is not None:
+            return snapshot
+    if _looks_like_ticker(query):
+        return get_company_snapshot(session, normalized_ticker)
+    return None
+
+
+def _prioritize_snapshot(primary: CompanyCacheSnapshot, snapshots: list[CompanyCacheSnapshot]) -> list[CompanyCacheSnapshot]:
+    prioritized = [primary]
+    seen_company_ids = {primary.company.id}
+    for snapshot in snapshots:
+        if snapshot.company.id in seen_company_ids:
+            continue
+        prioritized.append(snapshot)
+        seen_company_ids.add(snapshot.company.id)
+    return prioritized
 
 
 def _apply_conditional_headers(
@@ -8422,6 +8495,15 @@ def _build_source_registry_health_payload(
     )
 
 
+def _empty_source_registry_health_payload() -> SourceRegistryHealthPayload:
+    return SourceRegistryHealthPayload(
+        total_companies_cached=0,
+        average_data_age_seconds=None,
+        recent_error_window_hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
+        sources_with_recent_errors=[],
+    )
+
+
 def _build_source_registry_error_payloads(
     session: Session,
     *,
@@ -8769,6 +8851,7 @@ def _build_watchlist_summary_item(
             capital_filings=activity["capital_filings"],
             insider_trades=activity["insider_trades"],
             institutional_holdings=activity["institutional_holdings"],
+            comment_letters=activity.get("comment_letters", []),
         )
         entries = _build_activity_feed_entries(
             filings=activity["filings"],
@@ -8778,6 +8861,7 @@ def _build_watchlist_summary_item(
             insider_trades=activity["insider_trades"],
             form144_filings=activity["form144_filings"],
             institutional_holdings=activity["institutional_holdings"],
+            comment_letters=activity.get("comment_letters", []),
         )
     except Exception:
         logging.getLogger(__name__).exception("Unable to load watchlist activity summary for '%s'", snapshot.company.ticker)
@@ -9436,6 +9520,11 @@ def _normalize_cik_query(value: str) -> str | None:
     if not digits or len(digits) > 10:
         return None
     return digits.zfill(10)
+
+
+def _looks_like_cik_query(value: str) -> bool:
+    normalized = re.sub(r"^cik\s*[:#-]?\s*", "", value.strip(), flags=re.IGNORECASE)
+    return bool(normalized) and normalized.isdigit() and len(normalized) <= 10
 
 
 def _normalize_filing_form(form: str | None) -> tuple[str, bool]:

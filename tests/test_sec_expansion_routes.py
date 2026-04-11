@@ -1804,6 +1804,90 @@ def test_watchlist_summary_endpoint_tolerates_activity_data_failures(monkeypatch
     assert item["latest_activity"] is None
 
 
+def test_watchlist_summary_endpoint_tolerates_snapshot_lookup_failures(monkeypatch):
+    observed: list[str] = []
+
+    def _fake_missing(_background_tasks, ticker: str):
+        observed.append(ticker)
+        return main_module.WatchlistSummaryItemPayload(
+            ticker=ticker,
+            name=None,
+            sector=None,
+            cik=None,
+            last_checked=None,
+            refresh=RefreshState(triggered=True, reason="missing", ticker=ticker, job_id=f"job-{ticker}"),
+            alert_summary=main_module.AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
+            latest_alert=None,
+            latest_activity=None,
+            coverage=main_module.WatchlistCoveragePayload(financial_periods=0, price_points=0),
+        )
+
+    monkeypatch.setattr(
+        main_module,
+        "get_company_snapshots_by_ticker",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("pool busy")),
+    )
+    monkeypatch.setattr(main_module, "_build_missing_watchlist_summary_item", _fake_missing)
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["AAPL", "MSFT"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == ["AAPL", "MSFT"]
+    assert observed == ["AAPL", "MSFT"]
+    assert [item["name"] for item in payload["companies"]] == [None, None]
+
+
+def test_watchlist_summary_endpoint_includes_comment_letter_alerts(monkeypatch):
+    snap = _snapshot("AAPL", "0000320193")
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snap})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_load_company_activity_data",
+        lambda *_args, **_kwargs: {
+            "beneficial_filings": [],
+            "capital_filings": [],
+            "insider_trades": [],
+            "institutional_holdings": [],
+            "filings": [],
+            "filing_events": [],
+            "governance_filings": [],
+            "form144_filings": [],
+            "comment_letters": [
+                main_module.CommentLetterPayload(
+                    accession_number="0000000000-26-000001",
+                    filing_date=date(2026, 4, 10),
+                    description="SEC staff requested additional disclosure detail.",
+                    sec_url="https://www.sec.gov/Archives/example-letter",
+                )
+            ],
+        },
+    )
+    monkeypatch.setattr(main_module, "get_company_research_brief_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_visible_price_history", lambda *_args, **_kwargs: [])
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["AAPL"]})
+
+    assert response.status_code == 200
+    item = response.json()["companies"][0]
+    assert item["alert_summary"] == {"total": 1, "high": 0, "medium": 1, "low": 0}
+    assert item["latest_alert"]["source"] == "comment-letters"
+    assert item["latest_alert"]["title"] == "New SEC comment letter correspondence"
+
+
 def test_watchlist_summary_endpoint_includes_research_brief_material_change_digest(monkeypatch):
     snap = _snapshot("AAPL", "0000320193")
     monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snap})

@@ -50,17 +50,20 @@ services:
       FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
       SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
       SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz').read()\""]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 30s
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
@@ -81,6 +84,14 @@ services:
       FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}
       SEC_TIMEOUT_SECONDS: ${SEC_TIMEOUT_SECONDS:-30}
       SEC_MIN_REQUEST_INTERVAL_SECONDS: ${SEC_MIN_REQUEST_INTERVAL_SECONDS:-0.2}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      REFRESH_QUEUE_POLL_SECONDS: ${REFRESH_QUEUE_POLL_SECONDS:-5}
+      DATA_FETCHER_ENABLED: ${DATA_FETCHER_ENABLED:-true}
+      DATA_FETCHER_STARTUP_DELAY_SECONDS: ${DATA_FETCHER_STARTUP_DELAY_SECONDS:-45}
+      DATA_FETCHER_ENQUEUE_ON_STARTUP: ${DATA_FETCHER_ENQUEUE_ON_STARTUP:-false}
+      DATA_FETCHER_RUN_MACRO_WORKER: ${DATA_FETCHER_RUN_MACRO_WORKER:-true}
     depends_on:
       backend:
         condition: service_healthy
@@ -104,6 +115,9 @@ services:
       SP500_CONSTITUENTS_FILE: ${SP500_CONSTITUENTS_FILE:-/app/app/data/sp500_tickers.txt}
       SP500_PREWARM_LIMIT: ${SP500_PREWARM_LIMIT:-}
       SP500_PREWARM_START_AT: ${SP500_PREWARM_START_AT:-}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
     depends_on:
       backend:
         condition: service_healthy

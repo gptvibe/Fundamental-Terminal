@@ -8,6 +8,7 @@ from app.main import app
 def test_public_route_inventory_remains_stable() -> None:
     expected_routes = {
         ("GET", "/health"),
+        ("GET", "/readyz"),
         ("GET", "/api/health/pool-status"),
         ("GET", "/api/internal/cache-metrics"),
         ("POST", "/api/internal/cache-metrics/invalidate"),
@@ -77,7 +78,7 @@ def test_public_route_inventory_remains_stable() -> None:
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
-        if not (route.path == "/health" or route.path.startswith("/api/")):
+        if not (route.path in {"/health", "/readyz"} or route.path.startswith("/api/")):
             continue
         for method in route.methods:
             if method in {"GET", "POST"}:
