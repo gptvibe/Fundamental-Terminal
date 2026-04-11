@@ -150,7 +150,7 @@ describe("DerivedMetricsPanel", () => {
     expect(screen.getByText("Latest Period")).toBeTruthy();
     expect(screen.getByText("Coverage")).toBeTruthy();
     expect(screen.getByText("12.0%")).toBeTruthy();
-    expect(screen.getByText("Fundamental Terminal Derived Metrics Engine")).toBeTruthy();
+    expect(screen.getAllByText("Fundamental Terminal Derived Metrics Engine").length).toBeGreaterThan(0);
   });
 
   it("disables price-derived yield selectors in strict official mode", async () => {

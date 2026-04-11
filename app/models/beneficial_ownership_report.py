@@ -23,6 +23,7 @@ class BeneficialOwnershipReport(Base):
         ),
         Index("ix_beneficial_ownership_reports_company_id", "company_id"),
         Index("ix_beneficial_ownership_reports_company_filing_date", "company_id", "filing_date"),
+        Index("ix_beneficial_ownership_reports_company_filing_id", "company_id", "filing_date", "id"),
         Index("ix_beneficial_ownership_reports_company_chain_key", "company_id", "amendment_chain_key"),
         Index("ix_beneficial_ownership_reports_company_last_checked", "company_id", "last_checked"),
     )

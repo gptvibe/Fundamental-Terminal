@@ -24,6 +24,7 @@ class Form144Filing(Base):
         Index("ix_form144_filings_company_id", "company_id"),
         Index("ix_form144_filings_company_filing_date", "company_id", "filing_date"),
         Index("ix_form144_filings_company_planned_sale_date", "company_id", "planned_sale_date"),
+        Index("ix_form144_filings_company_sale_filing_id", "company_id", "planned_sale_date", "filing_date", "id"),
         Index("ix_form144_filings_company_last_checked", "company_id", "last_checked"),
     )
 

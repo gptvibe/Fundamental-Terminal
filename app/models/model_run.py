@@ -18,6 +18,7 @@ class ModelRun(Base):
     __table_args__ = (
         Index("ix_models_company_id", "company_id"),
         Index("ix_models_company_name_version", "company_id", "model_name", "model_version"),
+        Index("ix_models_company_name_created_id", "company_id", "model_name", "created_at", "id"),
         Index("ix_models_created_at", "created_at"),
     )
 

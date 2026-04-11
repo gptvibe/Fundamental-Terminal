@@ -24,6 +24,14 @@ class FilingEvent(Base):
         ),
         Index("ix_filing_events_company_id", "company_id"),
         Index("ix_filing_events_company_filing_date", "company_id", "filing_date"),
+        Index(
+            "ix_filing_events_company_filing_report_accession_item",
+            "company_id",
+            "filing_date",
+            "report_date",
+            "accession_number",
+            "item_code",
+        ),
         Index("ix_filing_events_company_category", "company_id", "category"),
         Index("ix_filing_events_company_last_checked", "company_id", "last_checked"),
     )

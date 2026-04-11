@@ -6,6 +6,8 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import formatdate
 from hashlib import sha256
 from typing import Any, Awaitable, Callable
 
@@ -26,7 +28,9 @@ except Exception:  # pragma: no cover - optional dependency
 
 @dataclass(frozen=True, slots=True)
 class HotCacheLookup:
-    payload: dict[str, Any]
+    content: bytes
+    etag: str
+    last_modified: str | None
     is_fresh: bool
 
 
@@ -39,12 +43,14 @@ class _InflightFill:
 
 @dataclass(slots=True)
 class _LocalCacheEntry:
-    payload: dict[str, Any]
+    content: bytes
     fresh_until: float
     stale_until: float
     stored_at: float
     route: str
     tags: tuple[str, ...]
+    etag: str
+    last_modified: str | None
 
 
 class SharedHotResponseCache:
@@ -109,16 +115,21 @@ class SharedHotResponseCache:
         stored_at = time.time()
         fresh_until = stored_at + settings.hot_response_cache_ttl_seconds
         stale_until = fresh_until + settings.hot_response_cache_stale_ttl_seconds
+        content = _render_json_bytes(payload)
+        etag = _etag_for_json_bytes(content)
+        last_modified = _extract_last_modified_header(payload)
         if self._redis is not None:
             try:
                 self._store_remote(
                     logical_key,
                     route=resolved_route,
-                    payload=payload,
+                    content=content,
                     tags=normalized_tags,
                     stored_at=stored_at,
                     fresh_until=fresh_until,
                     stale_until=stale_until,
+                    etag=etag,
+                    last_modified=last_modified,
                 )
                 return
             except RedisError:
@@ -127,11 +138,13 @@ class SharedHotResponseCache:
         await self._store_local(
             logical_key,
             route=resolved_route,
-            payload=payload,
+            content=content,
             tags=normalized_tags,
             stored_at=stored_at,
             fresh_until=fresh_until,
             stale_until=stale_until,
+            etag=etag,
+            last_modified=last_modified,
         )
 
     async def fill_or_get(
@@ -145,7 +158,7 @@ class SharedHotResponseCache:
         resolved_route = route or _route_from_logical_key(logical_key)
         cached = await self._read_entry(logical_key)
         if cached is not None:
-            return cached.payload
+            return _decode_lookup_payload(cached)
 
         leader, inflight = await self._acquire_local_inflight(logical_key)
         if not leader:
@@ -162,7 +175,7 @@ class SharedHotResponseCache:
 
             cached = await self._read_entry(logical_key)
             if cached is not None:
-                return cached.payload
+                return _decode_lookup_payload(cached)
 
         try:
             result = await self._fill_or_wait_remote(
@@ -302,7 +315,7 @@ class SharedHotResponseCache:
         try:
             client = redis.Redis.from_url(
                 settings.redis_url,
-                decode_responses=True,
+                decode_responses=False,
                 socket_timeout=0.5,
                 socket_connect_timeout=0.5,
             )
@@ -328,7 +341,7 @@ class SharedHotResponseCache:
             try:
                 cached = await self._read_entry(logical_key)
                 if cached is not None:
-                    return cached.payload
+                    return _decode_lookup_payload(cached)
                 return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
             finally:
                 self._release_remote_lock(logical_key, lock_token)
@@ -337,14 +350,14 @@ class SharedHotResponseCache:
         while time.monotonic() < deadline:
             cached = await self._read_entry(logical_key)
             if cached is not None:
-                return cached.payload
+                return _decode_lookup_payload(cached)
             if not self._remote_lock_exists(logical_key):
                 lock_token = self._acquire_remote_lock(logical_key)
                 if lock_token is not None:
                     try:
                         cached = await self._read_entry(logical_key)
                         if cached is not None:
-                            return cached.payload
+                            return _decode_lookup_payload(cached)
                         return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
                     finally:
                         self._release_remote_lock(logical_key, lock_token)
@@ -395,11 +408,20 @@ class SharedHotResponseCache:
     def _read_remote(self, logical_key: str) -> HotCacheLookup | None:
         assert self._redis is not None
         entry_key = self._entry_key(logical_key)
+        meta_key = self._meta_key(logical_key)
         raw_entry = self._redis.get(entry_key)
-        if raw_entry is None:
+        raw_meta = self._redis.get(meta_key)
+        if raw_entry is None or raw_meta is None:
+            if raw_entry is not None or raw_meta is not None:
+                self._delete_remote_entry(logical_key, [])
             return None
 
-        payload = json.loads(raw_entry)
+        try:
+            payload = json.loads(_decode_redis_text(raw_meta))
+        except Exception:
+            self._delete_remote_entry(logical_key, [])
+            return None
+
         now = time.time()
         stale_until = float(payload.get("stale_until", 0.0) or 0.0)
         if now > stale_until:
@@ -407,12 +429,17 @@ class SharedHotResponseCache:
             return None
 
         fresh_until = float(payload.get("fresh_until", 0.0) or 0.0)
-        cached_payload = payload.get("payload")
-        if not isinstance(cached_payload, dict):
+        etag = str(payload.get("etag") or "")
+        if not etag:
             self._delete_remote_entry(logical_key, payload.get("tags") or [])
             return None
 
-        return HotCacheLookup(payload=cached_payload, is_fresh=now <= fresh_until)
+        return HotCacheLookup(
+            content=raw_entry,
+            etag=etag,
+            last_modified=_optional_text(payload.get("last_modified")),
+            is_fresh=now <= fresh_until,
+        )
 
     async def _read_local(self, logical_key: str) -> HotCacheLookup | None:
         now = time.time()
@@ -423,46 +450,56 @@ class SharedHotResponseCache:
             if now > entry.stale_until:
                 self._delete_local_entry_locked(logical_key, entry.tags)
                 return None
-            return HotCacheLookup(payload=entry.payload, is_fresh=now <= entry.fresh_until)
+            return HotCacheLookup(
+                content=entry.content,
+                etag=entry.etag,
+                last_modified=entry.last_modified,
+                is_fresh=now <= entry.fresh_until,
+            )
 
     def _store_remote(
         self,
         logical_key: str,
         *,
         route: str,
-        payload: dict[str, Any],
+        content: bytes,
         tags: tuple[str, ...],
         stored_at: float,
         fresh_until: float,
         stale_until: float,
+        etag: str,
+        last_modified: str | None,
     ) -> None:
         assert self._redis is not None
         entry_key = self._entry_key(logical_key)
-        previous = self._redis.get(entry_key)
+        meta_key = self._meta_key(logical_key)
+        previous = self._redis.get(meta_key)
         previous_tags = []
         if previous:
             try:
-                previous_payload = json.loads(previous)
+                previous_payload = json.loads(_decode_redis_text(previous))
                 previous_tags = list(previous_payload.get("tags") or [])
             except Exception:
                 previous_tags = []
 
         record = json.dumps(
             {
-                "payload": payload,
                 "fresh_until": fresh_until,
                 "stale_until": stale_until,
                 "stored_at": stored_at,
                 "route": route,
                 "tags": list(tags),
+                "etag": etag,
+                "last_modified": last_modified,
             },
             separators=(",", ":"),
             sort_keys=True,
-        )
+        ).encode("utf-8")
         ttl_seconds = max(int(stale_until - stored_at) + 1, 1)
         pipeline = self._redis.pipeline()
         pipeline.sadd(self._route_registry_key(), route)
-        pipeline.setex(entry_key, ttl_seconds, record)
+        pipeline.set(entry_key, content, ex=ttl_seconds)
+        pipeline.set(meta_key, record, ex=ttl_seconds)
         if previous_tags:
             for previous_tag in previous_tags:
                 pipeline.srem(self._tag_key(previous_tag), logical_key)
@@ -475,23 +512,27 @@ class SharedHotResponseCache:
         logical_key: str,
         *,
         route: str,
-        payload: dict[str, Any],
+        content: bytes,
         tags: tuple[str, ...],
         stored_at: float,
         fresh_until: float,
         stale_until: float,
+        etag: str,
+        last_modified: str | None,
     ) -> None:
         async with self._local_lock:
             previous = self._local_entries.get(logical_key)
             if previous is not None:
                 self._delete_local_entry_locked(logical_key, previous.tags)
             self._local_entries[logical_key] = _LocalCacheEntry(
-                payload=payload,
+                content=content,
                 fresh_until=fresh_until,
                 stale_until=stale_until,
                 stored_at=stored_at,
                 route=route,
                 tags=tags,
+                etag=etag,
+                last_modified=last_modified,
             )
             for tag in tags:
                 self._local_tag_index.setdefault(tag, set()).add(logical_key)
@@ -500,6 +541,7 @@ class SharedHotResponseCache:
         assert self._redis is not None
         pipeline = self._redis.pipeline()
         pipeline.delete(self._entry_key(logical_key))
+        pipeline.delete(self._meta_key(logical_key))
         for tag in tags:
             pipeline.srem(self._tag_key(tag), logical_key)
         pipeline.execute()
@@ -523,11 +565,11 @@ class SharedHotResponseCache:
         deleted = 0
         pipeline = self._redis.pipeline()
         for logical_key in logical_keys:
-            raw_entry = self._redis.get(self._entry_key(logical_key))
+            raw_entry = self._redis.get(self._meta_key(logical_key))
             entry_tags: list[str] = []
             if raw_entry:
                 try:
-                    parsed = json.loads(raw_entry)
+                    parsed = json.loads(_decode_redis_text(raw_entry))
                     entry_tags = list(parsed.get("tags") or [])
                     route = str(parsed.get("route") or "")
                     if route:
@@ -535,6 +577,7 @@ class SharedHotResponseCache:
                 except Exception:
                     entry_tags = []
             pipeline.delete(self._entry_key(logical_key))
+            pipeline.delete(self._meta_key(logical_key))
             for tag in entry_tags:
                 pipeline.srem(self._tag_key(tag), logical_key)
             deleted += 1
@@ -562,10 +605,10 @@ class SharedHotResponseCache:
     def _resolve_remote_invalidation_keys(self, tags: tuple[str, ...]) -> set[str]:
         assert self._redis is not None
         if len(tags) == 1:
-            return {str(value) for value in self._redis.smembers(self._tag_key(tags[0]))}
+            return {_decode_redis_text(value) for value in self._redis.smembers(self._tag_key(tags[0]))}
 
         tag_keys = [self._tag_key(tag) for tag in tags]
-        return {str(value) for value in self._redis.sinter(tag_keys)}
+        return {_decode_redis_text(value) for value in self._redis.sinter(tag_keys)}
 
     def _resolve_local_invalidation_keys_locked(self, tags: tuple[str, ...]) -> set[str]:
         if not tags:
@@ -624,7 +667,7 @@ class SharedHotResponseCache:
 
     def _snapshot_remote_metrics(self) -> dict[str, dict[str, float]]:
         assert self._redis is not None
-        routes = {str(value) for value in self._redis.smembers(self._route_registry_key())}
+        routes = {_decode_redis_text(value) for value in self._redis.smembers(self._route_registry_key())}
         routes.add("overall")
         metrics: dict[str, dict[str, float]] = {}
         for route in routes:
@@ -632,7 +675,7 @@ class SharedHotResponseCache:
             parsed: dict[str, float] = {}
             for key, value in raw_values.items():
                 try:
-                    parsed[key] = float(value)
+                    parsed[_decode_redis_text(key)] = float(_decode_redis_text(value))
                 except (TypeError, ValueError):
                     continue
             metrics[route] = parsed
@@ -666,7 +709,7 @@ class SharedHotResponseCache:
             return
         lock_key = self._lock_key(logical_key)
         current = self._redis.get(lock_key)
-        if current == token:
+        if _optional_text(current) == token:
             self._redis.delete(lock_key)
 
     def _remote_lock_exists(self, logical_key: str) -> bool:
@@ -675,11 +718,11 @@ class SharedHotResponseCache:
     def _clear_remote(self) -> None:
         assert self._redis is not None
         cursor = 0
-        keys_to_delete: list[str] = []
+        keys_to_delete: list[Any] = []
         pattern = f"{self._namespace}:*"
         while True:
             cursor, keys = self._redis.scan(cursor=cursor, match=pattern, count=200)
-            keys_to_delete.extend(str(key) for key in keys)
+            keys_to_delete.extend(keys)
             if cursor == 0:
                 break
         if keys_to_delete:
@@ -707,6 +750,9 @@ class SharedHotResponseCache:
     def _entry_key(self, logical_key: str) -> str:
         return f"{self._namespace}:entry:{_digest(logical_key)}"
 
+    def _meta_key(self, logical_key: str) -> str:
+        return f"{self._namespace}:meta:{_digest(logical_key)}"
+
     def _lock_key(self, logical_key: str) -> str:
         return f"{self._namespace}:lock:{_digest(logical_key)}"
 
@@ -722,6 +768,72 @@ class SharedHotResponseCache:
 
 def _digest(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()
+
+
+def _render_json_bytes(payload: Any) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+def _etag_for_json_bytes(content: bytes) -> str:
+    return f'W/"{sha256(content).hexdigest()[:16]}"'
+
+
+def _extract_last_modified_header(payload: dict[str, Any]) -> str | None:
+    candidates: list[datetime] = []
+
+    company = payload.get("company")
+    if isinstance(company, dict):
+        parsed_company = _parse_cache_timestamp(company.get("last_checked"))
+        if parsed_company is not None:
+            candidates.append(parsed_company)
+
+    results = payload.get("results")
+    if isinstance(results, list):
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            parsed_item = _parse_cache_timestamp(item.get("last_checked"))
+            if parsed_item is not None:
+                candidates.append(parsed_item)
+
+    if not candidates:
+        return None
+    latest = max(candidates)
+    return formatdate(latest.timestamp(), usegmt=True)
+
+
+def _parse_cache_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _decode_lookup_payload(lookup: HotCacheLookup) -> dict[str, Any]:
+    return json.loads(lookup.content)
+
+
+def _decode_redis_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return str(value)
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _route_from_logical_key(logical_key: str) -> str:

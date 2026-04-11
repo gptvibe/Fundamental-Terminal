@@ -25,6 +25,13 @@ class DerivedMetricPoint(Base):
         ),
         Index("ix_derived_metric_points_company_id", "company_id"),
         Index("ix_derived_metric_points_company_period_end", "company_id", "period_end"),
+        Index(
+            "ix_derived_metric_points_company_type_period_end",
+            "company_id",
+            "period_type",
+            "period_end",
+            "metric_key",
+        ),
         Index("ix_derived_metric_points_company_metric", "company_id", "metric_key"),
         Index("ix_derived_metric_points_period_type", "period_type"),
     )

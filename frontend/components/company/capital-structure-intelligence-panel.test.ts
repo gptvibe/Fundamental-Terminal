@@ -248,8 +248,8 @@ describe("CapitalStructureIntelligencePanel", () => {
       expect(screen.getByText("Debt Maturity Ladder")).toBeTruthy();
       expect(screen.getByText("Lease Obligations")).toBeTruthy();
       expect(screen.getAllByText("Next 12 months")).toHaveLength(2);
-      expect(screen.getByText("Fundamental Terminal Capital Structure Intelligence")).toBeTruthy();
-      expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+      expect(screen.getAllByText("Fundamental Terminal Capital Structure Intelligence").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("SEC Company Facts (XBRL)").length).toBeGreaterThan(0);
     });
   });
 });

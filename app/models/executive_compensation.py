@@ -23,6 +23,7 @@ class ExecutiveCompensation(Base):
             name="uq_exec_comp_stmt_name_year",
         ),
         Index("ix_executive_compensation_company_id", "company_id"),
+        Index("ix_executive_compensation_company_year_total", "company_id", "fiscal_year", "total_compensation"),
         Index("ix_executive_compensation_proxy_statement_id", "proxy_statement_id"),
     )
 

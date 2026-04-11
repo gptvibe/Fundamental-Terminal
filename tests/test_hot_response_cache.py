@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import threading
 import time
 
@@ -22,9 +24,9 @@ def test_hot_cache_skips_company_missing_payloads(monkeypatch) -> None:
         confidence_flags=["company_missing"],
     )
 
-    shared_handlers._store_hot_cached_payload("financials:ON", payload)
+    asyncio.run(shared_handlers._store_hot_cached_payload("financials:ON", payload))
 
-    assert shared_handlers._get_hot_cached_payload("financials:ON") is None
+    assert asyncio.run(shared_handlers._get_hot_cached_payload("financials:ON")) is None
 
 
 def test_hot_cache_keeps_real_company_payloads(monkeypatch) -> None:
@@ -44,11 +46,11 @@ def test_hot_cache_keeps_real_company_payloads(monkeypatch) -> None:
         diagnostics=DataQualityDiagnosticsPayload(),
     )
 
-    shared_handlers._store_hot_cached_payload("financials:ON", payload)
+    asyncio.run(shared_handlers._store_hot_cached_payload("financials:ON", payload))
 
-    cached = shared_handlers._get_hot_cached_payload("financials:ON")
+    cached = asyncio.run(shared_handlers._get_hot_cached_payload("financials:ON"))
     assert cached is not None
-    assert cached[0]["company"]["ticker"] == "ON"
+    assert json.loads(cached.content)["company"]["ticker"] == "ON"
 
 
 def test_shared_hot_cache_invalidates_matching_tags(monkeypatch) -> None:
@@ -68,22 +70,24 @@ def test_shared_hot_cache_invalidates_matching_tags(monkeypatch) -> None:
         diagnostics=DataQualityDiagnosticsPayload(),
     )
 
-    shared_handlers._store_hot_cached_payload(
-        "financials:ON:asof=latest",
-        payload,
-        tags=shared_handlers._build_hot_cache_tags(
-            ticker="ON",
-            datasets=("financials",),
-            schema_versions=(shared_handlers.HOT_CACHE_SCHEMA_VERSIONS["financials"],),
-            as_of="latest",
-        ),
+    asyncio.run(
+        shared_handlers._store_hot_cached_payload(
+            "financials:ON:asof=latest",
+            payload,
+            tags=shared_handlers._build_hot_cache_tags(
+                ticker="ON",
+                datasets=("financials",),
+                schema_versions=(shared_handlers.HOT_CACHE_SCHEMA_VERSIONS["financials"],),
+                as_of="latest",
+            ),
+        )
     )
 
-    invalidation = shared_hot_response_cache.invalidate(ticker="ON", dataset="financials")
+    invalidation = shared_hot_response_cache.invalidate_sync(ticker="ON", dataset="financials")
 
     assert invalidation["invalidated_keys"] == 1
-    assert shared_handlers._get_hot_cached_payload("financials:ON:asof=latest") is None
-    metrics = shared_hot_response_cache.snapshot_metrics()["overall"]
+    assert asyncio.run(shared_handlers._get_hot_cached_payload("financials:ON:asof=latest")) is None
+    metrics = asyncio.run(shared_hot_response_cache.snapshot_metrics())["overall"]
     assert metrics["invalidation_count"] >= 1
 
 
@@ -104,26 +108,28 @@ def test_shared_hot_cache_tracks_stale_serves(monkeypatch) -> None:
         diagnostics=DataQualityDiagnosticsPayload(),
     )
 
-    shared_handlers._store_hot_cached_payload(
-        "financials:ON:asof=latest",
-        payload,
-        tags=shared_handlers._build_hot_cache_tags(
-            ticker="ON",
-            datasets=("financials",),
-            schema_versions=(shared_handlers.HOT_CACHE_SCHEMA_VERSIONS["financials"],),
-            as_of="latest",
-        ),
+    asyncio.run(
+        shared_handlers._store_hot_cached_payload(
+            "financials:ON:asof=latest",
+            payload,
+            tags=shared_handlers._build_hot_cache_tags(
+                ticker="ON",
+                datasets=("financials",),
+                schema_versions=(shared_handlers.HOT_CACHE_SCHEMA_VERSIONS["financials"],),
+                as_of="latest",
+            ),
+        )
     )
 
     entry = shared_hot_response_cache._local_entries["financials:ON:asof=latest"]
     entry.fresh_until = time.time() - 1
     entry.stale_until = time.time() + 60
 
-    cached = shared_handlers._get_hot_cached_payload("financials:ON:asof=latest")
+    cached = asyncio.run(shared_handlers._get_hot_cached_payload("financials:ON:asof=latest"))
 
     assert cached is not None
-    assert cached[1] is False
-    metrics = shared_hot_response_cache.snapshot_metrics()["overall"]
+    assert cached.is_fresh is False
+    metrics = asyncio.run(shared_hot_response_cache.snapshot_metrics())["overall"]
     assert metrics["stale_served_count"] >= 1
     assert metrics["hit_rate"] > 0
 
@@ -148,11 +154,13 @@ def test_shared_hot_cache_singleflight_coalesces_identical_local_fills(monkeypat
     def worker() -> None:
         barrier.wait()
         results.append(
-            shared_hot_response_cache.fill_or_get(
-                "financials:ON:asof=latest",
-                route="financials",
-                tags=(shared_hot_response_cache.build_ticker_tag("ON"),),
-                fill=fill,
+            asyncio.run(
+                shared_hot_response_cache.fill_or_get(
+                    "financials:ON:asof=latest",
+                    route="financials",
+                    tags=(shared_hot_response_cache.build_ticker_tag("ON"),),
+                    fill=fill,
+                )
             )
         )
 
@@ -164,7 +172,7 @@ def test_shared_hot_cache_singleflight_coalesces_identical_local_fills(monkeypat
 
     assert call_count == 1
     assert results == [{"value": 1}, {"value": 1}]
-    metrics = shared_hot_response_cache.snapshot_metrics()["overall"]
+    metrics = asyncio.run(shared_hot_response_cache.snapshot_metrics())["overall"]
     assert metrics["fills"] >= 1
     assert metrics["avg_fill_time_ms"] >= 0
     assert metrics["coalesced_waits"] >= 1

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.main import RefreshState, app
+from app.services.hot_cache import HotCacheLookup
 
 
 def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
@@ -47,39 +49,46 @@ def test_search_route_supports_conditional_get(monkeypatch):
 def test_search_route_does_not_trigger_refresh_when_refresh_disabled_on_stale_hot_cache(monkeypatch):
     trigger_calls: list[str] = []
 
+    payload = {
+        "query": "O",
+        "results": [
+            {
+                "ticker": "ON",
+                "cik": "0001097864",
+                "name": "ON SEMICONDUCTOR CORP",
+                "sector": "Semiconductors & Related Devices",
+                "market_sector": "Technology",
+                "market_industry": "Semiconductors",
+                "oil_exposure_type": "non_oil",
+                "oil_support_status": "unsupported",
+                "oil_support_reasons": ["non_energy_classification"],
+                "regulated_entity": None,
+                "strict_official_mode": False,
+                "last_checked": datetime.now(timezone.utc).isoformat(),
+                "last_checked_financials": datetime.now(timezone.utc).isoformat(),
+                "last_checked_prices": None,
+                "last_checked_insiders": None,
+                "last_checked_institutional": None,
+                "last_checked_filings": None,
+                "earnings_last_checked": None,
+                "cache_state": "stale",
+            }
+        ],
+        "refresh": {"triggered": False, "reason": "stale", "ticker": "O", "job_id": None},
+    }
+
+    async def _get_cached(*_args, **_kwargs):
+        return HotCacheLookup(
+            content=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            etag='W/"cached-search"',
+            last_modified=None,
+            is_fresh=False,
+        )
+
     monkeypatch.setattr(
         main_module,
         "_get_hot_cached_payload",
-        lambda *_args, **_kwargs: (
-            {
-                "query": "O",
-                "results": [
-                    {
-                        "ticker": "ON",
-                        "cik": "0001097864",
-                        "name": "ON SEMICONDUCTOR CORP",
-                        "sector": "Semiconductors & Related Devices",
-                        "market_sector": "Technology",
-                        "market_industry": "Semiconductors",
-                        "oil_exposure_type": "non_oil",
-                        "oil_support_status": "unsupported",
-                        "oil_support_reasons": ["non_energy_classification"],
-                        "regulated_entity": None,
-                        "strict_official_mode": False,
-                        "last_checked": datetime.now(timezone.utc).isoformat(),
-                        "last_checked_financials": datetime.now(timezone.utc).isoformat(),
-                        "last_checked_prices": None,
-                        "last_checked_insiders": None,
-                        "last_checked_institutional": None,
-                        "last_checked_filings": None,
-                        "earnings_last_checked": None,
-                        "cache_state": "stale",
-                    }
-                ],
-                "refresh": {"triggered": False, "reason": "stale", "ticker": "O", "job_id": None},
-            },
-            False,
-        ),
+        _get_cached,
     )
     monkeypatch.setattr(
         main_module,

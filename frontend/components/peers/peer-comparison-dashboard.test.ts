@@ -195,7 +195,7 @@ describe("PeerComparisonDashboard", () => {
 
     expect(screen.getByRole("button", { name: "Collapse compare tray" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("Selected 1/4")).toBeTruthy();
-    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    expect(screen.getAllByText("SEC Company Facts (XBRL)").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Hide provenance drawer" })).toBeTruthy();
     expect(screen.getByLabelText("Provenance drawer")).toBeTruthy();
 

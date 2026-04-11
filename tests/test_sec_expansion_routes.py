@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 from app.services.proxy_parser import ExecCompRow
 
 from datetime import date, datetime, timezone
@@ -8,8 +11,11 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload
+from app.api.schemas.financials import CompanyFinancialsResponse
 from app.main import RefreshState, app
 from app.services.beneficial_ownership import BeneficialOwnershipNormalizedParty, BeneficialOwnershipNormalizedReport
+from app.services.hot_cache import shared_hot_response_cache
 from app.services.sec_edgar import FilingMetadata
 
 
@@ -383,6 +389,65 @@ def test_peers_route_returns_default_selected_tickers(monkeypatch):
     assert payload["peers"]
 
 
+def test_financials_route_serves_raw_cached_json_on_fresh_hit(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    shared_hot_response_cache.clear_sync()
+
+    payload = CompanyFinancialsResponse(
+        company=CompanyPayload(
+            ticker="AAPL",
+            cik="0000320193",
+            name="Apple Inc.",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Consumer Electronics",
+            cache_state="fresh",
+            last_checked=datetime(2026, 3, 27, 18, 0, tzinfo=timezone.utc),
+        ),
+        financials=[],
+        price_history=[],
+        refresh=RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+        diagnostics=DataQualityDiagnosticsPayload(),
+    )
+    expected_bytes = json.dumps(
+        payload.model_dump(mode="json"),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    asyncio.run(
+        main_module._store_hot_cached_payload(
+            "financials:AAPL:asof=latest",
+            payload,
+            tags=main_module._build_hot_cache_tags(
+                ticker="AAPL",
+                datasets=("financials", "prices"),
+                schema_versions=(main_module.HOT_CACHE_SCHEMA_VERSIONS["financials"],),
+                as_of="latest",
+            ),
+        )
+    )
+
+    def _raise_model_validate(_cls, *_args, **_kwargs):
+        raise AssertionError("fresh cached hits should bypass model validation")
+
+    monkeypatch.setattr(main_module.CompanyFinancialsResponse, "model_validate", classmethod(_raise_model_validate))
+    monkeypatch.setattr(
+        main_module,
+        "_resolve_cached_company_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fresh cached hits should not rebuild the payload")),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/financials")
+
+    assert response.status_code == 200
+    assert response.content == expected_bytes
+    assert response.headers["content-type"].startswith("application/json")
+
+
 def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
     _install_common_overrides(monkeypatch, {})
     main_module._hot_response_cache.clear()
@@ -598,6 +663,7 @@ def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
         )
     }
     _install_common_overrides(monkeypatch, filings)
+    monkeypatch.setattr(main_module, "_load_snapshot_backed_governance_summary_response", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module,
         "get_company_proxy_statements",
@@ -641,6 +707,96 @@ def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
     assert summary["filings_with_vote_items"] == 1
     assert summary["latest_meeting_date"] == "2026-05-20"
     assert summary["max_vote_item_count"] == 3
+
+
+def test_governance_summary_endpoint_prefers_persisted_brief_snapshot(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    refresh = RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None)
+    brief_payload = main_module._empty_company_brief_response(refresh=refresh, as_of=None).model_dump(mode="json")
+    brief_payload["capital_and_risk"]["governance_summary"]["summary"] = {
+        "total_filings": 2,
+        "definitive_proxies": 1,
+        "supplemental_proxies": 1,
+        "filings_with_meeting_date": 2,
+        "filings_with_exec_comp": 1,
+        "filings_with_vote_items": 2,
+        "latest_meeting_date": "2026-05-20",
+        "max_vote_item_count": 4,
+    }
+
+    monkeypatch.setattr(
+        main_module,
+        "get_company_research_brief_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(payload=brief_payload),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not query proxy statements when persisted summary exists")),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/governance/summary")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["total_filings"] == 2
+    assert payload["summary"]["supplemental_proxies"] == 1
+    assert payload["summary"]["max_vote_item_count"] == 4
+
+
+def test_activity_overview_endpoint_prefers_persisted_brief_snapshot(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    refresh = RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None)
+    brief_payload = main_module._empty_company_brief_response(refresh=refresh, as_of=None).model_dump(mode="json")
+    brief_payload["what_changed"]["activity_overview"]["entries"] = [
+        {
+            "id": "entry-1",
+            "date": "2026-03-21",
+            "type": "filing",
+            "badge": "8-K",
+            "title": "Filed current report",
+            "detail": "Persisted activity entry.",
+            "href": "/company/AAPL/sec-feed",
+        }
+    ]
+    brief_payload["what_changed"]["activity_overview"]["alerts"] = [
+        {
+            "id": "alert-1",
+            "level": "high",
+            "title": "High priority alert",
+            "detail": "Persisted activity alert.",
+            "source": "sec_edgar",
+            "date": "2026-03-21",
+            "href": "/company/AAPL/sec-feed",
+        }
+    ]
+    brief_payload["what_changed"]["activity_overview"]["summary"] = {
+        "total": 1,
+        "high": 1,
+        "medium": 0,
+        "low": 0,
+    }
+
+    monkeypatch.setattr(
+        main_module,
+        "get_company_research_brief_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(payload=brief_payload),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_load_company_activity_data",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not fan out into per-dataset activity queries")),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/activity-overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {"total": 1, "high": 1, "medium": 0, "low": 0}
+    assert payload["entries"][0]["id"] == "entry-1"
+    assert payload["alerts"][0]["id"] == "alert-1"
 
 
 def test_governance_endpoint_triggers_refresh_when_proxy_cache_missing(monkeypatch):
@@ -1171,6 +1327,7 @@ def test_serialize_institutional_holding_includes_filing_metadata_fields():
 
 def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
     _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "_load_snapshot_backed_activity_overview_response", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
@@ -1359,6 +1516,7 @@ def test_activity_feed_endpoint_returns_unified_entries(monkeypatch):
 
 def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
     _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "_load_snapshot_backed_activity_overview_response", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "_load_filings_from_cache", lambda *_args, **_kwargs: [])
@@ -1810,7 +1968,7 @@ def test_watchlist_calendar_endpoint_projects_expected_events(monkeypatch):
 
     monkeypatch.setattr(main_module, "_watchlist_calendar_today", lambda: date(2026, 4, 4))
     monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: snapshots)
-    monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda _session, company: financials_by_ticker[company.ticker])
+    monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda _session, company, **_kwargs: financials_by_ticker[company.ticker])
     monkeypatch.setattr(main_module, "get_company_filing_events", lambda _session, company_id, **_kwargs: filing_events_by_company[company_id])
 
     client = TestClient(app)

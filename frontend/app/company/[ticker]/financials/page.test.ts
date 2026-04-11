@@ -364,9 +364,9 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getByText("Statement Reconciliation")).toBeTruthy();
     expect(screen.getByText(/RevenueFromContractWithCustomerExcludingAssessedTax/i)).toBeTruthy();
     expect(screen.getByText("revenue_reconciliation_disagreement")).toBeTruthy();
-    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    expect(screen.getAllByText("SEC Company Facts (XBRL)").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("commercial_fallback").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/commercial fallback present/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Price history and market profile data on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
   });
 

@@ -82,5 +82,4 @@ def test_jobs_routes_keep_streaming_and_async_contracts() -> None:
         "ticker",
         "background_tasks",
         "force",
-        "session",
     ]

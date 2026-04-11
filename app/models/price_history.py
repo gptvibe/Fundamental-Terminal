@@ -23,6 +23,7 @@ class PriceHistory(Base):
         ),
         Index("ix_price_history_company_id", "company_id"),
         Index("ix_price_history_company_trade_date", "company_id", "trade_date"),
+        Index("ix_price_history_company_trade_date_id", "company_id", "trade_date", "id"),
         Index("ix_price_history_company_last_checked", "company_id", "last_checked"),
     )
 

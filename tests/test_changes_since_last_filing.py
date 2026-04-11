@@ -355,6 +355,58 @@ def test_changes_since_last_filing_route_exposes_provenance_and_as_of(monkeypatc
     assert "prior_values_amended" in payload["confidence_flags"]
 
 
+def test_changes_since_last_filing_route_prefers_persisted_brief_snapshot(monkeypatch) -> None:
+    refresh = RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None)
+    brief_payload = main_module._empty_company_brief_response(refresh=refresh, as_of=None).model_dump(mode="json")
+    brief_payload["what_changed"]["changes"]["current_filing"] = {
+        "accession_number": "0000123456-26-000001",
+        "filing_type": "10-K",
+        "statement_type": "canonical_xbrl",
+        "period_start": "2025-01-01",
+        "period_end": "2025-12-31",
+        "source": "https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/form10k.htm",
+        "last_updated": "2026-02-20T20:00:00Z",
+        "last_checked": "2026-03-27T18:00:00Z",
+        "filing_acceptance_at": "2026-02-20T20:00:00Z",
+        "fetch_timestamp": "2026-02-20T20:00:00Z",
+    }
+    brief_payload["what_changed"]["changes"]["summary"].update(
+        {
+            "filing_type": "10-K",
+            "current_period_end": "2025-12-31",
+            "metric_delta_count": 3,
+        }
+    )
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: refresh)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_research_brief_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(payload=brief_payload),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_visible_financials_for_company",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not recompute changes from financial statements")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_financial_restatements",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not load restatements on the hot path")),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/changes-since-last-filing")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["filing_type"] == "10-K"
+    assert payload["summary"]["metric_delta_count"] == 3
+    assert payload["current_filing"]["filing_type"] == "10-K"
+    assert payload["company"]["ticker"] == "AAPL"
+
+
 def test_changes_since_last_filing_openapi_contract_includes_as_of() -> None:
     client = TestClient(app)
     schema = client.get("/openapi.json").json()

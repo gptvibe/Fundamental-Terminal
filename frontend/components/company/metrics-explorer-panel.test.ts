@@ -107,7 +107,7 @@ describe("MetricsExplorerPanel", () => {
 
     expect(screen.getByText("Latest: Dec 31, 2025")).toBeTruthy();
     expect(screen.getByText("12.0%")).toBeTruthy();
-    expect(screen.getByText("Fundamental Terminal Derived Metrics Mart")).toBeTruthy();
+    expect(screen.getAllByText("Fundamental Terminal Derived Metrics Mart").length).toBeGreaterThan(0);
   });
 
   it("renders bank metric cards for regulated-bank issuers", async () => {

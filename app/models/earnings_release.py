@@ -20,6 +20,7 @@ class EarningsRelease(Base):
         Index("ix_earnings_releases_company_id", "company_id"),
         Index("ix_earnings_releases_company_filing_date", "company_id", "filing_date"),
         Index("ix_earnings_releases_company_report_date", "company_id", "reported_period_end"),
+        Index("ix_earnings_releases_company_filing_reported_id", "company_id", "filing_date", "reported_period_end", "id"),
         Index("ix_earnings_releases_company_last_checked", "company_id", "last_checked"),
     )
 

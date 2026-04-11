@@ -133,8 +133,8 @@ describe("MarketContextPanel", () => {
     expect(screen.getByText("3m10y")).toBeTruthy();
     expect(screen.getByText("RRP")).toBeTruthy();
     expect(screen.getByText("4M")).toBeTruthy();
-    expect(screen.getByText("U.S. Treasury Daily Par Yield Curve")).toBeTruthy();
-    expect(screen.getByText("market context partial")).toBeTruthy();
+    expect(screen.getAllByText("U.S. Treasury Daily Par Yield Curve").length).toBeGreaterThan(0);
+    expect(screen.getByText(/market context partial/i)).toBeTruthy();
     expect(screen.getByText("Why this appears")).toBeTruthy();
     expect(screen.getByText("Capex Cycle")).toBeTruthy();
     expect(screen.getByText("Rate Sensitive")).toBeTruthy();

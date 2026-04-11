@@ -26,6 +26,13 @@ class FinancialRestatement(Base):
         Index("ix_financial_restatements_company_id", "company_id"),
         Index("ix_financial_restatements_company_period_end", "company_id", "period_end"),
         Index("ix_financial_restatements_company_filing_date", "company_id", "filing_date"),
+        Index(
+            "ix_financial_restatements_company_acceptance_filing_period",
+            "company_id",
+            "filing_acceptance_at",
+            "filing_date",
+            "period_end",
+        ),
         Index("ix_financial_restatements_company_last_checked", "company_id", "last_checked"),
     )
 

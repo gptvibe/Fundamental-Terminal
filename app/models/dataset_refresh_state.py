@@ -17,6 +17,7 @@ class DatasetRefreshState(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "dataset", name="uq_dataset_refresh_state_company_dataset"),
         Index("ix_dataset_refresh_state_company_dataset", "company_id", "dataset"),
+        Index("ix_dataset_refresh_state_dataset_company_checked", "dataset", "company_id", "last_checked"),
         Index("ix_dataset_refresh_state_deadline", "dataset", "freshness_deadline"),
         Index("ix_dataset_refresh_state_active_job", "active_job_id"),
     )

@@ -18,6 +18,7 @@ class CapitalMarketsEvent(Base):
         UniqueConstraint("company_id", "accession_number", name="uq_capital_markets_events_company_accession"),
         Index("ix_capital_markets_events_company_id", "company_id"),
         Index("ix_capital_markets_events_company_filing_date", "company_id", "filing_date"),
+        Index("ix_capital_markets_events_company_filing_id", "company_id", "filing_date", "id"),
         Index("ix_capital_markets_events_company_form", "company_id", "form"),
         Index("ix_capital_markets_events_company_last_checked", "company_id", "last_checked"),
     )

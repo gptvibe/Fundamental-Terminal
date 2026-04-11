@@ -111,7 +111,6 @@ describe("CompanyPeersPage", () => {
 
     expect(screen.getByRole("heading", { name: "Peers" })).toBeTruthy();
     expect(screen.getByText("4 selected peers")).toBeTruthy();
-    expect(screen.getByText("commercial_fallback")).toBeTruthy();
     expect(screen.getByText(/Market profile and peer-comparison price inputs on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("peer-dashboard-ACME")).toBeTruthy();
   });

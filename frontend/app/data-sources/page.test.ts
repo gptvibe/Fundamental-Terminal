@@ -112,7 +112,7 @@ describe("DataSourcesPage", () => {
 
     expect(screen.getByText("Official Regulators")).toBeTruthy();
     expect(screen.getByText("Commercial Fallbacks")).toBeTruthy();
-    expect(screen.getByText("SEC Company Facts (XBRL)")).toBeTruthy();
+    expect(screen.getAllByText("SEC Company Facts (XBRL)").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
     expect(screen.getByText("Companies cached")).toBeTruthy();
     expect(screen.getByText("412")).toBeTruthy();

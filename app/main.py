@@ -67,7 +67,12 @@ def _export_legacy_api() -> None:
         if name.startswith("__") or name in reserved_names:
             continue
         if inspect.isfunction(value) and getattr(value, "__module__", None) == _legacy_api.__name__:
-            globals()[name] = _clone_legacy_function(value)
+            export_value = value
+            wrapped = getattr(value, "__wrapped__", None)
+            if inspect.iscoroutinefunction(value) and inspect.isfunction(wrapped):
+                if getattr(wrapped, "__module__", None) == _legacy_api.__name__ and not inspect.iscoroutinefunction(wrapped):
+                    export_value = wrapped
+            globals()[name] = _clone_legacy_function(export_value)
             continue
         globals()[name] = value
 

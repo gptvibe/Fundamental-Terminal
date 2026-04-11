@@ -19,6 +19,7 @@ class EarningsModelPoint(Base):
         UniqueConstraint("company_id", "period_end", name="uq_earnings_model_points_company_period"),
         Index("ix_earnings_model_points_company_id", "company_id"),
         Index("ix_earnings_model_points_company_period_end", "company_id", "period_end"),
+        Index("ix_earnings_model_points_company_period_end_id", "company_id", "period_end", "id"),
         Index("ix_earnings_model_points_company_last_checked", "company_id", "last_checked"),
     )
 

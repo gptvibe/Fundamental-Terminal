@@ -24,6 +24,7 @@ class ProxyStatement(Base):
         ),
         Index("ix_proxy_statements_company_id", "company_id"),
         Index("ix_proxy_statements_company_filing_date", "company_id", "filing_date"),
+        Index("ix_proxy_statements_company_filing_id", "company_id", "filing_date", "id"),
         Index("ix_proxy_statements_company_last_checked", "company_id", "last_checked"),
     )
 

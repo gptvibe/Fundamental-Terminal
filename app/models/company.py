@@ -39,6 +39,8 @@ class Company(Base):
         Index("ix_companies_ticker", "ticker", unique=True),
         Index("ix_companies_cik", "cik", unique=True),
         Index("ix_companies_ticker_cik", "ticker", "cik"),
+        Index("ix_companies_market_sector", "market_sector"),
+        Index("ix_companies_market_industry", "market_industry"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

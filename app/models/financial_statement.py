@@ -28,6 +28,14 @@ class FinancialStatement(Base):
         Index("ix_financial_statements_company_id", "company_id"),
         Index("ix_financial_statements_company_last_checked", "company_id", "last_checked"),
         Index("ix_financial_statements_company_period_end", "company_id", "period_end"),
+        Index("ix_financial_statements_company_type_period_end", "company_id", "statement_type", "period_end"),
+        Index(
+            "ix_financial_statements_company_type_period_end_filing",
+            "company_id",
+            "statement_type",
+            "period_end",
+            "filing_type",
+        ),
         Index("ix_financial_statements_statement_type", "statement_type"),
     )
 

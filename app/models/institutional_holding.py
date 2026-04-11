@@ -25,6 +25,7 @@ class InstitutionalHolding(Base):
         Index("ix_institutional_holdings_company_id", "company_id"),
         Index("ix_institutional_holdings_fund_id", "fund_id"),
         Index("ix_institutional_holdings_company_reporting_date", "company_id", "reporting_date"),
+        Index("ix_institutional_holdings_company_reporting_value", "company_id", "reporting_date", "market_value"),
         Index("ix_institutional_holdings_company_last_checked", "company_id", "last_checked"),
     )
 

@@ -24,6 +24,13 @@ class CapitalStructureSnapshot(Base):
         ),
         Index("ix_capital_structure_snapshots_company_id", "company_id"),
         Index("ix_capital_structure_snapshots_company_period_end", "company_id", "period_end"),
+        Index(
+            "ix_capital_structure_snapshots_company_period_updated_id",
+            "company_id",
+            "period_end",
+            "last_updated",
+            "id",
+        ),
         Index("ix_capital_structure_snapshots_company_last_checked", "company_id", "last_checked"),
     )
 

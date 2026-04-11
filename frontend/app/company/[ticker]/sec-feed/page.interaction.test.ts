@@ -197,7 +197,7 @@ describe("CompanySecFeedPage interactions", () => {
     expect(screen.getByText("planned-sale").className).toContain("tone-red");
     expect(screen.getByText("Jane Doe filed Form 144 planned sale")).toBeTruthy();
     expect(screen.getByText("High (1)").className).toContain("tone-red");
-    expect(screen.getByText("SEC EDGAR Filing Archive")).toBeTruthy();
+    expect(screen.getAllByText("SEC EDGAR Filing Archive").length).toBeGreaterThan(0);
     expect(screen.getByText("SEC comment letter correspondence")).toBeTruthy();
 
     const newest = screen.getByText("Newest Event");

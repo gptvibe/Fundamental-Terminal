@@ -24,6 +24,7 @@ class InsiderTrade(Base):
         ),
         Index("ix_insider_trades_company_id", "company_id"),
         Index("ix_insider_trades_company_transaction_date", "company_id", "transaction_date"),
+        Index("ix_insider_trades_company_transaction_filing_id", "company_id", "transaction_date", "filing_date", "id"),
         Index("ix_insider_trades_company_last_checked", "company_id", "last_checked"),
         Index("ix_insider_trades_company_action", "company_id", "action"),
     )

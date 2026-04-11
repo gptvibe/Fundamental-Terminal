@@ -209,7 +209,12 @@ def get_company_coverage_counts(session: Session, company_ids: list[int]) -> dic
     return result
 
 
-def get_company_financials(session: Session, company_id: int) -> list[FinancialStatement]:
+def get_company_financials(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int | None = None,
+) -> list[FinancialStatement]:
     statement = (
         select(FinancialStatement)
         .where(
@@ -218,10 +223,17 @@ def get_company_financials(session: Session, company_id: int) -> list[FinancialS
         )
         .order_by(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
     )
+    if limit is not None:
+        statement = statement.limit(limit)
     return list(session.execute(statement).scalars())
 
 
-def get_company_regulated_bank_financials(session: Session, company_id: int) -> list[FinancialStatement]:
+def get_company_regulated_bank_financials(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int | None = None,
+) -> list[FinancialStatement]:
     statement = (
         select(FinancialStatement)
         .where(
@@ -230,6 +242,8 @@ def get_company_regulated_bank_financials(session: Session, company_id: int) -> 
         )
         .order_by(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc())
     )
+    if limit is not None:
+        statement = statement.limit(limit)
     return list(session.execute(statement).scalars())
 
 

@@ -927,7 +927,10 @@ def test_models_route_hides_yahoo_provenance_and_price_snapshot_in_strict_mode(m
     snapshot.company.sector = "prepackaged software"
     snapshot.cache_state = "stale"
     monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True, valuation_workbench_enabled=True))
-    monkeypatch.setattr(main_module, "_store_hot_cached_payload", lambda *_args, **_kwargs: None)
+    async def _store_hot_cache(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(main_module, "_store_hot_cached_payload", _store_hot_cache)
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(

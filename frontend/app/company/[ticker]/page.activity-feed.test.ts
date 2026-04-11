@@ -213,6 +213,11 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
     });
 
+    await waitFor(() => {
+      expect(screen.getAllByText("Jane Doe filed Form 144 planned sale").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
+    });
+
     expect(screen.getByRole("button", { name: "Refresh Brief Data" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "What changed" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Business quality" })).toBeTruthy();
@@ -220,8 +225,6 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByRole("heading", { name: "Valuation" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Collapse Snapshot" })).toBeTruthy();
-    expect(screen.getAllByText("Jane Doe filed Form 144 planned sale").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
     expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
     expect(screen.getAllByText("high")[0]?.className).toContain("tone-red");
     expect(screen.getByText("Ownership watch").closest(".research-brief-checklist-card")?.className).toContain("tone-cyan");

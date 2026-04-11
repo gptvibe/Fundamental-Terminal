@@ -121,7 +121,7 @@ from app.services.screener import build_official_screener_filter_catalog, run_of
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
-from app.services.hot_cache import shared_hot_response_cache
+from app.services.hot_cache import HotCacheLookup, shared_hot_response_cache
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, CompanyIdentity, EdgarClient, FilingMetadata
@@ -352,9 +352,12 @@ async def search_companies(
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
         if cached_hot is not None:
-            payload, is_fresh = cached_hot
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanySearchResponse.model_validate(payload)
-            if refresh and not is_fresh and _looks_like_ticker(normalized_query):
+            if refresh and _looks_like_ticker(normalized_query):
                 stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
                 cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
 
@@ -554,9 +557,12 @@ async def company_financials(
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
         if cached_hot is not None:
-            payload_data, is_fresh = cached_hot
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyFinancialsResponse.model_validate(payload_data)
-            if not is_fresh:
+            if not cached_hot.is_fresh:
                 stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
@@ -722,9 +728,12 @@ async def company_capital_structure(
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
         if cached_hot is not None:
-            payload_data, is_fresh = cached_hot
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyCapitalStructureResponse.model_validate(payload_data)
-            if not is_fresh:
+            if not cached_hot.is_fresh:
                 stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
@@ -881,6 +890,17 @@ def company_changes_since_last_filing(
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
+    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    persisted_payload = _load_snapshot_backed_changes_since_last_filing_response(
+        session,
+        snapshot,
+        refresh=refresh,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+    )
+    if persisted_payload is not None:
+        return persisted_payload
+
     financials = _visible_financials_for_company(session, snapshot.company)
     if parsed_as_of is not None:
         financials = select_point_in_time_financials(financials, parsed_as_of)
@@ -894,7 +914,6 @@ def company_changes_since_last_filing(
     if parsed_as_of is not None:
         comment_letters = [letter for letter in comment_letters if _effective_at(letter.filing_date) <= parsed_as_of]
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
     comparison = build_changes_since_last_filing(
         financials,
         restatements,
@@ -1708,9 +1727,12 @@ async def company_models(
         async with _session_scope() as session:
             cached_hot = await _get_hot_cached_payload(hot_key)
             if cached_hot is not None:
-                payload_data, is_fresh = cached_hot
+                if cached_hot.is_fresh:
+                    return _hot_cache_json_response(request, http_response, cached_hot)
+
+                payload_data = _decode_hot_cache_payload(cached_hot)
                 cached_response = CompanyModelsResponse.model_validate(payload_data)
-                if not is_fresh:
+                if not cached_hot.is_fresh:
                     stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
                     cached_response = cached_response.model_copy(
                         update={
@@ -1846,9 +1868,12 @@ async def company_oil_scenario_overlay(
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
         if cached_hot is not None:
-            payload_data, is_fresh = cached_hot
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyOilScenarioOverlayResponse.model_validate(payload_data)
-            if not is_fresh:
+            if not cached_hot.is_fresh:
                 stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
@@ -1944,9 +1969,12 @@ async def company_oil_scenario(
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
         if cached_hot is not None:
-            payload_data, is_fresh = cached_hot
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyOilScenarioResponse.model_validate(payload_data)
-            if not is_fresh:
+            if not cached_hot.is_fresh:
                 stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
@@ -2901,6 +2929,100 @@ def _augment_company_brief_response(
     )
 
 
+def _load_company_research_brief_snapshot_response(
+    session: Session,
+    company_id: int,
+    *,
+    as_of: datetime | None = None,
+) -> CompanyResearchBriefResponse | None:
+    try:
+        stored = get_company_research_brief_snapshot(
+            session,
+            company_id,
+            as_of=as_of,
+            schema_version=BRIEF_SCHEMA_VERSION,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to load company research brief snapshot for company_id=%s",
+            company_id,
+        )
+        return None
+
+    if stored is None or not isinstance(getattr(stored, "payload", None), dict):
+        return None
+
+    try:
+        return CompanyResearchBriefResponse.model_validate(stored.payload)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to validate company research brief snapshot for company_id=%s",
+            company_id,
+        )
+        return None
+
+
+def _load_snapshot_backed_changes_since_last_filing_response(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    refresh: RefreshState,
+    requested_as_of: str | None,
+    parsed_as_of: datetime | None,
+) -> CompanyChangesSinceLastFilingResponse | None:
+    brief = _load_company_research_brief_snapshot_response(
+        session,
+        snapshot.company.id,
+        as_of=parsed_as_of,
+    )
+    if brief is None:
+        return None
+
+    payload = brief.what_changed.changes.model_copy(
+        update={
+            "company": _serialize_company(snapshot),
+            "refresh": refresh,
+        }
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+def _load_snapshot_backed_governance_summary_response(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    refresh: RefreshState,
+) -> CompanyGovernanceSummaryResponse | None:
+    brief = _load_company_research_brief_snapshot_response(session, snapshot.company.id)
+    if brief is None:
+        return None
+
+    return brief.capital_and_risk.governance_summary.model_copy(
+        update={
+            "company": _serialize_company(snapshot),
+            "refresh": refresh,
+        }
+    )
+
+
+def _load_snapshot_backed_activity_overview_response(
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    refresh: RefreshState,
+) -> CompanyActivityOverviewResponse | None:
+    brief = _load_company_research_brief_snapshot_response(session, snapshot.company.id)
+    if brief is None:
+        return None
+
+    return brief.what_changed.activity_overview.model_copy(
+        update={
+            "company": _serialize_company(snapshot),
+            "refresh": refresh,
+        }
+    )
+
+
 def _build_company_brief_bootstrap_for_snapshot(
     session: Session,
     snapshot: CompanyCacheSnapshot,
@@ -3239,9 +3361,12 @@ async def company_peers(
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
         if cached_hot is not None:
-            payload_data, is_fresh = cached_hot
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyPeersResponse.model_validate(payload_data)
-            if not is_fresh:
+            if not cached_hot.is_fresh:
                 stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
@@ -3474,8 +3599,6 @@ def company_governance(
     refresh = _refresh_for_governance(background_tasks, session, snapshot)
     cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
     filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
-    if not filings:
-        filings = _load_live_governance_filings(snapshot.company.cik)
     return CompanyGovernanceResponse(
         company=_serialize_company(snapshot),
         filings=filings,
@@ -3503,10 +3626,16 @@ def company_governance_summary(
         )
 
     refresh = _refresh_for_governance(background_tasks, session, snapshot)
+    persisted_payload = _load_snapshot_backed_governance_summary_response(
+        session,
+        snapshot,
+        refresh=refresh,
+    )
+    if persisted_payload is not None:
+        return persisted_payload
+
     cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
     filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
-    if not filings:
-        filings = _load_live_governance_filings(snapshot.company.cik)
     return CompanyGovernanceSummaryResponse(
         company=_serialize_company(snapshot),
         summary=_build_governance_summary(filings),
@@ -4140,11 +4269,8 @@ def _store_cached_search_response(query: str, response: CompanySearchResponse) -
         _search_response_cache[query] = (expires_at, response.model_dump())
 
 
-async def _get_hot_cached_payload(key: str) -> tuple[dict[str, Any], bool] | None:
-    cached = await shared_hot_response_cache.get(key)
-    if cached is None:
-        return None
-    return cached.payload, cached.is_fresh
+async def _get_hot_cached_payload(key: str) -> HotCacheLookup | None:
+    return await shared_hot_response_cache.get(key)
 
 
 async def _store_hot_cached_payload(key: str, payload: BaseModel, *, tags: tuple[str, ...] = ()) -> None:
@@ -4192,13 +4318,33 @@ def _apply_conditional_headers(
     *,
     last_modified: datetime | None,
 ) -> Response | None:
-    canonical = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    etag = f'W/"{hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]}"'
+    canonical = json.dumps(
+        payload.model_dump(mode="json"),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    etag = f'W/"{hashlib.sha256(canonical).hexdigest()[:16]}"'
+
+    return _apply_precomputed_conditional_headers(
+        request,
+        response,
+        etag=etag,
+        last_modified=_format_last_modified_header(last_modified),
+    )
+
+
+def _apply_precomputed_conditional_headers(
+    request: Request,
+    response: Response,
+    *,
+    etag: str,
+    last_modified: str | None,
+) -> Response | None:
     response.headers["ETag"] = etag
 
     if last_modified is not None:
-        normalized = last_modified if last_modified.tzinfo else last_modified.replace(tzinfo=timezone.utc)
-        response.headers["Last-Modified"] = formatdate(normalized.timestamp(), usegmt=True)
+        response.headers["Last-Modified"] = last_modified
 
     response.headers["Cache-Control"] = "private, max-age=0, stale-while-revalidate=120"
 
@@ -4215,6 +4361,37 @@ def _apply_conditional_headers(
     _record_cache_metric("conditional.cacheable_200")
 
     return None
+
+
+def _format_last_modified_header(last_modified: datetime | None) -> str | None:
+    if last_modified is None:
+        return None
+    normalized = last_modified if last_modified.tzinfo else last_modified.replace(tzinfo=timezone.utc)
+    return formatdate(normalized.timestamp(), usegmt=True)
+
+
+def _hot_cache_json_response(
+    request: Request,
+    response: Response,
+    cached: HotCacheLookup,
+) -> Response:
+    not_modified = _apply_precomputed_conditional_headers(
+        request,
+        response,
+        etag=cached.etag,
+        last_modified=cached.last_modified,
+    )
+    if not_modified is not None:
+        return not_modified
+    return Response(
+        content=cached.content,
+        media_type="application/json",
+        headers=dict(response.headers),
+    )
+
+
+def _decode_hot_cache_payload(cached: HotCacheLookup) -> dict[str, Any]:
+    return json.loads(cached.content)
 
 
 def _record_cache_metric(key: str) -> None:
@@ -4286,11 +4463,16 @@ def _visible_price_history(session: Session, company_id: int) -> list[PriceHisto
     return get_company_price_history(session, company_id)
 
 
-def _visible_financials_for_company(session: Session, company: Any) -> list[FinancialStatement]:
-    sec_financials = get_company_financials(session, company.id)
+def _visible_financials_for_company(
+    session: Session,
+    company: Any,
+    *,
+    limit: int | None = None,
+) -> list[FinancialStatement]:
+    sec_financials = get_company_financials(session, company.id, limit=limit)
     if classify_regulated_entity(company) is None:
         return sec_financials
-    regulated_financials = get_company_regulated_bank_financials(session, company.id)
+    regulated_financials = get_company_regulated_bank_financials(session, company.id, limit=limit)
     return select_preferred_financials(company, sec_financials, regulated_financials)
 
 
@@ -7710,6 +7892,14 @@ def _build_company_activity_overview_response(
         )
 
     refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    persisted_payload = _load_snapshot_backed_activity_overview_response(
+        session,
+        snapshot,
+        refresh=refresh,
+    )
+    if persisted_payload is not None:
+        return persisted_payload
+
     activity = _load_company_activity_data(session, snapshot)
     entries = _build_activity_feed_entries(
         filings=activity["filings"],
@@ -8331,7 +8521,11 @@ def _project_watchlist_expected_filing(
     window_start: DateType,
     window_end: DateType,
 ) -> WatchlistCalendarEventPayload | None:
-    financials = _visible_financials_for_company(session, snapshot.company)
+    financials = _visible_financials_for_company(
+        session,
+        snapshot.company,
+        limit=24,
+    )
     periodic_records = _dedupe_projectable_watchlist_financials(financials)
     if not periodic_records:
         return None
