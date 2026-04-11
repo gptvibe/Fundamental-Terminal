@@ -8,6 +8,7 @@ from app.main import app
 def test_public_route_inventory_remains_stable() -> None:
     expected_routes = {
         ("GET", "/health"),
+        ("GET", "/api/health/pool-status"),
         ("GET", "/api/internal/cache-metrics"),
         ("POST", "/api/internal/cache-metrics/invalidate"),
         ("GET", "/api/internal/performance-audit"),

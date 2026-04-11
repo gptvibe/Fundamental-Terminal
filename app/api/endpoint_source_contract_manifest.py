@@ -145,6 +145,7 @@ def _price_sensitive_contract(*source_ids: str) -> SourceContract:
 
 
 USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
+    ("GET", "/api/health/pool-status"): _control_plane_contract(),
     ("GET", "/api/jobs/{job_id}/events"): _control_plane_contract(),
     ("GET", "/api/companies/search"): _official_only_contract("sec_edgar", "fdic_bankfind_institutions"),
     ("GET", "/api/companies/resolve"): _official_only_contract("sec_edgar"),

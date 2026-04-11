@@ -101,7 +101,7 @@ const CACHE_STORAGE_PREFIX = "ft:api-cache:v2:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
 
 const readCache = new Map<string, CacheEntry>();
-const inflightReads = new Map<string, Promise<unknown>>();
+const inflightRequests = new Map<string, Promise<unknown>>();
 let cacheSyncInitialized = false;
 
 function resolveReadPolicy(path: string): ReadCachePolicy {
@@ -266,6 +266,10 @@ function withApiPrefix(path: string): string {
   return `${API_PREFIX}${path}`;
 }
 
+function requestKeyForPath(path: string): string {
+  return withApiPrefix(path);
+}
+
 async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   return fetchAndParseWithAudit(path, init, {
     cacheDisposition: "network",
@@ -294,13 +298,14 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
   }
 
   const cacheKey = path;
+  const requestKey = requestKeyForPath(path);
   const cached = readCachedValue<T>(cacheKey, path);
   if (cached && !cached.stale) {
     recordCachedAudit(path, "GET", "fresh-cache-hit", auditContext);
     return cached.data;
   }
 
-  const currentInflight = inflightReads.get(cacheKey) as Promise<T> | undefined;
+  const currentInflight = inflightRequests.get(requestKey) as Promise<T> | undefined;
   if (currentInflight) {
     recordCachedAudit(path, "GET", "inflight-dedupe", auditContext);
     return currentInflight;
@@ -339,10 +344,10 @@ async function revalidateRead<T>(
       return payload;
     })
     .finally(() => {
-      inflightReads.delete(cacheKey);
+      inflightRequests.delete(requestKeyForPath(path));
     });
 
-  inflightReads.set(cacheKey, request);
+  inflightRequests.set(requestKeyForPath(path), request);
   return request;
 }
 
@@ -470,7 +475,7 @@ export function invalidateApiReadCacheForTicker(ticker: string): void {
 
 export function __resetApiClientCacheForTests(): void {
   invalidateApiReadCache("", { emitCrossTab: false });
-  inflightReads.clear();
+  inflightRequests.clear();
 }
 
 export function searchCompanies(

@@ -2224,6 +2224,7 @@ class EdgarIngestionService:
                 reporter=reporter,
                 announce=False,
             )
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2260,6 +2261,7 @@ class EdgarIngestionService:
                 force=policy.force,
             )
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2305,6 +2307,7 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2338,6 +2341,7 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(

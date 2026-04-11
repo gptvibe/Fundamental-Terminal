@@ -74,6 +74,7 @@ def _client():
 
 
 def test_company_compare_route_returns_batch_payload(monkeypatch):
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda _session, ticker: _snapshot(ticker))
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda _session, ticker: _snapshot(ticker))
     monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda *_args, **_kwargs: [_financial(date(2025, 12, 31))])
     monkeypatch.setattr(main_module, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))

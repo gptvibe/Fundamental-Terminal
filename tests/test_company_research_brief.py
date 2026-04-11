@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import BackgroundTasks
@@ -125,3 +125,58 @@ def test_company_brief_returns_composite_payload_when_cached_company_exists(monk
     assert response.section_statuses[1].id == "what_changed"
     assert response.section_statuses[1].state == "ready"
     assert any(card.title == "Revenue" for card in response.stale_summary_cards)
+
+
+def test_company_brief_returns_stale_snapshot_and_queues_background_refresh(monkeypatch):
+    snapshot = SimpleNamespace(
+        company=SimpleNamespace(
+            id=1,
+            ticker="ACME",
+            cik="0000123456",
+            name="Acme Corp",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Software",
+        ),
+        cache_state="fresh",
+        last_checked=datetime(2026, 3, 10, tzinfo=timezone.utc),
+    )
+    refresh = main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None)
+    built_payload = main_module._empty_company_brief_response(refresh=refresh, as_of=None).model_copy(
+        update={
+            "company": main_module._serialize_company(snapshot),
+            "build_state": "ready",
+            "build_status": "Research brief ready.",
+        }
+    )
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda session, ticker: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_research_brief_snapshot",
+        lambda *args, **kwargs: SimpleNamespace(
+            payload=built_payload.model_dump(mode="json"),
+            last_checked=datetime.now(timezone.utc) - timedelta(hours=main_module.settings.freshness_window_hours + 2),
+        ),
+    )
+    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: "job-stale")
+    monkeypatch.setattr(
+        main_module,
+        "_augment_company_brief_response",
+        lambda session, snapshot, payload, refresh, as_of: payload.model_copy(
+            update={
+                "refresh": refresh,
+                "available_sections": list(main_module.RESEARCH_BRIEF_SECTION_ORDER),
+                "section_statuses": main_module._build_research_brief_section_statuses(list(main_module.RESEARCH_BRIEF_SECTION_ORDER), build_state="ready"),
+            }
+        ),
+    )
+
+    response = main_module.company_brief("ACME", BackgroundTasks(), as_of=None, session=object())
+
+    assert response.build_state == "ready"
+    assert response.refresh.triggered is True
+    assert response.refresh.reason == "stale"
+    assert response.refresh.job_id == "job-stale"
+    assert response.company is not None
+    assert response.company.ticker == "ACME"

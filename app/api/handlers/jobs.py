@@ -8,6 +8,7 @@ cache_metrics = route_handler("cache_metrics")
 invalidate_cache_metrics = route_handler("invalidate_cache_metrics")
 performance_audit_snapshot = route_handler("performance_audit_snapshot")
 reset_performance_audit = route_handler("reset_performance_audit")
+pool_status = route_handler("pool_status")
 stream_job_events = route_handler("stream_job_events")
 refresh_company = route_handler("refresh_company")
 
@@ -17,6 +18,7 @@ __all__ = [
     "healthcheck",
     "invalidate_cache_metrics",
     "performance_audit_snapshot",
+    "pool_status",
     "refresh_company",
     "reset_performance_audit",
     "stream_job_events",

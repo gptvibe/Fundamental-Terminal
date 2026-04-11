@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 import json
 import logging
 import threading
@@ -15,7 +16,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import settings
-from app.db.session import SessionLocal, get_engine
+from app.db.session import SessionLocal, async_session_maker, get_async_engine, get_bound_request_sync_session, get_engine
 from app.models import RefreshJob, RefreshJobEvent
 from app.observability import emit_structured_log
 from app.services.refresh_state import ensure_company, set_active_refresh_job
@@ -246,10 +247,9 @@ class SharedStatusBroker:
         company_id: int | None = None,
     ) -> str:
         normalized_ticker = ticker.strip().upper()
-        get_engine()
         now = datetime.now(timezone.utc)
 
-        with SessionLocal() as session:
+        with self._sync_session_scope() as session:
             existing_job = self._get_active_job(session, ticker=normalized_ticker, kind=kind, dataset=dataset)
             if existing_job is not None:
                 return existing_job.job_id
@@ -302,8 +302,7 @@ class SharedStatusBroker:
 
     def get_active_job_id(self, *, ticker: str, kind: str, dataset: str = "company_refresh") -> str | None:
         normalized_ticker = ticker.strip().upper()
-        get_engine()
-        with SessionLocal() as session:
+        with self._sync_session_scope() as session:
             job = self._get_active_job(session, ticker=normalized_ticker, kind=kind, dataset=dataset)
             return job.job_id if job is not None else None
 
@@ -355,10 +354,9 @@ class SharedStatusBroker:
         )
 
     def touch(self, job_id: str, *, expected_claim_token: str | None = None) -> None:
-        get_engine()
         now = datetime.now(timezone.utc)
         try:
-            with SessionLocal() as session:
+            with self._sync_session_scope() as session:
                 job = self._get_job(session, job_id, for_update=True)
                 if job is None or job.status != "running":
                     return
@@ -373,10 +371,9 @@ class SharedStatusBroker:
 
     def claim_next_job(self, *, worker_id: str) -> ClaimedJob | None:
         self.requeue_expired_jobs(limit=self._recovery_batch_size)
-        get_engine()
         now = datetime.now(timezone.utc)
 
-        with SessionLocal() as session:
+        with self._sync_session_scope() as session:
             statement: Select[tuple[RefreshJob]] = (
                 select(RefreshJob)
                 .where(RefreshJob.status == "queued")
@@ -422,10 +419,9 @@ class SharedStatusBroker:
         )
 
     def requeue_expired_jobs(self, *, limit: int = 10) -> int:
-        get_engine()
         now = datetime.now(timezone.utc)
         emitted: list[tuple[str, JobEvent]] = []
-        with SessionLocal() as session:
+        with self._sync_session_scope() as session:
             statement: Select[tuple[RefreshJob]] = (
                 select(RefreshJob)
                 .where(
@@ -488,30 +484,37 @@ class SharedStatusBroker:
 
         return backlog, queue, unsubscribe
 
-    def list_events(self, job_id: str, *, after_sequence: int = 0) -> list[JobEvent]:
-        get_engine()
-        with SessionLocal() as session:
-            job = self._get_job(session, job_id)
-            if job is None:
-                return []
-            statement: Select[tuple[RefreshJobEvent]] = (
-                select(RefreshJobEvent)
-                .where(RefreshJobEvent.refresh_job_id == job.id, RefreshJobEvent.sequence > after_sequence)
-                .order_by(RefreshJobEvent.sequence)
+    async def async_subscribe(
+        self,
+        job_id: str,
+    ) -> tuple[list[JobEvent], asyncio.Queue[JobEvent], Callable[[], None]]:
+        if not await self.async_has_job(job_id):
+            raise KeyError(job_id)
+
+        backlog = await self.async_list_events(job_id)
+        queue: asyncio.Queue[JobEvent] = asyncio.Queue(maxsize=self._subscriber_queue_size)
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            self._poll_job_events_async(
+                job_id,
+                queue,
+                stop_event,
+                last_sequence=backlog[-1].sequence if backlog else 0,
             )
-            return [
-                JobEvent(
-                    sequence=event.sequence,
-                    timestamp=event.timestamp,
-                    ticker=event.ticker,
-                    kind=event.kind,
-                    stage=event.stage,
-                    message=event.message,
-                    status=event.status,
-                    level=event.level,
-                )
-                for event in session.execute(statement).scalars()
-            ]
+        )
+
+        def unsubscribe() -> None:
+            stop_event.set()
+            task.cancel()
+
+        return backlog, queue, unsubscribe
+
+    def list_events(self, job_id: str, *, after_sequence: int = 0) -> list[JobEvent]:
+        with self._sync_session_scope() as session:
+            return self._list_events_in_session(session, job_id, after_sequence=after_sequence)
+
+    async def async_list_events(self, job_id: str, *, after_sequence: int = 0) -> list[JobEvent]:
+        return await self._run_async(lambda session: self._list_events_in_session(session, job_id, after_sequence=after_sequence))
 
     def format_sse(self, job_id: str, event: JobEvent) -> str:
         payload = json.dumps(event.to_payload(job_id))
@@ -519,6 +522,9 @@ class SharedStatusBroker:
 
     def has_job(self, job_id: str) -> bool:
         return self._job_snapshot(job_id) is not None
+
+    async def async_has_job(self, job_id: str) -> bool:
+        return await self._async_job_snapshot(job_id) is not None
 
     async def _poll_job_events(
         self,
@@ -550,15 +556,46 @@ class SharedStatusBroker:
         except asyncio.CancelledError:
             return
 
-    def _job_snapshot(self, job_id: str) -> tuple[str, int] | None:
-        get_engine()
+    async def _poll_job_events_async(
+        self,
+        job_id: str,
+        queue: asyncio.Queue[JobEvent],
+        stop_event: asyncio.Event,
+        *,
+        last_sequence: int,
+    ) -> None:
         try:
-            with SessionLocal() as session:
-                statement = select(RefreshJob.status, RefreshJob.event_sequence).where(RefreshJob.job_id == job_id)
-                row = session.execute(statement).one_or_none()
-                if row is None:
-                    return None
-                return str(row[0]), int(row[1])
+            while not stop_event.is_set():
+                snapshot = await self._async_job_snapshot(job_id)
+                if snapshot is None:
+                    return
+
+                status, event_sequence = snapshot
+                if event_sequence > last_sequence:
+                    for event in await self.async_list_events(job_id, after_sequence=last_sequence):
+                        last_sequence = event.sequence
+                        _safe_put_nowait(queue, event)
+
+                if status in TERMINAL_JOB_STATES and last_sequence >= event_sequence:
+                    return
+
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=self._poll_interval_seconds)
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            return
+
+    def _job_snapshot(self, job_id: str) -> tuple[str, int] | None:
+        try:
+            with self._sync_session_scope() as session:
+                return self._job_snapshot_in_session(session, job_id)
+        except SQLAlchemyError:
+            return None
+
+    async def _async_job_snapshot(self, job_id: str) -> tuple[str, int] | None:
+        try:
+            return await self._run_async(lambda session: self._job_snapshot_in_session(session, job_id))
         except SQLAlchemyError:
             return None
 
@@ -572,10 +609,9 @@ class SharedStatusBroker:
         level: JobLevel,
         expected_claim_token: str | None,
     ) -> JobEvent | None:
-        get_engine()
         now = datetime.now(timezone.utc)
         try:
-            with SessionLocal() as session:
+            with self._sync_session_scope() as session:
                 job = self._get_job(session, job_id, for_update=True)
                 if job is None:
                     return None
@@ -650,6 +686,52 @@ class SharedStatusBroker:
             status=event.status,
             level=event.level,
         )
+
+    @contextmanager
+    def _sync_session_scope(self):
+        bound_session = get_bound_request_sync_session()
+        if bound_session is not None:
+            yield bound_session
+            return
+
+        get_engine()
+        with SessionLocal() as session:
+            yield session
+
+    async def _run_async(self, callback: Callable[[object], object]):
+        get_async_engine()
+        async with async_session_maker() as session:
+            return await session.run_sync(callback)
+
+    def _list_events_in_session(self, session, job_id: str, *, after_sequence: int = 0) -> list[JobEvent]:
+        job = self._get_job(session, job_id)
+        if job is None:
+            return []
+        statement: Select[tuple[RefreshJobEvent]] = (
+            select(RefreshJobEvent)
+            .where(RefreshJobEvent.refresh_job_id == job.id, RefreshJobEvent.sequence > after_sequence)
+            .order_by(RefreshJobEvent.sequence)
+        )
+        return [
+            JobEvent(
+                sequence=event.sequence,
+                timestamp=event.timestamp,
+                ticker=event.ticker,
+                kind=event.kind,
+                stage=event.stage,
+                message=event.message,
+                status=event.status,
+                level=event.level,
+            )
+            for event in session.execute(statement).scalars()
+        ]
+
+    def _job_snapshot_in_session(self, session, job_id: str) -> tuple[str, int] | None:
+        statement = select(RefreshJob.status, RefreshJob.event_sequence).where(RefreshJob.job_id == job_id)
+        row = session.execute(statement).one_or_none()
+        if row is None:
+            return None
+        return str(row[0]), int(row[1])
 
     def _get_active_job(self, session, *, ticker: str, kind: str, dataset: str) -> RefreshJob | None:
         statement: Select[tuple[RefreshJob]] = (

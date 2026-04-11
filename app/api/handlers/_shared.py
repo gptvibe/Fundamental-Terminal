@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas import *
 from app.config import settings
-from app.db import async_session_maker as async_session, get_async_engine, get_db_session
+from app.db import async_session_maker as async_session, bind_request_sync_session, get_async_engine, get_async_pool_status, get_db_session
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
 from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
 from app.model_engine.models import dupont as dupont_model
@@ -88,7 +88,6 @@ from app.services.cache_queries import (
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
 from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
-    build_company_research_brief_response,
     get_company_research_brief_snapshot,
 )
 from app.services.equity_claim_risk import build_company_equity_claim_risk_response
@@ -290,10 +289,10 @@ def reset_performance_audit() -> dict[str, Any]:
 
 @app.get("/api/jobs/{job_id}/events")
 async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
-    if not status_broker.has_job(job_id):
+    if not await status_broker.async_has_job(job_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown job ID")
 
-    backlog, queue, unsubscribe = status_broker.subscribe(job_id)
+    backlog, queue, unsubscribe = await status_broker.async_subscribe(job_id)
 
     async def event_generator():
         try:
@@ -327,6 +326,11 @@ async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+def pool_status() -> DatabasePoolStatusResponse:
+    snapshot = get_async_pool_status()
+    return DatabasePoolStatusResponse.model_validate(snapshot, from_attributes=True)
 
 
 @app.get("/api/companies/search", response_model=CompanySearchResponse)
@@ -2729,12 +2733,17 @@ def company_brief(
             as_of=requested_as_of,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    if hasattr(session, "get") and hasattr(session, "execute"):
-        payload = build_company_research_brief_response(session, snapshot.company.id, as_of=parsed_as_of)
-    else:
-        stored = get_company_research_brief_snapshot(session, snapshot.company.id, as_of=parsed_as_of, schema_version=BRIEF_SCHEMA_VERSION)
-        payload = CompanyResearchBriefResponse.model_validate(stored.payload) if stored is not None else None
+    stored_snapshot, payload = _load_company_research_brief_snapshot_record(
+        session,
+        snapshot.company.id,
+        as_of=parsed_as_of,
+    )
+    refresh = _refresh_for_company_brief(
+        background_tasks,
+        snapshot,
+        stored_snapshot=stored_snapshot,
+        as_of=parsed_as_of,
+    )
     if payload is None:
         if not refresh.triggered:
             refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
@@ -2935,6 +2944,20 @@ def _load_company_research_brief_snapshot_response(
     *,
     as_of: datetime | None = None,
 ) -> CompanyResearchBriefResponse | None:
+    _, payload = _load_company_research_brief_snapshot_record(
+        session,
+        company_id,
+        as_of=as_of,
+    )
+    return payload
+
+
+def _load_company_research_brief_snapshot_record(
+    session: Session,
+    company_id: int,
+    *,
+    as_of: datetime | None = None,
+) -> tuple[Any | None, CompanyResearchBriefResponse | None]:
     try:
         stored = get_company_research_brief_snapshot(
             session,
@@ -2947,19 +2970,49 @@ def _load_company_research_brief_snapshot_response(
             "Unable to load company research brief snapshot for company_id=%s",
             company_id,
         )
-        return None
+        return None, None
 
     if stored is None or not isinstance(getattr(stored, "payload", None), dict):
-        return None
+        return stored, None
 
     try:
-        return CompanyResearchBriefResponse.model_validate(stored.payload)
+        return stored, CompanyResearchBriefResponse.model_validate(stored.payload)
     except Exception:
         logging.getLogger(__name__).exception(
             "Unable to validate company research brief snapshot for company_id=%s",
             company_id,
         )
-        return None
+        return stored, None
+
+
+def _refresh_for_company_brief(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    stored_snapshot: Any | None,
+    as_of: datetime | None,
+) -> RefreshState:
+    if stored_snapshot is None:
+        if snapshot.cache_state in {"missing", "stale"}:
+            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    if as_of is not None:
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    if _company_research_brief_snapshot_is_fresh(stored_snapshot):
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+
+
+def _company_research_brief_snapshot_is_fresh(stored_snapshot: Any) -> bool:
+    last_checked = getattr(stored_snapshot, "last_checked", None)
+    if last_checked is None:
+        return True
+    if last_checked.tzinfo is None:
+        normalized_last_checked = last_checked.replace(tzinfo=timezone.utc)
+    else:
+        normalized_last_checked = last_checked.astimezone(timezone.utc)
+    freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.freshness_window_hours)
+    return normalized_last_checked >= freshness_cutoff
 
 
 def _load_snapshot_backed_changes_since_last_filing_response(
@@ -9524,7 +9577,8 @@ def _wrap_db_handler(function: Any) -> Any:
                 if main_module is None:
                     raise RuntimeError("app.main must be loaded before invoking handler wrappers")
                 rebound = main_module._clone_legacy_function(function)
-                return rebound(*args, **kwargs, session=sync_session)
+                with bind_request_sync_session(sync_session):
+                    return rebound(*args, **kwargs, session=sync_session)
 
             return await _run_with_session_binding(session, invoke)
 

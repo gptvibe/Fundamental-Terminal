@@ -105,11 +105,19 @@ def test_search_route_does_not_trigger_refresh_when_refresh_disabled_on_stale_ho
 
 
 def test_financials_route_supports_conditional_get(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    snapshot = _snapshot()
+    financials_calls: list[str] = []
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
     monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "_visible_financials_for_company",
+        lambda *_args, **_kwargs: financials_calls.append("called") or [],
+    )
     monkeypatch.setattr(
         main_module,
         "_refresh_for_financial_page",
@@ -117,11 +125,23 @@ def test_financials_route_supports_conditional_get(monkeypatch):
     )
 
     client = TestClient(app)
-    _assert_304_on_second_request(client, "/api/companies/AAPL/financials")
+    first = client.get("/api/companies/AAPL/financials")
+    assert first.status_code == 200
+    assert first.headers.get("cache-control") == "public, max-age=20, stale-while-revalidate=300"
+    etag = first.headers.get("etag")
+    assert etag
+
+    second = client.get("/api/companies/AAPL/financials", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.content == b""
+    assert second.headers.get("cache-control") == "public, max-age=20, stale-while-revalidate=300"
+    assert financials_calls == ["called"]
 
 
 def test_models_route_supports_conditional_get(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    snapshot = _snapshot()
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(
         main_module,
         "_refresh_for_snapshot",
@@ -177,6 +197,7 @@ def test_model_evaluation_route_supports_conditional_get(monkeypatch):
 
 def test_peers_route_supports_conditional_get(monkeypatch):
     snapshot = _snapshot()
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
     monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
@@ -200,3 +221,92 @@ def test_peers_route_supports_conditional_get(monkeypatch):
 
     client = TestClient(app)
     _assert_304_on_second_request(client, "/api/companies/AAPL/peers")
+
+
+def test_compare_route_sets_public_cache_headers(monkeypatch):
+    snapshot = _snapshot()
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "_build_company_compare_item",
+        lambda *_args, **_kwargs: main_module.CompanyCompareItemPayload.model_validate(
+            {
+                "ticker": "AAPL",
+                "financials": {
+                    "company": {
+                        "ticker": "AAPL",
+                        "cik": "0000320193",
+                        "name": "Apple Inc.",
+                        "sector": "Technology",
+                        "market_sector": "Technology",
+                        "market_industry": "Consumer Electronics",
+                        "last_checked": snapshot.last_checked.isoformat(),
+                        "cache_state": "fresh",
+                    },
+                    "financials": [],
+                    "price_history": [],
+                    "refresh": {"triggered": False, "reason": "fresh", "ticker": "AAPL", "job_id": None},
+                    "diagnostics": {},
+                    "provenance": [],
+                    "source_mix": {},
+                    "confidence_flags": [],
+                    "as_of": None,
+                    "last_refreshed_at": snapshot.last_checked.isoformat(),
+                },
+                "metrics_summary": {
+                    "company": {
+                        "ticker": "AAPL",
+                        "cik": "0000320193",
+                        "name": "Apple Inc.",
+                        "sector": "Technology",
+                        "market_sector": "Technology",
+                        "market_industry": "Consumer Electronics",
+                        "last_checked": snapshot.last_checked.isoformat(),
+                        "cache_state": "fresh",
+                    },
+                    "period_type": "annual",
+                    "latest_period_end": None,
+                    "metrics": [],
+                    "last_metrics_check": snapshot.last_checked.isoformat(),
+                    "last_financials_check": snapshot.last_checked.isoformat(),
+                    "last_price_check": snapshot.last_checked.isoformat(),
+                    "staleness_reason": None,
+                    "refresh": {"triggered": False, "reason": "fresh", "ticker": "AAPL", "job_id": None},
+                    "diagnostics": {},
+                    "provenance": [],
+                    "source_mix": {},
+                    "confidence_flags": [],
+                    "as_of": None,
+                    "last_refreshed_at": snapshot.last_checked.isoformat(),
+                },
+                "models": {
+                    "company": {
+                        "ticker": "AAPL",
+                        "cik": "0000320193",
+                        "name": "Apple Inc.",
+                        "sector": "Technology",
+                        "market_sector": "Technology",
+                        "market_industry": "Consumer Electronics",
+                        "last_checked": snapshot.last_checked.isoformat(),
+                        "cache_state": "fresh",
+                    },
+                    "requested_models": [],
+                    "models": [],
+                    "refresh": {"triggered": False, "reason": "fresh", "ticker": "AAPL", "job_id": None},
+                    "diagnostics": {},
+                    "provenance": [],
+                    "source_mix": {},
+                    "confidence_flags": [],
+                    "as_of": None,
+                    "last_refreshed_at": snapshot.last_checked.isoformat(),
+                },
+            }
+        ),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/compare?tickers=AAPL")
+
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "public, max-age=20, stale-while-revalidate=300"
+    assert response.headers.get("etag")

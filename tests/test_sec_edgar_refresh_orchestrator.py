@@ -145,6 +145,7 @@ def test_refresh_company_uses_cached_partial_insider_refresh(monkeypatch):
     recent = datetime.now(timezone.utc) - timedelta(hours=1)
     stale = datetime.now(timezone.utc) - timedelta(days=3)
     submissions_seen: list[str] = []
+    brief_refresh_steps: list[str] = []
 
     monkeypatch.setattr(sec_edgar, "settings", _settings())
     monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
@@ -173,6 +174,11 @@ def test_refresh_company_uses_cached_partial_insider_refresh(monkeypatch):
     )
     monkeypatch.setattr(service, "refresh_insiders", lambda **_kwargs: 2)
     monkeypatch.setattr(service, "refresh_form144", lambda **_kwargs: 1)
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_research_brief_cache",
+        lambda *_args, **_kwargs: brief_refresh_steps.append("brief"),
+    )
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -183,8 +189,59 @@ def test_refresh_company_uses_cached_partial_insider_refresh(monkeypatch):
     assert result.form144_filings_written == 1
     assert result.detail == "Cached 2 insider trades and 1 Form 144 filings"
     assert submissions_seen == [company.cik]
+    assert brief_refresh_steps == ["brief"]
     assert reporter.completed == ["Refresh and compute complete."]
     assert session.commit_count >= 2
+
+
+def test_refresh_company_rebuilds_brief_after_cached_earnings_refresh(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+    recent = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = datetime.now(timezone.utc) - timedelta(days=3)
+    cache_steps: list[str] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(sec_edgar, "_latest_company_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_price_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_insider_trade_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_form144_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(service.client, "get_submissions", lambda cik: {"recent": {}, "cik": cik}, raising=False)
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {"a": object()}, raising=False)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda *_args, **_kwargs: pytest.fail("Full SEC refresh should not run for cached earnings refresh"),
+        raising=False,
+    )
+    monkeypatch.setattr(service, "refresh_earnings", lambda **_kwargs: 3)
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_earnings_model_cache",
+        lambda *_args, **_kwargs: cache_steps.append("earnings-model"),
+    )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_research_brief_cache",
+        lambda *_args, **_kwargs: cache_steps.append("brief"),
+    )
+
+    result = service.refresh_company("MSFT", reporter=reporter)
+
+    assert result.status == "fetched"
+    assert result.fetched_from_sec is True
+    assert result.earnings_releases_written == 3
+    assert cache_steps == ["earnings-model", "brief"]
+    assert reporter.completed == ["Refresh and compute complete."]
 
 
 def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):

@@ -5,6 +5,7 @@ from app.api.schemas.events import *
 from app.api.schemas.filings import *
 from app.api.schemas.financials import *
 from app.api.schemas.governance import *
+from app.api.schemas.health import *
 from app.api.schemas.jobs import *
 from app.api.schemas.market_context import *
 from app.api.schemas.model_evaluations import *
