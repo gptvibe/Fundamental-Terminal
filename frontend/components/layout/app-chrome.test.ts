@@ -83,4 +83,93 @@ describe("AppChrome", () => {
 
     expect(searchCompanies).toHaveBeenCalledWith("OA", { refresh: false });
   });
+
+  it("runs an immediate autocomplete lookup before SEC resolve on fast submit", async () => {
+    searchCompanies.mockResolvedValue({
+      query: "MSFT",
+      results: [
+        {
+          ticker: "MSFT",
+          cik: "0000789019",
+          name: "Microsoft Corp.",
+          sector: "Technology",
+          market_sector: "Technology",
+          market_industry: "Software",
+          regulated_entity: null,
+          strict_official_mode: false,
+          last_checked: null,
+          last_checked_financials: null,
+          last_checked_prices: null,
+          last_checked_insiders: null,
+          last_checked_institutional: null,
+          last_checked_filings: null,
+          earnings_last_checked: null,
+          cache_state: "fresh",
+        },
+      ],
+      refresh: { triggered: false, reason: "fresh", ticker: "MSFT", job_id: null },
+    });
+
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    const searchInput = screen.getAllByLabelText("Search company or ticker")[0];
+    fireEvent.change(searchInput, { target: { value: "MSFT" } });
+    const searchForm = searchInput.closest("form");
+    expect(searchForm).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.submit(searchForm as HTMLFormElement);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(resolveCompanyIdentifier).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith("/company/MSFT");
+  });
+
+  it("does not auto-select a fuzzy autocomplete result on fast submit", async () => {
+    searchCompanies.mockResolvedValue({
+      query: "NET",
+      results: [
+        {
+          ticker: "NFLX",
+          cik: "0001065280",
+          name: "NETFLIX INC",
+          sector: "Services-Video Tape Rental",
+          market_sector: "Communication Services",
+          market_industry: "Entertainment",
+          regulated_entity: null,
+          strict_official_mode: false,
+          last_checked: null,
+          last_checked_financials: null,
+          last_checked_prices: null,
+          last_checked_insiders: null,
+          last_checked_institutional: null,
+          last_checked_filings: null,
+          earnings_last_checked: null,
+          cache_state: "stale",
+        },
+      ],
+      refresh: { triggered: false, reason: "none", ticker: "NET", job_id: null },
+    });
+    resolveCompanyIdentifier.mockResolvedValue({ resolved: true, ticker: "NET", name: "Cloudflare, Inc.", error: null });
+
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    const searchInput = screen.getAllByLabelText("Search company or ticker")[0];
+    fireEvent.change(searchInput, { target: { value: "NET" } });
+    const searchForm = searchInput.closest("form");
+    expect(searchForm).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.submit(searchForm as HTMLFormElement);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(resolveCompanyIdentifier).toHaveBeenCalledWith("NET");
+    expect(push).toHaveBeenCalledWith("/company/NET");
+  });
 });

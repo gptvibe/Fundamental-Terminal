@@ -894,6 +894,7 @@ def test_activity_overview_route_includes_registry_backed_provenance(monkeypatch
             "capital_filings": [],
         },
     )
+    monkeypatch.setattr(main_module, "_load_snapshot_backed_activity_overview_response", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module,
         "get_cached_market_context_status",

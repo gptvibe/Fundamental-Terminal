@@ -2539,6 +2539,8 @@ export interface JobStatusEvent {
   message: string;
   status: "queued" | "running" | "completed" | "failed";
   level: "info" | "success" | "error";
+  queue_position?: number;
+  jobs_ahead?: number;
 }
 
 export interface ConsoleEntry {
@@ -2553,6 +2555,8 @@ export interface ConsoleEntry {
   level: "info" | "success" | "error";
   status: "queued" | "running" | "completed" | "failed";
   source: "backend" | "client";
+  queue_position?: number;
+  jobs_ahead?: number;
 }
 
 export interface Form144FilingPayload {

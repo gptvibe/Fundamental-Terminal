@@ -156,7 +156,9 @@ export function useJobStream(jobId: string | null | undefined) {
         message: event.message,
         level: event.level,
         status: event.status,
-        source: "backend"
+        source: "backend",
+        queue_position: event.queue_position,
+        jobs_ahead: event.jobs_ahead,
       })),
     [events]
   );

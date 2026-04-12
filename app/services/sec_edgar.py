@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import re
@@ -45,7 +46,7 @@ from app.services.oil_scenario_overlay import refresh_company_oil_scenario_overl
 from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, collect_regulated_financial_statements
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.sec_sic import resolve_sec_sic_profile
-from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
+from app.services.refresh_state import cache_state_for_dataset, get_dataset_state, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
 from app.services.status_stream import JobReporter
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ FILING_PARSER_STATEMENT_TYPE = "filing_parser"
 RESTATEMENT_TRACKED_FORMS = {"10-K", "10-Q"}
 RECONCILIATION_METRICS = ("revenue", "net_income", "operating_income")
 RECONCILIATION_SUPPORTED_FORMS = SUPPORTED_PARSER_FORMS & RESTATEMENT_TRACKED_FORMS
+FINANCIALS_REFRESH_FINGERPRINT_VERSION = "financials-refresh-fingerprint-v1"
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -1814,6 +1816,7 @@ class EdgarIngestionService:
         parsed_filing_insights: list[ParsedFilingInsight],
         checked_at: datetime,
         reporter: JobReporter,
+        payload_version_hash: str | None = None,
     ) -> int:
         reporter.step("normalize", "Normalizing XBRL...")
         normalized_statements = self.normalizer.normalize(
@@ -1857,7 +1860,7 @@ class EdgarIngestionService:
             parsed_insights=parsed_filing_insights,
             checked_at=checked_at,
         )
-        _touch_company_statements(session, company.id, checked_at)
+        _touch_company_statements(session, company.id, checked_at, payload_version_hash=payload_version_hash)
         precompute_core_models(session, company.id, reporter=reporter)
         return statements_written + parsed_statements_written
 
@@ -2418,11 +2421,7 @@ class EdgarIngestionService:
         reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
         filing_index = self.client.build_filing_index(submissions)
         companyfacts = self.client.get_companyfacts(company_identity.cik)
-        reporter.step("filing", "Parsing filing reports...")
-        parsed_filing_insights = self.filing_parser.parse_financial_insights(
-            cik=company_identity.cik,
-            filing_index=filing_index,
-        )
+        financials_fingerprint = _build_financials_refresh_fingerprint(companyfacts, filing_index)
         sec_market_profile = resolve_sec_sic_profile(submissions.get("sic"), submissions.get("sicDescription") or company_identity.sector)
         try:
             if settings.strict_official_mode:
@@ -2455,15 +2454,38 @@ class EdgarIngestionService:
         get_engine()
         with SessionLocal() as session:
             company = _upsert_company(session, enriched_identity)
-            statements_written = self.refresh_statements(
-                session=session,
-                company=company,
-                filing_index=filing_index,
-                companyfacts=companyfacts,
-                parsed_filing_insights=parsed_filing_insights,
-                checked_at=checked_at,
-                reporter=reporter,
+            statements_written = 0
+            financials_state = get_dataset_state(session, company.id, "financials")
+            can_reuse_financials = (
+                not policy.force
+                and financials_state is not None
+                and financials_state.payload_version_hash == financials_fingerprint
             )
+            if can_reuse_financials:
+                reporter.step("normalize", "SEC financial inputs unchanged; reusing cached normalized statements.")
+                _touch_company_statements(
+                    session,
+                    company.id,
+                    checked_at,
+                    payload_version_hash=financials_fingerprint,
+                    invalidate_hot_cache=False,
+                )
+            else:
+                reporter.step("filing", "Parsing filing reports...")
+                parsed_filing_insights = self.filing_parser.parse_financial_insights(
+                    cik=company_identity.cik,
+                    filing_index=filing_index,
+                )
+                statements_written = self.refresh_statements(
+                    session=session,
+                    company=company,
+                    filing_index=filing_index,
+                    companyfacts=companyfacts,
+                    parsed_filing_insights=parsed_filing_insights,
+                    checked_at=checked_at,
+                    reporter=reporter,
+                    payload_version_hash=financials_fingerprint,
+                )
             session.commit()
 
             insider_outcome = DatasetRefreshOutcome()
@@ -4333,7 +4355,14 @@ def _change_direction(previous_value: Any, current_value: Any) -> str:
     return "changed"
 
 
-def _touch_company_statements(session: Session, company_id: int, checked_at: datetime) -> None:
+def _touch_company_statements(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+    invalidate_hot_cache: bool = True,
+) -> None:
     statement = (
         update(FinancialStatement)
         .where(
@@ -4343,7 +4372,43 @@ def _touch_company_statements(session: Session, company_id: int, checked_at: dat
         .values(last_checked=checked_at)
     )
     session.execute(statement)
-    mark_dataset_checked(session, company_id, "financials", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "financials",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=invalidate_hot_cache,
+    )
+
+
+def _build_financials_refresh_fingerprint(
+    companyfacts: dict[str, Any],
+    filing_index: dict[str, FilingMetadata],
+) -> str:
+    payload = {
+        "version": FINANCIALS_REFRESH_FINGERPRINT_VERSION,
+        "companyfacts": companyfacts,
+        "filings": [
+            {
+                "accession_number": metadata.accession_number,
+                "form": metadata.form,
+                "filing_date": metadata.filing_date.isoformat() if metadata.filing_date else None,
+                "report_date": metadata.report_date.isoformat() if metadata.report_date else None,
+                "acceptance_datetime": metadata.acceptance_datetime.isoformat() if metadata.acceptance_datetime else None,
+                "primary_document": metadata.primary_document,
+                "primary_doc_description": metadata.primary_doc_description,
+            }
+            for metadata in sorted(
+                filing_index.values(),
+                key=lambda item: (item.filing_date or date.min, item.accession_number),
+                reverse=True,
+            )
+        ],
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:32]
 
 
 def _new_accumulator(

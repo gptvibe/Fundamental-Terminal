@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -67,7 +69,7 @@ def test_shared_status_broker_persists_jobs_and_prevents_duplicates(monkeypatch)
     assert next_job_id != job_id
 
 
-def test_shared_status_broker_claims_newest_job_first(monkeypatch) -> None:
+def test_shared_status_broker_claims_oldest_job_first(monkeypatch) -> None:
     _configure_sqlite_store(monkeypatch)
     broker = status_stream.SharedStatusBroker(poll_interval_seconds=0.01)
 
@@ -77,6 +79,38 @@ def test_shared_status_broker_claims_newest_job_first(monkeypatch) -> None:
     claimed = broker.claim_next_job(worker_id="worker-1")
 
     assert claimed is not None
-    assert claimed.job_id == newer_job_id
-    assert claimed.ticker == "MSFT"
-    assert claimed.job_id != older_job_id
+    assert claimed.job_id == older_job_id
+    assert claimed.ticker == "AAPL"
+    assert claimed.job_id != newer_job_id
+
+
+def test_shared_status_broker_formats_jobs_ahead_for_queued_job_events(monkeypatch) -> None:
+    _configure_sqlite_store(monkeypatch)
+    broker = status_stream.SharedStatusBroker(poll_interval_seconds=0.01)
+
+    first_job_id = broker.create_job(ticker="AAPL", kind="refresh", dataset="company_refresh", force=False)
+    broker.create_job(ticker="MSFT", kind="refresh", dataset="company_refresh", force=False)
+    queued_job_id = broker.create_job(ticker="NET", kind="refresh", dataset="company_refresh", force=False)
+
+    queued_event = broker.list_events(queued_job_id)[0]
+    initial_payload = json.loads(broker.format_sse(queued_job_id, queued_event).split("data: ", 1)[1])
+
+    assert initial_payload["queue_position"] == 3
+    assert initial_payload["jobs_ahead"] == 2
+
+    claimed = broker.claim_next_job(worker_id="worker-1")
+
+    assert claimed is not None
+    assert claimed.job_id == first_job_id
+
+    running_ahead_payload = json.loads(broker.format_sse(queued_job_id, queued_event).split("data: ", 1)[1])
+
+    assert running_ahead_payload["queue_position"] == 3
+    assert running_ahead_payload["jobs_ahead"] == 2
+
+    broker.complete(first_job_id, expected_claim_token=claimed.claim_token)
+
+    updated_payload = json.loads(broker.format_sse(queued_job_id, queued_event).split("data: ", 1)[1])
+
+    assert updated_payload["queue_position"] == 2
+    assert updated_payload["jobs_ahead"] == 1

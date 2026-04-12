@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from datetime import date
 from types import SimpleNamespace
 
 import pytest
@@ -12,12 +13,17 @@ class _FakeSession:
     def __init__(self) -> None:
         self.commit_count = 0
         self.rollback_count = 0
+        self.statements = []
 
     def commit(self) -> None:
         self.commit_count += 1
 
     def rollback(self) -> None:
         self.rollback_count += 1
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        return SimpleNamespace(scalar_one_or_none=lambda: None)
 
 
 class _SessionFactory:
@@ -308,6 +314,7 @@ def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):
     monkeypatch.setattr(service, "refresh_capital_markets", lambda **_kwargs: 9)
     monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 0)
     monkeypatch.setattr(service, "refresh_prices", lambda **_kwargs: 10)
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
@@ -358,6 +365,89 @@ def test_refresh_prices_marks_prices_checked_when_symbol_has_no_yahoo_history(mo
     assert written == 0
     assert touched == [(company.id, checked_at)]
     assert reporter.steps[-1] == ("market", "Yahoo Finance has no chart history for OXYWS. Marking prices checked without cached bars.")
+
+
+def test_refresh_company_reuses_cached_financials_when_sec_inputs_are_unchanged(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+
+    filing_index = {
+        "0001": sec_edgar.FilingMetadata(
+            accession_number="0001",
+            form="10-K",
+            filing_date=date(2026, 1, 31),
+            report_date=date(2025, 12, 31),
+            primary_document="annual.htm",
+            primary_doc_description="Annual report",
+        )
+    }
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda identifier: SimpleNamespace(
+            cik="0000789019",
+            ticker=identifier,
+            name="Microsoft",
+            exchange="NASDAQ",
+            sector="Technology",
+            sic="3571",
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda *_args, **_kwargs: {
+            "tickers": ["MSFT"],
+            "name": "Microsoft",
+            "exchanges": ["NASDAQ"],
+            "sicDescription": "Technology",
+            "sic": "3571",
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: filing_index, raising=False)
+    monkeypatch.setattr(service.client, "get_companyfacts", lambda *_args, **_kwargs: {"facts": {"us-gaap": {}}}, raising=False)
+    monkeypatch.setattr(service.market_data, "get_market_profile", lambda *_args, **_kwargs: sec_edgar.MarketProfile(sector="Technology", industry="Software"), raising=False)
+    monkeypatch.setattr(sec_edgar, "_build_financials_refresh_fingerprint", lambda *_args, **_kwargs: "fingerprint-1")
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: SimpleNamespace(payload_version_hash="fingerprint-1"))
+    monkeypatch.setattr(sec_edgar, "_upsert_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(
+        service.filing_parser,
+        "parse_financial_insights",
+        lambda *_args, **_kwargs: pytest.fail("filing parser should be skipped when financial inputs are unchanged"),
+        raising=False,
+    )
+    monkeypatch.setattr(service, "refresh_statements", lambda **_kwargs: pytest.fail("statement normalization should be skipped when financial inputs are unchanged"))
+    monkeypatch.setattr(service, "refresh_insiders", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_form144", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_institutional", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_beneficial_ownership", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_earnings", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_events", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_capital_markets", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_prices", lambda **_kwargs: 0)
+    monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
+
+    result = service.refresh_company("MSFT", reporter=reporter)
+
+    assert result.status == "fetched"
+    assert result.fetched_from_sec is True
+    assert result.statements_written == 0
+    assert ("normalize", "SEC financial inputs unchanged; reusing cached normalized statements.") in reporter.steps
+    assert reporter.completed == ["Refresh and compute complete."]
 
 
 def test_refresh_prices_marks_prices_checked_when_yahoo_returns_no_bars(monkeypatch):

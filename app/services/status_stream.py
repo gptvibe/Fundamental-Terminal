@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import settings
@@ -42,7 +42,7 @@ class JobEvent:
     status: JobState
     level: JobLevel = "info"
 
-    def to_payload(self, job_id: str) -> dict[str, str | int]:
+    def to_payload(self, job_id: str) -> dict[str, str | int | None]:
         return {
             "job_id": job_id,
             "trace_id": job_id,
@@ -377,7 +377,7 @@ class SharedStatusBroker:
             statement: Select[tuple[RefreshJob]] = (
                 select(RefreshJob)
                 .where(RefreshJob.status == "queued")
-                .order_by(RefreshJob.requested_at.desc(), RefreshJob.id.desc())
+                .order_by(RefreshJob.requested_at.asc(), RefreshJob.id.asc())
                 .limit(1)
                 .with_for_update(skip_locked=True)
             )
@@ -517,7 +517,9 @@ class SharedStatusBroker:
         return await self._run_async(lambda session: self._list_events_in_session(session, job_id, after_sequence=after_sequence))
 
     def format_sse(self, job_id: str, event: JobEvent) -> str:
-        payload = json.dumps(event.to_payload(job_id))
+        payload_data = event.to_payload(job_id)
+        payload_data.update(self._build_queue_payload(job_id, event))
+        payload = json.dumps(payload_data)
         return f"event: status\ndata: {payload}\n\n"
 
     def has_job(self, job_id: str) -> bool:
@@ -585,6 +587,26 @@ class SharedStatusBroker:
                     continue
         except asyncio.CancelledError:
             return
+
+    def _build_queue_payload(self, job_id: str, event: JobEvent) -> dict[str, int]:
+        if event.status != "queued":
+            return {}
+
+        try:
+            with self._sync_session_scope() as session:
+                queued_snapshot = self._queued_job_snapshot_in_session(session, job_id)
+                if queued_snapshot is None:
+                    return {}
+
+                requested_at, job_pk = queued_snapshot
+                jobs_ahead = self._count_jobs_ahead_in_session(session, requested_at=requested_at, job_pk=job_pk)
+        except SQLAlchemyError:
+            return {}
+
+        return {
+            "queue_position": jobs_ahead + 1,
+            "jobs_ahead": jobs_ahead,
+        }
 
     def _job_snapshot(self, job_id: str) -> tuple[str, int] | None:
         try:
@@ -732,6 +754,21 @@ class SharedStatusBroker:
         if row is None:
             return None
         return str(row[0]), int(row[1])
+
+    def _queued_job_snapshot_in_session(self, session, job_id: str) -> tuple[datetime, int] | None:
+        statement = select(RefreshJob.requested_at, RefreshJob.id, RefreshJob.status).where(RefreshJob.job_id == job_id)
+        row = session.execute(statement).one_or_none()
+        if row is None or row[2] != "queued":
+            return None
+        return row[0], int(row[1])
+
+    def _count_jobs_ahead_in_session(self, session, *, requested_at: datetime, job_pk: int) -> int:
+        statement = select(func.count()).select_from(RefreshJob).where(
+            RefreshJob.status.in_(tuple(ACTIVE_JOB_STATES)),
+            (RefreshJob.requested_at < requested_at)
+            | ((RefreshJob.requested_at == requested_at) & (RefreshJob.id < job_pk)),
+        )
+        return int(session.execute(statement).scalar_one())
 
     def _get_active_job(self, session, *, ticker: str, kind: str, dataset: str) -> RefreshJob | None:
         statement: Select[tuple[RefreshJob]] = (

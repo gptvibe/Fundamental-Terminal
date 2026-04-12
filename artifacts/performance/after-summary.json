@@ -1,0 +1,449 @@
+{
+  "baseline_file": "scripts/performance_regression_baseline.json",
+  "evaluation": {
+    "failure_count": 1,
+    "failures": [
+      {
+        "case": "peers_payload",
+        "message": "observed 4.59, explicit budget 4.34",
+        "metric": "latency_ms.p50",
+        "suite": "hot_endpoints"
+      }
+    ],
+    "status": "regression"
+  },
+  "generated_at": "2026-04-12T07:28:22.206676+00:00",
+  "schema_version": "performance_regression_summary_v1",
+  "suites": [
+    {
+      "config": {
+        "rounds": 12,
+        "ticker": "AAPL"
+      },
+      "results": [
+        {
+          "_raw_durations_ms": [
+            3.0175,
+            3.8011,
+            3.3841,
+            3.3525,
+            3.948,
+            3.0104,
+            3.0797,
+            3.9456,
+            3.0718,
+            3.8233,
+            3.1202,
+            3.102
+          ],
+          "_raw_payload_sizes": [
+            766,
+            766,
+            766,
+            766,
+            766,
+            766,
+            766,
+            766,
+            766,
+            766,
+            766,
+            766
+          ],
+          "_raw_status_codes": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ],
+          "latency_ms": {
+            "avg": 3.39,
+            "max": 3.95,
+            "min": 3.01,
+            "p50": 3.24,
+            "p95": 3.95
+          },
+          "name": "company_search",
+          "path": "/api/companies/search?query=AAPL&refresh=false",
+          "payload_bytes": {
+            "avg": 766.0,
+            "max": 766,
+            "min": 766
+          },
+          "request_count": 12,
+          "status_codes": [
+            200
+          ]
+        },
+        {
+          "_raw_durations_ms": [
+            3.5979,
+            3.3083,
+            3.6465,
+            3.6505,
+            3.5197,
+            4.1262,
+            3.1066,
+            3.9248,
+            4.1974,
+            7.6826,
+            5.2189,
+            4.4737
+          ],
+          "_raw_payload_sizes": [
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040,
+            4040
+          ],
+          "_raw_status_codes": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ],
+          "latency_ms": {
+            "avg": 4.2,
+            "max": 7.68,
+            "min": 3.11,
+            "p50": 3.79,
+            "p95": 5.22
+          },
+          "name": "financials_payload",
+          "path": "/api/companies/AAPL/financials",
+          "payload_bytes": {
+            "avg": 4040.0,
+            "max": 4040,
+            "min": 4040
+          },
+          "request_count": 12,
+          "status_codes": [
+            200
+          ]
+        },
+        {
+          "_raw_durations_ms": [
+            4.6,
+            4.8037,
+            4.2773,
+            4.2261,
+            4.161,
+            5.7004,
+            3.5714,
+            3.7833,
+            3.4914,
+            3.3539,
+            3.3001,
+            3.7668
+          ],
+          "_raw_payload_sizes": [
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158,
+            5158
+          ],
+          "_raw_status_codes": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ],
+          "latency_ms": {
+            "avg": 4.09,
+            "max": 5.7,
+            "min": 3.3,
+            "p50": 3.97,
+            "p95": 4.8
+          },
+          "name": "models_payload",
+          "path": "/api/companies/AAPL/models?model=ratios%2Cdupont%2Cdcf%2Creverse_dcf%2Croic%2Ccapital_allocation",
+          "payload_bytes": {
+            "avg": 5158.0,
+            "max": 5158,
+            "min": 5158
+          },
+          "request_count": 12,
+          "status_codes": [
+            200
+          ]
+        },
+        {
+          "_raw_durations_ms": [
+            3.6991,
+            6.1125,
+            5.5484,
+            6.7088,
+            5.1433,
+            5.325,
+            6.0044,
+            3.5032,
+            3.668,
+            3.849,
+            3.16,
+            4.0326
+          ],
+          "_raw_payload_sizes": [
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631,
+            3631
+          ],
+          "_raw_status_codes": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ],
+          "latency_ms": {
+            "avg": 4.73,
+            "max": 6.71,
+            "min": 3.16,
+            "p50": 4.59,
+            "p95": 6.11
+          },
+          "name": "peers_payload",
+          "path": "/api/companies/AAPL/peers",
+          "payload_bytes": {
+            "avg": 3631.0,
+            "max": 3631,
+            "min": 3631
+          },
+          "request_count": 12,
+          "status_codes": [
+            200
+          ]
+        },
+        {
+          "_raw_durations_ms": [
+            1.6209,
+            1.2256,
+            1.2094,
+            1.2413,
+            1.4119,
+            1.6983,
+            1.6582,
+            1.4933,
+            1.6415,
+            1.6218,
+            1.8966,
+            1.5814
+          ],
+          "_raw_payload_sizes": [
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615,
+            3615
+          ],
+          "_raw_status_codes": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ],
+          "latency_ms": {
+            "avg": 1.53,
+            "max": 1.9,
+            "min": 1.21,
+            "p50": 1.6,
+            "p95": 1.7
+          },
+          "name": "metrics_timeseries_payload",
+          "path": "/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=12",
+          "payload_bytes": {
+            "avg": 3615.0,
+            "max": 3615,
+            "min": 3615
+          },
+          "request_count": 12,
+          "status_codes": [
+            200
+          ]
+        }
+      ],
+      "suite": "hot_endpoints",
+      "title": "Warm-Cache Hot Read Routes"
+    },
+    {
+      "config": {
+        "concurrency": 6,
+        "requests_per_worker": 4,
+        "ticker": "AAPL",
+        "total_requests": 24
+      },
+      "results": [
+        {
+          "_raw_durations_ms": [
+            6.2225,
+            5.7586,
+            17.0545,
+            8.8669,
+            4.711,
+            5.3461,
+            12.698,
+            10.0511,
+            23.3755,
+            10.6669,
+            6.1066,
+            5.9355,
+            6.7386,
+            19.5577,
+            8.8107,
+            4.3797,
+            8.2811,
+            14.8048,
+            9.5165,
+            5.9061,
+            8.1455,
+            13.1292,
+            9.9865,
+            6.2912
+          ],
+          "_raw_payload_sizes": [
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640,
+            10640
+          ],
+          "_raw_status_codes": [
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200,
+            200
+          ],
+          "latency_ms": {
+            "avg": 9.68,
+            "max": 23.38,
+            "min": 4.38,
+            "p50": 8.55,
+            "p95": 19.56
+          },
+          "name": "company_brief_ready",
+          "path": "/api/companies/AAPL/brief",
+          "payload_bytes": {
+            "avg": 10640.0,
+            "max": 10640,
+            "min": 10640
+          },
+          "request_count": 24,
+          "status_codes": [
+            200
+          ]
+        }
+      ],
+      "suite": "company_brief_concurrency",
+      "title": "Company Brief Simulated Concurrency"
+    }
+  ]
+}

@@ -50,6 +50,7 @@ import type {
   CompanyBeneficialOwnershipSummaryResponse,
   CompanyCapitalMarketsSummaryResponse,
   CompanyCapitalStructureResponse,
+  ConsoleEntry,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsSummaryResponse,
   EquityClaimRiskSummaryPayload,
@@ -237,6 +238,7 @@ export default function CompanyResearchBriefPage() {
     error,
     refreshing,
     refreshState,
+    activeJobId,
     consoleEntries,
     connectionState,
     queueRefresh,
@@ -390,6 +392,20 @@ export default function CompanyResearchBriefPage() {
   const bootstrapFreeCashFlowValue = findBriefSummaryCardValue(briefData.summaryCards, "Free Cash Flow");
   const bootstrapTopSegmentValue = findBriefSummaryCardValue(briefData.summaryCards, "Top Segment");
   const bootstrapLatestFilingValue = findBriefSummaryCardValue(briefData.summaryCards, "Latest Filing");
+  const activeRefreshEntry = useMemo(() => {
+    if (!activeJobId) {
+      return null;
+    }
+
+    for (let index = consoleEntries.length - 1; index >= 0; index -= 1) {
+      const entry = consoleEntries[index];
+      if (entry.source === "backend" && entry.job_id === activeJobId) {
+        return entry;
+      }
+    }
+
+    return null;
+  }, [activeJobId, consoleEntries]);
   const initialCompanyLoad =
     loading &&
     !pageCompany &&
@@ -400,6 +416,11 @@ export default function CompanyResearchBriefPage() {
     !briefData.activityOverview.data &&
     !error &&
     !briefData.error;
+  const refreshQueueDetailLine = useMemo(() => buildRefreshQueueDetailLine(activeRefreshEntry), [activeRefreshEntry]);
+  const initialCompanyLoadMessage = useMemo(
+    () => buildInitialCompanyLoadMessage(initialCompanyLoad, activeRefreshEntry, briefData.buildState, briefData.buildStatus),
+    [activeRefreshEntry, briefData.buildState, briefData.buildStatus, initialCompanyLoad]
+  );
 
   async function handleExportResearchPackage() {
     try {
@@ -513,6 +534,7 @@ export default function CompanyResearchBriefPage() {
           lastChecked: pageCompany?.last_checked ?? null,
           errors: [error, briefData.error],
           detailLines: [
+            refreshQueueDetailLine,
             `Annual filings cached: ${annualStatements.length.toLocaleString()}`,
             `Price history points: ${priceHistory.length.toLocaleString()}`,
             `Current alerts: ${latestAlertCount.toLocaleString()}`,
@@ -545,13 +567,7 @@ export default function CompanyResearchBriefPage() {
           ]}
           fallbackLabels={fallbackLabels}
           loading={initialCompanyLoad}
-          loadingMessage={
-            initialCompanyLoad
-              ? "No cached company snapshot exists yet. Fetching the first overview now."
-              : briefData.buildState !== "ready"
-                ? briefData.buildStatus
-                : null
-          }
+          loadingMessage={initialCompanyLoadMessage}
         />
       </CompanyResearchHeader>
 
@@ -1752,6 +1768,59 @@ function ResearchBriefHeroSummary({
       </div>
     </div>
   );
+}
+
+function buildInitialCompanyLoadMessage(
+  initialCompanyLoad: boolean,
+  activeRefreshEntry: ConsoleEntry | null,
+  buildState: ResearchBriefBuildState,
+  buildStatus: string | null,
+): string | null {
+  if (!initialCompanyLoad) {
+    return buildState !== "ready" ? buildStatus : null;
+  }
+
+  if (activeRefreshEntry?.status === "queued") {
+    const jobsAhead = activeRefreshEntry.jobs_ahead;
+    if (typeof jobsAhead === "number") {
+      if (jobsAhead <= 0) {
+        return "No cached company snapshot exists yet. Your first overview is next in the refresh queue.";
+      }
+
+      const plural = jobsAhead === 1 ? "" : "es";
+      return `No cached company snapshot exists yet. Queued behind ${jobsAhead.toLocaleString()} other refresh${plural} before the first overview starts.`;
+    }
+
+    return "No cached company snapshot exists yet. The first overview is queued and will start shortly.";
+  }
+
+  if (activeRefreshEntry?.status === "running") {
+    return "No cached company snapshot exists yet. Building the first overview now.";
+  }
+
+  return "No cached company snapshot exists yet. Fetching the first overview now.";
+}
+
+function buildRefreshQueueDetailLine(activeRefreshEntry: ConsoleEntry | null): string | null {
+  if (activeRefreshEntry?.status === "queued") {
+    const jobsAhead = activeRefreshEntry.jobs_ahead;
+    if (typeof jobsAhead === "number") {
+      if (jobsAhead <= 0) {
+        return "Refresh queue: next in line for the worker.";
+      }
+
+      const plural = jobsAhead === 1 ? "" : "es";
+      return `Refresh queue: ${jobsAhead.toLocaleString()} refresh${plural} ahead before this company snapshot starts.`;
+    }
+
+    return "Refresh queue: waiting for the worker to claim this company refresh.";
+  }
+
+  if (activeRefreshEntry?.status === "running") {
+    return "Refresh queue: worker claimed this company and the first snapshot is building now.";
+  }
+
+  return null;
 }
 
 function ResearchBriefSectionNav({ activeSectionId }: { activeSectionId: string }) {

@@ -12,7 +12,7 @@ import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { ACTIVE_JOB_EVENT, clearStoredActiveJob, readStoredActiveJob, type StoredActiveJob } from "@/lib/active-job";
 import { getGlobalMarketContext, getSourceRegistry, getWatchlistSummary, resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
-import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
+import { findExactSearchMatch, normalizeSearchText } from "@/lib/company-search";
 import { formatDate, formatPercent, titleCase } from "@/lib/format";
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import {
@@ -71,6 +71,7 @@ export default function HomePage() {
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [hasNavigatedSuggestions, setHasNavigatedSuggestions] = useState(false);
   const [recentJob, setRecentJob] = useState<StoredActiveJob | null>(null);
   const [macroContext, setMacroContext] = useState<CompanyMarketContextResponse | null>(null);
   const [macroError, setMacroError] = useState<string | null>(null);
@@ -255,7 +256,8 @@ export default function HomePage() {
       setError(null);
       setLoading(false);
       setActiveSuggestionIndex(0);
-      return;
+      setHasNavigatedSuggestions(false);
+      return null;
     }
 
     try {
@@ -271,11 +273,14 @@ export default function HomePage() {
       );
       setData(response);
       setActiveSuggestionIndex(0);
+      setHasNavigatedSuggestions(false);
+      return response;
     } catch (nextError) {
       if (signal?.aborted) {
-        return;
+        return null;
       }
       setError(nextError instanceof Error ? nextError.message : "Search failed");
+      return null;
     } finally {
       if (!signal?.aborted) {
         setLoading(false);
@@ -309,17 +314,27 @@ export default function HomePage() {
   function selectSuggestion(result: CompanyPayload, destination: "company" | "models" = "company") {
     setQuery(result.ticker);
     setAutocompleteOpen(false);
+    setHasNavigatedSuggestions(false);
     goToTicker(result.ticker, destination, result);
   }
 
   async function openSearch(destination: "company" | "models" = "company") {
-    const selectedSuggestion = getPreferredSuggestion(autocompleteResults, trimmedSearchText, activeSuggestionIndex);
+    const selectedSuggestion = hasNavigatedSuggestions
+      ? (autocompleteResults[activeSuggestionIndex] ?? null)
+      : findExactSearchMatch(autocompleteResults, trimmedSearchText);
     if (selectedSuggestion) {
       selectSuggestion(selectedSuggestion, destination);
       return;
     }
 
     if (!trimmedSearchText) {
+      return;
+    }
+
+    const latestSearchResponse = data?.query === trimmedSearchText ? data : await loadSearch(trimmedSearchText);
+    const resolvedSuggestion = findExactSearchMatch(latestSearchResponse?.results ?? [], trimmedSearchText);
+    if (resolvedSuggestion) {
+      selectSuggestion(resolvedSuggestion, destination);
       return;
     }
 
@@ -367,6 +382,7 @@ export default function HomePage() {
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setAutocompleteOpen(true);
+      setHasNavigatedSuggestions(true);
       setActiveSuggestionIndex((current) => (autocompleteOpen ? Math.min(current + 1, autocompleteResults.length - 1) : 0));
       return;
     }
@@ -374,6 +390,7 @@ export default function HomePage() {
     if (event.key === "ArrowUp") {
       event.preventDefault();
       setAutocompleteOpen(true);
+      setHasNavigatedSuggestions(true);
       setActiveSuggestionIndex((current) => (autocompleteOpen ? Math.max(current - 1, 0) : 0));
       return;
     }
@@ -414,6 +431,7 @@ export default function HomePage() {
                     onChange={(event) => {
                       setQuery(event.target.value);
                       setAutocompleteOpen(true);
+                      setHasNavigatedSuggestions(false);
                       setInvalidMessage(null);
                     }}
                     onFocus={() => {
@@ -440,7 +458,10 @@ export default function HomePage() {
                       results={autocompleteResults}
                       loading={loading}
                       activeIndex={activeSuggestionIndex}
-                      onHover={setActiveSuggestionIndex}
+                      onHover={(index) => {
+                        setHasNavigatedSuggestions(true);
+                        setActiveSuggestionIndex(index);
+                      }}
                       onSelect={(result) => selectSuggestion(result)}
                     />
                   ) : null}

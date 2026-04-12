@@ -189,9 +189,7 @@ ALLOWED_SEC_EMBED_MIME_PREFIXES = ("text/html", "application/html", "application
 ALLOWED_SEC_EMBED_EXTENSIONS = (".htm", ".html", ".xhtml", ".txt")
 MAX_SEC_EMBED_BYTES = 5 * 1024 * 1024
 FILINGS_TIMELINE_TTL_SECONDS = settings.sec_filings_timeline_ttl_seconds
-SEARCH_RESPONSE_TTL_SECONDS = 60
 _search_response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
-_search_response_cache_lock = threading.Lock()
 
 
 class _HotCacheCompatProxy:
@@ -203,6 +201,7 @@ _hot_response_cache = _HotCacheCompatProxy()
 
 HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
     "search": "search-response-v1",
+    "resolve": "resolve-response-v1",
     "financials": "financials-response-v1",
     "capital_structure": "capital-structure-response-v1",
     "models": "models-response-v1",
@@ -258,7 +257,7 @@ async def cache_metrics() -> dict[str, Any]:
     return {
         "search_cache": {
             "entries": len(_search_response_cache),
-            "ttl_seconds": SEARCH_RESPONSE_TTL_SECONDS,
+            "ttl_seconds": 0,
         },
         "hot_cache": await shared_hot_response_cache.snapshot_metrics(),
     }
@@ -392,7 +391,6 @@ async def search_companies(
     if not refresh:
         cached_response = _get_cached_search_response(normalized_query)
         if cached_response is not None:
-            await _store_hot_cached_payload(hot_key, cached_response, tags=hot_tags)
             not_modified = _apply_conditional_headers(
                 request,
                 http_response,
@@ -449,8 +447,6 @@ async def search_companies(
                 results=[_serialize_company(snapshot) for snapshot in snapshots],
                 refresh=refresh_state,
             )
-            if not refresh:
-                _store_cached_search_response(normalized_query, payload)
             return payload
 
         payload = await _fill_hot_cached_payload(
@@ -471,27 +467,52 @@ async def search_companies(
 
 
 @app.get("/api/companies/resolve", response_model=CompanyResolutionResponse)
-def resolve_company_identifier(query: str = Query(..., min_length=1), session: Session = Depends(get_db_session)) -> CompanyResolutionResponse:
+async def resolve_company_identifier(query: str = Query(..., min_length=1)) -> CompanyResolutionResponse:
     normalized_query = _normalize_search_query(query)
+    hot_key = f"resolve:{normalized_query}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=_normalize_ticker(normalized_query) if _looks_like_ticker(normalized_query) else None,
+        datasets=("financials",),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["resolve"],),
+    )
+    cached_hot = await _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        return CompanyResolutionResponse.model_validate(_decode_hot_cache_payload(cached_hot))
 
     client = EdgarClient()
     try:
         identity = client.resolve_company(normalized_query)
     except ValueError:
-        return CompanyResolutionResponse(query=normalized_query, resolved=False, error="not_found")
+        payload = CompanyResolutionResponse(query=normalized_query, resolved=False, error="not_found")
+        await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
+        return payload
     except Exception:
         logging.getLogger(__name__).exception("SEC company resolution failed for '%s'", normalized_query)
         return CompanyResolutionResponse(query=normalized_query, resolved=False, error="lookup_failed")
     finally:
         client.close()
 
-    return CompanyResolutionResponse(
+    async with _session_scope() as session:
+        canonical_ticker = await _run_with_session_binding(
+            session,
+            lambda sync_session: _resolve_canonical_ticker(sync_session, identity),
+        )
+
+    payload = CompanyResolutionResponse(
         query=normalized_query,
         resolved=True,
-        ticker=_resolve_canonical_ticker(session, identity) or identity.ticker,
+        ticker=canonical_ticker or identity.ticker,
         name=identity.name,
         error=None,
     )
+    if payload.ticker:
+        hot_tags = _build_hot_cache_tags(
+            ticker=payload.ticker,
+            datasets=("financials",),
+            schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["resolve"],),
+        )
+    await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
+    return payload
 
 
 @app.get("/api/screener/filters", response_model=OfficialScreenerMetadataResponse)
@@ -4329,23 +4350,8 @@ def _refresh_for_earnings_workspace(
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
-def _get_cached_search_response(query: str) -> CompanySearchResponse | None:
-    now = time.monotonic()
-    with _search_response_cache_lock:
-        cached = _search_response_cache.get(query)
-        if cached is None:
-            return None
-        expires_at, payload = cached
-        if expires_at <= now:
-            _search_response_cache.pop(query, None)
-            return None
-        return CompanySearchResponse.model_validate(payload)
-
-
-def _store_cached_search_response(query: str, response: CompanySearchResponse) -> None:
-    expires_at = time.monotonic() + SEARCH_RESPONSE_TTL_SECONDS
-    with _search_response_cache_lock:
-        _search_response_cache[query] = (expires_at, response.model_dump())
+def _get_cached_search_response(_query: str) -> CompanySearchResponse | None:
+    return None
 
 
 async def _get_hot_cached_payload(key: str) -> HotCacheLookup | None:

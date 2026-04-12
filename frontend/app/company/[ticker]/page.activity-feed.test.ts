@@ -44,8 +44,22 @@ vi.mock("@/components/layout/company-utility-rail", () => ({
 }));
 
 vi.mock("@/components/layout/company-research-header", () => ({
-  CompanyResearchHeader: ({ title, children }: { title: string; children?: React.ReactNode }) =>
-    React.createElement("header", null, React.createElement("h1", null, title), children),
+  CompanyResearchHeader: ({
+    title,
+    freshness,
+    children,
+  }: {
+    title: string;
+    freshness?: { detailLines?: Array<string | null | undefined> };
+    children?: React.ReactNode;
+  }) =>
+    React.createElement(
+      "header",
+      null,
+      React.createElement("h1", null, title),
+      (freshness?.detailLines ?? []).filter(Boolean).map((line) => React.createElement("p", { key: line }, line)),
+      children,
+    ),
   CompanyMetricGrid: ({ items }: { items: Array<{ label: string; value: string | null }> }) =>
     React.createElement(
       "div",
@@ -441,6 +455,50 @@ describe("CompanyResearchBriefPage", () => {
     expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
     expect(getCompanyEarningsSummary).not.toHaveBeenCalled();
   });
+
+  it("shows queue depth for cold-start refreshes that are still waiting on the worker", () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      data: {
+        provenance,
+        source_mix: sourceMix,
+        as_of: "2025-12-31",
+        last_refreshed_at: "2026-03-10T00:00:00Z",
+        confidence_flags: [],
+        company: null,
+        segment_analysis: null,
+      },
+      company: null,
+      financials: [],
+      annualStatements: [],
+      priceHistory: [],
+      fundamentalsTrendData: [],
+      latestFinancial: null,
+      loading: true,
+      activeJobId: "job-acme",
+      consoleEntries: [
+        {
+          id: "job-acme-1",
+          job_id: "job-acme",
+          trace_id: "job-acme",
+          ticker: "ACME",
+          kind: "refresh",
+          timestamp: "2026-03-10T00:00:00Z",
+          stage: "queued",
+          message: "Refresh queued for ACME",
+          level: "info",
+          status: "queued",
+          source: "backend",
+          queue_position: 3,
+          jobs_ahead: 2,
+        },
+      ],
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    expect(screen.getByText(/Queued behind 2 other refreshes before the first overview starts/i)).toBeTruthy();
+    expect(screen.getByText(/Refresh queue: 2 refreshes ahead before this company snapshot starts/i)).toBeTruthy();
+  });
 });
 
 function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
@@ -545,6 +603,7 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
     institutionalError: null,
     refreshing: false,
     refreshState: null,
+    activeJobId: null,
     consoleEntries: [],
     connectionState: "open",
     queueRefresh: vi.fn(),

@@ -9,7 +9,7 @@ import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplet
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { APP_TOAST_EVENT, type AppToastDetail, showAppToast } from "@/lib/app-toast";
-import { getPreferredSuggestion, normalizeSearchText } from "@/lib/company-search";
+import { findExactSearchMatch, normalizeSearchText } from "@/lib/company-search";
 import type { CompanyPayload } from "@/lib/types";
 
 interface AppChromeProps {
@@ -36,6 +36,7 @@ export function AppChrome({ children }: AppChromeProps) {
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
   const [autocompleteLoading, setAutocompleteLoading] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0);
+  const [hasNavigatedSuggestions, setHasNavigatedSuggestions] = useState(false);
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<AppToastDetail | null>(null);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -59,6 +60,7 @@ export function AppChrome({ children }: AppChromeProps) {
     setAutocompleteOpen(false);
     setAutocompleteResults([]);
     setActiveSuggestionIndex(0);
+    setHasNavigatedSuggestions(false);
     setInvalidMessage(null);
     setMobileSearchOpen(false);
   }, [pathname, routeTicker]);
@@ -152,6 +154,7 @@ export function AppChrome({ children }: AppChromeProps) {
       setAutocompleteResults([]);
       setAutocompleteLoading(false);
       setActiveSuggestionIndex(0);
+      setHasNavigatedSuggestions(false);
       return;
     }
 
@@ -167,6 +170,7 @@ export function AppChrome({ children }: AppChromeProps) {
 
         setAutocompleteResults(response.results);
         setActiveSuggestionIndex(0);
+        setHasNavigatedSuggestions(false);
       } catch {
         if (requestId !== searchRequestId.current) {
           return;
@@ -205,6 +209,7 @@ export function AppChrome({ children }: AppChromeProps) {
     setSearchText(normalized);
     setSearchDirty(false);
     setAutocompleteOpen(false);
+    setHasNavigatedSuggestions(false);
     setMobileSearchOpen(false);
     setInvalidMessage(null);
     router.push(`/company/${encodeURIComponent(normalized)}`);
@@ -214,14 +219,55 @@ export function AppChrome({ children }: AppChromeProps) {
     goToTicker(result.ticker);
   }
 
+  async function fetchImmediateAutocompleteResults(searchQuery: string): Promise<CompanyPayload[]> {
+    if (!searchQuery) {
+      setAutocompleteResults([]);
+      setAutocompleteLoading(false);
+      setActiveSuggestionIndex(0);
+      setHasNavigatedSuggestions(false);
+      return [];
+    }
+
+    const requestId = ++searchRequestId.current;
+    try {
+      setAutocompleteLoading(true);
+      const response = await searchCompanies(searchQuery, { refresh: false });
+      if (requestId !== searchRequestId.current) {
+        return [];
+      }
+      setAutocompleteResults(response.results);
+      setActiveSuggestionIndex(0);
+      setHasNavigatedSuggestions(false);
+      return response.results;
+    } catch {
+      if (requestId === searchRequestId.current) {
+        setAutocompleteResults([]);
+      }
+      return [];
+    } finally {
+      if (requestId === searchRequestId.current) {
+        setAutocompleteLoading(false);
+      }
+    }
+  }
+
   async function submitSearch() {
-    const selectedSuggestion = getPreferredSuggestion(autocompleteResults, trimmedSearchText, activeSuggestionIndex);
+    const selectedSuggestion = hasNavigatedSuggestions
+      ? (autocompleteResults[activeSuggestionIndex] ?? null)
+      : findExactSearchMatch(autocompleteResults, trimmedSearchText);
     if (selectedSuggestion) {
       selectSuggestion(selectedSuggestion);
       return;
     }
 
     if (!trimmedSearchText) {
+      return;
+    }
+
+    const immediateResults = await fetchImmediateAutocompleteResults(trimmedSearchText);
+    const resolvedSuggestion = findExactSearchMatch(immediateResults, trimmedSearchText);
+    if (resolvedSuggestion) {
+      selectSuggestion(resolvedSuggestion);
       return;
     }
 
@@ -257,6 +303,7 @@ export function AppChrome({ children }: AppChromeProps) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setAutocompleteOpen(true);
+      setHasNavigatedSuggestions(true);
       setActiveSuggestionIndex((current) => (autocompleteOpen ? Math.min(current + 1, autocompleteResults.length - 1) : 0));
       return;
     }
@@ -264,6 +311,7 @@ export function AppChrome({ children }: AppChromeProps) {
     if (event.key === "ArrowUp") {
       event.preventDefault();
       setAutocompleteOpen(true);
+      setHasNavigatedSuggestions(true);
       setActiveSuggestionIndex((current) => (autocompleteOpen ? Math.max(current - 1, 0) : 0));
       return;
     }
@@ -333,6 +381,7 @@ export function AppChrome({ children }: AppChromeProps) {
                     setSearchText(event.target.value);
                     setSearchDirty(true);
                     setAutocompleteOpen(true);
+                    setHasNavigatedSuggestions(false);
                     setInvalidMessage(null);
                   }}
                   onFocus={() => {
@@ -359,7 +408,10 @@ export function AppChrome({ children }: AppChromeProps) {
                     results={autocompleteResults}
                     loading={autocompleteLoading}
                     activeIndex={activeSuggestionIndex}
-                    onHover={setActiveSuggestionIndex}
+                    onHover={(index) => {
+                      setHasNavigatedSuggestions(true);
+                      setActiveSuggestionIndex(index);
+                    }}
                     onSelect={selectSuggestion}
                   />
                 ) : null}
@@ -455,6 +507,7 @@ export function AppChrome({ children }: AppChromeProps) {
                     setSearchText(event.target.value);
                     setSearchDirty(true);
                     setAutocompleteOpen(true);
+                    setHasNavigatedSuggestions(false);
                     setInvalidMessage(null);
                   }}
                   onFocus={() => {
@@ -481,7 +534,10 @@ export function AppChrome({ children }: AppChromeProps) {
                     results={autocompleteResults}
                     loading={autocompleteLoading}
                     activeIndex={activeSuggestionIndex}
-                    onHover={setActiveSuggestionIndex}
+                    onHover={(index) => {
+                      setHasNavigatedSuggestions(true);
+                      setActiveSuggestionIndex(index);
+                    }}
                     onSelect={selectSuggestion}
                   />
                 ) : null}

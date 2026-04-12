@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import HomePage from "@/app/page";
@@ -241,6 +241,65 @@ describe("HomePage", () => {
     const recentCompanies = JSON.parse(window.localStorage.getItem(RECENT_COMPANIES_STORAGE_KEY) ?? "[]");
     expect(recentCompanies[0]).toMatchObject({ ticker: "MSFT", name: "Microsoft Corp." });
     expect(syncMetadata).toHaveBeenCalledWith({ ticker: "MSFT", name: "Microsoft Corp.", sector: "Technology" });
+  });
+
+  it("runs an immediate autocomplete lookup before SEC resolve when the user submits before debounce completes", async () => {
+    vi.useFakeTimers();
+    searchCompanies.mockResolvedValue({
+      query: "MSFT",
+      results: [buildCompanyPayload({ ticker: "MSFT", name: "Microsoft Corp." })],
+      refresh: refreshState,
+    });
+
+    render(React.createElement(HomePage));
+
+    const searchInput = screen.getByLabelText(/search by ticker, company, or cik/i);
+    fireEvent.change(searchInput, {
+      target: { value: "msft" },
+    });
+
+    const searchForm = searchInput.closest("form");
+    expect(searchForm).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.submit(searchForm as HTMLFormElement);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(resolveCompanyIdentifier).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith("/company/MSFT");
+  });
+
+  it("does not auto-select a fuzzy autocomplete result on fast submit", async () => {
+    vi.useFakeTimers();
+    searchCompanies.mockResolvedValue({
+      query: "NET",
+      results: [buildCompanyPayload({ ticker: "NFLX", name: "NETFLIX INC", cik: "0001065280" })],
+      refresh: { triggered: false, reason: "none", ticker: "NET", job_id: null },
+    });
+    resolveCompanyIdentifier.mockResolvedValue({ resolved: true, ticker: "NET", name: "Cloudflare, Inc.", error: null });
+
+    render(React.createElement(HomePage));
+
+    const searchInput = screen.getByLabelText(/search by ticker, company, or cik/i);
+    fireEvent.change(searchInput, {
+      target: { value: "NET" },
+    });
+
+    const searchForm = searchInput.closest("form");
+    expect(searchForm).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.submit(searchForm as HTMLFormElement);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(resolveCompanyIdentifier).toHaveBeenCalledWith("NET");
+    expect(push).toHaveBeenCalledWith("/company/NET");
   });
 });
 
