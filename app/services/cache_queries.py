@@ -52,7 +52,6 @@ def search_company_snapshots(
     limit: int = 20,
     allow_contains_fallback: bool = True,
 ) -> list[CompanyCacheSnapshot]:
-    latest_checks = _latest_checks_subquery()
     normalized_query = ticker_query.strip()
     if not normalized_query:
         return []
@@ -62,7 +61,7 @@ def search_company_snapshots(
     cik_digits_query = "".join(character for character in normalized_query if character.isdigit())
     padded_cik_query = cik_digits_query.zfill(10) if cik_digits_query else None
     escaped_ticker_query = _escape_like_query(normalized_ticker_query)
-    escaped_name_query = _escape_like_query(normalized_query)
+    escaped_name_query = _escape_like_query(normalized_name_query)
     escaped_cik_query = _escape_like_query(cik_digits_query) if cik_digits_query else None
 
     ticker_prefix_pattern = f"{escaped_ticker_query}%"
@@ -76,86 +75,68 @@ def search_company_snapshots(
     ranking_clauses.extend(
         [
             (func.upper(Company.ticker) == normalized_ticker_query, 1),
-            (Company.ticker.ilike(ticker_prefix_pattern, escape="\\"), 2),
+            (Company.ticker.like(ticker_prefix_pattern, escape="\\"), 2),
             (func.lower(Company.name) == normalized_name_query, 3),
-            (Company.name.ilike(name_prefix_pattern, escape="\\"), 4),
-            (Company.name.ilike(name_contains_pattern, escape="\\"), 5),
+            (func.lower(Company.name).like(name_prefix_pattern, escape="\\"), 4),
+            (func.lower(Company.name).like(name_contains_pattern, escape="\\"), 5),
         ]
     )
     if cik_contains_pattern:
-        ranking_clauses.append((Company.cik.ilike(cik_contains_pattern, escape="\\"), 6))
+        ranking_clauses.append((Company.cik.like(cik_contains_pattern, escape="\\"), 6))
     match_rank = case(*ranking_clauses, else_=7)
 
     search_clauses = [
-        Company.ticker.ilike(ticker_prefix_pattern, escape="\\"),
-        Company.name.ilike(name_prefix_pattern, escape="\\"),
+        Company.ticker.like(ticker_prefix_pattern, escape="\\"),
+        func.lower(Company.name).like(name_prefix_pattern, escape="\\"),
     ]
     if cik_prefix_pattern:
-        search_clauses.append(Company.cik.ilike(cik_prefix_pattern, escape="\\"))
+        search_clauses.append(Company.cik.like(cik_prefix_pattern, escape="\\"))
 
     statement = (
-        select(Company, latest_checks.c.last_checked)
-        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
+        select(Company)
         .where(or_(*search_clauses))
         .order_by(match_rank.asc(), func.length(Company.ticker).asc(), Company.ticker.asc())
         .limit(limit)
     )
 
-    rows = session.execute(statement).all()
-    if not allow_contains_fallback or len(rows) >= limit or len(normalized_query) < 3:
-        return [_build_snapshot(company, last_checked) for company, last_checked in rows]
+    companies = list(session.execute(statement).scalars())
+    if not allow_contains_fallback or len(companies) >= limit or len(normalized_query) < 3:
+        return _build_snapshots_for_companies(session, companies)
 
-    seen_ids = {company.id for company, _ in rows}
-    contains_clauses = [Company.name.ilike(name_contains_pattern, escape="\\")]
+    seen_ids = {company.id for company in companies}
+    contains_clauses = [func.lower(Company.name).like(name_contains_pattern, escape="\\")]
     if cik_contains_pattern:
-        contains_clauses.append(Company.cik.ilike(cik_contains_pattern, escape="\\"))
+        contains_clauses.append(Company.cik.like(cik_contains_pattern, escape="\\"))
 
     contains_statement = (
-        select(Company, latest_checks.c.last_checked)
-        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
+        select(Company)
         .where(or_(*contains_clauses))
         .order_by(match_rank.asc(), func.length(Company.ticker).asc(), Company.ticker.asc())
-        .limit(limit - len(rows))
+        .limit(limit - len(companies))
     )
     if seen_ids:
         contains_statement = contains_statement.where(~Company.id.in_(seen_ids))
 
-    rows.extend(session.execute(contains_statement).all())
-    return [_build_snapshot(company, last_checked) for company, last_checked in rows]
+    companies.extend(session.execute(contains_statement).scalars())
+    return _build_snapshots_for_companies(session, companies)
 
 
 def get_company_snapshot(session: Session, ticker: str) -> CompanyCacheSnapshot | None:
-    latest_checks = _latest_checks_subquery()
     normalized_ticker = ticker.strip().upper()
-    statement = (
-        select(Company, latest_checks.c.last_checked)
-        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
-        .where(Company.ticker == normalized_ticker)
-    )
-
-    row = session.execute(statement).one_or_none()
-    if row is None:
+    statement = select(Company).where(Company.ticker == normalized_ticker)
+    company = session.execute(statement).scalar_one_or_none()
+    if company is None:
         return None
-
-    company, last_checked = row
-    return _build_snapshot(company, last_checked)
+    return _build_snapshots_for_companies(session, [company])[0]
 
 
 def get_company_snapshot_by_cik(session: Session, cik: str) -> CompanyCacheSnapshot | None:
-    latest_checks = _latest_checks_subquery()
     normalized_cik = str(cik).strip().zfill(10)
-    statement = (
-        select(Company, latest_checks.c.last_checked)
-        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
-        .where(Company.cik == normalized_cik)
-    )
-
-    row = session.execute(statement).one_or_none()
-    if row is None:
+    statement = select(Company).where(Company.cik == normalized_cik)
+    company = session.execute(statement).scalar_one_or_none()
+    if company is None:
         return None
-
-    company, last_checked = row
-    return _build_snapshot(company, last_checked)
+    return _build_snapshots_for_companies(session, [company])[0]
 
 
 def get_company_snapshots_by_ticker(session: Session, tickers: list[str]) -> dict[str, CompanyCacheSnapshot]:
@@ -166,14 +147,9 @@ def get_company_snapshots_by_ticker(session: Session, tickers: list[str]) -> dic
     if not normalized_tickers:
         return {}
 
-    latest_checks = _latest_checks_subquery()
-    statement = (
-        select(Company, latest_checks.c.last_checked)
-        .outerjoin(latest_checks, latest_checks.c.company_id == Company.id)
-        .where(Company.ticker.in_(normalized_tickers))
-    )
-    rows = session.execute(statement).all()
-    return {company.ticker: _build_snapshot(company, last_checked) for company, last_checked in rows}
+    statement = select(Company).where(Company.ticker.in_(normalized_tickers))
+    companies = list(session.execute(statement).scalars())
+    return {snapshot.company.ticker: snapshot for snapshot in _build_snapshots_for_companies(session, companies)}
 
 
 def get_company_coverage_counts(session: Session, company_ids: list[int]) -> dict[int, dict[str, int]]:
@@ -813,35 +789,58 @@ def get_company_proxy_cache_status(session: Session, company: Company) -> tuple[
     return last_checked, _cache_state_from_last_checked(last_checked)
 
 
-def _latest_checks_subquery():
-    statement_checks = (
+def _build_snapshots_for_companies(session: Session, companies: list[Company]) -> list[CompanyCacheSnapshot]:
+    if not companies:
+        return []
+
+    latest_checks_by_company_id = _load_latest_checks_by_company_ids(
+        session,
+        [company.id for company in companies],
+    )
+    return [_build_snapshot(company, latest_checks_by_company_id.get(company.id)) for company in companies]
+
+
+def _load_latest_checks_by_company_ids(session: Session, company_ids: list[int]) -> dict[int, datetime | None]:
+    normalized_company_ids = sorted({int(company_id) for company_id in company_ids})
+    if not normalized_company_ids:
+        return {}
+
+    statement_checks_statement = (
         select(
-            FinancialStatement.company_id.label("company_id"),
-            func.max(FinancialStatement.last_checked).label("last_checked"),
+            FinancialStatement.company_id,
+            func.max(FinancialStatement.last_checked),
         )
-        .where(FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE)
+        .where(
+            FinancialStatement.company_id.in_(normalized_company_ids),
+            FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,
+        )
         .group_by(FinancialStatement.company_id)
-        .subquery()
     )
+    statement_checks = {
+        int(company_id): _normalize_datetime(last_checked)
+        for company_id, last_checked in session.execute(statement_checks_statement).all()
+    }
 
-    refresh_checks = (
+    refresh_checks_statement = (
         select(
-            DatasetRefreshState.company_id.label("company_id"),
-            func.max(DatasetRefreshState.last_checked).label("last_checked"),
+            DatasetRefreshState.company_id,
+            func.max(DatasetRefreshState.last_checked),
         )
-        .where(DatasetRefreshState.dataset == "financials")
+        .where(
+            DatasetRefreshState.company_id.in_(normalized_company_ids),
+            DatasetRefreshState.dataset == "financials",
+        )
         .group_by(DatasetRefreshState.company_id)
-        .subquery()
     )
+    refresh_checks = {
+        int(company_id): _normalize_datetime(last_checked)
+        for company_id, last_checked in session.execute(refresh_checks_statement).all()
+    }
 
-    return (
-        select(
-            statement_checks.c.company_id.label("company_id"),
-            func.coalesce(refresh_checks.c.last_checked, statement_checks.c.last_checked).label("last_checked"),
-        )
-        .outerjoin(refresh_checks, refresh_checks.c.company_id == statement_checks.c.company_id)
-        .subquery()
-    )
+    latest_checks_by_company_id: dict[int, datetime | None] = {}
+    for company_id in normalized_company_ids:
+        latest_checks_by_company_id[company_id] = refresh_checks.get(company_id, statement_checks.get(company_id))
+    return latest_checks_by_company_id
 
 
 def _build_snapshot(company: Company, last_checked: datetime | None) -> CompanyCacheSnapshot:
