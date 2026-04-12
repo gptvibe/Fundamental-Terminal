@@ -13,13 +13,14 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import BeneficialOwnershipParty, BeneficialOwnershipReport, Company
-from app.services.refresh_state import mark_dataset_checked
+from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
 from app.services.sec_edgar import EdgarClient, FilingMetadata
 
 _BENEFICIAL_OWNERSHIP_FORM_PATTERN = re.compile(
     r"^(?:SC\s+|SCHEDULE\s+)?(13D|13G)\s*(/A)?$",
     re.IGNORECASE,
 )
+BENEFICIAL_OWNERSHIP_PAYLOAD_VERSION = "beneficial-ownership-v1"
 
 
 @dataclass(slots=True)
@@ -178,7 +179,12 @@ def upsert_beneficial_ownership_reports(
     checked_at: datetime,
 ) -> int:
     count = 0
-    for report in reports:
+    report_list = list(reports)
+    payload_version_hash = build_payload_version_hash(
+        version=BENEFICIAL_OWNERSHIP_PAYLOAD_VERSION,
+        payload=report_list,
+    )
+    for report in report_list:
         statement = (
             insert(BeneficialOwnershipReport)
             .values(
@@ -226,7 +232,15 @@ def upsert_beneficial_ownership_reports(
         count += 1
 
     company.beneficial_ownership_last_checked = checked_at
-    mark_dataset_checked(session, company.id, "beneficial_ownership", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company.id,
+        "beneficial_ownership",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
     return count
 
 

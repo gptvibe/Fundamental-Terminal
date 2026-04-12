@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, EarningsModelPoint, EarningsRelease, FinancialStatement, PriceHistory
+from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
 from app.services.sec_sic import resolve_sec_sic_profile
 
 QUARTERLY_FORMS = {"10-Q", "6-K"}
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 MODEL_VERSION = "sec_earnings_intel_v1"
+EARNINGS_MODEL_PAYLOAD_VERSION = "earnings-models-v1"
 SEGMENT_ALERT_THRESHOLD = 0.08
 QUALITY_MID_THRESHOLD = 45.0
 QUALITY_HIGH_THRESHOLD = 65.0
@@ -51,6 +53,7 @@ def recompute_and_persist_company_earnings_model_points(
     company_id: int,
     *,
     checked_at: datetime | None = None,
+    payload_version_hash: str | None = None,
 ) -> int:
     financials = list(
         session.execute(
@@ -64,9 +67,23 @@ def recompute_and_persist_company_earnings_model_points(
         session.execute(select(EarningsRelease).where(EarningsRelease.company_id == company_id)).scalars()
     )
     points = build_earnings_model_points(financials, releases)
+    effective_payload_version_hash = payload_version_hash or build_payload_version_hash(
+        version=EARNINGS_MODEL_PAYLOAD_VERSION,
+        payload=points,
+    )
 
     session.execute(delete(EarningsModelPoint).where(EarningsModelPoint.company_id == company_id))
     if not points:
+        timestamp = checked_at or datetime.now(timezone.utc)
+        mark_dataset_checked(
+            session,
+            company_id,
+            "earnings_models",
+            checked_at=timestamp,
+            success=True,
+            payload_version_hash=effective_payload_version_hash,
+            invalidate_hot_cache=True,
+        )
         return 0
 
     timestamp = checked_at or datetime.now(timezone.utc)
@@ -118,6 +135,15 @@ def recompute_and_persist_company_earnings_model_points(
         },
     )
     session.execute(statement)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "earnings_models",
+        checked_at=timestamp,
+        success=True,
+        payload_version_hash=effective_payload_version_hash,
+        invalidate_hot_cache=True,
+    )
     return len(payloads)
 
 

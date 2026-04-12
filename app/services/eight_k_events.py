@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import Company, FilingEvent
-from app.services.refresh_state import mark_dataset_checked
+from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
 from app.services.sec_edgar import FilingMetadata
 
 EVENT_ITEM_LABELS: dict[str, str] = {
@@ -29,6 +29,7 @@ EVENT_ITEM_LABELS: dict[str, str] = {
     "8.01": "Other Events",
     "9.01": "Financial Statements and Exhibits",
 }
+FILING_EVENTS_PAYLOAD_VERSION = "filing-events-v1"
 
 
 @dataclass(slots=True)
@@ -95,7 +96,12 @@ def upsert_filing_events(
     checked_at: datetime,
 ) -> int:
     count = 0
-    for event in events:
+    event_list = list(events)
+    payload_version_hash = build_payload_version_hash(
+        version=FILING_EVENTS_PAYLOAD_VERSION,
+        payload=event_list,
+    )
+    for event in event_list:
         statement = (
             insert(FilingEvent)
             .values(
@@ -138,7 +144,15 @@ def upsert_filing_events(
         count += 1
 
     company.filing_events_last_checked = checked_at
-    mark_dataset_checked(session, company.id, "filings", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company.id,
+        "filings",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
     return count
 
 

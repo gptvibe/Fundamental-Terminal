@@ -9,12 +9,13 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models import CapitalMarketsEvent, Company
-from app.services.refresh_state import mark_dataset_checked
+from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
 from app.services.sec_edgar import FilingMetadata
 
 SUPPORTED_CAPITAL_FORMS = {
     "S-1", "S-1/A", "S-3", "S-3/A", "F-3", "F-3/A", "424B1", "424B2", "424B3", "424B4", "424B5", "NT 10-K", "NT 10-Q",
 }
+CAPITAL_MARKETS_PAYLOAD_VERSION = "capital-markets-v1"
 
 
 @dataclass(slots=True)
@@ -80,7 +81,12 @@ def upsert_capital_markets_events(
     checked_at: datetime,
 ) -> int:
     count = 0
-    for event in events:
+    event_list = list(events)
+    payload_version_hash = build_payload_version_hash(
+        version=CAPITAL_MARKETS_PAYLOAD_VERSION,
+        payload=event_list,
+    )
+    for event in event_list:
         statement = (
             insert(CapitalMarketsEvent)
             .values(
@@ -124,7 +130,15 @@ def upsert_capital_markets_events(
         count += 1
 
     company.capital_markets_last_checked = checked_at
-    mark_dataset_checked(session, company.id, "capital_markets", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company.id,
+        "capital_markets",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
     return count
 
 

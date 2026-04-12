@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, PriceHistory
-from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked
+from app.services.refresh_state import build_payload_version_hash, cache_state_for_dataset, mark_dataset_checked
 
 
 PRICE_SOURCE = "yahoo_finance_chart"
+PRICE_HISTORY_PAYLOAD_VERSION = "price-history-v1"
 
 
 class MarketDataUnavailableError(RuntimeError):
@@ -234,14 +235,40 @@ def upsert_price_history(
     return total_rows
 
 
-def touch_company_price_history(session: Session, company_id: int, checked_at: datetime) -> None:
+def build_price_history_payload_hash(price_bars: list[PriceBar]) -> str:
+    payload = [
+        {
+            "trade_date": bar.trade_date,
+            "close": bar.close,
+            "volume": bar.volume,
+        }
+        for bar in sorted(price_bars, key=lambda item: item.trade_date)
+    ]
+    return build_payload_version_hash(version=PRICE_HISTORY_PAYLOAD_VERSION, payload=payload)
+
+
+def touch_company_price_history(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+) -> None:
     statement = (
         update(PriceHistory)
         .where(PriceHistory.company_id == company_id)
         .values(last_checked=checked_at)
     )
     session.execute(statement)
-    mark_dataset_checked(session, company_id, "prices", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "prices",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
 
 
 def _normalize_market_symbol(ticker: str) -> str:

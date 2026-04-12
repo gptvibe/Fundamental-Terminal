@@ -32,6 +32,7 @@ from app.services.institutional_holdings import (
     refresh_company_institutional_holdings,
 )
 from app.services.market_data import (
+    build_price_history_payload_hash,
     MarketDataClient,
     MarketDataUnavailableError,
     MarketProfile,
@@ -46,7 +47,7 @@ from app.services.oil_scenario_overlay import refresh_company_oil_scenario_overl
 from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, collect_regulated_financial_statements
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
 from app.services.sec_sic import resolve_sec_sic_profile
-from app.services.refresh_state import cache_state_for_dataset, get_dataset_state, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
+from app.services.refresh_state import build_payload_version_hash, cache_state_for_dataset, get_dataset_state, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
 from app.services.status_stream import JobReporter
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,14 @@ RESTATEMENT_TRACKED_FORMS = {"10-K", "10-Q"}
 RECONCILIATION_METRICS = ("revenue", "net_income", "operating_income")
 RECONCILIATION_SUPPORTED_FORMS = SUPPORTED_PARSER_FORMS & RESTATEMENT_TRACKED_FORMS
 FINANCIALS_REFRESH_FINGERPRINT_VERSION = "financials-refresh-fingerprint-v1"
+INSIDER_FILINGS_FINGERPRINT_VERSION = "insider-filings-v1"
+FORM144_FILINGS_FINGERPRINT_VERSION = "form144-filings-v1"
+EARNINGS_RELEASES_FINGERPRINT_VERSION = "earnings-releases-v1"
+COMMENT_LETTERS_FINGERPRINT_VERSION = "comment-letters-v1"
+DERIVED_METRICS_INPUT_FINGERPRINT_VERSION = "derived-metrics-inputs-v1"
+CAPITAL_STRUCTURE_INPUT_FINGERPRINT_VERSION = "capital-structure-inputs-v1"
+EARNINGS_MODELS_INPUT_FINGERPRINT_VERSION = "earnings-models-inputs-v1"
+COMPANY_RESEARCH_BRIEF_INPUT_FINGERPRINT_VERSION = "company-research-brief-inputs-v1"
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -1658,6 +1667,10 @@ class EdgarIngestionService:
             reverse=True,
         )
         insider_filings = insider_filings[: settings.sec_form4_max_filings_per_refresh]
+        payload_version_hash = _build_filing_metadata_fingerprint(
+            INSIDER_FILINGS_FINGERPRINT_VERSION,
+            insider_filings,
+        )
 
         candidate_filings = insider_filings if force else [
             metadata for metadata in insider_filings if metadata.accession_number not in existing_accessions
@@ -1687,7 +1700,12 @@ class EdgarIngestionService:
                 normalized_trades=normalized_trades,
                 checked_at=checked_at,
             )
-        _touch_company_insider_trades(session, company.id, checked_at)
+        _touch_company_insider_trades(
+            session,
+            company.id,
+            checked_at,
+            payload_version_hash=payload_version_hash,
+        )
         return trades_written
 
     def _refresh_form144_filings(
@@ -1715,6 +1733,10 @@ class EdgarIngestionService:
             reverse=True,
         )
         form144_filings = form144_filings[: settings.sec_form4_max_filings_per_refresh]
+        payload_version_hash = _build_filing_metadata_fingerprint(
+            FORM144_FILINGS_FINGERPRINT_VERSION,
+            form144_filings,
+        )
 
         candidate_filings = form144_filings if force else [
             metadata for metadata in form144_filings if metadata.accession_number not in existing_accessions
@@ -1744,7 +1766,12 @@ class EdgarIngestionService:
                 normalized_filings=normalized_filings,
                 checked_at=checked_at,
             )
-        _touch_company_form144_filings(session, company.id, checked_at)
+        _touch_company_form144_filings(
+            session,
+            company.id,
+            checked_at,
+            payload_version_hash=payload_version_hash,
+        )
         return filings_written
 
     def _refresh_earnings_releases(
@@ -1779,6 +1806,10 @@ class EdgarIngestionService:
             reverse=True,
         )
         earnings_filings = earnings_filings[: settings.sec_form4_max_filings_per_refresh]
+        payload_version_hash = _build_filing_metadata_fingerprint(
+            EARNINGS_RELEASES_FINGERPRINT_VERSION,
+            earnings_filings,
+        )
 
         candidate_filings = earnings_filings if force else [
             metadata for metadata in earnings_filings if metadata.accession_number not in existing_accessions
@@ -1803,7 +1834,12 @@ class EdgarIngestionService:
                 releases=normalized_releases,
                 checked_at=checked_at,
             )
-        _touch_company_earnings_releases(session, company.id, checked_at)
+        _touch_company_earnings_releases(
+            session,
+            company.id,
+            checked_at,
+            payload_version_hash=payload_version_hash,
+        )
         return releases_written
 
     def refresh_statements(
@@ -1892,16 +1928,28 @@ class EdgarIngestionService:
                 company.market_industry = market_profile.industry
 
         reporter.step("market", "Fetching price history...")
+        existing_state = get_dataset_state(session, company.id, "prices")
+        existing_payload_hash = existing_state.payload_version_hash if existing_state is not None else None
         try:
             price_bars = self.market_data.get_price_history(company.ticker)
         except MarketDataUnavailableError as exc:
             reporter.step("market", f"{exc} Marking prices checked without cached bars.")
-            touch_company_price_history(session, company.id, checked_at)
+            touch_company_price_history(
+                session,
+                company.id,
+                checked_at,
+                payload_version_hash=existing_payload_hash,
+            )
             return 0
 
         if not price_bars:
             reporter.step("market", f"No Yahoo price history returned for {company.ticker}; marking prices checked without cached bars.")
-            touch_company_price_history(session, company.id, checked_at)
+            touch_company_price_history(
+                session,
+                company.id,
+                checked_at,
+                payload_version_hash=existing_payload_hash,
+            )
             return 0
 
         reporter.step("database", "Saving price history to database...")
@@ -1911,7 +1959,12 @@ class EdgarIngestionService:
             price_bars=price_bars,
             checked_at=checked_at,
         )
-        touch_company_price_history(session, company.id, checked_at)
+        touch_company_price_history(
+            session,
+            company.id,
+            checked_at,
+            payload_version_hash=build_price_history_payload_hash(price_bars),
+        )
         return price_points_written
 
     def refresh_insiders(
@@ -2068,6 +2121,10 @@ class EdgarIngestionService:
             submissions,
             filing_index=filing_index,
         )
+        payload_version_hash = build_payload_version_hash(
+            version=COMMENT_LETTERS_FINGERPRINT_VERSION,
+            payload=normalized_letters,
+        )
         candidate_letters = normalized_letters if force else [
             letter for letter in normalized_letters if letter.accession_number not in existing_accessions
         ]
@@ -2081,7 +2138,12 @@ class EdgarIngestionService:
                 comment_letters=candidate_letters,
                 checked_at=checked_at,
             )
-        _touch_company_comment_letters(session, company.id, checked_at)
+        _touch_company_comment_letters(
+            session,
+            company.id,
+            checked_at,
+            payload_version_hash=payload_version_hash,
+        )
         return letters_written
 
     def _build_refresh_policy(
@@ -2183,11 +2245,11 @@ class EdgarIngestionService:
             return None
 
         if policy.can_skip_sec_refresh():
-            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
-            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
+            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
-            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             reporter.complete("Using fresh cached data.")
             session.commit()
             return IngestionResult(
@@ -2227,7 +2289,7 @@ class EdgarIngestionService:
                 reporter=reporter,
                 announce=False,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2263,8 +2325,8 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2310,7 +2372,7 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2344,7 +2406,7 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2383,11 +2445,11 @@ class EdgarIngestionService:
                 logger.exception("Market data refresh failed for %s", local_company.ticker)
                 reporter.step("market", f"Market data refresh failed: {exc}")
                 session.rollback()
-            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter)
-            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter)
+            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
-            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter)
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2637,11 +2699,11 @@ class EdgarIngestionService:
                     ),
                 )
 
-            _refresh_derived_metrics_cache(session, company.id, checked_at, reporter)
-            _refresh_capital_structure_cache(session, company.id, checked_at, reporter)
+            _refresh_derived_metrics_cache(session, company.id, checked_at, reporter, force=policy.force)
+            _refresh_capital_structure_cache(session, company.id, checked_at, reporter, force=policy.force)
             _refresh_oil_scenario_overlay_cache(session, company, checked_at, reporter)
-            _refresh_earnings_model_cache(session, company.id, checked_at, reporter)
-            _refresh_company_research_brief_cache(session, company.id, checked_at, reporter)
+            _refresh_earnings_model_cache(session, company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_research_brief_cache(session, company.id, checked_at, reporter, force=policy.force)
 
             session.commit()
             reporter.complete("Refresh and compute complete.")
@@ -2876,14 +2938,172 @@ def run_refresh_job(
         service.close()
 
 
+def _dataset_payload_hash(session: Session, company_id: int, dataset: str) -> str | None:
+    state = get_dataset_state(session, company_id, dataset)
+    if state is None:
+        return None
+    return state.payload_version_hash
+
+
+def _filing_metadata_fingerprint_payload(metadata: FilingMetadata) -> dict[str, Any]:
+    return {
+        "accession_number": metadata.accession_number,
+        "form": metadata.form,
+        "filing_date": metadata.filing_date,
+        "report_date": metadata.report_date,
+        "acceptance_datetime": metadata.acceptance_datetime,
+        "primary_document": metadata.primary_document,
+        "primary_doc_description": metadata.primary_doc_description,
+        "items": metadata.items,
+    }
+
+
+def _build_filing_metadata_fingerprint(version: str, filings: list[FilingMetadata]) -> str:
+    return build_payload_version_hash(
+        version=version,
+        payload=[_filing_metadata_fingerprint_payload(metadata) for metadata in filings],
+    )
+
+
+def _mark_dataset_recompute_skipped(
+    session: Session,
+    *,
+    company_id: int,
+    dataset: str,
+    checked_at: datetime,
+    payload_version_hash: str,
+) -> None:
+    mark_dataset_checked(
+        session,
+        company_id,
+        dataset,
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=False,
+    )
+
+
+def _build_derived_metrics_inputs_fingerprint(session: Session, company_id: int) -> str | None:
+    financials_hash = _dataset_payload_hash(session, company_id, "financials")
+    if financials_hash is None:
+        return None
+
+    payload: dict[str, Any] = {
+        "formula_version": "sec_metrics_mart_v1",
+        "financials": financials_hash,
+        "strict_official_mode": settings.strict_official_mode,
+    }
+    if not settings.strict_official_mode:
+        prices_hash = _dataset_payload_hash(session, company_id, "prices")
+        if prices_hash is None:
+            return None
+        payload["prices"] = prices_hash
+
+    return build_payload_version_hash(version=DERIVED_METRICS_INPUT_FINGERPRINT_VERSION, payload=payload)
+
+
+def _build_capital_structure_inputs_fingerprint(session: Session, company_id: int) -> str | None:
+    financials_hash = _dataset_payload_hash(session, company_id, "financials")
+    if financials_hash is None:
+        return None
+    return build_payload_version_hash(
+        version=CAPITAL_STRUCTURE_INPUT_FINGERPRINT_VERSION,
+        payload={
+            "formula_version": "capital_structure_v1",
+            "financials": financials_hash,
+        },
+    )
+
+
+def _build_earnings_models_inputs_fingerprint(session: Session, company_id: int) -> str | None:
+    financials_hash = _dataset_payload_hash(session, company_id, "financials")
+    earnings_hash = _dataset_payload_hash(session, company_id, "earnings")
+    if financials_hash is None or earnings_hash is None:
+        return None
+    return build_payload_version_hash(
+        version=EARNINGS_MODELS_INPUT_FINGERPRINT_VERSION,
+        payload={
+            "model_version": "sec_earnings_intel_v1",
+            "financials": financials_hash,
+            "earnings": earnings_hash,
+        },
+    )
+
+
+def _build_company_research_brief_inputs_fingerprint(session: Session, company_id: int) -> str | None:
+    company = session.get(Company, company_id)
+    if company is None:
+        return None
+
+    dependency_hashes: dict[str, Any] = {
+        "financials": _dataset_payload_hash(session, company_id, "financials"),
+        "filings": _dataset_payload_hash(session, company_id, "filings"),
+        "capital_markets": _dataset_payload_hash(session, company_id, "capital_markets"),
+        "insiders": _dataset_payload_hash(session, company_id, "insiders"),
+        "form144": _dataset_payload_hash(session, company_id, "form144"),
+        "institutional": _dataset_payload_hash(session, company_id, "institutional"),
+        "beneficial_ownership": _dataset_payload_hash(session, company_id, "beneficial_ownership"),
+        "earnings": _dataset_payload_hash(session, company_id, "earnings"),
+        "comment_letters": _dataset_payload_hash(session, company_id, "comment_letters"),
+        "capital_structure": _dataset_payload_hash(session, company_id, "capital_structure"),
+    }
+    if not settings.strict_official_mode:
+        dependency_hashes["prices"] = _dataset_payload_hash(session, company_id, "prices")
+
+    if any(value is None for value in dependency_hashes.values()):
+        return None
+
+    return build_payload_version_hash(
+        version=COMPANY_RESEARCH_BRIEF_INPUT_FINGERPRINT_VERSION,
+        payload={
+            "schema_version": "company_research_brief_v1",
+            "company": {
+                "ticker": company.ticker,
+                "cik": company.cik,
+                "name": company.name,
+                "exchange": getattr(company, "exchange", None),
+                "sector": company.sector,
+                "market_sector": company.market_sector,
+                "market_industry": company.market_industry,
+                "sic": getattr(company, "sic", None),
+            },
+            "dependencies": dependency_hashes,
+        },
+    )
+
+
 def _refresh_derived_metrics_cache(
     session: Session,
     company_id: int,
     checked_at: datetime,
     reporter: JobReporter,
+    *,
+    force: bool = False,
 ) -> int:
+    payload_version_hash = _build_derived_metrics_inputs_fingerprint(session, company_id)
+    if (
+        not force
+        and payload_version_hash is not None
+        and _dataset_payload_hash(session, company_id, "derived_metrics") == payload_version_hash
+    ):
+        reporter.step("metrics", "Skipping derived metrics mart recompute; dependent inputs are unchanged.")
+        _mark_dataset_recompute_skipped(
+            session,
+            company_id=company_id,
+            dataset="derived_metrics",
+            checked_at=checked_at,
+            payload_version_hash=payload_version_hash,
+        )
+        return 0
+
     reporter.step("metrics", "Recomputing derived metrics mart...")
-    rows_written = recompute_and_persist_company_derived_metrics(session, company_id, checked_at=checked_at)
+    rows_written = recompute_and_persist_company_derived_metrics(
+        session,
+        company_id,
+        checked_at=checked_at,
+        payload_version_hash=payload_version_hash,
+    )
     reporter.step("metrics", f"Updated {rows_written} derived metric rows")
     return rows_written
 
@@ -2893,9 +3113,32 @@ def _refresh_capital_structure_cache(
     company_id: int,
     checked_at: datetime,
     reporter: JobReporter,
+    *,
+    force: bool = False,
 ) -> int:
+    payload_version_hash = _build_capital_structure_inputs_fingerprint(session, company_id)
+    if (
+        not force
+        and payload_version_hash is not None
+        and _dataset_payload_hash(session, company_id, "capital_structure") == payload_version_hash
+    ):
+        reporter.step("capital_structure", "Skipping capital structure intelligence recompute; dependent inputs are unchanged.")
+        _mark_dataset_recompute_skipped(
+            session,
+            company_id=company_id,
+            dataset="capital_structure",
+            checked_at=checked_at,
+            payload_version_hash=payload_version_hash,
+        )
+        return 0
+
     reporter.step("capital_structure", "Recomputing capital structure intelligence cache...")
-    rows_written = recompute_and_persist_company_capital_structure(session, company_id, checked_at=checked_at)
+    rows_written = recompute_and_persist_company_capital_structure(
+        session,
+        company_id,
+        checked_at=checked_at,
+        payload_version_hash=payload_version_hash,
+    )
     reporter.step("capital_structure", f"Updated {rows_written} capital structure rows")
     return rows_written
 
@@ -2922,9 +3165,32 @@ def _refresh_earnings_model_cache(
     company_id: int,
     checked_at: datetime,
     reporter: JobReporter,
+    *,
+    force: bool = False,
 ) -> int:
+    payload_version_hash = _build_earnings_models_inputs_fingerprint(session, company_id)
+    if (
+        not force
+        and payload_version_hash is not None
+        and _dataset_payload_hash(session, company_id, "earnings_models") == payload_version_hash
+    ):
+        reporter.step("earnings_models", "Skipping SEC-heavy earnings model recompute; dependent inputs are unchanged.")
+        _mark_dataset_recompute_skipped(
+            session,
+            company_id=company_id,
+            dataset="earnings_models",
+            checked_at=checked_at,
+            payload_version_hash=payload_version_hash,
+        )
+        return 0
+
     reporter.step("earnings_models", "Recomputing SEC-heavy earnings model cache...")
-    rows_written = recompute_and_persist_company_earnings_model_points(session, company_id, checked_at=checked_at)
+    rows_written = recompute_and_persist_company_earnings_model_points(
+        session,
+        company_id,
+        checked_at=checked_at,
+        payload_version_hash=payload_version_hash,
+    )
     reporter.step("earnings_models", f"Updated {rows_written} earnings model rows")
     return rows_written
 
@@ -2934,14 +3200,37 @@ def _refresh_company_research_brief_cache(
     company_id: int,
     checked_at: datetime,
     reporter: JobReporter,
+    *,
+    force: bool = False,
 ) -> int:
     if not hasattr(session, "get"):
         return 0
 
     from app.services.company_research_brief import recompute_and_persist_company_research_brief
 
+    payload_version_hash = _build_company_research_brief_inputs_fingerprint(session, company_id)
+    if (
+        not force
+        and payload_version_hash is not None
+        and _dataset_payload_hash(session, company_id, "company_research_brief") == payload_version_hash
+    ):
+        reporter.step("company_research_brief", "Skipping company research brief recompute; dependent inputs are unchanged.")
+        _mark_dataset_recompute_skipped(
+            session,
+            company_id=company_id,
+            dataset="company_research_brief",
+            checked_at=checked_at,
+            payload_version_hash=payload_version_hash,
+        )
+        return 0
+
     reporter.step("company_research_brief", "Recomputing company research brief cache...")
-    payload = recompute_and_persist_company_research_brief(session, company_id, checked_at=checked_at)
+    payload = recompute_and_persist_company_research_brief(
+        session,
+        company_id,
+        checked_at=checked_at,
+        payload_version_hash=payload_version_hash,
+    )
     reporter.step("company_research_brief", f"Updated {1 if payload is not None else 0} company research brief rows")
     return 1 if payload is not None else 0
 
@@ -3421,7 +3710,13 @@ def _upsert_comment_letters(
     return len(payload)
 
 
-def _touch_company_insider_trades(session: Session, company_id: int, checked_at: datetime) -> None:
+def _touch_company_insider_trades(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+) -> None:
     session.execute(
         update(InsiderTrade)
         .where(InsiderTrade.company_id == company_id)
@@ -3432,10 +3727,24 @@ def _touch_company_insider_trades(session: Session, company_id: int, checked_at:
         .where(Company.id == company_id)
         .values(insider_trades_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "insiders", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "insiders",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
 
 
-def _touch_company_form144_filings(session: Session, company_id: int, checked_at: datetime) -> None:
+def _touch_company_form144_filings(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+) -> None:
     session.execute(
         update(Form144Filing)
         .where(Form144Filing.company_id == company_id)
@@ -3446,10 +3755,24 @@ def _touch_company_form144_filings(session: Session, company_id: int, checked_at
         .where(Company.id == company_id)
         .values(form144_filings_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "form144", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "form144",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
 
 
-def _touch_company_earnings_releases(session: Session, company_id: int, checked_at: datetime) -> None:
+def _touch_company_earnings_releases(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+) -> None:
     session.execute(
         update(EarningsRelease)
         .where(EarningsRelease.company_id == company_id)
@@ -3460,10 +3783,24 @@ def _touch_company_earnings_releases(session: Session, company_id: int, checked_
         .where(Company.id == company_id)
         .values(earnings_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "earnings", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "earnings",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
 
 
-def _touch_company_comment_letters(session: Session, company_id: int, checked_at: datetime) -> None:
+def _touch_company_comment_letters(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+) -> None:
     session.execute(
         update(CommentLetter)
         .where(CommentLetter.company_id == company_id)
@@ -3474,7 +3811,15 @@ def _touch_company_comment_letters(session: Session, company_id: int, checked_at
         .where(Company.id == company_id)
         .values(comment_letters_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "comment_letters", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "comment_letters",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
 
 
 def _load_form144_document(client: EdgarClient, cik: str, filing_metadata: FilingMetadata) -> tuple[str, str]:

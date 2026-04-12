@@ -14,6 +14,7 @@ class _FakeSession:
         self.commit_count = 0
         self.rollback_count = 0
         self.statements = []
+        self.objects: dict[tuple[object, int], object] = {}
 
     def commit(self) -> None:
         self.commit_count += 1
@@ -24,6 +25,9 @@ class _FakeSession:
     def execute(self, statement):
         self.statements.append(statement)
         return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+    def get(self, model, key):
+        return self.objects.get((model, key))
 
 
 class _SessionFactory:
@@ -79,10 +83,12 @@ def _company() -> SimpleNamespace:
         id=7,
         cik="0000789019",
         ticker="MSFT",
+        exchange="NASDAQ",
         name="Microsoft",
         sector="Technology",
         market_sector=None,
         market_industry=None,
+        sic="3571",
     )
 
 
@@ -125,6 +131,11 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
         sec_edgar,
         "_refresh_earnings_model_cache",
         lambda *_args, **_kwargs: cache_steps.append("earnings-model"),
+    )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_research_brief_cache",
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         service.client,
@@ -319,6 +330,7 @@ def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):
     monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -353,7 +365,8 @@ def test_refresh_prices_marks_prices_checked_when_symbol_has_no_yahoo_history(mo
         raising=False,
     )
     monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: pytest.fail("price upsert should not run when the symbol is unavailable"))
-    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp: touched.append((company_id, timestamp)))
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp, **_kwargs: touched.append((company_id, timestamp)))
 
     written = service.refresh_prices(
         session=SimpleNamespace(),
@@ -460,7 +473,8 @@ def test_refresh_prices_marks_prices_checked_when_yahoo_returns_no_bars(monkeypa
     monkeypatch.setattr(sec_edgar, "settings", _settings())
     monkeypatch.setattr(service.market_data, "get_price_history", lambda *_args, **_kwargs: [], raising=False)
     monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: pytest.fail("price upsert should not run when Yahoo returns no bars"))
-    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp: touched.append((company_id, timestamp)))
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp, **_kwargs: touched.append((company_id, timestamp)))
 
     written = service.refresh_prices(
         session=SimpleNamespace(),
@@ -472,3 +486,229 @@ def test_refresh_prices_marks_prices_checked_when_yahoo_returns_no_bars(monkeypa
     assert written == 0
     assert touched == [(company.id, checked_at)]
     assert reporter.steps[-1] == ("market", "No Yahoo price history returned for MSFT; marking prices checked without cached bars.")
+
+
+@pytest.mark.parametrize(
+    ("builder_name", "helper_name", "dataset", "recompute_name", "expected_stage"),
+    [
+        (
+            "_build_derived_metrics_inputs_fingerprint",
+            "_refresh_derived_metrics_cache",
+            "derived_metrics",
+            "recompute_and_persist_company_derived_metrics",
+            "metrics",
+        ),
+        (
+            "_build_capital_structure_inputs_fingerprint",
+            "_refresh_capital_structure_cache",
+            "capital_structure",
+            "recompute_and_persist_company_capital_structure",
+            "capital_structure",
+        ),
+        (
+            "_build_earnings_models_inputs_fingerprint",
+            "_refresh_earnings_model_cache",
+            "earnings_models",
+            "recompute_and_persist_company_earnings_model_points",
+            "earnings_models",
+        ),
+    ],
+)
+def test_downstream_recompute_skips_when_input_fingerprint_matches(
+    monkeypatch,
+    builder_name: str,
+    helper_name: str,
+    dataset: str,
+    recompute_name: str,
+    expected_stage: str,
+):
+    session = _FakeSession()
+    reporter = _Reporter()
+    checked_at = datetime.now(timezone.utc)
+    marks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    fingerprint = "matched-input-fingerprint"
+
+    monkeypatch.setattr(sec_edgar, builder_name, lambda *_args, **_kwargs: fingerprint)
+
+    def _fake_get_dataset_state(_session, _company_id, requested_dataset):
+        if requested_dataset == dataset:
+            return SimpleNamespace(payload_version_hash=fingerprint)
+        return SimpleNamespace(payload_version_hash="upstream-hash")
+
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", _fake_get_dataset_state)
+    monkeypatch.setattr(
+        sec_edgar,
+        "mark_dataset_checked",
+        lambda _session, company_id, dataset_name, **kwargs: marks.append(
+            {
+                "company_id": company_id,
+                "dataset": dataset_name,
+                **kwargs,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        sec_edgar,
+        recompute_name,
+        lambda *_args, **_kwargs: pytest.fail("recompute should be skipped when input fingerprint matches"),
+    )
+
+    written = getattr(sec_edgar, helper_name)(session, 7, checked_at, reporter)
+
+    assert written == 0
+    assert reporter.steps[-1][0] == expected_stage
+    assert "Skipping" in reporter.steps[-1][1]
+    assert marks == [
+        {
+            "company_id": 7,
+            "dataset": dataset,
+            "checked_at": checked_at,
+            "success": True,
+            "payload_version_hash": fingerprint,
+            "invalidate_hot_cache": False,
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("builder_name", "helper_name", "dataset", "recompute_name", "expected_stage"),
+    [
+        (
+            "_build_derived_metrics_inputs_fingerprint",
+            "_refresh_derived_metrics_cache",
+            "derived_metrics",
+            "recompute_and_persist_company_derived_metrics",
+            "metrics",
+        ),
+        (
+            "_build_capital_structure_inputs_fingerprint",
+            "_refresh_capital_structure_cache",
+            "capital_structure",
+            "recompute_and_persist_company_capital_structure",
+            "capital_structure",
+        ),
+        (
+            "_build_earnings_models_inputs_fingerprint",
+            "_refresh_earnings_model_cache",
+            "earnings_models",
+            "recompute_and_persist_company_earnings_model_points",
+            "earnings_models",
+        ),
+    ],
+)
+def test_downstream_recompute_runs_when_input_fingerprint_changes(
+    monkeypatch,
+    builder_name: str,
+    helper_name: str,
+    dataset: str,
+    recompute_name: str,
+    expected_stage: str,
+):
+    session = _FakeSession()
+    reporter = _Reporter()
+    checked_at = datetime.now(timezone.utc)
+    seen_hashes: list[str | None] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    fingerprint = "new-input-fingerprint"
+
+    monkeypatch.setattr(sec_edgar, builder_name, lambda *_args, **_kwargs: fingerprint)
+
+    def _fake_get_dataset_state(_session, _company_id, requested_dataset):
+        if requested_dataset == dataset:
+            return SimpleNamespace(payload_version_hash="stale-fingerprint")
+        return SimpleNamespace(payload_version_hash="upstream-hash")
+
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", _fake_get_dataset_state)
+    monkeypatch.setattr(
+        sec_edgar,
+        recompute_name,
+        lambda *_args, **kwargs: seen_hashes.append(kwargs.get("payload_version_hash")) or 11,
+    )
+
+    written = getattr(sec_edgar, helper_name)(session, 7, checked_at, reporter)
+
+    assert written == 11
+    assert seen_hashes == [fingerprint]
+    assert reporter.steps[0][0] == expected_stage
+    assert reporter.steps[0][1].startswith("Recomputing")
+
+
+def test_company_research_brief_recompute_skips_when_input_fingerprint_matches(monkeypatch):
+    session = _FakeSession()
+    session.objects[(sec_edgar.Company, 7)] = _company()
+    reporter = _Reporter()
+    checked_at = datetime.now(timezone.utc)
+    marks: list[dict[str, object]] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "_build_company_research_brief_inputs_fingerprint", lambda *_args, **_kwargs: "brief-fingerprint")
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: SimpleNamespace(payload_version_hash="brief-fingerprint"))
+    monkeypatch.setattr(
+        sec_edgar,
+        "mark_dataset_checked",
+        lambda _session, company_id, dataset_name, **kwargs: marks.append(
+            {
+                "company_id": company_id,
+                "dataset": dataset_name,
+                **kwargs,
+            }
+        ),
+    )
+
+    def _fail(*_args, **_kwargs):
+        raise AssertionError("brief recompute should be skipped")
+
+    monkeypatch.setattr(
+        "app.services.company_research_brief.recompute_and_persist_company_research_brief",
+        _fail,
+        raising=False,
+    )
+
+    written = sec_edgar._refresh_company_research_brief_cache(session, 7, checked_at, reporter)
+
+    assert written == 0
+    assert reporter.steps[-1] == (
+        "company_research_brief",
+        "Skipping company research brief recompute; dependent inputs are unchanged.",
+    )
+    assert marks == [
+        {
+            "company_id": 7,
+            "dataset": "company_research_brief",
+            "checked_at": checked_at,
+            "success": True,
+            "payload_version_hash": "brief-fingerprint",
+            "invalidate_hot_cache": False,
+        }
+    ]
+
+
+def test_company_research_brief_recompute_runs_when_input_fingerprint_changes(monkeypatch):
+    session = _FakeSession()
+    session.objects[(sec_edgar.Company, 7)] = _company()
+    reporter = _Reporter()
+    checked_at = datetime.now(timezone.utc)
+    seen_hashes: list[str | None] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "_build_company_research_brief_inputs_fingerprint", lambda *_args, **_kwargs: "brief-fingerprint-new")
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: SimpleNamespace(payload_version_hash="brief-fingerprint-old"))
+
+    def _recompute(_session, _company_id, **kwargs):
+        seen_hashes.append(kwargs.get("payload_version_hash"))
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "app.services.company_research_brief.recompute_and_persist_company_research_brief",
+        _recompute,
+        raising=False,
+    )
+
+    written = sec_edgar._refresh_company_research_brief_cache(session, 7, checked_at, reporter)
+
+    assert written == 1
+    assert seen_hashes == ["brief-fingerprint-new"]
+    assert reporter.steps[0] == ("company_research_brief", "Recomputing company research brief cache...")

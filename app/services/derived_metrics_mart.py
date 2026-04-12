@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Company, DerivedMetricPoint, FinancialStatement, PriceHistory
 from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, select_preferred_financials
+from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 QUARTERLY_FORMS = {"10-Q", "6-K", "CALL", "FR Y-9C"}
@@ -34,6 +35,7 @@ FLOW_FIELDS = {
     "provision_for_credit_losses",
 }
 FORMULA_VERSION = "sec_metrics_mart_v1"
+DERIVED_METRICS_PAYLOAD_VERSION = "derived-metrics-v1"
 POSTGRES_MAX_BIND_PARAMS = 65535
 DERIVED_METRIC_UPSERT_COLUMN_COUNT = 14
 DERIVED_METRIC_UPSERT_BATCH_SIZE = POSTGRES_MAX_BIND_PARAMS // DERIVED_METRIC_UPSERT_COLUMN_COUNT
@@ -61,6 +63,7 @@ def recompute_and_persist_company_derived_metrics(
     company_id: int,
     *,
     checked_at: datetime | None = None,
+    payload_version_hash: str | None = None,
 ) -> int:
     company = session.get(Company, company_id)
     if company is None:
@@ -81,9 +84,23 @@ def recompute_and_persist_company_derived_metrics(
     if not settings.strict_official_mode:
         prices = list(session.execute(select(PriceHistory).where(PriceHistory.company_id == company_id)).scalars())
     points = build_derived_metric_points(financials, prices)
+    effective_payload_version_hash = payload_version_hash or build_payload_version_hash(
+        version=DERIVED_METRICS_PAYLOAD_VERSION,
+        payload=points,
+    )
 
     session.execute(delete(DerivedMetricPoint).where(DerivedMetricPoint.company_id == company_id))
     if not points:
+        timestamp = checked_at or datetime.now(timezone.utc)
+        mark_dataset_checked(
+            session,
+            company_id,
+            "derived_metrics",
+            checked_at=timestamp,
+            success=True,
+            payload_version_hash=effective_payload_version_hash,
+            invalidate_hot_cache=True,
+        )
         return 0
 
     timestamp = checked_at or datetime.now(timezone.utc)
@@ -125,6 +142,15 @@ def recompute_and_persist_company_derived_metrics(
             },
         )
         session.execute(statement)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "derived_metrics",
+        checked_at=timestamp,
+        success=True,
+        payload_version_hash=effective_payload_version_hash,
+        invalidate_hot_cache=True,
+    )
     return len(payloads)
 
 

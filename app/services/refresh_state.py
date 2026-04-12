@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import asdict, is_dataclass
+from datetime import date
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy import Select, event, select
 from sqlalchemy.dialects.postgresql import insert
@@ -26,6 +30,8 @@ DatasetName = Literal[
     "comment_letters",
     "proxy",
     "derived_metrics",
+    "capital_structure",
+    "company_research_brief",
     "oil_scenario_overlay",
     "company_refresh",
 ]
@@ -122,9 +128,10 @@ def mark_dataset_checked(
             "active_job_id": None,
             "failure_count": 0,
             "last_error": None,
-            "payload_version_hash": payload_version_hash,
             "updated_at": normalized_checked_at,
         }
+        if payload_version_hash is not None:
+            set_values["payload_version_hash"] = payload_version_hash
     else:
         set_values = {
             "last_checked": normalized_checked_at,
@@ -150,6 +157,18 @@ def mark_dataset_checked(
             dataset=str(dataset),
             schema_version=payload_version_hash,
         )
+
+
+def build_payload_version_hash(*, version: str, payload: Any) -> str:
+    encoded = json.dumps(
+        {
+            "version": version,
+            "payload": _json_fingerprint_value(payload),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:32]
 
 
 def set_active_refresh_job(
@@ -257,6 +276,24 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
+
+
+def _json_fingerprint_value(value: Any) -> Any:
+    if is_dataclass(value):
+        return _json_fingerprint_value(asdict(value))
+    if isinstance(value, datetime):
+        normalized = _normalize_datetime(value)
+        return normalized.isoformat() if normalized is not None else None
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {
+            str(key): _json_fingerprint_value(item)
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_json_fingerprint_value(item) for item in value]
+    return value
 
 
 def _queue_hot_cache_invalidation(

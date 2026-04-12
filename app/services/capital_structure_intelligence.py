@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.model_engine.utils import average, json_number, safe_divide
 from app.models import CapitalStructureSnapshot, FinancialStatement
-from app.services.refresh_state import mark_dataset_checked
+from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
 
 CANONICAL_STATEMENT_TYPE = "canonical_xbrl"
 FORMULA_VERSION = "capital_structure_v1"
+CAPITAL_STRUCTURE_PAYLOAD_VERSION = "capital-structure-v1"
 
 DEBT_MATURITY_BUCKETS: list[tuple[str, str]] = [
     ("debt_maturity_due_next_twelve_months", "Next 12 months"),
@@ -39,6 +40,7 @@ def recompute_and_persist_company_capital_structure(
     company_id: int,
     *,
     checked_at: datetime | None = None,
+    payload_version_hash: str | None = None,
 ) -> int:
     financials = list(
         session.execute(
@@ -50,11 +52,23 @@ def recompute_and_persist_company_capital_structure(
     )
     snapshots = build_capital_structure_snapshots(financials)
     timestamp = checked_at or datetime.now(timezone.utc)
+    effective_payload_version_hash = payload_version_hash or build_payload_version_hash(
+        version=CAPITAL_STRUCTURE_PAYLOAD_VERSION,
+        payload=snapshots,
+    )
 
     session.execute(delete(CapitalStructureSnapshot).where(CapitalStructureSnapshot.company_id == company_id))
 
     if not snapshots:
-        mark_dataset_checked(session, company_id, "capital_structure", checked_at=timestamp, success=True, invalidate_hot_cache=True)
+        mark_dataset_checked(
+            session,
+            company_id,
+            "capital_structure",
+            checked_at=timestamp,
+            success=True,
+            payload_version_hash=effective_payload_version_hash,
+            invalidate_hot_cache=True,
+        )
         return 0
 
     payloads = [
@@ -97,7 +111,15 @@ def recompute_and_persist_company_capital_structure(
         },
     )
     session.execute(statement)
-    mark_dataset_checked(session, company_id, "capital_structure", checked_at=timestamp, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "capital_structure",
+        checked_at=timestamp,
+        success=True,
+        payload_version_hash=effective_payload_version_hash,
+        invalidate_hot_cache=True,
+    )
     return len(payloads)
 
 

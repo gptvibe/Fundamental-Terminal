@@ -275,6 +275,7 @@ def recompute_and_persist_company_research_brief(
     *,
     checked_at: datetime | None = None,
     as_of: datetime | None = None,
+    payload_version_hash: str | None = None,
 ) -> CompanyResearchBriefResponse | None:
     timestamp = checked_at or datetime.now(timezone.utc)
     response = build_company_research_brief_response(session, company_id, as_of=as_of, generated_at=timestamp)
@@ -285,7 +286,7 @@ def recompute_and_persist_company_research_brief(
             "company_research_brief",
             checked_at=timestamp,
             success=True,
-            payload_version_hash=BRIEF_SCHEMA_VERSION,
+            payload_version_hash=payload_version_hash or BRIEF_SCHEMA_VERSION,
             invalidate_hot_cache=True,
         )
         return None
@@ -315,7 +316,7 @@ def recompute_and_persist_company_research_brief(
         "company_research_brief",
         checked_at=timestamp,
         success=True,
-        payload_version_hash=BRIEF_SCHEMA_VERSION,
+        payload_version_hash=payload_version_hash or BRIEF_SCHEMA_VERSION,
         invalidate_hot_cache=True,
     )
     return response

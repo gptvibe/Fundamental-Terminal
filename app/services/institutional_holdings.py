@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, InstitutionalFund, InstitutionalHolding
-from app.services.refresh_state import cache_state_for_dataset, mark_dataset_checked
+from app.services.refresh_state import build_payload_version_hash, cache_state_for_dataset, mark_dataset_checked
 from app.services.sec_cache import sec_http_cache
 from app.services.status_stream import JobReporter
 
@@ -73,6 +73,7 @@ CURATED_13F_STRATEGIES: dict[str, str] = {
     "t rowe price": "Long-only growth investing.",
     "capital world investors": "Fundamental long-only global growth investing.",
 }
+INSTITUTIONAL_HOLDINGS_PAYLOAD_VERSION = "institutional-holdings-v1"
 
 
 @dataclass(slots=True)
@@ -219,7 +220,15 @@ def refresh_company_institutional_holdings(
         session.commit()
         if not resolved_funds:
             reporter.step("13f", "No 13F managers resolved; skipping institutional holdings refresh.")
-            _touch_company_institutional_holdings(session, company.id, checked_at)
+            _touch_company_institutional_holdings(
+                session,
+                company.id,
+                checked_at,
+                payload_version_hash=build_payload_version_hash(
+                    version=INSTITUTIONAL_HOLDINGS_PAYLOAD_VERSION,
+                    payload=[],
+                ),
+            )
             return 0
 
         reporter.step("13f", f"Checking SEC 13F filings across {len(resolved_funds)} managers...")
@@ -237,13 +246,28 @@ def refresh_company_institutional_holdings(
                 logger.warning("Unable to refresh 13F holdings for %s: %s", fund.fund_name, exc)
 
         reporter.step("database", "Saving institutional holdings to database...")
+        payload_version_hash = build_payload_version_hash(
+            version=INSTITUTIONAL_HOLDINGS_PAYLOAD_VERSION,
+            payload=[
+                {
+                    "fund_id": fund_id,
+                    "snapshot": snapshot,
+                }
+                for fund_id, snapshot in normalized_holdings
+            ],
+        )
         holdings_written = _upsert_institutional_holdings(
             session=session,
             company=company,
             fund_snapshots=normalized_holdings,
             checked_at=checked_at,
         )
-        _touch_company_institutional_holdings(session, company.id, checked_at)
+        _touch_company_institutional_holdings(
+            session,
+            company.id,
+            checked_at,
+            payload_version_hash=payload_version_hash,
+        )
         return holdings_written
     finally:
         client.close()
@@ -602,13 +626,27 @@ def _upsert_institutional_holdings(
     return holdings_written
 
 
-def _touch_company_institutional_holdings(session: Session, company_id: int, checked_at: datetime) -> None:
+def _touch_company_institutional_holdings(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    *,
+    payload_version_hash: str | None = None,
+) -> None:
     session.execute(
         update(Company)
         .where(Company.id == company_id)
         .values(institutional_holdings_last_checked=checked_at)
     )
-    mark_dataset_checked(session, company_id, "institutional", checked_at=checked_at, success=True, invalidate_hot_cache=True)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "institutional",
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+        invalidate_hot_cache=True,
+    )
 
 
 def _issuer_matches_company(issuer_name: str, company_tokens: set[str]) -> bool:
