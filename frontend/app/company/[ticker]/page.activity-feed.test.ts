@@ -260,6 +260,48 @@ describe("CompanyResearchBriefPage", () => {
     expect(getCompanyPeers).not.toHaveBeenCalled();
   });
 
+  it("reuses the overview workspace brief payload without issuing a second brief request", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      briefData: buildResearchBriefResponse(),
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+    });
+
+    expect(getCompanyResearchBrief).not.toHaveBeenCalled();
+  });
+
+  it("waits for the overview workspace brief before falling back to a standalone brief request", async () => {
+    let workspaceState = buildWorkspaceMock({
+      loading: true,
+      briefData: null,
+    });
+    vi.mocked(useCompanyWorkspace).mockImplementation(() => workspaceState);
+
+    const view = render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /brief warming|cold start bootstrap/i })).toBeTruthy();
+    });
+
+    expect(getCompanyResearchBrief).not.toHaveBeenCalled();
+
+    workspaceState = buildWorkspaceMock({
+      loading: false,
+      briefData: buildResearchBriefResponse(),
+    });
+    view.rerender(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+    });
+
+    expect(getCompanyResearchBrief).not.toHaveBeenCalled();
+  });
+
   it("hydrates collapsed brief sections from localStorage", async () => {
     window.localStorage.setItem(
       "fundamental-terminal:research-brief:sections:ACME",
@@ -607,6 +649,7 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
     consoleEntries: [],
     connectionState: "open",
     queueRefresh: vi.fn(),
+    briefData: null,
     reloadKey: "brief-1",
     ...overrides,
   };

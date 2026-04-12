@@ -37,6 +37,7 @@ import {
   CompanyResearchBriefResponse,
   CompanySectorContextResponse,
   CompanyMetricsTimeseriesResponse,
+  CompanyOverviewResponse,
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
@@ -81,6 +82,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/search\?/, policy: { ttlMs: 20_000, staleMs: 90_000 } },
   { pattern: /^\/screener\/filters(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
+  { pattern: /^\/companies\/[^/]+\/overview(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/segment-history(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/brief(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -99,6 +101,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
 
 const CACHE_STORAGE_PREFIX = "ft:api-cache:v2:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
+const AUDIT_RECORDED_ERROR = Symbol("auditRecordedError");
 
 const readCache = new Map<string, CacheEntry>();
 const inflightRequests = new Map<string, Promise<unknown>>();
@@ -262,6 +265,10 @@ function cacheValue(cacheKey: string, data: unknown): void {
   writePersistentCache(cacheKey, entry);
 }
 
+function shareReadCacheValue(cacheKey: string, sourceData: unknown): void {
+  cacheValue(cacheKey, sourceData);
+}
+
 function withApiPrefix(path: string): string {
   return `${API_PREFIX}${path}`;
 }
@@ -371,59 +378,83 @@ async function fetchAndParseWithAudit<T>(
   }
 
   try {
-    const response = await fetch(withApiPrefix(path), {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {})
-      },
-      cache: init?.cache,
-      signal: init?.signal
-    });
-
-    const shouldMeasureBytes = isPerformanceAuditEnabled();
-    const textPayload = shouldMeasureBytes ? await response.text() : null;
-    const responseBytes = textPayload != null ? new TextEncoder().encode(textPayload).length : null;
-    const durationMs = shouldMeasureBytes ? performance.now() - startedPerf : 0;
-
-    if (!response.ok) {
-      recordPerformanceAuditRequest({
-        context: audit?.context ?? null,
-        startedAt,
-        method,
-        path,
-        cacheDisposition: audit?.cacheDisposition ?? "network",
-        networkRequest: true,
-        backgroundRevalidate: audit?.backgroundRevalidate ?? false,
-        statusCode: response.status,
-        durationMs,
-        responseBytes,
-        error: `API request failed: ${response.status} ${response.statusText}`,
+    try {
+      const response = await fetch(withApiPrefix(path), {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {})
+        },
+        cache: init?.cache,
+        signal: init?.signal
       });
-      throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+
+      const shouldMeasureBytes = isPerformanceAuditEnabled();
+      const textPayload = shouldMeasureBytes ? await response.text() : null;
+      const responseBytes = textPayload != null ? new TextEncoder().encode(textPayload).length : null;
+      const durationMs = shouldMeasureBytes ? performance.now() - startedPerf : 0;
+
+      if (!response.ok) {
+        const requestError = new Error(`API request failed: ${response.status} ${response.statusText}`) as Error & { [AUDIT_RECORDED_ERROR]?: boolean };
+        requestError[AUDIT_RECORDED_ERROR] = true;
+        recordPerformanceAuditRequest({
+          context: audit?.context ?? null,
+          startedAt,
+          method,
+          path,
+          cacheDisposition: audit?.cacheDisposition ?? "network",
+          networkRequest: true,
+          backgroundRevalidate: audit?.backgroundRevalidate ?? false,
+          statusCode: response.status,
+          durationMs,
+          responseBytes,
+          error: requestError.message,
+        });
+        throw requestError;
+      }
+
+      const payload = textPayload != null
+        ? ((textPayload ? JSON.parse(textPayload) : null) as T)
+        : ((await response.json()) as T);
+
+      if (shouldMeasureBytes) {
+        recordPerformanceAuditRequest({
+          context: audit?.context ?? null,
+          startedAt,
+          method,
+          path,
+          cacheDisposition: audit?.cacheDisposition ?? "network",
+          networkRequest: true,
+          backgroundRevalidate: audit?.backgroundRevalidate ?? false,
+          statusCode: response.status,
+          durationMs,
+          responseBytes,
+          error: null,
+        });
+      }
+
+      return payload;
+    } catch (error) {
+      const isAbortError = typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
+      const isAborted = init?.signal?.aborted || isAbortError;
+      const alreadyRecorded = typeof error === "object" && error !== null && AUDIT_RECORDED_ERROR in error;
+      if (isPerformanceAuditEnabled() && !alreadyRecorded) {
+        recordPerformanceAuditRequest({
+          context: audit?.context ?? null,
+          startedAt,
+          method,
+          path,
+          cacheDisposition: audit?.cacheDisposition ?? "network",
+          networkRequest: true,
+          backgroundRevalidate: audit?.backgroundRevalidate ?? false,
+          statusCode: null,
+          durationMs: performance.now() - startedPerf,
+          responseBytes: null,
+          error: isAborted ? "aborted" : (error instanceof Error ? error.message : String(error)),
+        });
+      }
+      throw error;
     }
-
-    const payload = textPayload != null
-      ? ((textPayload ? JSON.parse(textPayload) : null) as T)
-      : ((await response.json()) as T);
-
-    if (shouldMeasureBytes) {
-      recordPerformanceAuditRequest({
-        context: audit?.context ?? null,
-        startedAt,
-        method,
-        path,
-        cacheDisposition: audit?.cacheDisposition ?? "network",
-        networkRequest: true,
-        backgroundRevalidate: audit?.backgroundRevalidate ?? false,
-        statusCode: response.status,
-        durationMs,
-        responseBytes,
-        error: null,
-      });
-    }
-
-    return payload;
   } finally {
     if (isPerformanceAuditEnabled()) {
       endPerformanceAuditNetworkRequest();
@@ -527,6 +558,20 @@ export function getCompanyFinancials(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyOverview(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyOverviewResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const normalizedTicker = encodeURIComponent(ticker);
+  return fetchJson<CompanyOverviewResponse>(`/companies/${normalizedTicker}/overview${suffix}`, { signal: options?.signal }).then((payload) => {
+    shareReadCacheValue(`/companies/${normalizedTicker}/financials${suffix}`, payload.financials);
+    return payload;
+  });
 }
 
 export function getCompaniesCompare(

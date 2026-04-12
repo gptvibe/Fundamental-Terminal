@@ -234,6 +234,7 @@ export default function CompanyResearchBriefPage() {
     priceHistory,
     fundamentalsTrendData,
     latestFinancial,
+    briefData: initialBriefData,
     loading,
     error,
     refreshing,
@@ -246,12 +247,13 @@ export default function CompanyResearchBriefPage() {
   } = useCompanyWorkspace(ticker, {
     includeInsiders: false,
     includeInstitutional: false,
+    includeOverviewBrief: true,
     includeChartConsole: true,
     auditPageRoute: "/company/[ticker]",
     auditScenario: "company_overview",
   });
 
-  const briefData = useResearchBriefData(ticker, reloadKey);
+  const briefData = useResearchBriefData(ticker, reloadKey, initialBriefData, loading);
   const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
   const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker);
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
@@ -1412,11 +1414,36 @@ export default function CompanyResearchBriefPage() {
   );
 }
 
-function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefDataState {
-  const [state, setState] = useState<ResearchBriefDataState>(INITIAL_RESEARCH_BRIEF_DATA_STATE);
+function useResearchBriefData(
+  ticker: string,
+  reloadKey: string,
+  initialBrief: CompanyResearchBriefResponse | null,
+  overviewBootstrapLoading: boolean
+): ResearchBriefDataState {
+  const [state, setState] = useState<ResearchBriefDataState>(() =>
+    initialBrief ? mapBriefResponseToAsyncState(initialBrief) : INITIAL_RESEARCH_BRIEF_DATA_STATE
+  );
 
   useEffect(() => {
     let cancelled = false;
+
+    if (initialBrief) {
+      setState(mapBriefResponseToAsyncState(initialBrief));
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (overviewBootstrapLoading) {
+      setState((current) => ({
+        ...current,
+        loading: true,
+        error: null,
+      }));
+      return () => {
+        cancelled = true;
+      };
+    }
 
     setState((current) => ({
       ...current,
@@ -1468,7 +1495,7 @@ function useResearchBriefData(ticker: string, reloadKey: string): ResearchBriefD
     return () => {
       cancelled = true;
     };
-  }, [reloadKey, ticker]);
+  }, [initialBrief, overviewBootstrapLoading, reloadKey, ticker]);
 
   return state;
 }

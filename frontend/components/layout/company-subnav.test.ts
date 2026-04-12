@@ -8,6 +8,7 @@ import { CompanySubnav } from "@/components/layout/company-subnav";
 
 const mockUsePathname = vi.fn();
 const getCompanyFinancials = vi.fn();
+const getCompanyOverview = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
@@ -15,6 +16,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", () => ({
   getCompanyFinancials: (...args: unknown[]) => getCompanyFinancials(...args),
+  getCompanyOverview: (...args: unknown[]) => getCompanyOverview(...args),
 }));
 
 vi.mock("next/link", () => ({
@@ -25,7 +27,9 @@ describe("CompanySubnav", () => {
   beforeEach(() => {
     mockUsePathname.mockReset();
     getCompanyFinancials.mockReset();
+    getCompanyOverview.mockReset();
     getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "unsupported" } });
+    getCompanyOverview.mockResolvedValue({ company: { oil_support_status: "unsupported" }, financials: { company: { oil_support_status: "unsupported" } } });
   });
 
   it("includes peers tab and marks it active on peers route", () => {
@@ -109,5 +113,22 @@ describe("CompanySubnav", () => {
       expect(getCompanyFinancials).toHaveBeenCalledWith("KMI");
     });
     expect(within(desktopNav).queryByRole("link", { name: "Oil" })).toBeNull();
+  });
+
+  it("reuses the overview payload on the overview route when deciding Oil tab visibility", async () => {
+    mockUsePathname.mockReturnValue("/company/XOM");
+    getCompanyOverview.mockResolvedValue({
+      company: { oil_support_status: "partial" },
+      financials: { company: { oil_support_status: "partial" } },
+    });
+
+    const { container } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
+    const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
+
+    await waitFor(() => {
+      expect(getCompanyOverview).toHaveBeenCalledWith("XOM");
+    });
+    expect(getCompanyFinancials).not.toHaveBeenCalled();
+    expect(within(desktopNav).getByRole("link", { name: "Oil" }).getAttribute("href")).toBe("/company/XOM/oil");
   });
 });

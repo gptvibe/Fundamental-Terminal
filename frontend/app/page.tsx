@@ -14,6 +14,7 @@ import { getGlobalMarketContext, getSourceRegistry, getWatchlistSummary, resolve
 import { showAppToast } from "@/lib/app-toast";
 import { findExactSearchMatch, normalizeSearchText } from "@/lib/company-search";
 import { formatDate, formatPercent, titleCase } from "@/lib/format";
+import type { PerformanceAuditContext } from "@/lib/performance-audit";
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import {
   readRecentCompanies,
@@ -35,6 +36,11 @@ import type {
 
 const MACRO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_WATCHLIST_SUMMARY_TICKERS = 8;
+const HOME_SEARCH_AUDIT_SOURCES = {
+  autocomplete: "home:autocomplete-search",
+  submit: "home:submit-search",
+  resolve: "home:resolve-company",
+} as const;
 
 type HomeChangeTone = "attention-high" | "attention-medium" | "live" | "success" | "error";
 
@@ -250,7 +256,7 @@ export default function HomePage() {
     [router, syncMetadata]
   );
 
-  const loadSearch = useCallback(async (searchQuery: string, signal?: AbortSignal) => {
+  const loadSearch = useCallback(async (searchQuery: string, signal?: AbortSignal, source: keyof typeof HOME_SEARCH_AUDIT_SOURCES = "autocomplete") => {
     if (!searchQuery) {
       setData(null);
       setError(null);
@@ -264,13 +270,12 @@ export default function HomePage() {
       setLoading(true);
       setError(null);
       const response = await withPerformanceAuditSource(
-        {
-          pageRoute: "/",
-          scenario: "homepage_search",
-          source: "home:autocomplete-search",
-        },
+        buildHomeSearchAuditContext(HOME_SEARCH_AUDIT_SOURCES[source]),
         () => searchCompanies(searchQuery, { refresh: false, signal })
       );
+      if (signal?.aborted) {
+        return null;
+      }
       setData(response);
       setActiveSuggestionIndex(0);
       setHasNavigatedSuggestions(false);
@@ -291,7 +296,7 @@ export default function HomePage() {
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      void loadSearch(trimmedSearchText, controller.signal);
+      void loadSearch(trimmedSearchText, controller.signal, "autocomplete");
     }, 250);
 
     return () => {
@@ -331,7 +336,7 @@ export default function HomePage() {
       return;
     }
 
-    const latestSearchResponse = data?.query === trimmedSearchText ? data : await loadSearch(trimmedSearchText);
+    const latestSearchResponse = data?.query === trimmedSearchText ? data : await loadSearch(trimmedSearchText, undefined, "submit");
     const resolvedSuggestion = findExactSearchMatch(latestSearchResponse?.results ?? [], trimmedSearchText);
     if (resolvedSuggestion) {
       selectSuggestion(resolvedSuggestion, destination);
@@ -340,11 +345,7 @@ export default function HomePage() {
 
     try {
       const resolution = await withPerformanceAuditSource(
-        {
-          pageRoute: "/",
-          scenario: "homepage_search",
-          source: "home:resolve-company",
-        },
+        buildHomeSearchAuditContext(HOME_SEARCH_AUDIT_SOURCES.resolve),
         () => resolveCompanyIdentifier(trimmedSearchText)
       );
       if (resolution.resolved && resolution.ticker) {
@@ -744,6 +745,14 @@ export default function HomePage() {
 
 function getBestMatch(results: CompanyPayload[], ticker: string): CompanyPayload | null {
   return results.find((result) => result.ticker.toUpperCase() === ticker) ?? results[0] ?? null;
+}
+
+function buildHomeSearchAuditContext(source: string): PerformanceAuditContext {
+  return {
+    scenario: "homepage_search",
+    pageRoute: "/",
+    source,
+  };
 }
 
 function getRefreshLabel(refresh: RefreshState | null | undefined, loading: boolean, hasQuery: boolean): string {

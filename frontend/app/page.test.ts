@@ -236,6 +236,7 @@ describe("HomePage", () => {
       expect(push).toHaveBeenCalledWith("/company/MSFT");
     });
 
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
     expect(resolveCompanyIdentifier).not.toHaveBeenCalled();
 
     const recentCompanies = JSON.parse(window.localStorage.getItem(RECENT_COMPANIES_STORAGE_KEY) ?? "[]");
@@ -300,6 +301,78 @@ describe("HomePage", () => {
     expect(searchCompanies).toHaveBeenCalledTimes(1);
     expect(resolveCompanyIdentifier).toHaveBeenCalledWith("NET");
     expect(push).toHaveBeenCalledWith("/company/NET");
+  });
+
+  it("aborts stale autocomplete requests without letting older results overwrite newer ones", async () => {
+    vi.useFakeTimers();
+    const requests = new Map<
+      string,
+      { signal: AbortSignal | undefined; resolve: (value: { query: string; results: ReturnType<typeof buildCompanyPayload>[]; refresh: typeof refreshState }) => void }
+    >();
+    searchCompanies.mockImplementation((query: string, options?: { signal?: AbortSignal }) => {
+      return new Promise((resolve) => {
+        requests.set(query, { signal: options?.signal, resolve });
+      });
+    });
+
+    render(React.createElement(HomePage));
+
+    const searchInput = screen.getByLabelText(/search by ticker, company, or cik/i);
+
+    fireEvent.change(searchInput, {
+      target: { value: "m" },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+
+    const firstRequest = requests.get("m");
+    expect(firstRequest?.signal?.aborted).toBe(false);
+
+    fireEvent.change(searchInput, {
+      target: { value: "ms" },
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(firstRequest?.signal?.aborted).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+    });
+
+    const secondRequest = requests.get("ms");
+    expect(secondRequest?.signal?.aborted).toBe(false);
+
+    await act(async () => {
+      secondRequest?.resolve({
+        query: "ms",
+        results: [buildCompanyPayload({ ticker: "MSFT", name: "Microsoft Corp." })],
+        refresh: refreshState,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("Microsoft Corp.").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      firstRequest?.resolve({
+        query: "m",
+        results: [buildCompanyPayload({ ticker: "META", name: "Meta Platforms" })],
+        refresh: refreshState,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText("Meta Platforms")).toBeNull();
+    expect(screen.getAllByText("Microsoft Corp.").length).toBeGreaterThan(0);
   });
 });
 

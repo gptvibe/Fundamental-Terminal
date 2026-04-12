@@ -180,3 +180,53 @@ def test_company_brief_returns_stale_snapshot_and_queues_background_refresh(monk
     assert response.refresh.job_id == "job-stale"
     assert response.company is not None
     assert response.company.ticker == "ACME"
+
+
+def test_company_overview_reuses_shared_snapshot_for_financials_and_brief(monkeypatch):
+    snapshot = SimpleNamespace(
+        company=SimpleNamespace(
+            id=1,
+            ticker="ACME",
+            cik="0000123456",
+            name="Acme Corp",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Software",
+        ),
+        cache_state="fresh",
+        last_checked=datetime(2026, 3, 10, tzinfo=timezone.utc),
+    )
+    seen_snapshots: list[tuple[str, object | None]] = []
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda session, ticker: snapshot)
+
+    def _build_financials(*_args, **kwargs):
+        seen_snapshots.append(("financials", kwargs.get("snapshot")))
+        return main_module.CompanyFinancialsResponse(
+            company=main_module._serialize_company(snapshot),
+            financials=[],
+            price_history=[],
+            refresh=main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None),
+            diagnostics=main_module._build_data_quality_diagnostics(),
+            **main_module._empty_provenance_contract(),
+        )
+
+    def _build_brief(*_args, **kwargs):
+        seen_snapshots.append(("brief", kwargs.get("snapshot")))
+        return main_module._empty_company_brief_response(
+            refresh=main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None),
+            as_of=None,
+        ).model_copy(update={"company": main_module._serialize_company(snapshot)})
+
+    monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
+    monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
+
+    response = main_module.company_overview("ACME", BackgroundTasks(), as_of=None, session=object())
+
+    assert response.company is not None
+    assert response.company.ticker == "ACME"
+    assert response.financials.company is not None
+    assert response.financials.company.ticker == "ACME"
+    assert response.brief.company is not None
+    assert response.brief.company.ticker == "ACME"
+    assert seen_snapshots == [("financials", snapshot), ("brief", snapshot)]

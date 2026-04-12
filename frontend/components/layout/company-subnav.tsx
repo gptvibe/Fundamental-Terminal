@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 
-import { getCompanyFinancials } from "@/lib/api";
+import { getCompanyFinancials, getCompanyOverview } from "@/lib/api";
 import { companySupportsOilWorkspace } from "@/lib/oil-workspace";
 
 interface CompanySubnavProps {
@@ -83,9 +83,11 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
 
     async function loadOilTabVisibility() {
       try {
-        const financialData = await getCompanyFinancials(ticker);
+        const company = isOverviewRoute(pathname, baseHref)
+          ? await getCompanyOverview(ticker).then((overviewData) => overviewData.company ?? overviewData.financials.company)
+          : await getCompanyFinancials(ticker).then((financialData) => financialData.company);
         if (!cancelled) {
-          setShowOilTab(companySupportsOilWorkspace(financialData.company));
+          setShowOilTab(companySupportsOilWorkspace(company));
         }
       } catch {
         if (!cancelled) {
@@ -98,7 +100,7 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     return () => {
       cancelled = true;
     };
-  }, [ticker]);
+  }, [baseHref, pathname, ticker]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -300,6 +302,10 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
       </nav>
     </div>
   );
+}
+
+function isOverviewRoute(pathname: string | null, baseHref: string): boolean {
+  return pathname === baseHref || pathname === `${baseHref}/overview`;
 }
 
 function isTabActive(pathname: string | null, baseHref: string, tab: CompanySubnavTab): boolean {

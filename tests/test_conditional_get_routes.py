@@ -190,6 +190,36 @@ def test_search_route_prioritizes_exact_cik_and_skips_contains_fallback(monkeypa
     assert search_calls == [False]
 
 
+def test_company_overview_route_supports_conditional_get(monkeypatch):
+    snapshot = _snapshot()
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "_build_company_financials_response",
+        lambda *_args, **_kwargs: main_module.CompanyFinancialsResponse(
+            company=main_module._serialize_company(snapshot),
+            financials=[],
+            price_history=[],
+            refresh=RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+            diagnostics=main_module._build_data_quality_diagnostics(),
+            **main_module._empty_provenance_contract(),
+        ),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_build_company_research_brief_response",
+        lambda *_args, **_kwargs: main_module._empty_company_brief_response(
+            refresh=RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+            as_of=None,
+        ).model_copy(update={"company": main_module._serialize_company(snapshot)}),
+    )
+
+    client = TestClient(app)
+    _assert_304_on_second_request(client, "/api/companies/AAPL/overview")
+
+
 def test_readyz_returns_ok_when_database_is_usable(monkeypatch):
     class _HealthySession:
         async def execute(self, _statement):

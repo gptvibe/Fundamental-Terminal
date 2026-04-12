@@ -2521,6 +2521,12 @@ export interface CompanyResearchBriefResponse {
   monitor: CompanyResearchBriefMonitorSection;
 }
 
+export interface CompanyOverviewResponse {
+  company: CompanyPayload | null;
+  financials: CompanyFinancialsResponse;
+  brief: CompanyResearchBriefResponse;
+}
+
 export interface RefreshQueuedResponse {
   status: "queued";
   ticker: string;

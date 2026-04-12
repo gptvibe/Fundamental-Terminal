@@ -13,6 +13,7 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
 
     provenance_fields = {"provenance", "as_of", "last_refreshed_at", "source_mix", "confidence_flags"}
     endpoint_expectations = {
+        "/api/companies/{ticker}/overview": {"company", "financials", "brief"},
         "/api/companies/{ticker}/financials": {"company", "financials", "price_history", "refresh", "diagnostics", *provenance_fields},
         "/api/companies/{ticker}/capital-structure": {
             "company",
@@ -143,6 +144,7 @@ def test_hot_endpoint_openapi_contracts_include_point_in_time_query_params() -> 
     schema = client.get("/openapi.json").json()
 
     for path in (
+        "/api/companies/{ticker}/overview",
         "/api/companies/{ticker}/financials",
         "/api/companies/{ticker}/capital-structure",
         "/api/companies/{ticker}/changes-since-last-filing",
@@ -159,6 +161,7 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     for interface_name in (
         "ProvenanceEnvelope",
         "CompanyFinancialsResponse",
+        "CompanyOverviewResponse",
         "CompanyCapitalStructureResponse",
         "CompanyOilScenarioResponse",
         "CompanyOilScenarioOverlayResponse",

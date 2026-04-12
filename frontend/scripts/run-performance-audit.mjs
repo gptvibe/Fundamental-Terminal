@@ -12,6 +12,8 @@ const DEFAULT_FRONTEND_URL = "http://127.0.0.1:3000";
 const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
 const DEFAULT_TICKER = "AAPL";
 const DEFAULT_ROUNDS = 8;
+const DEFAULT_RESOLVE_QUERY = "NET";
+const SEARCH_DUPLICATE_WINDOW_MS = 1500;
 const MODEL_NAMES = ["ratios", "dupont", "dcf", "reverse_dcf", "roic", "capital_allocation"];
 const LOCAL_USER_DATA_STORAGE_KEY = "ft-local-user-data";
 const API_CACHE_STORAGE_PREFIX = "ft:api-cache:v2:";
@@ -23,15 +25,31 @@ const PAGE_SCENARIOS = [
     label: "Homepage search",
     pageRoute: "/",
     async run(page, config, phase) {
-      await page.goto(config.frontendUrl, { waitUntil: "domcontentloaded" });
-      await waitForFrontendAudit(page);
-      await resetCollectors(page, config.backendUrl, phase);
-
-      const input = page.getByRole("combobox", { name: /search by ticker, company, or cik/i });
-      await input.fill("");
-      await input.fill(config.ticker);
-      await waitForAuditIdle(page);
-      return collectScenarioResult(page, config.backendUrl, this.label, phase);
+      return runHomepageSearchScenario(page, config, phase, this.label, config.searchQuery);
+    },
+  },
+  {
+    key: "homepage_resolve_fallback",
+    label: "Homepage resolve fallback",
+    pageRoute: "/",
+    async run(page, config, phase) {
+      return runHomepageSearchScenario(page, config, phase, this.label, config.resolveQuery);
+    },
+  },
+  {
+    key: "topbar_search",
+    label: "Top-bar search",
+    pageRoute: "/company/[ticker]",
+    async run(page, config, phase) {
+      return runTopbarSearchScenario(page, config, phase, this.label, config.topbarQuery);
+    },
+  },
+  {
+    key: "topbar_resolve_fallback",
+    label: "Top-bar resolve fallback",
+    pageRoute: "/company/[ticker]",
+    async run(page, config, phase) {
+      return runTopbarSearchScenario(page, config, phase, this.label, config.resolveQuery);
     },
   },
   {
@@ -224,9 +242,47 @@ function parseArgs(args) {
     backendUrl: values.get("backend-url") ?? DEFAULT_BACKEND_URL,
     frontendUrl: values.get("frontend-url") ?? DEFAULT_FRONTEND_URL,
     ticker: String(values.get("ticker") ?? DEFAULT_TICKER).trim().toUpperCase(),
+    searchQuery: String(values.get("search-query") ?? values.get("ticker") ?? DEFAULT_TICKER).trim(),
+    topbarQuery: String(values.get("topbar-query") ?? pickAlternateTicker(String(values.get("ticker") ?? DEFAULT_TICKER).trim().toUpperCase())).trim(),
+    resolveQuery: String(values.get("resolve-query") ?? DEFAULT_RESOLVE_QUERY).trim(),
     rounds: Number.parseInt(values.get("rounds") ?? String(DEFAULT_ROUNDS), 10),
     repoRoot: path.resolve(SCRIPT_DIR, "..", ".."),
   };
+}
+
+
+async function runHomepageSearchScenario(page, config, phase, label, query) {
+  await page.goto(config.frontendUrl, { waitUntil: "domcontentloaded" });
+  await waitForFrontendAudit(page);
+  await resetCollectors(page, config.backendUrl, phase);
+
+  const input = page.getByRole("combobox", { name: /search by ticker, company, or cik/i });
+  await input.fill("");
+  await input.fill(query);
+  await waitForAuditIdle(page);
+  await input.press("Enter");
+  await page.waitForTimeout(150);
+  await waitForFrontendAudit(page);
+  await waitForAuditIdle(page);
+  return collectScenarioResult(page, config.backendUrl, label, phase);
+}
+
+
+async function runTopbarSearchScenario(page, config, phase, label, query) {
+  await page.goto(`${config.frontendUrl}/company/${encodeURIComponent(config.ticker)}`, { waitUntil: "domcontentloaded" });
+  await waitForFrontendAudit(page);
+  await waitForAuditIdle(page);
+  await resetCollectors(page, config.backendUrl, phase);
+
+  const input = page.getByRole("combobox", { name: /search company or ticker/i }).first();
+  await input.fill("");
+  await input.fill(query);
+  await waitForAuditIdle(page);
+  await input.press("Enter");
+  await page.waitForTimeout(150);
+  await waitForFrontendAudit(page);
+  await waitForAuditIdle(page);
+  return collectScenarioResult(page, config.backendUrl, label, phase);
 }
 
 
@@ -384,6 +440,7 @@ function summarizeScenario(label, phase, frontendSnapshot, backendSnapshot) {
   const totalSqlElapsedMs = backendRecords.reduce((sum, record) => sum + Number(record.sql_elapsed_ms ?? 0), 0);
   const totalResponseBytes = backendRecords.reduce((sum, record) => sum + Number(record.response_bytes ?? 0), 0);
   const totalSerializationMs = backendRecords.reduce((sum, record) => sum + Number(record.serialization_ms ?? 0), 0);
+  const searchAudit = summarizeSearchFlowAudit(blockingRequests);
 
   return {
     label,
@@ -405,7 +462,116 @@ function summarizeScenario(label, phase, frontendSnapshot, backendSnapshot) {
       totalSerializationMs: round(totalSerializationMs),
       routeSummaries: Array.isArray(backendSnapshot.route_summaries) ? backendSnapshot.route_summaries : [],
     },
+    searchAudit,
   };
+}
+
+
+function summarizeSearchFlowAudit(requests) {
+  const searchRecords = requests
+    .map((record) => toSearchFlowRecord(record))
+    .filter(Boolean)
+    .sort((left, right) => left.startedAtMs - right.startedAtMs);
+
+  const autocompleteRequests = searchRecords.filter((record) => record.category === "autocomplete").length;
+  const submitSearchRequests = searchRecords.filter((record) => record.category === "submit").length;
+  const resolveFallbackRequests = searchRecords.filter((record) => record.category === "resolve").length;
+  const abortedAutocompleteRequests = searchRecords.filter((record) => record.category === "autocomplete" && record.error === "aborted").length;
+  const duplicateSameQueryDetails = [];
+  const searchToResolvePairs = [];
+
+  const priorSearchesByQuery = new Map();
+  for (const record of searchRecords) {
+    const priorSearch = priorSearchesByQuery.get(record.query) ?? null;
+    if (record.kind === "search" && priorSearch && record.startedAtMs - priorSearch.startedAtMs <= SEARCH_DUPLICATE_WINDOW_MS) {
+      duplicateSameQueryDetails.push({
+        query: record.query,
+        gapMs: round(record.startedAtMs - priorSearch.startedAtMs),
+        firstSource: priorSearch.source,
+        secondSource: record.source,
+        firstCacheDisposition: priorSearch.cacheDisposition,
+        secondCacheDisposition: record.cacheDisposition,
+      });
+    }
+
+    if (record.kind === "resolve" && priorSearch && record.startedAtMs - priorSearch.startedAtMs <= SEARCH_DUPLICATE_WINDOW_MS) {
+      searchToResolvePairs.push({
+        query: record.query,
+        gapMs: round(record.startedAtMs - priorSearch.startedAtMs),
+        searchSource: priorSearch.source,
+        resolveSource: record.source,
+        searchCacheDisposition: priorSearch.cacheDisposition,
+      });
+    }
+
+    if (record.kind === "search") {
+      priorSearchesByQuery.set(record.query, record);
+    }
+  }
+
+  return {
+    windowMs: SEARCH_DUPLICATE_WINDOW_MS,
+    autocompleteRequests,
+    submitSearchRequests,
+    resolveFallbackRequests,
+    abortedAutocompleteRequests,
+    duplicateSameQueryRequestCount: duplicateSameQueryDetails.length,
+    duplicateSameQueryDetails,
+    searchToResolvePairCount: searchToResolvePairs.length,
+    searchToResolvePairs,
+  };
+}
+
+
+function toSearchFlowRecord(record) {
+  const classification = classifySearchAuditRecord(record);
+  if (!classification) {
+    return null;
+  }
+
+  return {
+    ...classification,
+    source: record.source ?? "unknown",
+    cacheDisposition: record.cacheDisposition,
+    error: record.error,
+    startedAtMs: toTimestamp(record.startedAt),
+  };
+}
+
+
+function classifySearchAuditRecord(record) {
+  const query = extractSearchQuery(record.path);
+  if (!query) {
+    return null;
+  }
+
+  if (record.path.startsWith("/companies/search?")) {
+    if (record.source?.endsWith(":autocomplete-search")) {
+      return { kind: "search", category: "autocomplete", query };
+    }
+    if (record.source?.endsWith(":submit-search")) {
+      return { kind: "search", category: "submit", query };
+    }
+    return { kind: "search", category: "other-search", query };
+  }
+
+  if (record.path.startsWith("/companies/resolve?")) {
+    return { kind: "resolve", category: "resolve", query };
+  }
+
+  return null;
+}
+
+
+function extractSearchQuery(pathname) {
+  const queryIndex = pathname.indexOf("?");
+  if (queryIndex < 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(pathname.slice(queryIndex + 1));
+  const query = params.get("query")?.trim().toLowerCase();
+  return query || null;
 }
 
 
@@ -554,9 +720,11 @@ function buildSummary(config, scenarioResults, benchmarkResults) {
     })
     .sort((left, right) => left.label.localeCompare(right.label) || left.phase.localeCompare(right.phase));
 
+  const searchFlowRollup = buildSearchFlowRollup(scenarioResults);
+
   return {
     generatedAt: new Date().toISOString(),
-    command: `npm --prefix frontend run audit:performance -- --ticker ${config.ticker}`,
+    command: buildAuditCommand(config),
     config,
     pageFlows: scenarioResults,
     requestBudgets,
@@ -564,6 +732,7 @@ function buildSummary(config, scenarioResults, benchmarkResults) {
     slowestRoutes,
     mostOverFetchedFlows,
     duplicateSources,
+    searchFlowRollup,
     benchmarkResults,
   };
 }
@@ -585,6 +754,48 @@ function buildMarkdown(summary) {
   lines.push("- Start the backend with `PERFORMANCE_AUDIT_ENABLED=true`.");
   lines.push("- Start the frontend with `NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED=true`.");
   lines.push("- Keep the services on the default local ports or pass `--frontend-url` / `--backend-url`.");
+  lines.push("- Use `--search-query` to exercise exact autocomplete + submit reuse, `--topbar-query` for company-page top-bar search, and `--resolve-query` to force a resolve fallback probe.");
+  lines.push("");
+  lines.push("Search-flow counters are only collected when the frontend performance audit flag is enabled, and duplicate same-query requests are counted when the same `/companies/search` input repeats within 1.5s.");
+  lines.push("");
+  lines.push("## Search Flow Audit");
+  lines.push("");
+  lines.push("| Flow | Phase | Autocomplete | Submit Search | Resolve Fallback | Aborted Autocomplete | Duplicate Same Query | Search→Resolve Pairs |");
+  lines.push("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+  for (const flow of summary.pageFlows) {
+    lines.push(`| ${flow.label} | ${flow.phase} | ${flow.searchAudit.autocompleteRequests} | ${flow.searchAudit.submitSearchRequests} | ${flow.searchAudit.resolveFallbackRequests} | ${flow.searchAudit.abortedAutocompleteRequests} | ${flow.searchAudit.duplicateSameQueryRequestCount} | ${flow.searchAudit.searchToResolvePairCount} |`);
+  }
+  lines.push("");
+  lines.push("### Search Flow Totals");
+  lines.push("");
+  lines.push(`- Autocomplete requests: ${summary.searchFlowRollup.autocompleteRequests}`);
+  lines.push(`- Submit-triggered search requests: ${summary.searchFlowRollup.submitSearchRequests}`);
+  lines.push(`- Resolve fallback requests: ${summary.searchFlowRollup.resolveFallbackRequests}`);
+  lines.push(`- Aborted autocomplete requests: ${summary.searchFlowRollup.abortedAutocompleteRequests}`);
+  lines.push(`- Duplicate same-query requests (${summary.searchFlowRollup.windowMs}ms window): ${summary.searchFlowRollup.duplicateSameQueryRequestCount}`);
+  lines.push(`- Search-to-resolve back-to-back pairs: ${summary.searchFlowRollup.searchToResolvePairCount}`);
+  lines.push("");
+  lines.push("### Duplicate Same-Query Search Requests");
+  lines.push("");
+  lines.push("| Flow | Phase | Query | Gap (ms) | First Source | Second Source | First Cache | Second Cache |");
+  lines.push("| --- | --- | --- | ---: | --- | --- | --- | --- |");
+  for (const duplicate of summary.searchFlowRollup.duplicateSameQueryDetails) {
+    lines.push(`| ${duplicate.label} | ${duplicate.phase} | ${duplicate.query} | ${duplicate.gapMs} | ${duplicate.firstSource} | ${duplicate.secondSource} | ${duplicate.firstCacheDisposition} | ${duplicate.secondCacheDisposition} |`);
+  }
+  if (!summary.searchFlowRollup.duplicateSameQueryDetails.length) {
+    lines.push("No duplicate same-query search requests were captured in the audited flows.");
+  }
+  lines.push("");
+  lines.push("### Search Then Resolve Pairs");
+  lines.push("");
+  lines.push("| Flow | Phase | Query | Gap (ms) | Search Source | Search Cache | Resolve Source |");
+  lines.push("| --- | --- | --- | ---: | --- | --- | --- |");
+  for (const pair of summary.searchFlowRollup.searchToResolvePairs) {
+    lines.push(`| ${pair.label} | ${pair.phase} | ${pair.query} | ${pair.gapMs} | ${pair.searchSource} | ${pair.searchCacheDisposition} | ${pair.resolveSource} |`);
+  }
+  if (!summary.searchFlowRollup.searchToResolvePairs.length) {
+    lines.push("No search-to-resolve back-to-back pairs were captured in the audited flows.");
+  }
   lines.push("");
   lines.push("## Request Budgets");
   lines.push("");
@@ -652,6 +863,52 @@ function buildMarkdown(summary) {
 }
 
 
+function buildSearchFlowRollup(scenarioResults) {
+  const duplicateSameQueryDetails = scenarioResults.flatMap((result) =>
+    result.searchAudit.duplicateSameQueryDetails.map((detail) => ({
+      label: result.label,
+      phase: result.phase,
+      ...detail,
+    }))
+  );
+  const searchToResolvePairs = scenarioResults.flatMap((result) =>
+    result.searchAudit.searchToResolvePairs.map((pair) => ({
+      label: result.label,
+      phase: result.phase,
+      ...pair,
+    }))
+  );
+
+  return {
+    windowMs: SEARCH_DUPLICATE_WINDOW_MS,
+    autocompleteRequests: scenarioResults.reduce((sum, result) => sum + result.searchAudit.autocompleteRequests, 0),
+    submitSearchRequests: scenarioResults.reduce((sum, result) => sum + result.searchAudit.submitSearchRequests, 0),
+    resolveFallbackRequests: scenarioResults.reduce((sum, result) => sum + result.searchAudit.resolveFallbackRequests, 0),
+    abortedAutocompleteRequests: scenarioResults.reduce((sum, result) => sum + result.searchAudit.abortedAutocompleteRequests, 0),
+    duplicateSameQueryRequestCount: duplicateSameQueryDetails.length,
+    duplicateSameQueryDetails: duplicateSameQueryDetails
+      .sort((left, right) => left.query.localeCompare(right.query) || left.label.localeCompare(right.label) || left.phase.localeCompare(right.phase))
+      .slice(0, 20),
+    searchToResolvePairCount: searchToResolvePairs.length,
+    searchToResolvePairs: searchToResolvePairs
+      .sort((left, right) => left.query.localeCompare(right.query) || left.label.localeCompare(right.label) || left.phase.localeCompare(right.phase))
+      .slice(0, 20),
+  };
+}
+
+
+function buildAuditCommand(config) {
+  const parts = [
+    "npm --prefix frontend run audit:performance --",
+    `--ticker ${config.ticker}`,
+    `--search-query "${config.searchQuery}"`,
+    `--topbar-query "${config.topbarQuery}"`,
+    `--resolve-query "${config.resolveQuery}"`,
+  ];
+  return parts.join(" ");
+}
+
+
 function percentile(values, quantile) {
   if (!values.length) {
     return 0;
@@ -672,6 +929,11 @@ function average(values) {
 
 function round(value) {
   return Math.round(value * 100) / 100;
+}
+
+
+function pickAlternateTicker(ticker) {
+  return ticker === "AAPL" ? "MSFT" : "AAPL";
 }
 
 

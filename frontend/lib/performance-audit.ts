@@ -28,6 +28,11 @@ export type PerformanceAuditRequestRecord = {
   error: string | null;
 };
 
+export type PerformanceAuditSnapshot = PerformanceAuditState & {
+  enabled: boolean;
+  pendingCount: number;
+};
+
 type PerformanceAuditState = {
   sessionId: string;
   phase: string;
@@ -37,7 +42,7 @@ type PerformanceAuditState = {
 type PerformanceAuditApi = {
   reset: (options?: { phase?: string }) => PerformanceAuditState;
   setPhase: (phase: string) => string;
-  snapshot: () => PerformanceAuditState & { enabled: boolean; pendingCount: number };
+  snapshot: () => PerformanceAuditSnapshot;
 };
 
 declare global {

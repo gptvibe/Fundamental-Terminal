@@ -12,6 +12,9 @@ Prerequisites:
 - Start the backend with `PERFORMANCE_AUDIT_ENABLED=true`.
 - Start the frontend with `NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED=true`.
 - Keep the services on the default local ports or pass `--frontend-url` / `--backend-url`.
+- Use `--search-query` to probe homepage submit reuse, `--topbar-query` for company-page top-bar search, and `--resolve-query` to inspect search→resolve fallback behavior for the same input.
+
+Search-flow counters are only collected during local frontend audit runs. Duplicate same-query search requests are counted when the same `/companies/search` input repeats within 1.5s, and the generated report now breaks out autocomplete, submit-triggered search, resolve fallback, and aborted autocomplete counts per audited flow.
 
 ## Top 10 Slowest Routes
 
@@ -83,4 +86,3 @@ Prerequisites:
 ### Lower Impact
 - Increase the visibility of route-level payload and serialization metrics in local developer workflows so regressions show up before they reach UI review.
 - Keep the internal audit collector enabled only for local measurement runs. It is structured and low-risk, but it still adds measurable overhead when active.
-

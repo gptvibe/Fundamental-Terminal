@@ -623,49 +623,13 @@ async def company_financials(
             return cached_response
 
         def build_financials_payload(sync_session: Session) -> CompanyFinancialsResponse:
-            snapshot = _resolve_cached_company_snapshot(sync_session, normalized_ticker)
-            if snapshot is None:
-                payload = CompanyFinancialsResponse(
-                    company=None,
-                    financials=[],
-                    price_history=[],
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-                    diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
-                    **_empty_provenance_contract("company_missing"),
-                )
-                return _apply_requested_as_of(payload, requested_as_of)
-
-            financials = _visible_financials_for_company(sync_session, snapshot.company)
-            price_last_checked, price_cache_state = _visible_price_cache_status(sync_session, snapshot.company.id)
-            refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
-            price_history = _visible_price_history(sync_session, snapshot.company.id)
-            if parsed_as_of is not None:
-                financials = select_point_in_time_financials(financials, parsed_as_of)
-                price_history = filter_price_history_as_of(price_history, parsed_as_of)
-            serialized_financials = [_serialize_financial(statement) for statement in financials]
-            segment_analysis_payload = build_segment_analysis(serialized_financials)
-            diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
-            payload = CompanyFinancialsResponse(
-                company=_serialize_company(
-                    snapshot,
-                    last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
-                    last_checked_prices=price_last_checked,
-                    regulated_entity=_regulated_entity_payload(snapshot.company, financials),
-                ),
-                financials=serialized_financials,
-                price_history=[_serialize_price_history(point) for point in price_history],
-                segment_analysis=SegmentAnalysisPayload.model_validate(segment_analysis_payload) if segment_analysis_payload is not None else None,
-                refresh=refresh,
-                diagnostics=diagnostics,
-                **_financials_provenance_contract(
-                    financials,
-                    price_history,
-                    price_last_checked=price_last_checked,
-                    diagnostics=diagnostics,
-                    refresh=refresh,
-                ),
+            return _build_company_financials_response(
+                sync_session,
+                normalized_ticker,
+                background_tasks,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
             )
-            return _apply_requested_as_of(payload, requested_as_of)
 
         payload = await _fill_hot_cached_payload(
             hot_key,
@@ -682,6 +646,40 @@ async def company_financials(
         if not_modified is not None:
             return not_modified  # type: ignore[return-value]
         return payload
+
+
+@app.get("/api/companies/{ticker}/overview", response_model=CompanyOverviewResponse)
+def company_overview(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyOverviewResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    financials = _build_company_financials_response(
+        session,
+        normalized_ticker,
+        background_tasks,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+        snapshot=snapshot,
+    )
+    brief = _build_company_research_brief_response(
+        session,
+        normalized_ticker,
+        background_tasks,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+        snapshot=snapshot,
+    )
+    return CompanyOverviewResponse(
+        company=financials.company or brief.company,
+        financials=financials,
+        brief=brief,
+    )
 
 
 @app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
@@ -2760,8 +2758,26 @@ def company_brief(
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
-    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
-    if snapshot is None:
+    return _build_company_research_brief_response(
+        session,
+        normalized_ticker,
+        background_tasks,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+    )
+
+
+def _build_company_research_brief_response(
+    session: Session,
+    normalized_ticker: str,
+    background_tasks: BackgroundTasks,
+    *,
+    requested_as_of: str | None,
+    parsed_as_of: datetime | None,
+    snapshot: CompanyCacheSnapshot | None = None,
+) -> CompanyResearchBriefResponse:
+    resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
+    if resolved_snapshot is None:
         refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
         return _build_company_brief_bootstrap_for_missing_ticker(
             normalized_ticker,
@@ -2771,28 +2787,28 @@ def company_brief(
 
     stored_snapshot, payload = _load_company_research_brief_snapshot_record(
         session,
-        snapshot.company.id,
+        resolved_snapshot.company.id,
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_brief(
         background_tasks,
-        snapshot,
+        resolved_snapshot,
         stored_snapshot=stored_snapshot,
         as_of=parsed_as_of,
     )
     if payload is None:
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(background_tasks, resolved_snapshot.company.ticker, reason="missing")
         return _build_company_brief_bootstrap_for_snapshot(
             session,
-            snapshot,
+            resolved_snapshot,
             refresh=refresh,
             as_of=requested_as_of,
         )
 
     return _augment_company_brief_response(
         session,
-        snapshot,
+        resolved_snapshot,
         payload,
         refresh=refresh,
         as_of=requested_as_of,
@@ -4606,6 +4622,62 @@ def _visible_financials_for_company(
         return sec_financials
     regulated_financials = get_company_regulated_bank_financials(session, company.id, limit=limit)
     return select_preferred_financials(company, sec_financials, regulated_financials)
+
+
+def _build_company_financials_response(
+    session: Session,
+    normalized_ticker: str,
+    background_tasks: BackgroundTasks,
+    *,
+    requested_as_of: str | None,
+    parsed_as_of: datetime | None,
+    snapshot: CompanyCacheSnapshot | None = None,
+) -> CompanyFinancialsResponse:
+    resolved_snapshot = snapshot or _resolve_cached_company_snapshot(session, normalized_ticker)
+    if resolved_snapshot is None:
+        payload = CompanyFinancialsResponse(
+            company=None,
+            financials=[],
+            price_history=[],
+            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    financials = _visible_financials_for_company(session, resolved_snapshot.company)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, resolved_snapshot.company.id)
+    refresh = _refresh_for_financial_page(background_tasks, resolved_snapshot, price_cache_state, financials)
+    price_history = _visible_price_history(session, resolved_snapshot.company.id)
+    compare_financials = financials
+    compare_price_history = price_history
+    if parsed_as_of is not None:
+        compare_financials = select_point_in_time_financials(compare_financials, parsed_as_of)
+        compare_price_history = filter_price_history_as_of(compare_price_history, parsed_as_of)
+    serialized_financials = [_serialize_financial(statement) for statement in compare_financials]
+    segment_analysis_payload = build_segment_analysis(serialized_financials)
+    diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
+    payload = CompanyFinancialsResponse(
+        company=_serialize_company(
+            resolved_snapshot,
+            last_checked=_merge_last_checked(resolved_snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(resolved_snapshot.company, compare_financials),
+        ),
+        financials=serialized_financials,
+        price_history=[_serialize_price_history(point) for point in compare_price_history],
+        segment_analysis=SegmentAnalysisPayload.model_validate(segment_analysis_payload) if segment_analysis_payload is not None else None,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_financials_provenance_contract(
+            compare_financials,
+            compare_price_history,
+            price_last_checked=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
 
 
 def _regulated_entity_payload(company: Any, financials: list[Any] | None = None) -> RegulatedEntityPayload | None:

@@ -81,32 +81,49 @@ describe("AppChrome", () => {
       await Promise.resolve();
     });
 
-    expect(searchCompanies).toHaveBeenCalledWith("OA", { refresh: false });
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(searchCompanies).toHaveBeenCalledWith(
+      "OA",
+      expect.objectContaining({ refresh: false, signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("reuses autocomplete results on submit without issuing a duplicate search", async () => {
+    searchCompanies.mockResolvedValue({
+      query: "MSFT",
+      results: [buildCompanyPayload({ ticker: "MSFT", name: "Microsoft Corp.", cik: "0000789019" })],
+      refresh: { triggered: false, reason: "fresh", ticker: "MSFT", job_id: null },
+    });
+
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    const searchInput = screen.getAllByLabelText("Search company or ticker")[0];
+    fireEvent.change(searchInput, { target: { value: "MSFT" } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const searchForm = searchInput.closest("form");
+    expect(searchForm).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.submit(searchForm as HTMLFormElement);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(resolveCompanyIdentifier).not.toHaveBeenCalled();
+    expect(push).toHaveBeenCalledWith("/company/MSFT");
   });
 
   it("runs an immediate autocomplete lookup before SEC resolve on fast submit", async () => {
     searchCompanies.mockResolvedValue({
       query: "MSFT",
-      results: [
-        {
-          ticker: "MSFT",
-          cik: "0000789019",
-          name: "Microsoft Corp.",
-          sector: "Technology",
-          market_sector: "Technology",
-          market_industry: "Software",
-          regulated_entity: null,
-          strict_official_mode: false,
-          last_checked: null,
-          last_checked_financials: null,
-          last_checked_prices: null,
-          last_checked_insiders: null,
-          last_checked_institutional: null,
-          last_checked_filings: null,
-          earnings_last_checked: null,
-          cache_state: "fresh",
-        },
-      ],
+      results: [buildCompanyPayload({ ticker: "MSFT", name: "Microsoft Corp.", cik: "0000789019" })],
       refresh: { triggered: false, reason: "fresh", ticker: "MSFT", job_id: null },
     });
 
@@ -131,26 +148,7 @@ describe("AppChrome", () => {
   it("does not auto-select a fuzzy autocomplete result on fast submit", async () => {
     searchCompanies.mockResolvedValue({
       query: "NET",
-      results: [
-        {
-          ticker: "NFLX",
-          cik: "0001065280",
-          name: "NETFLIX INC",
-          sector: "Services-Video Tape Rental",
-          market_sector: "Communication Services",
-          market_industry: "Entertainment",
-          regulated_entity: null,
-          strict_official_mode: false,
-          last_checked: null,
-          last_checked_financials: null,
-          last_checked_prices: null,
-          last_checked_insiders: null,
-          last_checked_institutional: null,
-          last_checked_filings: null,
-          earnings_last_checked: null,
-          cache_state: "stale",
-        },
-      ],
+      results: [buildCompanyPayload({ ticker: "NFLX", name: "NETFLIX INC", cik: "0001065280", cache_state: "stale" })],
       refresh: { triggered: false, reason: "none", ticker: "NET", job_id: null },
     });
     resolveCompanyIdentifier.mockResolvedValue({ resolved: true, ticker: "NET", name: "Cloudflare, Inc.", error: null });
@@ -172,4 +170,96 @@ describe("AppChrome", () => {
     expect(resolveCompanyIdentifier).toHaveBeenCalledWith("NET");
     expect(push).toHaveBeenCalledWith("/company/NET");
   });
+
+  it("falls back to resolve only when the latest autocomplete payload has no exact match", async () => {
+    searchCompanies.mockResolvedValue({
+      query: "NET",
+      results: [buildCompanyPayload({ ticker: "NFLX", name: "NETFLIX INC", cik: "0001065280", cache_state: "stale" })],
+      refresh: { triggered: false, reason: "none", ticker: "NET", job_id: null },
+    });
+    resolveCompanyIdentifier.mockResolvedValue({ resolved: true, ticker: "NET", name: "Cloudflare, Inc.", error: null });
+
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    const searchInput = screen.getAllByLabelText("Search company or ticker")[0];
+    fireEvent.change(searchInput, { target: { value: "NET" } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const searchForm = searchInput.closest("form");
+    expect(searchForm).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.submit(searchForm as HTMLFormElement);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(searchCompanies).toHaveBeenCalledTimes(1);
+    expect(resolveCompanyIdentifier).toHaveBeenCalledWith("NET");
+    expect(push).toHaveBeenCalledWith("/company/NET");
+  });
+
+  it("aborts stale autocomplete requests when the query changes", async () => {
+    const requests = new Map<string, { signal: AbortSignal | undefined; resolve: (value: unknown) => void }>();
+    searchCompanies.mockImplementation((query: string, options?: { signal?: AbortSignal }) => {
+      return new Promise((resolve) => {
+        requests.set(query, { signal: options?.signal, resolve });
+      });
+    });
+
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    const searchInput = screen.getAllByLabelText("Search company or ticker")[0];
+    fireEvent.change(searchInput, { target: { value: "M" } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
+    const firstRequest = requests.get("M");
+    expect(firstRequest?.signal?.aborted).toBe(false);
+
+    fireEvent.change(searchInput, { target: { value: "MS" } });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(firstRequest?.signal?.aborted).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
+    expect(requests.get("MS")?.signal?.aborted).toBe(false);
+  });
 });
+
+function buildCompanyPayload(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    ticker: "AAPL",
+    cik: "0000320193",
+    name: "Apple Inc.",
+    sector: "Technology",
+    market_sector: "Technology",
+    market_industry: "Consumer Electronics",
+    regulated_entity: null,
+    strict_official_mode: false,
+    last_checked: null,
+    last_checked_financials: null,
+    last_checked_prices: null,
+    last_checked_insiders: null,
+    last_checked_institutional: null,
+    last_checked_filings: null,
+    earnings_last_checked: null,
+    cache_state: "fresh",
+    ...overrides,
+  };
+}

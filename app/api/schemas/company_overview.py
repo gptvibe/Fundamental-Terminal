@@ -9,7 +9,7 @@ from app.api.schemas.common import CompanyPayload, Number, ProvenanceEnvelope, R
 from app.api.schemas.equity_claim_risk import EquityClaimRiskSummaryPayload
 from app.api.schemas.events import CompanyActivityOverviewResponse, CompanyCapitalMarketsSummaryResponse
 from app.api.schemas.filings import FilingTimelineItemPayload
-from app.api.schemas.financials import CompanyCapitalStructureResponse, CompanyChangesSinceLastFilingResponse
+from app.api.schemas.financials import CompanyCapitalStructureResponse, CompanyChangesSinceLastFilingResponse, CompanyFinancialsResponse
 from app.api.schemas.governance import CompanyGovernanceSummaryResponse
 from app.api.schemas.models import CompanyModelsResponse
 from app.api.schemas.ownership import CompanyBeneficialOwnershipSummaryResponse
@@ -158,3 +158,9 @@ class CompanyResearchBriefResponse(BaseModel):
     capital_and_risk: CompanyResearchBriefCapitalAndRiskSection
     valuation: CompanyResearchBriefValuationSection
     monitor: CompanyResearchBriefMonitorSection
+
+
+class CompanyOverviewResponse(BaseModel):
+    company: CompanyPayload | None
+    financials: CompanyFinancialsResponse
+    brief: CompanyResearchBriefResponse

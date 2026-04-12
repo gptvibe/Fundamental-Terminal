@@ -1,7 +1,7 @@
 "use client";
 
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { AppLogo } from "@/components/layout/app-logo";
@@ -10,6 +10,8 @@ import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { APP_TOAST_EVENT, type AppToastDetail, showAppToast } from "@/lib/app-toast";
 import { findExactSearchMatch, normalizeSearchText } from "@/lib/company-search";
+import type { PerformanceAuditContext } from "@/lib/performance-audit";
+import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import type { CompanyPayload } from "@/lib/types";
 
 interface AppChromeProps {
@@ -17,8 +19,17 @@ interface AppChromeProps {
 }
 
 type ThemeMode = "dark" | "light";
+type LatestAutocompletePayload = {
+  query: string;
+  results: CompanyPayload[];
+};
 
 const AUTOCOMPLETE_DEBOUNCE_MS = 180;
+const TOPBAR_SEARCH_AUDIT_SOURCES = {
+  autocomplete: "topbar:autocomplete-search",
+  submit: "topbar:submit-search",
+  resolve: "topbar:resolve-company",
+} as const;
 
 export function AppChrome({ children }: AppChromeProps) {
   const router = useRouter();
@@ -40,6 +51,8 @@ export function AppChrome({ children }: AppChromeProps) {
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<AppToastDetail | null>(null);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const autocompleteAbortControllerRef = useRef<AbortController | null>(null);
+  const latestAutocompleteRef = useRef<LatestAutocompletePayload | null>(null);
   const searchRequestId = useRef(0);
   const toastTimeoutRef = useRef<number | null>(null);
   const { savedCompanyCount } = useLocalUserData();
@@ -55,6 +68,9 @@ export function AppChrome({ children }: AppChromeProps) {
   const activeMobileOptionId = showAutocomplete && autocompleteResults.length ? `app-mobile-autocomplete-option-${activeSuggestionIndex}` : undefined;
 
   useEffect(() => {
+    autocompleteAbortControllerRef.current?.abort();
+    autocompleteAbortControllerRef.current = null;
+    latestAutocompleteRef.current = null;
     setSearchText(routeTicker);
     setSearchDirty(false);
     setAutocompleteOpen(false);
@@ -135,6 +151,59 @@ export function AppChrome({ children }: AppChromeProps) {
     };
   }, []);
 
+  const fetchAutocompleteResults = useCallback(async (
+    searchQuery: string,
+    controller = new AbortController(),
+    source: keyof typeof TOPBAR_SEARCH_AUDIT_SOURCES = "autocomplete"
+  ): Promise<CompanyPayload[]> => {
+    if (!searchQuery) {
+      latestAutocompleteRef.current = null;
+      setAutocompleteResults([]);
+      setAutocompleteLoading(false);
+      setActiveSuggestionIndex(0);
+      setHasNavigatedSuggestions(false);
+      return [];
+    }
+
+    autocompleteAbortControllerRef.current?.abort();
+    autocompleteAbortControllerRef.current = controller;
+    const requestId = ++searchRequestId.current;
+    try {
+      setAutocompleteLoading(true);
+      const response = await withPerformanceAuditSource(
+        buildTopbarSearchAuditContext(TOPBAR_SEARCH_AUDIT_SOURCES[source], pathname),
+        () => searchCompanies(searchQuery, { refresh: false, signal: controller.signal })
+      );
+      if (controller.signal.aborted || requestId !== searchRequestId.current) {
+        return [];
+      }
+
+      latestAutocompleteRef.current = { query: searchQuery, results: response.results };
+      setAutocompleteResults(response.results);
+      setActiveSuggestionIndex(0);
+      setHasNavigatedSuggestions(false);
+      return response.results;
+    } catch {
+      if (controller.signal.aborted || requestId !== searchRequestId.current) {
+        return [];
+      }
+
+      latestAutocompleteRef.current = { query: searchQuery, results: [] };
+      if (requestId === searchRequestId.current) {
+        setAutocompleteResults([]);
+      }
+      return [];
+    } finally {
+      if (autocompleteAbortControllerRef.current === controller) {
+        autocompleteAbortControllerRef.current = null;
+      }
+
+      if (!controller.signal.aborted && requestId === searchRequestId.current) {
+        setAutocompleteLoading(false);
+      }
+    }
+  }, [pathname]);
+
   useEffect(() => {
     function onPointerDown(event: MouseEvent) {
       const target = event.target as Node;
@@ -151,6 +220,9 @@ export function AppChrome({ children }: AppChromeProps) {
 
   useEffect(() => {
     if (!allowAutocomplete) {
+      autocompleteAbortControllerRef.current?.abort();
+      autocompleteAbortControllerRef.current = null;
+      latestAutocompleteRef.current = null;
       setAutocompleteResults([]);
       setAutocompleteLoading(false);
       setActiveSuggestionIndex(0);
@@ -159,33 +231,14 @@ export function AppChrome({ children }: AppChromeProps) {
     }
 
     const timer = window.setTimeout(async () => {
-      const requestId = ++searchRequestId.current;
-
-      try {
-        setAutocompleteLoading(true);
-        const response = await searchCompanies(trimmedSearchText, { refresh: false });
-        if (requestId !== searchRequestId.current) {
-          return;
-        }
-
-        setAutocompleteResults(response.results);
-        setActiveSuggestionIndex(0);
-        setHasNavigatedSuggestions(false);
-      } catch {
-        if (requestId !== searchRequestId.current) {
-          return;
-        }
-
-        setAutocompleteResults([]);
-      } finally {
-        if (requestId === searchRequestId.current) {
-          setAutocompleteLoading(false);
-        }
-      }
+      void fetchAutocompleteResults(trimmedSearchText, new AbortController(), "autocomplete");
     }, AUTOCOMPLETE_DEBOUNCE_MS);
 
-    return () => window.clearTimeout(timer);
-  }, [allowAutocomplete, trimmedSearchText]);
+    return () => {
+      window.clearTimeout(timer);
+      autocompleteAbortControllerRef.current?.abort();
+    };
+  }, [allowAutocomplete, fetchAutocompleteResults, trimmedSearchText]);
 
   useEffect(() => {
     if (!mobileSearchOpen) {
@@ -219,38 +272,6 @@ export function AppChrome({ children }: AppChromeProps) {
     goToTicker(result.ticker);
   }
 
-  async function fetchImmediateAutocompleteResults(searchQuery: string): Promise<CompanyPayload[]> {
-    if (!searchQuery) {
-      setAutocompleteResults([]);
-      setAutocompleteLoading(false);
-      setActiveSuggestionIndex(0);
-      setHasNavigatedSuggestions(false);
-      return [];
-    }
-
-    const requestId = ++searchRequestId.current;
-    try {
-      setAutocompleteLoading(true);
-      const response = await searchCompanies(searchQuery, { refresh: false });
-      if (requestId !== searchRequestId.current) {
-        return [];
-      }
-      setAutocompleteResults(response.results);
-      setActiveSuggestionIndex(0);
-      setHasNavigatedSuggestions(false);
-      return response.results;
-    } catch {
-      if (requestId === searchRequestId.current) {
-        setAutocompleteResults([]);
-      }
-      return [];
-    } finally {
-      if (requestId === searchRequestId.current) {
-        setAutocompleteLoading(false);
-      }
-    }
-  }
-
   async function submitSearch() {
     const selectedSuggestion = hasNavigatedSuggestions
       ? (autocompleteResults[activeSuggestionIndex] ?? null)
@@ -264,15 +285,21 @@ export function AppChrome({ children }: AppChromeProps) {
       return;
     }
 
-    const immediateResults = await fetchImmediateAutocompleteResults(trimmedSearchText);
-    const resolvedSuggestion = findExactSearchMatch(immediateResults, trimmedSearchText);
+    const latestAutocompleteResults = latestAutocompleteRef.current?.query === trimmedSearchText ? latestAutocompleteRef.current.results : null;
+    const resolvedSuggestion = findExactSearchMatch(
+      latestAutocompleteResults ?? (await fetchAutocompleteResults(trimmedSearchText, new AbortController(), "submit")),
+      trimmedSearchText
+    );
     if (resolvedSuggestion) {
       selectSuggestion(resolvedSuggestion);
       return;
     }
 
     try {
-      const resolution = await resolveCompanyIdentifier(trimmedSearchText);
+      const resolution = await withPerformanceAuditSource(
+        buildTopbarSearchAuditContext(TOPBAR_SEARCH_AUDIT_SOURCES.resolve, pathname),
+        () => resolveCompanyIdentifier(trimmedSearchText)
+      );
       if (resolution.resolved && resolution.ticker) {
         goToTicker(resolution.ticker);
         return;
@@ -568,6 +595,24 @@ function deriveTicker(pathname: string | null): string {
   }
 
   return "";
+}
+
+function buildTopbarSearchAuditContext(source: string, pathname: string | null): PerformanceAuditContext {
+  return {
+    scenario: "topbar_search",
+    pageRoute: deriveAuditPageRoute(pathname),
+    source,
+  };
+}
+
+function deriveAuditPageRoute(pathname: string | null): string {
+  if (!pathname) {
+    return "/unknown";
+  }
+  if (pathname.startsWith("/company/")) {
+    return "/company/[ticker]";
+  }
+  return pathname;
 }
 
 function deriveWorkspace(pathname: string | null): { label: string; ticker: string | null } {
