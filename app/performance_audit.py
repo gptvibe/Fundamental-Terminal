@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import Request
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
-from starlette.responses import Response
+from starlette.responses import JSONResponse
 
 from app.config import settings
 from app.observability import emit_structured_log
@@ -64,9 +64,7 @@ class RequestMetrics:
         return payload
 
 
-class PerformanceAuditJSONResponse(Response):
-    media_type = "application/json"
-
+class PerformanceAuditJSONResponse(JSONResponse):
     def render(self, content: Any) -> bytes:
         started_at = perf_counter()
         if content is None:
