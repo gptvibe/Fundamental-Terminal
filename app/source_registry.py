@@ -318,6 +318,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Server-composed company brief assembled from persisted official-derived summaries and labeled price-sensitive sections.",
     ),
+    "ft_company_charts_dashboard": SourceDefinition(
+        source_id="ft_company_charts_dashboard",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Company Charts Dashboard",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Persisted chart-ready historical and forecast dashboard payloads derived from official company filings and labeled internal projection rules.",
+    ),
     "ft_snapshot_history": SourceDefinition(
         source_id="ft_snapshot_history",
         tier="derived_from_official",

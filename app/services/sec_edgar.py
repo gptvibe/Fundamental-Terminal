@@ -70,6 +70,7 @@ DERIVED_METRICS_INPUT_FINGERPRINT_VERSION = "derived-metrics-inputs-v1"
 CAPITAL_STRUCTURE_INPUT_FINGERPRINT_VERSION = "capital-structure-inputs-v1"
 EARNINGS_MODELS_INPUT_FINGERPRINT_VERSION = "earnings-models-inputs-v1"
 COMPANY_RESEARCH_BRIEF_INPUT_FINGERPRINT_VERSION = "company-research-brief-inputs-v1"
+CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v1"
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -2346,6 +2347,7 @@ class EdgarIngestionService:
             _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             reporter.complete("Using fresh cached data.")
             session.commit()
             return IngestionResult(
@@ -2386,6 +2388,7 @@ class EdgarIngestionService:
                 announce=False,
             )
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2423,6 +2426,7 @@ class EdgarIngestionService:
             )
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2469,6 +2473,7 @@ class EdgarIngestionService:
                 force=policy.force,
             )
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2503,6 +2508,7 @@ class EdgarIngestionService:
                 force=policy.force,
             )
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2546,6 +2552,7 @@ class EdgarIngestionService:
             _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
             _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2577,6 +2584,7 @@ class EdgarIngestionService:
                 reporter=reporter,
             )
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2612,6 +2620,7 @@ class EdgarIngestionService:
                 reporter=reporter,
             )
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2649,6 +2658,7 @@ class EdgarIngestionService:
                 force=policy.force,
             )
             _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2907,6 +2917,7 @@ class EdgarIngestionService:
             _refresh_oil_scenario_overlay_cache(session, company, checked_at, reporter)
             _refresh_earnings_model_cache(session, company.id, checked_at, reporter, force=policy.force)
             _refresh_company_research_brief_cache(session, company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_charts_dashboard_cache(session, company.id, checked_at, reporter, force=policy.force)
 
             session.commit()
             reporter.complete("Refresh and compute complete.")
@@ -3276,6 +3287,38 @@ def _build_company_research_brief_inputs_fingerprint(session: Session, company_i
     )
 
 
+def _build_company_charts_dashboard_inputs_fingerprint(session: Session, company_id: int) -> str | None:
+    company = session.get(Company, company_id)
+    if company is None:
+        return None
+
+    dependency_hashes: dict[str, Any] = {
+        "financials": _dataset_payload_hash(session, company_id, "financials"),
+        "derived_metrics": _dataset_payload_hash(session, company_id, "derived_metrics"),
+        "capital_structure": _dataset_payload_hash(session, company_id, "capital_structure"),
+        "earnings_models": _dataset_payload_hash(session, company_id, "earnings_models"),
+        "company_research_brief": _dataset_payload_hash(session, company_id, "company_research_brief"),
+    }
+    if any(value is None for value in dependency_hashes.values()):
+        return None
+
+    return build_payload_version_hash(
+        version=CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION,
+        payload={
+            "schema_version": "company_charts_dashboard_v1",
+            "company": {
+                "ticker": company.ticker,
+                "cik": company.cik,
+                "name": company.name,
+                "sector": company.sector,
+                "market_sector": company.market_sector,
+                "market_industry": company.market_industry,
+            },
+            "dependencies": dependency_hashes,
+        },
+    )
+
+
 def _refresh_derived_metrics_cache(
     session: Session,
     company_id: int,
@@ -3435,6 +3478,46 @@ def _refresh_company_research_brief_cache(
         payload_version_hash=payload_version_hash,
     )
     reporter.step("company_research_brief", f"Updated {1 if payload is not None else 0} company research brief rows")
+    return 1 if payload is not None else 0
+
+
+def _refresh_company_charts_dashboard_cache(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    reporter: JobReporter,
+    *,
+    force: bool = False,
+) -> int:
+    if not hasattr(session, "get"):
+        return 0
+
+    from app.services.company_charts_dashboard import recompute_and_persist_company_charts_dashboard
+
+    payload_version_hash = _build_company_charts_dashboard_inputs_fingerprint(session, company_id)
+    if (
+        not force
+        and payload_version_hash is not None
+        and _dataset_payload_hash(session, company_id, "charts_dashboard") == payload_version_hash
+    ):
+        reporter.step("charts_dashboard", "Skipping charts dashboard recompute; dependent inputs are unchanged.")
+        _mark_dataset_recompute_skipped(
+            session,
+            company_id=company_id,
+            dataset="charts_dashboard",
+            checked_at=checked_at,
+            payload_version_hash=payload_version_hash,
+        )
+        return 0
+
+    reporter.step("charts_dashboard", "Recomputing charts dashboard cache...")
+    payload = recompute_and_persist_company_charts_dashboard(
+        session,
+        company_id,
+        checked_at=checked_at,
+        payload_version_hash=payload_version_hash,
+    )
+    reporter.step("charts_dashboard", f"Updated {1 if payload is not None else 0} charts dashboard rows")
     return 1 if payload is not None else 0
 
 

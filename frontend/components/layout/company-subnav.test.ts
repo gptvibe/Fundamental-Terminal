@@ -32,15 +32,15 @@ describe("CompanySubnav", () => {
     getCompanyOverview.mockResolvedValue({ company: { oil_support_status: "unsupported" }, financials: { company: { oil_support_status: "unsupported" } } });
   });
 
-  it("includes peers tab and marks it active on peers route", () => {
-    mockUsePathname.mockReturnValue("/company/AAPL/peers");
+  it("includes charts tab and marks it active on charts route", () => {
+    mockUsePathname.mockReturnValue("/company/AAPL/charts");
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
-    const peersTab = within(desktopNav).getByRole("link", { name: "Peers" });
-    expect(peersTab.getAttribute("href")).toBe("/company/AAPL/peers");
-    expect(peersTab.getAttribute("aria-current")).toBe("page");
+    const chartsTab = within(desktopNav).getByRole("link", { name: "Charts" });
+    expect(chartsTab.getAttribute("href")).toBe("/company/AAPL/charts");
+    expect(chartsTab.getAttribute("aria-current")).toBe("page");
   });
 
   it("renders all company tabs directly on desktop without a More trigger", () => {

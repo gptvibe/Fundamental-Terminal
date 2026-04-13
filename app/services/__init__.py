@@ -53,19 +53,31 @@ def __getattr__(name: str):
         from app.services import company_research_brief as brief_service
 
         return getattr(brief_service, name)
+    if name in {
+        "CHARTS_DASHBOARD_SCHEMA_VERSION",
+        "build_company_charts_dashboard_response",
+        "get_company_charts_dashboard_snapshot",
+        "recompute_and_persist_company_charts_dashboard",
+    }:
+        from app.services import company_charts_dashboard as charts_service
+
+        return getattr(charts_service, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "CompanyCacheSnapshot",
     "BRIEF_SCHEMA_VERSION",
+    "CHARTS_DASHBOARD_SCHEMA_VERSION",
     "EdgarIngestionService",
     "JobReporter",
     "build_changes_since_last_filing",
+    "build_company_charts_dashboard_response",
     "build_company_research_brief_response",
     "get_company_beneficial_ownership_reports",
     "get_company_capital_markets_cache_status",
     "get_company_coverage_counts",
     "get_company_capital_markets_events",
+    "get_company_charts_dashboard_snapshot",
     "get_company_comment_letters",
     "get_company_comment_letters_cache_status",
     "get_company_capital_structure_last_checked",
@@ -99,6 +111,7 @@ __all__ = [
     "get_company_snapshots_by_ticker",
     "get_company_snapshot_by_cik",
     "queue_company_refresh",
+    "recompute_and_persist_company_charts_dashboard",
     "recompute_and_persist_company_research_brief",
     "run_refresh_job",
     "search_company_snapshots",

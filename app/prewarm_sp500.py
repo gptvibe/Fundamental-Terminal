@@ -8,6 +8,7 @@ from pathlib import Path
 from app.db import SessionLocal, get_engine
 from app.model_engine.engine import ModelEngine
 from app.model_engine.registry import MODEL_REGISTRY
+from app.services.company_charts_dashboard import recompute_and_persist_company_charts_dashboard
 from app.services.sec_edgar import CompanyIdentity, EdgarClient, EdgarIngestionService, upsert_company_identity
 from app.services.cache_queries import get_company_snapshot
 from app.services.sp500 import DEFAULT_SP500_TICKERS_PATH, load_sp500_tickers, normalize_index_ticker
@@ -36,6 +37,12 @@ def prewarm_main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_SP500_TICKERS_PATH),
         help="Path to a newline-delimited list of S&P 500 tickers.",
     )
+    parser.add_argument(
+        "--tickers",
+        nargs="+",
+        default=None,
+        help="Explicit ticker list to prewarm. Accepts space-delimited tickers and comma-separated groups.",
+    )
     parser.add_argument("--force", action="store_true", help="Bypass the freshness window during refresh mode.")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N tickers after --start-at.")
     parser.add_argument("--start-at", type=int, default=1, help="1-based index into the constituent list.")
@@ -49,17 +56,16 @@ def prewarm_main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    constituents_path = Path(args.constituents_file)
-    tickers = load_sp500_tickers(constituents_path)
+    tickers, workload_label = _load_requested_tickers(args.tickers, args.constituents_file)
     selected_tickers = _select_tickers(tickers, start_at=args.start_at, limit=args.limit)
     if not selected_tickers:
-        logger.warning("No S&P 500 tickers selected from %s", constituents_path)
+        logger.warning("No tickers selected from %s", workload_label)
         return 0
 
     logger.info(
-        "Loaded %s S&P 500 tickers from %s; processing %s ticker(s) starting at #%s",
+        "Loaded %s ticker(s) from %s; processing %s ticker(s) starting at #%s",
         len(tickers),
-        constituents_path,
+        workload_label,
         len(selected_tickers),
         args.start_at,
     )
@@ -123,6 +129,7 @@ def _refresh_seeded_companies(tickers: list[str], *, force: bool, core_only: boo
     refreshed = 0
     skipped = 0
     failed = 0
+    charts_warmed = 0
     try:
         for index, ticker in enumerate(tickers, start=1):
             logger.info("[%s/%s] Refreshing %s", index, len(tickers), ticker)
@@ -154,15 +161,20 @@ def _refresh_seeded_companies(tickers: list[str], *, force: bool, core_only: boo
                     total_models,
                 )
 
+            if _warm_company_charts_dashboard(ticker):
+                charts_warmed += 1
+                logger.info("[%s/%s] %s -> warmed charts dashboard payload", index, len(tickers), ticker)
+
             logger.info("[%s/%s] %s -> %s (%s)", index, len(tickers), ticker, result.status, result.detail)
     finally:
         service.close()
 
     logger.info(
-        "Prewarm complete: %s refreshed, %s skipped, %s failed",
+        "Prewarm complete: %s refreshed, %s skipped, %s failed, %s charts payloads warmed",
         refreshed,
         skipped,
         failed,
+        charts_warmed,
     )
     return 1 if failed else 0
 
@@ -185,6 +197,20 @@ def _warm_company_model_cache(ticker: str) -> tuple[int, int]:
     return sum(1 for result in results if not result.cached), len(results)
 
 
+def _warm_company_charts_dashboard(ticker: str) -> bool:
+    get_engine()
+    with SessionLocal() as session:
+        snapshot = get_company_snapshot(session, ticker)
+        if snapshot is None:
+            raise ValueError(f"Unable to warm charts dashboard for unknown ticker '{ticker}'")
+
+        payload = recompute_and_persist_company_charts_dashboard(session, snapshot.company.id)
+        if payload is not None:
+            session.commit()
+            return True
+    return False
+
+
 def _build_sec_identity_map(client: EdgarClient) -> dict[str, CompanyIdentity]:
     identities: dict[str, CompanyIdentity] = {}
     for item in client.get_company_tickers():
@@ -204,6 +230,28 @@ def _select_tickers(tickers: list[str], *, start_at: int, limit: int | None) -> 
     if limit is not None:
         selected = selected[:limit]
     return selected
+
+
+def _load_requested_tickers(explicit_tickers: list[str] | None, constituents_file: str | Path) -> tuple[list[str], str]:
+    normalized = _normalize_requested_tickers(explicit_tickers or [])
+    if normalized:
+        return normalized, "explicit ticker list"
+
+    constituents_path = Path(constituents_file)
+    return load_sp500_tickers(constituents_path), str(constituents_path)
+
+
+def _normalize_requested_tickers(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        for raw_part in value.split(","):
+            ticker = normalize_index_ticker(raw_part)
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            normalized.append(ticker)
+    return normalized
 
 
 if __name__ == "__main__":

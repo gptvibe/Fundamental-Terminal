@@ -185,6 +185,20 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ),
     (
         "GET",
+        "/api/companies/{ticker}/charts",
+    ): _derived_official_contract(
+        "ft_company_charts_dashboard",
+        "ft_company_research_brief",
+        "ft_derived_metrics_mart",
+        "ft_model_engine",
+        "ft_capital_structure_intelligence",
+        "sec_companyfacts",
+        "sec_edgar",
+        "fdic_bankfind_financials",
+        "federal_reserve_fr_y9c",
+    ),
+    (
+        "GET",
         "/api/companies/{ticker}/financials",
     ): _price_sensitive_contract(
         "sec_companyfacts",

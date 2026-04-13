@@ -15,6 +15,7 @@ class _FakeSession:
         self.rollback_count = 0
         self.statements = []
         self.objects: dict[tuple[object, int], object] = {}
+        self.info: dict[str, object] = {}
 
     def commit(self) -> None:
         self.commit_count += 1
@@ -142,6 +143,11 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
         lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_charts_dashboard_cache",
+        lambda *_args, **_kwargs: cache_steps.append("charts"),
+    )
+    monkeypatch.setattr(
         service.client,
         "resolve_company",
         lambda *_args, **_kwargs: pytest.fail("SEC lookup should be skipped for fresh cached data"),
@@ -153,7 +159,7 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
     assert result.status == "skipped"
     assert result.fetched_from_sec is False
     assert result.detail == "Freshness window still valid"
-    assert cache_steps == ["derived", "capital-structure", "oil-scenario", "earnings-model"]
+    assert cache_steps == ["derived", "capital-structure", "oil-scenario", "earnings-model", "charts"]
     assert reporter.completed == ["Using fresh cached data."]
     assert session.commit_count == 1
 
@@ -203,6 +209,11 @@ def test_refresh_company_uses_cached_partial_insider_refresh(monkeypatch):
         "_refresh_company_research_brief_cache",
         lambda *_args, **_kwargs: brief_refresh_steps.append("brief"),
     )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_charts_dashboard_cache",
+        lambda *_args, **_kwargs: brief_refresh_steps.append("charts"),
+    )
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -213,7 +224,7 @@ def test_refresh_company_uses_cached_partial_insider_refresh(monkeypatch):
     assert result.form144_filings_written == 1
     assert result.detail == "Cached 2 insider trades and 1 Form 144 filings"
     assert submissions_seen == [company.cik]
-    assert brief_refresh_steps == ["brief"]
+    assert brief_refresh_steps == ["brief", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
     assert session.commit_count >= 2
 
@@ -261,13 +272,18 @@ def test_refresh_company_rebuilds_brief_after_cached_earnings_refresh(monkeypatc
         "_refresh_company_research_brief_cache",
         lambda *_args, **_kwargs: cache_steps.append("brief"),
     )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_charts_dashboard_cache",
+        lambda *_args, **_kwargs: cache_steps.append("charts"),
+    )
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
     assert result.status == "fetched"
     assert result.fetched_from_sec is True
     assert result.earnings_releases_written == 3
-    assert cache_steps == ["earnings-model", "brief"]
+    assert cache_steps == ["earnings-model", "brief", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -315,6 +331,11 @@ def test_refresh_company_uses_cached_partial_filing_events_refresh(monkeypatch):
         "_refresh_company_research_brief_cache",
         lambda *_args, **_kwargs: cache_steps.append("brief"),
     )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_charts_dashboard_cache",
+        lambda *_args, **_kwargs: cache_steps.append("charts"),
+    )
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -323,7 +344,7 @@ def test_refresh_company_uses_cached_partial_filing_events_refresh(monkeypatch):
     assert result.statements_written == 0
     assert result.detail == "Cached 4 filing event rows"
     assert submissions_seen == [company.cik]
-    assert cache_steps == ["brief"]
+    assert cache_steps == ["brief", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -371,6 +392,11 @@ def test_refresh_company_uses_cached_partial_capital_markets_refresh(monkeypatch
         "_refresh_company_research_brief_cache",
         lambda *_args, **_kwargs: cache_steps.append("brief"),
     )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_charts_dashboard_cache",
+        lambda *_args, **_kwargs: cache_steps.append("charts"),
+    )
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -379,7 +405,7 @@ def test_refresh_company_uses_cached_partial_capital_markets_refresh(monkeypatch
     assert result.statements_written == 0
     assert result.detail == "Cached 3 capital markets rows"
     assert submissions_seen == [company.cik]
-    assert cache_steps == ["brief"]
+    assert cache_steps == ["brief", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -427,6 +453,11 @@ def test_refresh_company_uses_cached_partial_comment_letters_refresh(monkeypatch
         "_refresh_company_research_brief_cache",
         lambda *_args, **_kwargs: cache_steps.append("brief"),
     )
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_charts_dashboard_cache",
+        lambda *_args, **_kwargs: cache_steps.append("charts"),
+    )
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -435,7 +466,7 @@ def test_refresh_company_uses_cached_partial_comment_letters_refresh(monkeypatch
     assert result.statements_written == 0
     assert result.detail == "Cached 2 SEC correspondence filings"
     assert submissions_seen == [company.cik]
-    assert cache_steps == ["brief"]
+    assert cache_steps == ["brief", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -514,6 +545,7 @@ def test_refresh_company_uses_full_sec_refresh_when_core_financials_are_stale(mo
     monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_charts_dashboard_cache", lambda *_args, **_kwargs: None)
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -595,6 +627,7 @@ def test_refresh_company_isolates_optional_dataset_failures(monkeypatch):
     monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_charts_dashboard_cache", lambda *_args, **_kwargs: None)
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -717,6 +750,7 @@ def test_refresh_company_reuses_cached_financials_when_sec_inputs_are_unchanged(
     monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_charts_dashboard_cache", lambda *_args, **_kwargs: None)
 
     result = service.refresh_company("MSFT", reporter=reporter)
 

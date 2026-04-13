@@ -100,6 +100,9 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
     if route_name in {"overview", "brief"}:
         return [f"financials:{normalized_ticker}:asof={normalized_as_of}"]
 
+    if route_name == "charts":
+        return [f"charts:{normalized_ticker}:asof={normalized_as_of}"]
+
     if route_name == "capital-structure":
         try:
             max_periods = int(request.query_params.get("max_periods", "8"))

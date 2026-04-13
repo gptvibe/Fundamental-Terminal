@@ -227,6 +227,7 @@ The frontend proxies backend requests through `/backend/*` and exposes:
 - `/` for the research launcher, SEC-backed resolution, and direct company/model handoff
 - `/watchlist` — browser-local watchlist workspace for saved companies, note coverage, freshness, and triage filters
 - `/company/[ticker]` — company overview workspace with grouped core views, research feeds, priority alerts, and quick peer context
+- `/company/[ticker]/charts` — Growth Outlook dashboard with persisted historical snapshots, explicitly labeled forecast series, factor badges, and a screenshot-first chart-card layout
 - `/company/[ticker]/financials` — dedicated financial workspace with synchronized cadence/range/comparison state across statements, annual comparison tables, filing-based charts, derived metrics, provenance/quality diagnostics, explicit annual-fallback messaging where needed, and a bank-specific regulated-financial view for banks and bank holding companies
 - `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
 - `/company/[ticker]/earnings` — earnings workspace with release trends, guidance and capital-return signals, and linked filing context
@@ -538,8 +539,22 @@ Useful options:
 
 - `--mode seed` to only seed `companies` rows for faster search bootstrapping
 - `--mode core` to warm `companies`, financial statements, prices, and core models only
+- `--tickers AAPL MSFT` to prewarm an explicit ticker set instead of the bundled S&P 500 list
+- `--tickers AAPL,MSFT,BRK.B` to pass comma-separated groups in the same invocation
 - `--force` to refresh even if the cache is still fresh
 - `--limit 50 --start-at 101` to process the list in resumable batches
+
+Charts dashboard API and warm path:
+
+```bash
+GET /api/companies/AAPL/charts
+GET /api/companies/AAPL/charts?as_of=2025-12-31
+
+python -m app.prewarm_sp500 --mode refresh --tickers AAPL MSFT
+python -m app.prewarm_sp500 --mode refresh --tickers NVDA --force
+```
+
+The charts route persists a frontend-ready `company_charts_dashboard_snapshots` payload in PostgreSQL, fronts repeat reads with the shared hot-response cache, and keeps reported versus forecast series explicitly separated in the API contract.
 
 ## Model engine
 

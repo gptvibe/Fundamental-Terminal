@@ -86,6 +86,11 @@ from app.services.cache_queries import (
     select_point_in_time_financials,
 )
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
+from app.services.company_charts_dashboard import (
+    CHARTS_DASHBOARD_SCHEMA_VERSION,
+    get_company_charts_dashboard_snapshot,
+    recompute_and_persist_company_charts_dashboard,
+)
 from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
     get_company_research_brief_snapshot,
@@ -123,7 +128,7 @@ from app.services.earnings_intelligence import build_earnings_alerts, build_earn
 from app.services.hot_cache import HotCacheLookup, _etag_for_json_bytes, _render_json_bytes, shared_hot_response_cache
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
-from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, CompanyIdentity, EdgarClient, FilingMetadata
+from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, CompanyIdentity, EdgarClient, EdgarIngestionService, FilingMetadata
 from app.services.status_stream import status_broker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -181,6 +186,7 @@ SOURCE_REGISTRY_DATASET_SOURCE_IDS: dict[str, tuple[str, ...]] = {
     "comment_letters": ("sec_edgar_corresp",),
     "proxy": ("sec_edgar",),
     "derived_metrics": ("ft_derived_metrics_mart",),
+    "charts_dashboard": ("ft_company_charts_dashboard",),
     "oil_scenario_overlay": ("ft_oil_scenario_overlay",),
     "capital_structure": ("ft_capital_structure_intelligence",),
 }
@@ -202,6 +208,7 @@ _hot_response_cache = _HotCacheCompatProxy()
 HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
     "search": "search-response-v1",
     "resolve": "resolve-response-v1",
+    "charts": "company-charts-dashboard-response-v1",
     "financials": "financials-response-v1",
     "capital_structure": "capital-structure-response-v1",
     "models": "models-response-v1",
@@ -2765,6 +2772,148 @@ def company_sector_context(
     )
 
 
+@app.get("/api/companies/{ticker}/charts", response_model=CompanyChartsDashboardResponse)
+def company_charts(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsDashboardResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = (as_of or "").strip() or None
+    parsed_as_of = _validated_as_of(requested_as_of)
+    return _build_company_charts_response(
+        session,
+        normalized_ticker,
+        background_tasks,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+    )
+
+
+def _build_company_charts_response(
+    session: Session,
+    normalized_ticker: str,
+    background_tasks: BackgroundTasks,
+    *,
+    requested_as_of: str | None,
+    parsed_as_of: datetime | None,
+    snapshot: CompanyCacheSnapshot | None = None,
+) -> CompanyChartsDashboardResponse:
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    hot_key = f"charts:{normalized_ticker}:asof={normalized_as_of}"
+    cached_hot = shared_hot_response_cache.get_sync(hot_key, route="charts")
+    if cached_hot is not None and cached_hot.is_fresh:
+        return CompanyChartsDashboardResponse.model_validate(_decode_hot_cache_payload(cached_hot))
+
+    resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
+    if resolved_snapshot is None:
+        resolved_snapshot = _attempt_inline_company_snapshot_refresh_for_charts(session, normalized_ticker)
+    if resolved_snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        return _build_company_charts_bootstrap_for_missing_ticker(
+            normalized_ticker,
+            refresh=refresh,
+            as_of=requested_as_of,
+        )
+
+    stored_snapshot, payload = _load_company_charts_snapshot_record(
+        session,
+        resolved_snapshot.company.id,
+        as_of=parsed_as_of,
+    )
+    refresh = _refresh_for_company_charts(
+        background_tasks,
+        resolved_snapshot,
+        stored_snapshot=stored_snapshot,
+        as_of=parsed_as_of,
+    )
+    if payload is None:
+        if hasattr(session, "execute") and hasattr(session, "commit"):
+            generated = recompute_and_persist_company_charts_dashboard(
+                session,
+                resolved_snapshot.company.id,
+                as_of=parsed_as_of,
+            )
+            if generated is not None:
+                session.commit()
+                response = _augment_company_charts_response(
+                    resolved_snapshot,
+                    generated,
+                    refresh=RefreshState(triggered=False, reason="fresh", ticker=resolved_snapshot.company.ticker, job_id=None),
+                    as_of=requested_as_of,
+                )
+                shared_hot_response_cache.store_sync(
+                    hot_key,
+                    route="charts",
+                    payload=response.model_dump(mode="json"),
+                    tags=_build_hot_cache_tags(
+                        ticker=resolved_snapshot.company.ticker,
+                        datasets=("charts_dashboard",),
+                        schema_versions=(response.payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,),
+                        as_of=normalized_as_of,
+                    ),
+                )
+                return response
+        if not refresh.triggered:
+            refresh = _trigger_refresh(background_tasks, resolved_snapshot.company.ticker, reason="missing")
+        return _build_company_charts_bootstrap_for_snapshot(
+            resolved_snapshot,
+            refresh=refresh,
+            as_of=requested_as_of,
+        )
+
+    response = _augment_company_charts_response(
+        resolved_snapshot,
+        payload,
+        refresh=refresh,
+        as_of=requested_as_of,
+    )
+    shared_hot_response_cache.store_sync(
+        hot_key,
+        route="charts",
+        payload=response.model_dump(mode="json"),
+        tags=_build_hot_cache_tags(
+            ticker=resolved_snapshot.company.ticker,
+            datasets=("charts_dashboard",),
+            schema_versions=(response.payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,),
+            as_of=normalized_as_of,
+        ),
+    )
+    return response
+
+
+def _attempt_inline_company_snapshot_refresh_for_charts(
+    session: Session,
+    normalized_ticker: str,
+) -> CompanyCacheSnapshot | None:
+    if not hasattr(session, "execute") or not hasattr(session, "commit"):
+        return None
+
+    service = EdgarIngestionService()
+    try:
+        service.refresh_company(
+            identifier=normalized_ticker,
+            force=False,
+            refresh_insider_data=False,
+            refresh_institutional_data=False,
+            refresh_beneficial_ownership_data=False,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Inline charts refresh failed for '%s'",
+            normalized_ticker,
+        )
+        return None
+    finally:
+        service.close()
+
+    if hasattr(session, "expire_all"):
+        session.expire_all()
+
+    return _resolve_company_brief_snapshot(session, normalized_ticker)
+
+
 @app.get("/api/companies/{ticker}/brief", response_model=CompanyResearchBriefResponse)
 def company_brief(
     ticker: str,
@@ -2829,6 +2978,213 @@ def _build_company_research_brief_response(
         payload,
         refresh=refresh,
         as_of=requested_as_of,
+    )
+
+
+def _empty_company_charts_response(*, refresh: RefreshState, as_of: str | None) -> CompanyChartsDashboardResponse:
+    legend = CompanyChartsLegendPayload(
+        title="Actual vs Forecast",
+        items=[
+            CompanyChartsLegendItemPayload(
+                key="actual",
+                label="Reported",
+                style="solid",
+                tone="actual",
+                description="Actual values are sourced from reported official filings.",
+            ),
+            CompanyChartsLegendItemPayload(
+                key="forecast",
+                label="Forecast",
+                style="dashed",
+                tone="forecast",
+                description="Forecast values are internal projections, not reported results.",
+            ),
+        ],
+    )
+    empty_state = "Historical and forecast chart payloads are still being prepared."
+    return CompanyChartsDashboardResponse(
+        company=None,
+        title="Growth Outlook",
+        build_state="building",
+        build_status="Charts dashboard is warming up.",
+        summary=CompanyChartsSummaryPayload(
+            headline="Growth Outlook",
+            primary_score=CompanyChartsScoreBadgePayload(
+                key="growth",
+                label="Growth",
+                score=None,
+                tone="unavailable",
+                unavailable_reason="Awaiting persisted chart payload.",
+            ),
+            secondary_badges=[
+                CompanyChartsScoreBadgePayload(key="quality", label="Quality", tone="unavailable", unavailable_reason="Awaiting persisted chart payload."),
+                CompanyChartsScoreBadgePayload(key="momentum", label="Momentum", tone="unavailable", unavailable_reason="Awaiting persisted chart payload."),
+                CompanyChartsScoreBadgePayload(key="value", label="Value", tone="unavailable", unavailable_reason="Awaiting persisted chart payload."),
+                CompanyChartsScoreBadgePayload(
+                    key="forecast_confidence",
+                    label="Forecast Confidence",
+                    tone="unavailable",
+                    unavailable_reason="Awaiting persisted chart payload.",
+                ),
+            ],
+            thesis="Reported history is being assembled and forecast projections will appear once preprocessing completes.",
+            unavailable_notes=["Forecasts are always labeled and are never blended into reported history."],
+        ),
+        factors=CompanyChartsFactorsPayload(),
+        legend=legend,
+        cards=CompanyChartsCardsPayload(
+            revenue=CompanyChartsCardPayload(key="revenue", title="Revenue", empty_state=empty_state),
+            revenue_growth=CompanyChartsCardPayload(key="revenue_growth", title="Revenue Growth", empty_state=empty_state),
+            profit_metric=CompanyChartsCardPayload(key="profit_metric", title="Profit Metrics", empty_state=empty_state),
+            cash_flow_metric=CompanyChartsCardPayload(key="cash_flow_metric", title="Cash Flow Metrics", empty_state=empty_state),
+            eps=CompanyChartsCardPayload(key="eps", title="EPS", empty_state=empty_state),
+            growth_summary=CompanyChartsComparisonCardPayload(empty_state=empty_state),
+            forecast_assumptions=CompanyChartsAssumptionsCardPayload(
+                items=[],
+                empty_state="Forecast rules will be disclosed once the first dashboard build completes.",
+            ),
+        ),
+        forecast_methodology=CompanyChartsMethodologyPayload(
+            version=CHARTS_DASHBOARD_SCHEMA_VERSION,
+            label="Deterministic internal projection",
+            summary="Forecasts use persisted historical official inputs, guarded trend extrapolation, and bounded margin assumptions.",
+            disclaimer="Forecast values are internal projections from historical official data. They are not reported results or analyst consensus.",
+        ),
+        payload_version=CHARTS_DASHBOARD_SCHEMA_VERSION,
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(stale_flags=["charts_dashboard_missing"]),
+        **_empty_provenance_contract("charts_dashboard_missing"),
+    )
+
+
+def _load_company_charts_snapshot_record(
+    session: Session,
+    company_id: int,
+    *,
+    as_of: datetime | None = None,
+) -> tuple[Any | None, CompanyChartsDashboardResponse | None]:
+    try:
+        stored = get_company_charts_dashboard_snapshot(
+            session,
+            company_id,
+            as_of=as_of,
+            schema_version=CHARTS_DASHBOARD_SCHEMA_VERSION,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to load company charts dashboard snapshot for company_id=%s",
+            company_id,
+        )
+        return None, None
+
+    if stored is None:
+        return None, None
+
+    try:
+        return stored, CompanyChartsDashboardResponse.model_validate(stored.payload)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to validate company charts dashboard snapshot for company_id=%s",
+            company_id,
+        )
+        return stored, None
+
+
+def _refresh_for_company_charts(
+    background_tasks: BackgroundTasks,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    stored_snapshot: Any | None,
+    as_of: datetime | None,
+) -> RefreshState:
+    if stored_snapshot is None:
+        if snapshot.cache_state in {"missing", "stale"}:
+            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    if as_of is not None:
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    if _snapshot_last_checked_is_fresh(stored_snapshot):
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+
+
+def _augment_company_charts_response(
+    snapshot: CompanyCacheSnapshot,
+    payload: CompanyChartsDashboardResponse,
+    *,
+    refresh: RefreshState,
+    as_of: str | None,
+) -> CompanyChartsDashboardResponse:
+    updated_payload = payload.model_copy(
+        update={
+            "company": _serialize_company(snapshot),
+            "refresh": refresh,
+            "build_state": "ready",
+            "build_status": "Charts dashboard ready.",
+            "payload_version": payload.payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,
+        }
+    )
+    return _apply_requested_as_of(updated_payload, as_of)
+
+
+def _build_company_charts_bootstrap_for_snapshot(
+    snapshot: CompanyCacheSnapshot,
+    *,
+    refresh: RefreshState,
+    as_of: str | None,
+) -> CompanyChartsDashboardResponse:
+    return _empty_company_charts_response(refresh=refresh, as_of=as_of).model_copy(
+        update={
+            "company": _serialize_company(snapshot),
+            "build_state": "partial",
+            "build_status": "Showing cached company basics while the charts dashboard finishes building.",
+            "summary": CompanyChartsSummaryPayload(
+                headline="Growth Outlook",
+                primary_score=CompanyChartsScoreBadgePayload(key="growth", label="Growth", tone="unavailable", unavailable_reason="Dashboard build in progress."),
+                secondary_badges=[
+                    CompanyChartsScoreBadgePayload(key="quality", label="Quality", tone="unavailable", unavailable_reason="Dashboard build in progress."),
+                    CompanyChartsScoreBadgePayload(key="momentum", label="Momentum", tone="unavailable", unavailable_reason="Dashboard build in progress."),
+                    CompanyChartsScoreBadgePayload(key="value", label="Value", tone="unavailable", unavailable_reason="Dashboard build in progress."),
+                    CompanyChartsScoreBadgePayload(
+                        key="forecast_confidence",
+                        label="Forecast Confidence",
+                        tone="unavailable",
+                        unavailable_reason="Dashboard build in progress.",
+                    ),
+                ],
+                thesis="Reported history is available, and chart-ready forecast payloads are being precomputed.",
+                unavailable_notes=["Forecast values will remain visually distinct from reported results once available."],
+            ),
+        }
+    )
+
+
+def _build_company_charts_bootstrap_for_missing_ticker(
+    normalized_ticker: str,
+    *,
+    refresh: RefreshState,
+    as_of: str | None,
+) -> CompanyChartsDashboardResponse:
+    return _empty_company_charts_response(refresh=refresh, as_of=as_of).model_copy(
+        update={
+            "build_status": "No persisted company snapshot is available yet. A refresh has been queued to build the first charts dashboard.",
+            "summary": CompanyChartsSummaryPayload(
+                headline="Growth Outlook",
+                primary_score=CompanyChartsScoreBadgePayload(key="growth", label="Growth", tone="unavailable", unavailable_reason="No company snapshot available yet."),
+                secondary_badges=[
+                    CompanyChartsScoreBadgePayload(key="quality", label="Quality", tone="unavailable", unavailable_reason="No company snapshot available yet."),
+                    CompanyChartsScoreBadgePayload(key="momentum", label="Momentum", tone="unavailable", unavailable_reason="No company snapshot available yet."),
+                    CompanyChartsScoreBadgePayload(key="value", label="Value", tone="unavailable", unavailable_reason="No company snapshot available yet."),
+                    CompanyChartsScoreBadgePayload(
+                        key="forecast_confidence",
+                        label="Forecast Confidence",
+                        tone="unavailable",
+                        unavailable_reason="No company snapshot available yet.",
+                    ),
+                ],
+                thesis=f"No persisted company snapshot exists for {normalized_ticker} yet. The first charts build has been queued.",
+            ),
+        }
     )
 
 
@@ -3067,12 +3423,12 @@ def _refresh_for_company_brief(
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
-    if _company_research_brief_snapshot_is_fresh(stored_snapshot):
+    if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
 
 
-def _company_research_brief_snapshot_is_fresh(stored_snapshot: Any) -> bool:
+def _snapshot_last_checked_is_fresh(stored_snapshot: Any) -> bool:
     last_checked = getattr(stored_snapshot, "last_checked", None)
     if last_checked is None:
         return True
@@ -3082,6 +3438,10 @@ def _company_research_brief_snapshot_is_fresh(stored_snapshot: Any) -> bool:
         normalized_last_checked = last_checked.astimezone(timezone.utc)
     freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.freshness_window_hours)
     return normalized_last_checked >= freshness_cutoff
+
+
+def _company_research_brief_snapshot_is_fresh(stored_snapshot: Any) -> bool:
+    return _snapshot_last_checked_is_fresh(stored_snapshot)
 
 
 def _load_snapshot_backed_changes_since_last_filing_response(

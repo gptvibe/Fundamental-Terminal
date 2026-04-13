@@ -56,6 +56,53 @@ def test_hot_cache_keeps_real_company_payloads(monkeypatch) -> None:
     assert json.loads(cached.content)["company"]["ticker"] == "ON"
 
 
+def test_shared_hot_cache_sync_compat_supports_running_event_loop(monkeypatch) -> None:
+    cache = SharedHotResponseCache()
+    monkeypatch.setattr(cache, "_redis", None)
+
+    async def _exercise() -> tuple[object | None, dict[str, dict[str, float]]]:
+        await cache.clear()
+        cache.store_sync(
+            "charts:ON:asof=latest",
+            route="charts",
+            payload={"company": {"ticker": "ON"}, "build_state": "ready"},
+            tags=(cache.build_ticker_tag("ON"), cache.build_dataset_tag("charts_dashboard")),
+        )
+        lookup = cache.get_sync("charts:ON:asof=latest", route="charts")
+        metrics = await cache.snapshot_metrics()
+        return lookup, metrics
+
+    lookup, metrics = asyncio.run(_exercise())
+
+    assert lookup is not None
+    assert lookup.is_fresh is True
+    assert metrics["overall"]["requests"] >= 1
+    assert metrics["overall"]["hit_fresh"] >= 1
+
+
+def test_shared_hot_cache_invalidate_sync_supports_running_event_loop(monkeypatch) -> None:
+    cache = SharedHotResponseCache()
+    monkeypatch.setattr(cache, "_redis", None)
+
+    async def _exercise() -> tuple[dict[str, object], dict[str, dict[str, float]]]:
+        await cache.clear()
+        cache.store_sync(
+            "charts:AMD:asof=latest",
+            route="charts",
+            payload={"company": {"ticker": "AMD"}, "build_state": "ready"},
+            tags=(cache.build_ticker_tag("AMD"), cache.build_dataset_tag("charts_dashboard")),
+        )
+        result = cache.invalidate_sync(ticker="AMD", dataset="charts_dashboard")
+        metrics = await cache.snapshot_metrics()
+        return result, metrics
+
+    invalidation, metrics = asyncio.run(_exercise())
+
+    assert invalidation["invalidated_keys"] == 1
+    assert metrics["overall"]["invalidation_count"] >= 1
+    assert "charts:AMD:asof=latest" not in cache._local_entries
+
+
 def test_shared_hot_cache_invalidates_matching_tags(monkeypatch) -> None:
     monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
     shared_handlers._hot_response_cache.clear()

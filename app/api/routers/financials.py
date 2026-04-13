@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.handlers import financials as handlers
 from app.api.source_contracts import add_user_visible_route
+from app.api.schemas.company_charts import CompanyChartsDashboardResponse
 from app.api.schemas.equity_claim_risk import CompanyEquityClaimRiskResponse
 from app.api.schemas.financials import (
     CompanyCapitalStructureResponse,
@@ -28,6 +29,13 @@ def build_router() -> APIRouter:
         handlers.company_compare,
         methods=["GET"],
         response_model=CompanyCompareResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts",
+        handlers.company_charts,
+        methods=["GET"],
+        response_model=CompanyChartsDashboardResponse,
     )
     add_user_visible_route(
         router,

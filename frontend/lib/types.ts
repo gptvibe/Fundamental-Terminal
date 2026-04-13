@@ -2521,6 +2521,157 @@ export interface CompanyResearchBriefResponse {
   monitor: CompanyResearchBriefMonitorSection;
 }
 
+export type CompanyChartsTone = "positive" | "neutral" | "caution" | "negative" | "unavailable";
+export type CompanyChartsLegendStyle = "solid" | "dashed" | "muted";
+export type CompanyChartsLegendTone = "actual" | "forecast" | "comparison" | "context";
+export type CompanyChartsSeriesKind = "actual" | "forecast" | "comparison" | "context";
+export type CompanyChartsUnit = "usd" | "usd_per_share" | "shares" | "percent" | "ratio" | "count";
+export type CompanyChartsChartType = "line" | "bar" | "area";
+
+export interface CompanyChartsScoreBadgePayload {
+  key: string;
+  label: string;
+  score: number | null;
+  tone: CompanyChartsTone;
+  detail: string | null;
+  unavailable_reason?: string | null;
+}
+
+export interface CompanyChartsSummaryPayload {
+  headline: string;
+  primary_score: CompanyChartsScoreBadgePayload;
+  secondary_badges: CompanyChartsScoreBadgePayload[];
+  thesis: string | null;
+  unavailable_notes: string[];
+  freshness_badges: string[];
+  source_badges: string[];
+}
+
+export interface CompanyChartsFactorValuePayload {
+  key: string;
+  label: string;
+  score: number | null;
+  normalized_score: number | null;
+  tone: CompanyChartsTone;
+  detail: string | null;
+  unavailable_reason?: string | null;
+}
+
+export interface CompanyChartsFactorsPayload {
+  primary: CompanyChartsFactorValuePayload | null;
+  supporting: CompanyChartsFactorValuePayload[];
+}
+
+export interface CompanyChartsLegendItemPayload {
+  key: string;
+  label: string;
+  style: CompanyChartsLegendStyle;
+  tone: CompanyChartsLegendTone;
+  description: string | null;
+}
+
+export interface CompanyChartsLegendPayload {
+  title: string;
+  items: CompanyChartsLegendItemPayload[];
+}
+
+export interface CompanyChartsSeriesPointPayload {
+  period_label: string;
+  fiscal_year: number | null;
+  period_end: string | null;
+  value: number | null;
+  series_kind: "actual" | "forecast" | "comparison";
+  annotation: string | null;
+}
+
+export interface CompanyChartsSeriesPayload {
+  key: string;
+  label: string;
+  unit: CompanyChartsUnit;
+  chart_type: CompanyChartsChartType;
+  series_kind: CompanyChartsSeriesKind;
+  stroke_style: CompanyChartsLegendStyle;
+  points: CompanyChartsSeriesPointPayload[];
+}
+
+export interface CompanyChartsCardPayload {
+  key: string;
+  title: string;
+  subtitle: string | null;
+  metric_label: string | null;
+  unit_label: string | null;
+  empty_state: string | null;
+  series: CompanyChartsSeriesPayload[];
+  highlights: string[];
+}
+
+export interface CompanyChartsComparisonItemPayload {
+  key: string;
+  label: string;
+  company_value: number | null;
+  benchmark_value: number | null;
+  benchmark_label: string | null;
+  unit: CompanyChartsUnit;
+  company_label: string | null;
+  benchmark_available: boolean;
+}
+
+export interface CompanyChartsComparisonCardPayload {
+  key: string;
+  title: string;
+  subtitle: string | null;
+  comparisons: CompanyChartsComparisonItemPayload[];
+  empty_state: string | null;
+}
+
+export interface CompanyChartsAssumptionItemPayload {
+  key: string;
+  label: string;
+  value: string;
+  detail: string | null;
+}
+
+export interface CompanyChartsAssumptionsCardPayload {
+  key: string;
+  title: string;
+  items: CompanyChartsAssumptionItemPayload[];
+  empty_state: string | null;
+}
+
+export interface CompanyChartsCardsPayload {
+  revenue: CompanyChartsCardPayload;
+  revenue_growth: CompanyChartsCardPayload;
+  profit_metric: CompanyChartsCardPayload;
+  cash_flow_metric: CompanyChartsCardPayload;
+  eps: CompanyChartsCardPayload;
+  growth_summary: CompanyChartsComparisonCardPayload;
+  forecast_assumptions: CompanyChartsAssumptionsCardPayload | null;
+}
+
+export interface CompanyChartsMethodologyPayload {
+  version: string;
+  label: string;
+  summary: string;
+  disclaimer: string;
+  forecast_horizon_years: number;
+  confidence_label: string | null;
+}
+
+export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  title: string;
+  build_state: "building" | "partial" | "ready";
+  build_status: string;
+  summary: CompanyChartsSummaryPayload;
+  factors: CompanyChartsFactorsPayload;
+  legend: CompanyChartsLegendPayload;
+  cards: CompanyChartsCardsPayload;
+  forecast_methodology: CompanyChartsMethodologyPayload;
+  payload_version: string;
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
 export interface CompanyOverviewResponse {
   company: CompanyPayload | null;
   financials: CompanyFinancialsResponse;

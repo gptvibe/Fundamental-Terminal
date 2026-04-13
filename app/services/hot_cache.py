@@ -308,6 +308,32 @@ class SharedHotResponseCache:
     def clear_sync(self) -> None:
         self._run_async_compat(self.clear())
 
+    def get_sync(self, logical_key: str, *, route: str | None = None) -> HotCacheLookup | None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            return self._get_sync_from_running_loop(logical_key, route=route)
+        return self._run_async_compat(self.get(logical_key, route=route))
+
+    def store_sync(
+        self,
+        logical_key: str,
+        *,
+        route: str | None = None,
+        payload: dict[str, Any],
+        tags: tuple[str, ...] = (),
+    ) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            self._store_sync_from_running_loop(logical_key, route=route, payload=payload, tags=tags)
+            return
+        self._run_async_compat(self.store(logical_key, route=route, payload=payload, tags=tags))
+
     def invalidate_sync(
         self,
         *,
@@ -316,6 +342,18 @@ class SharedHotResponseCache:
         schema_version: str | None = None,
         as_of: str | None = None,
     ) -> dict[str, Any]:
+        # SQLAlchemy after_commit hooks can fire while FastAPI still has an active event loop.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            return self._invalidate_sync_from_running_loop(
+                ticker=ticker,
+                dataset=dataset,
+                schema_version=schema_version,
+                as_of=as_of,
+            )
         return self._run_async_compat(
             self.invalidate(
                 ticker=ticker,
@@ -331,6 +369,113 @@ class SharedHotResponseCache:
         except RuntimeError:
             return asyncio.run(awaitable)
         raise RuntimeError("Async shared hot cache APIs must be awaited when called from a running event loop")
+
+    def _get_sync_from_running_loop(
+        self,
+        logical_key: str,
+        *,
+        route: str | None = None,
+    ) -> HotCacheLookup | None:
+        resolved_route = route or _route_from_logical_key(logical_key)
+        lookup = self._read_entry_sync(logical_key)
+        if lookup is None:
+            self._record_metric_sync(resolved_route, "requests")
+            self._record_metric_sync(resolved_route, "misses")
+            return None
+
+        self._record_metric_sync(resolved_route, "requests")
+        if lookup.is_fresh:
+            self._record_metric_sync(resolved_route, "hit_fresh")
+        else:
+            self._record_metric_sync(resolved_route, "hit_stale")
+            self._record_metric_sync(resolved_route, "stale_served")
+        return lookup
+
+    def _store_sync_from_running_loop(
+        self,
+        logical_key: str,
+        *,
+        route: str | None = None,
+        payload: dict[str, Any],
+        tags: tuple[str, ...] = (),
+    ) -> None:
+        resolved_route = route or _route_from_logical_key(logical_key)
+        normalized_tags = tuple(sorted({tag for tag in tags if tag}))
+        stored_at = time.time()
+        fresh_until = stored_at + settings.hot_response_cache_ttl_seconds
+        stale_until = fresh_until + settings.hot_response_cache_stale_ttl_seconds
+        content = _render_json_bytes(payload)
+        etag = _etag_for_json_bytes(content)
+        last_modified = _extract_last_modified_header(payload)
+        if self._redis is not None:
+            try:
+                self._store_remote(
+                    logical_key,
+                    route=resolved_route,
+                    content=content,
+                    tags=normalized_tags,
+                    stored_at=stored_at,
+                    fresh_until=fresh_until,
+                    stale_until=stale_until,
+                    etag=etag,
+                    last_modified=last_modified,
+                )
+                return
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="store", exc=exc)
+
+        self._store_local_sync(
+            logical_key,
+            route=resolved_route,
+            content=content,
+            tags=normalized_tags,
+            stored_at=stored_at,
+            fresh_until=fresh_until,
+            stale_until=stale_until,
+            etag=etag,
+            last_modified=last_modified,
+        )
+
+    def _invalidate_sync_from_running_loop(
+        self,
+        *,
+        ticker: str | None = None,
+        dataset: str | None = None,
+        schema_version: str | None = None,
+        as_of: str | None = None,
+    ) -> dict[str, Any]:
+        tags = self._build_invalidation_tags(
+            ticker=ticker,
+            dataset=dataset,
+            schema_version=schema_version,
+            as_of=as_of,
+        )
+        if not tags:
+            raise ValueError("At least one invalidation dimension is required")
+
+        if self._redis is not None:
+            try:
+                deleted = self._invalidate_remote(tags)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="invalidate", exc=exc)
+                deleted = self._invalidate_local_sync(tags)
+        else:
+            deleted = self._invalidate_local_sync(tags)
+
+        self._record_metric_sync(None, "invalidation_count")
+        self._record_metric_sync(None, "invalidated_keys", deleted)
+        emit_structured_log(
+            logger,
+            "shared_hot_cache.invalidate",
+            backend=self.backend,
+            tags=tags,
+            invalidated_keys=deleted,
+        )
+        return {
+            "backend": self.backend,
+            "tags": tags,
+            "invalidated_keys": deleted,
+        }
 
     def _build_redis_client(self):
         if redis is None:
@@ -501,6 +646,29 @@ class SharedHotResponseCache:
                 is_fresh=now <= entry.fresh_until,
             )
 
+    def _read_entry_sync(self, logical_key: str) -> HotCacheLookup | None:
+        if self._redis is not None:
+            try:
+                return self._read_remote(logical_key)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="read", exc=exc)
+        return self._read_local_sync(logical_key)
+
+    def _read_local_sync(self, logical_key: str) -> HotCacheLookup | None:
+        now = time.time()
+        entry = self._local_entries.get(logical_key)
+        if entry is None:
+            return None
+        if now > entry.stale_until:
+            self._delete_local_entry_locked(logical_key, entry.tags)
+            return None
+        return HotCacheLookup(
+            content=entry.content,
+            etag=entry.etag,
+            last_modified=entry.last_modified,
+            is_fresh=now <= entry.fresh_until,
+        )
+
     def _store_remote(
         self,
         logical_key: str,
@@ -580,6 +748,35 @@ class SharedHotResponseCache:
             for tag in tags:
                 self._local_tag_index.setdefault(tag, set()).add(logical_key)
 
+    def _store_local_sync(
+        self,
+        logical_key: str,
+        *,
+        route: str,
+        content: bytes,
+        tags: tuple[str, ...],
+        stored_at: float,
+        fresh_until: float,
+        stale_until: float,
+        etag: str,
+        last_modified: str | None,
+    ) -> None:
+        previous = self._local_entries.get(logical_key)
+        if previous is not None:
+            self._delete_local_entry_locked(logical_key, previous.tags)
+        self._local_entries[logical_key] = _LocalCacheEntry(
+            content=content,
+            fresh_until=fresh_until,
+            stale_until=stale_until,
+            stored_at=stored_at,
+            route=route,
+            tags=tags,
+            etag=etag,
+            last_modified=last_modified,
+        )
+        for tag in tags:
+            self._local_tag_index.setdefault(tag, set()).add(logical_key)
+
     def _delete_remote_entry(self, logical_key: str, tags: list[str]) -> None:
         assert self._redis is not None
         pipeline = self._redis.pipeline()
@@ -616,7 +813,7 @@ class SharedHotResponseCache:
                     entry_tags = list(parsed.get("tags") or [])
                     route = str(parsed.get("route") or "")
                     if route:
-                        self._record_metric(route, "invalidation_count")
+                        self._record_metric_sync(route, "invalidation_count")
                 except Exception:
                     entry_tags = []
             pipeline.delete(self._entry_key(logical_key))
@@ -643,6 +840,23 @@ class SharedHotResponseCache:
                 deleted += 1
         for route in invalidated_routes:
             await self._record_metric(route, "invalidation_count")
+        return deleted
+
+    def _invalidate_local_sync(self, tags: tuple[str, ...]) -> int:
+        deleted = 0
+        invalidated_routes: list[str] = []
+        logical_keys = self._resolve_local_invalidation_keys_locked(tags)
+        if not logical_keys:
+            return 0
+        for logical_key in logical_keys:
+            entry = self._local_entries.get(logical_key)
+            if entry is None:
+                continue
+            invalidated_routes.append(entry.route)
+            self._delete_local_entry_locked(logical_key, entry.tags)
+            deleted += 1
+        for route in invalidated_routes:
+            self._record_metric_sync(route, "invalidation_count")
         return deleted
 
     def _resolve_remote_invalidation_keys(self, tags: tuple[str, ...]) -> set[str]:
@@ -675,6 +889,22 @@ class SharedHotResponseCache:
             except RedisError as exc:
                 self._note_runtime_fallback(operation="metrics_write", exc=exc)
         await self._record_local_metric(normalized_route, field, amount)
+
+    def _record_metric_sync(self, route: str | None, field: str, amount: float = 1.0) -> None:
+        if amount == 0:
+            return
+        normalized_route = route or "overall"
+        if self._redis is not None:
+            try:
+                self._record_remote_metric(normalized_route, field, amount)
+                return
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="metrics_write", exc=exc)
+        overall = self._local_metrics.setdefault("overall", {})
+        overall[field] = float(overall.get(field, 0.0)) + amount
+        if normalized_route != "overall":
+            route_metrics = self._local_metrics.setdefault(normalized_route, {})
+            route_metrics[field] = float(route_metrics.get(field, 0.0)) + amount
 
     def _record_remote_metric(self, route: str, field: str, amount: float) -> None:
         assert self._redis is not None

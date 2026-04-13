@@ -7,6 +7,7 @@ import {
   CompanyCompareResponse,
   CompanyCapitalMarketsSummaryResponse,
   CompanyCapitalStructureResponse,
+  CompanyChartsDashboardResponse,
   CompanyEquityClaimRiskResponse,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsResponse,
@@ -85,6 +86,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/overview(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/segment-history(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/charts(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/brief(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/oil-scenario(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -598,6 +600,16 @@ export function getCompanyCapitalStructure(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/capital-structure${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyCharts(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyChartsDashboardResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyEquityClaimRisk(

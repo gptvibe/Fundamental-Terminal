@@ -4,6 +4,7 @@ from app.models.capital_markets_event import CapitalMarketsEvent
 from app.models.capital_structure_snapshot import CapitalStructureSnapshot
 from app.models.comment_letter import CommentLetter
 from app.models.company import Company
+from app.models.company_charts_dashboard_snapshot import CompanyChartsDashboardSnapshot
 from app.models.company_macro_snapshot import CompanyMacroSnapshot
 from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
 from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
@@ -38,6 +39,7 @@ __all__ = [
     "CapitalStructureSnapshot",
     "CommentLetter",
     "Company",
+    "CompanyChartsDashboardSnapshot",
     "CompanyMacroSnapshot",
     "CompanyOilScenarioOverlaySnapshot",
     "CompanyResearchBriefSnapshot",

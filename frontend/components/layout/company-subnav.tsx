@@ -37,6 +37,7 @@ const baseTabs: CompanySubnavTab[] = [
     ]
   },
   { key: "financials", label: "Financials", suffix: "/financials", section: "primary" },
+  { key: "charts", label: "Charts", suffix: "/charts", section: "primary" },
   { key: "models", label: "Models", suffix: "/models", section: "primary" },
   { key: "peers", label: "Peers", suffix: "/peers", section: "primary" },
   { key: "earnings", label: "Earnings", suffix: "/earnings", section: "more" },

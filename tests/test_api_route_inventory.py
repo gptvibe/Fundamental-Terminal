@@ -20,6 +20,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/screener/filters"),
         ("POST", "/api/screener/search"),
         ("GET", "/api/companies/compare"),
+        ("GET", "/api/companies/{ticker}/charts"),
         ("GET", "/api/companies/{ticker}/financials"),
         ("GET", "/api/companies/{ticker}/overview"),
         ("GET", "/api/companies/{ticker}/segment-history"),

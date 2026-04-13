@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetApiClientCacheForTests,
   getCompanyCapitalStructure,
+  getCompanyCharts,
   getCompanyChangesSinceLastFiling,
   getCompaniesCompare,
   getCompanyEarningsWorkspace,
@@ -263,6 +264,29 @@ describe("api route stability", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       9,
       "/backend/api/companies/compare?tickers=AAPL%2CMSFT&as_of=2025-02-01",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("keeps charts helper paths unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyCharts("AAPL");
+    await getCompanyCharts("AAPL", { asOf: "2025-02-01" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/companies/AAPL/charts",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/AAPL/charts?as_of=2025-02-01",
       expect.objectContaining({ cache: "no-store" })
     );
   });

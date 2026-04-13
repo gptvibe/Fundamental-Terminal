@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.capital_markets_event import CapitalMarketsEvent
     from app.models.capital_structure_snapshot import CapitalStructureSnapshot
+    from app.models.company_charts_dashboard_snapshot import CompanyChartsDashboardSnapshot
     from app.models.comment_letter import CommentLetter
     from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
     from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
@@ -111,6 +112,11 @@ class Company(Base):
         passive_deletes=True,
     )
     research_brief_snapshots: Mapped[list["CompanyResearchBriefSnapshot"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    charts_dashboard_snapshots: Mapped[list["CompanyChartsDashboardSnapshot"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

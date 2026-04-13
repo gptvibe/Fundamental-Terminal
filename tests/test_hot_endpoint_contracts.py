@@ -14,6 +14,21 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
     provenance_fields = {"provenance", "as_of", "last_refreshed_at", "source_mix", "confidence_flags"}
     endpoint_expectations = {
         "/api/companies/{ticker}/overview": {"company", "financials", "brief"},
+        "/api/companies/{ticker}/charts": {
+            "company",
+            "title",
+            "build_state",
+            "build_status",
+            "summary",
+            "factors",
+            "legend",
+            "cards",
+            "forecast_methodology",
+            "payload_version",
+            "refresh",
+            "diagnostics",
+            *provenance_fields,
+        },
         "/api/companies/{ticker}/financials": {"company", "financials", "price_history", "refresh", "diagnostics", *provenance_fields},
         "/api/companies/{ticker}/capital-structure": {
             "company",
@@ -145,6 +160,7 @@ def test_hot_endpoint_openapi_contracts_include_point_in_time_query_params() -> 
 
     for path in (
         "/api/companies/{ticker}/overview",
+        "/api/companies/{ticker}/charts",
         "/api/companies/{ticker}/financials",
         "/api/companies/{ticker}/capital-structure",
         "/api/companies/{ticker}/changes-since-last-filing",
