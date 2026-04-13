@@ -17,6 +17,11 @@ from app.observability import emit_structured_log
 logger = logging.getLogger(__name__)
 
 try:
+    import orjson
+except Exception:  # pragma: no cover - optional dependency during bootstrap
+    orjson = None
+
+try:
     import redis
     from redis.exceptions import RedisError
 except Exception:  # pragma: no cover - optional dependency
@@ -456,7 +461,7 @@ class SharedHotResponseCache:
             return None
 
         try:
-            payload = json.loads(_decode_redis_text(raw_meta))
+            payload = _json_loads(raw_meta)
         except Exception:
             self._delete_remote_entry(logical_key, [])
             return None
@@ -516,12 +521,12 @@ class SharedHotResponseCache:
         previous_tags = []
         if previous:
             try:
-                previous_payload = json.loads(_decode_redis_text(previous))
+                previous_payload = _json_loads(previous)
                 previous_tags = list(previous_payload.get("tags") or [])
             except Exception:
                 previous_tags = []
 
-        record = json.dumps(
+        record = _json_dumps_bytes(
             {
                 "fresh_until": fresh_until,
                 "stale_until": stale_until,
@@ -531,9 +536,8 @@ class SharedHotResponseCache:
                 "etag": etag,
                 "last_modified": last_modified,
             },
-            separators=(",", ":"),
             sort_keys=True,
-        ).encode("utf-8")
+        )
         ttl_seconds = max(int(stale_until - stored_at) + 1, 1)
         pipeline = self._redis.pipeline()
         pipeline.sadd(self._route_registry_key(), route)
@@ -608,7 +612,7 @@ class SharedHotResponseCache:
             entry_tags: list[str] = []
             if raw_entry:
                 try:
-                    parsed = json.loads(_decode_redis_text(raw_entry))
+                    parsed = _json_loads(raw_entry)
                     entry_tags = list(parsed.get("tags") or [])
                     route = str(parsed.get("route") or "")
                     if route:
@@ -875,7 +879,7 @@ def _digest(value: str) -> str:
 
 
 def _render_json_bytes(payload: Any) -> bytes:
-    return json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    return _json_dumps_bytes(payload)
 
 
 def _etag_for_json_bytes(content: bytes) -> str:
@@ -924,7 +928,24 @@ def _parse_cache_timestamp(value: Any) -> datetime | None:
 
 
 def _decode_lookup_payload(lookup: HotCacheLookup) -> dict[str, Any]:
-    return json.loads(lookup.content)
+    return _json_loads(lookup.content)
+
+
+def _json_dumps_bytes(payload: Any, *, sort_keys: bool = False) -> bytes:
+    if orjson is not None:
+        option = 0
+        if sort_keys:
+            option |= orjson.OPT_SORT_KEYS
+        return orjson.dumps(payload, option=option)
+    return json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=sort_keys).encode("utf-8")
+
+
+def _json_loads(payload: Any) -> dict[str, Any]:
+    if orjson is not None:
+        return orjson.loads(payload)
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8")
+    return json.loads(payload)
 
 
 def _decode_redis_text(value: Any) -> str:

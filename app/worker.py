@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import threading
+import time
 import uuid
 
 from app.config import settings
@@ -24,13 +25,20 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     effective_poll_interval = poll_interval_seconds or settings.refresh_queue_poll_seconds
     worker_id = f"{threading.current_thread().name}-{uuid.uuid4().hex[:8]}"
+    next_recovery_at = 0.0
 
     while True:
-        job = status_broker.claim_next_job(worker_id=worker_id)
+        now = time.monotonic()
+        if now >= next_recovery_at:
+            status_broker.requeue_expired_jobs(limit=10)
+            next_recovery_at = now + settings.refresh_recovery_interval_seconds
+
+        job = status_broker.claim_next_job_blocking(worker_id=worker_id, timeout_seconds=effective_poll_interval)
         if job is None:
             if once:
                 return 0
-            threading.Event().wait(effective_poll_interval)
+            if not status_broker.has_blocking_queue:
+                threading.Event().wait(effective_poll_interval)
             continue
 
         logger.info("Processing refresh job %s for %s", job.job_id, job.ticker)

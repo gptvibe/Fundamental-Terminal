@@ -21,6 +21,17 @@ from app.models import RefreshJob, RefreshJobEvent
 from app.observability import emit_structured_log
 from app.services.refresh_state import ensure_company, set_active_refresh_job
 
+try:
+    import redis
+    import redis.asyncio as redis_async
+    from redis.exceptions import RedisError
+except Exception:  # pragma: no cover - optional dependency at runtime
+    redis = None
+    redis_async = None
+
+    class RedisError(Exception):
+        pass
+
 
 JobState = Literal["queued", "running", "completed", "failed"]
 JobLevel = Literal["info", "success", "error"]
@@ -236,6 +247,14 @@ class SharedStatusBroker:
         self._poll_interval_seconds = poll_interval_seconds
         self._recovery_batch_size = recovery_batch_size
         self._lease_duration = timedelta(seconds=settings.refresh_lock_timeout_seconds)
+        self._redis = self._build_sync_redis_client()
+        self._redis_async = self._build_async_redis_client()
+        self._queue_key = f"{settings.hot_response_cache_namespace}:refresh-jobs:queue"
+        self._event_channel_prefix = f"{settings.hot_response_cache_namespace}:refresh-jobs:events:"
+
+    @property
+    def has_blocking_queue(self) -> bool:
+        return self._redis is not None
 
     def create_job(
         self,
@@ -298,6 +317,8 @@ class SharedStatusBroker:
                 raise
 
         _emit_event_log(job.job_id, event)
+        self._publish_realtime_event(job.job_id, event)
+        self._enqueue_job_signal(job.job_id)
         return job.job_id
 
     def get_active_job_id(self, *, ticker: str, kind: str, dataset: str = "company_refresh") -> str | None:
@@ -326,6 +347,7 @@ class SharedStatusBroker:
         )
         if event is not None:
             _emit_event_log(job_id, event)
+            self._publish_realtime_event(job_id, event)
 
     def complete(
         self,
@@ -370,7 +392,6 @@ class SharedStatusBroker:
             return
 
     def claim_next_job(self, *, worker_id: str) -> ClaimedJob | None:
-        self.requeue_expired_jobs(limit=self._recovery_batch_size)
         now = datetime.now(timezone.utc)
 
         with self._sync_session_scope() as session:
@@ -407,6 +428,7 @@ class SharedStatusBroker:
             session.commit()
 
         _emit_event_log(job.job_id, event)
+        self._publish_realtime_event(job.job_id, event)
         return ClaimedJob(
             job_id=job.job_id,
             ticker=job.ticker,
@@ -417,6 +439,17 @@ class SharedStatusBroker:
             worker_id=worker_id,
             claim_token=claim_token,
         )
+
+    def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float | None = None) -> ClaimedJob | None:
+        if self._redis is None:
+            return self.claim_next_job(worker_id=worker_id)
+
+        timeout = max(1, int(timeout_seconds or settings.refresh_queue_block_seconds))
+        try:
+            self._redis.blpop(self._queue_key, timeout=timeout)
+        except RedisError:
+            return self.claim_next_job(worker_id=worker_id)
+        return self.claim_next_job(worker_id=worker_id)
 
     def requeue_expired_jobs(self, *, limit: int = 10) -> int:
         now = datetime.now(timezone.utc)
@@ -457,6 +490,8 @@ class SharedStatusBroker:
 
         for public_job_id, event in emitted:
             _emit_event_log(public_job_id, event)
+            self._publish_realtime_event(public_job_id, event)
+            self._enqueue_job_signal(public_job_id)
         return len(emitted)
 
     def subscribe(
@@ -494,12 +529,13 @@ class SharedStatusBroker:
         backlog = await self.async_list_events(job_id)
         queue: asyncio.Queue[JobEvent] = asyncio.Queue(maxsize=self._subscriber_queue_size)
         stop_event = asyncio.Event()
+        last_sequence = backlog[-1].sequence if backlog else 0
         task = asyncio.create_task(
-            self._poll_job_events_async(
+            self._subscribe_job_events_async(
                 job_id,
                 queue,
                 stop_event,
-                last_sequence=backlog[-1].sequence if backlog else 0,
+                last_sequence=last_sequence,
             )
         )
 
@@ -587,6 +623,60 @@ class SharedStatusBroker:
                     continue
         except asyncio.CancelledError:
             return
+
+    async def _subscribe_job_events_async(
+        self,
+        job_id: str,
+        queue: asyncio.Queue[JobEvent],
+        stop_event: asyncio.Event,
+        *,
+        last_sequence: int,
+    ) -> None:
+        if self._redis_async is None:
+            await self._poll_job_events_async(job_id, queue, stop_event, last_sequence=last_sequence)
+            return
+
+        pubsub = self._redis_async.pubsub()
+        channel = self._event_channel(job_id)
+        try:
+            await pubsub.subscribe(channel)
+            while not stop_event.is_set():
+                try:
+                    message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=self._poll_interval_seconds)
+                except RedisError:
+                    await self._poll_job_events_async(job_id, queue, stop_event, last_sequence=last_sequence)
+                    return
+
+                event = _job_event_from_pubsub(message)
+                if event is not None and event.sequence > last_sequence:
+                    last_sequence = event.sequence
+                    _safe_put_nowait(queue, event)
+                    if event.status in TERMINAL_JOB_STATES:
+                        return
+                    continue
+
+                snapshot = await self._async_job_snapshot(job_id)
+                if snapshot is None:
+                    return
+
+                status, event_sequence = snapshot
+                if event_sequence > last_sequence:
+                    for missed_event in await self.async_list_events(job_id, after_sequence=last_sequence):
+                        last_sequence = missed_event.sequence
+                        _safe_put_nowait(queue, missed_event)
+                if status in TERMINAL_JOB_STATES and last_sequence >= event_sequence:
+                    return
+        except asyncio.CancelledError:
+            return
+        finally:
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                pass
+            try:
+                await pubsub.aclose()
+            except Exception:
+                pass
 
     def _build_queue_payload(self, job_id: str, event: JobEvent) -> dict[str, int]:
         if event.status != "queued":
@@ -790,6 +880,53 @@ class SharedStatusBroker:
             statement = statement.with_for_update()
         return session.execute(statement).scalar_one_or_none()
 
+    def _build_sync_redis_client(self):
+        if redis is None:
+            return None
+        try:
+            client = redis.Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_timeout=max(settings.refresh_queue_block_seconds + 1.0, 5.0),
+                socket_connect_timeout=1.0,
+            )
+            client.ping()
+            return client
+        except Exception:
+            return None
+
+    def _build_async_redis_client(self):
+        if redis_async is None:
+            return None
+        try:
+            return redis_async.Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_timeout=max(settings.refresh_status_poll_seconds + 1.0, 5.0),
+                socket_connect_timeout=1.0,
+            )
+        except Exception:
+            return None
+
+    def _enqueue_job_signal(self, job_id: str) -> None:
+        if self._redis is None:
+            return
+        try:
+            self._redis.rpush(self._queue_key, job_id)
+        except RedisError:
+            return
+
+    def _publish_realtime_event(self, job_id: str, event: JobEvent) -> None:
+        if self._redis is None:
+            return
+        try:
+            self._redis.publish(self._event_channel(job_id), json.dumps(event.to_payload(job_id), separators=(",", ":")))
+        except RedisError:
+            return
+
+    def _event_channel(self, job_id: str) -> str:
+        return f"{self._event_channel_prefix}{job_id}"
+
 
 class JobReporter:
     def __init__(self, job_id: str | None = None, *, claim_token: str | None = None) -> None:
@@ -832,6 +969,55 @@ def _emit_event_log(job_id: str, event: JobEvent) -> None:
         status=event.status,
         level_name=event.level,
         sequence=event.sequence,
+    )
+
+
+def _job_event_from_pubsub(message: object) -> JobEvent | None:
+    if not isinstance(message, dict) or message.get("type") != "message":
+        return None
+
+    payload = message.get("data")
+    if payload is None:
+        return None
+
+    try:
+        parsed = json.loads(payload)
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(parsed, dict):
+        return None
+
+    timestamp = parsed.get("timestamp")
+    if not isinstance(timestamp, str):
+        return None
+    if timestamp.endswith("Z"):
+        timestamp = f"{timestamp[:-1]}+00:00"
+
+    try:
+        parsed_timestamp = datetime.fromisoformat(timestamp)
+    except ValueError:
+        return None
+
+    if parsed_timestamp.tzinfo is None:
+        parsed_timestamp = parsed_timestamp.replace(tzinfo=timezone.utc)
+    else:
+        parsed_timestamp = parsed_timestamp.astimezone(timezone.utc)
+
+    try:
+        sequence = int(parsed.get("sequence"))
+    except (TypeError, ValueError):
+        return None
+
+    return JobEvent(
+        sequence=sequence,
+        timestamp=parsed_timestamp,
+        ticker=str(parsed.get("ticker") or ""),
+        kind=str(parsed.get("kind") or ""),
+        stage=str(parsed.get("stage") or ""),
+        message=str(parsed.get("message") or ""),
+        status=str(parsed.get("status") or "queued"),
+        level=str(parsed.get("level") or "info"),
     )
 
 

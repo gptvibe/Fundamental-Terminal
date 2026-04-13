@@ -74,6 +74,7 @@ def _settings(strict_official_mode: bool = False) -> SimpleNamespace:
         sec_cache_prune_max_entries=0,
         sec_cache_prune_interval_seconds=3600,
         freshness_window_hours=24,
+        market_history_overlap_days=7,
         strict_official_mode=strict_official_mode,
     )
 
@@ -749,6 +750,42 @@ def test_refresh_prices_marks_prices_checked_when_yahoo_returns_no_bars(monkeypa
     assert written == 0
     assert touched == [(company.id, checked_at)]
     assert reporter.steps[-1] == ("market", "No Yahoo price history returned for MSFT; marking prices checked without cached bars.")
+
+
+def test_refresh_prices_fetches_only_the_incremental_tail_after_initial_backfill(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+    company = _company()
+    checked_at = datetime.now(timezone.utc)
+    captured: dict[str, object] = {}
+    touched: list[tuple[int, datetime]] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_company_latest_trade_date", lambda *_args, **_kwargs: date(2026, 4, 10))
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        service.market_data,
+        "get_price_history",
+        lambda ticker, *, start_date=None: captured.update({"ticker": ticker, "start_date": start_date}) or [
+            SimpleNamespace(trade_date=date(2026, 4, 10), close=100.0, volume=10),
+            SimpleNamespace(trade_date=date(2026, 4, 11), close=101.0, volume=20),
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: 2)
+    monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp, **_kwargs: touched.append((company_id, timestamp)))
+
+    written = service.refresh_prices(
+        session=SimpleNamespace(),
+        company=company,
+        checked_at=checked_at,
+        reporter=reporter,
+    )
+
+    assert written == 2
+    assert captured == {"ticker": "MSFT", "start_date": date(2026, 4, 3)}
+    assert touched == [(company.id, checked_at)]
+    assert reporter.steps[0] == ("market", "Fetching price history tail...")
 
 
 @pytest.mark.parametrize(

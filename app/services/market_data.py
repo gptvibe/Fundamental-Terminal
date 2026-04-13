@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as datetime_time, timezone
 import time
 from typing import Any
 
@@ -53,18 +53,21 @@ class MarketDataClient:
     def close(self) -> None:
         self._http.close()
 
-    def get_price_history(self, ticker: str) -> list[PriceBar]:
+    def get_price_history(self, ticker: str, *, start_date: date | None = None) -> list[PriceBar]:
         if settings.strict_official_mode:
             return []
 
         symbol = _normalize_market_symbol(ticker)
+        period_start = 0
+        if start_date is not None:
+            period_start = max(0, int(datetime.combine(start_date, datetime_time.min, tzinfo=timezone.utc).timestamp()))
         period_end = int(time.time())
         try:
             response = _request_with_retries(
                 self._http,
                 f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
                 params={
-                    "period1": 0,
+                    "period1": period_start,
                     "period2": period_end,
                     "interval": "1d",
                     "includeAdjustedClose": "true",
@@ -176,6 +179,11 @@ def get_company_price_last_checked(session: Session, company_id: int) -> datetim
     if scanned is not None:
         mark_dataset_checked(session, company_id, "prices", checked_at=scanned, success=True)
     return scanned
+
+
+def get_company_latest_trade_date(session: Session, company_id: int) -> date | None:
+    statement = select(func.max(PriceHistory.trade_date)).where(PriceHistory.company_id == company_id)
+    return session.execute(statement).scalar_one_or_none()
 
 
 def upsert_price_history(

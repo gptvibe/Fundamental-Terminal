@@ -120,7 +120,7 @@ from app.services.screener import build_official_screener_filter_catalog, run_of
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
-from app.services.hot_cache import HotCacheLookup, shared_hot_response_cache
+from app.services.hot_cache import HotCacheLookup, _etag_for_json_bytes, _render_json_bytes, shared_hot_response_cache
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, CompanyIdentity, EdgarClient, FilingMetadata
@@ -564,6 +564,7 @@ def company_compare(
     normalized_tickers = _normalize_compare_tickers(tickers)
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
+    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
     companies = [
         _build_company_compare_item(
             session=session,
@@ -571,6 +572,7 @@ def company_compare(
             ticker=ticker,
             requested_as_of=requested_as_of,
             parsed_as_of=parsed_as_of,
+            snapshot=snapshots_by_ticker.get(ticker),
         )
         for ticker in normalized_tickers
     ]
@@ -4481,13 +4483,8 @@ def _apply_conditional_headers(
     *,
     last_modified: datetime | None,
 ) -> Response | None:
-    canonical = json.dumps(
-        payload.model_dump(mode="json"),
-        ensure_ascii=False,
-        allow_nan=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    etag = f'W/"{hashlib.sha256(canonical).hexdigest()[:16]}"'
+    canonical = _render_json_bytes(payload.model_dump(mode="json"))
+    etag = _etag_for_json_bytes(canonical)
 
     return _apply_precomputed_conditional_headers(
         request,
@@ -9384,9 +9381,10 @@ def _build_company_compare_item(
     ticker: str,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
+    snapshot: CompanyCacheSnapshot | None = None,
 ) -> CompanyCompareItemPayload:
     normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    snapshot = snapshot or _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
         refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
         return CompanyCompareItemPayload(

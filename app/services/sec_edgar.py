@@ -36,6 +36,7 @@ from app.services.market_data import (
     MarketDataClient,
     MarketDataUnavailableError,
     MarketProfile,
+    get_company_latest_trade_date,
     get_company_price_last_checked,
     touch_company_price_history,
     upsert_price_history,
@@ -1996,11 +1997,22 @@ class EdgarIngestionService:
             if market_profile.industry:
                 company.market_industry = market_profile.industry
 
-        reporter.step("market", "Fetching price history...")
+        try:
+            latest_trade_date = get_company_latest_trade_date(session, company.id)
+        except AttributeError:
+            latest_trade_date = None
+        incremental_start_date = None
+        if latest_trade_date is not None:
+            incremental_start_date = latest_trade_date - timedelta(days=settings.market_history_overlap_days)
+
+        reporter.step(
+            "market",
+            "Fetching price history tail..." if incremental_start_date is not None else "Fetching full price history...",
+        )
         existing_state = get_dataset_state(session, company.id, "prices")
         existing_payload_hash = existing_state.payload_version_hash if existing_state is not None else None
         try:
-            price_bars = self.market_data.get_price_history(company.ticker)
+            price_bars = self.market_data.get_price_history(company.ticker, start_date=incremental_start_date)
         except MarketDataUnavailableError as exc:
             reporter.step("market", f"{exc} Marking prices checked without cached bars.")
             touch_company_price_history(

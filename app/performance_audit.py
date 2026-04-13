@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
@@ -12,10 +13,15 @@ from uuid import uuid4
 from fastapi import Request
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
-from starlette.responses import JSONResponse
+from starlette.responses import Response
 
 from app.config import settings
 from app.observability import emit_structured_log
+
+try:
+    import orjson
+except Exception:  # pragma: no cover - optional dependency during bootstrap
+    orjson = None
 
 
 logger = logging.getLogger(__name__)
@@ -58,10 +64,17 @@ class RequestMetrics:
         return payload
 
 
-class PerformanceAuditJSONResponse(JSONResponse):
+class PerformanceAuditJSONResponse(Response):
+    media_type = "application/json"
+
     def render(self, content: Any) -> bytes:
         started_at = perf_counter()
-        body = super().render(content)
+        if content is None:
+            body = b"null"
+        elif orjson is not None:
+            body = orjson.dumps(content)
+        else:
+            body = json.dumps(content, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
         metrics = _CURRENT_REQUEST_METRICS.get()
         if metrics is not None:
             metrics.serialization_ms += (perf_counter() - started_at) * 1000.0

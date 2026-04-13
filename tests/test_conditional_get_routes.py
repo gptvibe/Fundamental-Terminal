@@ -354,6 +354,28 @@ def test_financials_route_supports_conditional_get(monkeypatch):
     assert financials_calls == ["called"]
 
 
+def test_financials_route_uses_hot_cache_metadata_for_304_without_opening_session(monkeypatch):
+    async def _get_cached(*_args, **_kwargs):
+        return HotCacheLookup(
+            content=b'{"company":{"ticker":"AAPL"}}',
+            etag='W/"financials-hot"',
+            last_modified="Sun, 13 Apr 2026 00:00:00 GMT",
+            is_fresh=True,
+        )
+
+    def _unexpected_session_scope():
+        raise AssertionError("fresh financial hot-cache metadata should satisfy 304 checks without opening a DB session")
+
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
+    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/financials", headers={"If-None-Match": 'W/"financials-hot"'})
+
+    assert response.status_code == 304
+    assert response.content == b""
+
+
 def test_models_route_supports_conditional_get(monkeypatch):
     snapshot = _snapshot()
     monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
@@ -442,6 +464,7 @@ def test_peers_route_supports_conditional_get(monkeypatch):
 def test_compare_route_sets_public_cache_headers(monkeypatch):
     snapshot = _snapshot()
     monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snapshot})
     monkeypatch.setattr(
         main_module,
         "_build_company_compare_item",
