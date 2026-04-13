@@ -140,8 +140,11 @@ The mobile layout swaps the desktop tab rail for a compact section picker and st
 
    ```bash
    set DATABASE_URL=postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals
+   set REDIS_URL=redis://localhost:6379/0
    set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
    ```
+
+   `REDIS_URL` is used for the shared hot-response cache. If Redis is unavailable, the app falls back to an in-process local cache automatically. That keeps reads working, but weakens cross-instance hot-cache reuse and shared singleflight coordination.
 
    Optional regulated-bank source configuration:
 
@@ -191,6 +194,13 @@ alembic upgrade head
 ```bash
 uvicorn app.main:app --reload
 ```
+
+Hot-cache backend visibility:
+
+- Check startup logs for `shared_hot_cache.backend` to confirm whether the app is using Redis or the local in-process fallback.
+- Check runtime logs for `shared_hot_cache.local_fallback` if Redis operations start failing after boot.
+- Check `/api/internal/cache-metrics` for `hot_cache_backend_mode` and `hot_cache.backend_details`.
+- If `hot_cache_backend_mode` is `local_memory_fallback`, verify `REDIS_URL`, Redis reachability, and that all app instances can reach the same Redis deployment.
 
 API composition notes:
 
@@ -271,6 +281,7 @@ Point-in-time research mode:
 - Supported research routes include `/api/companies/{ticker}/financials`, `/metrics-timeseries`, `/metrics`, `/metrics/summary`, `/models`, and `/peers`.
 - Date-only values are treated as end-of-day UTC. Full ISO-8601 timestamps are also accepted.
 - The frontend automatically forwards `?as_of=...` from the current page URL when it calls these research endpoints.
+- `/api/companies/{ticker}/models` now omits bulky `input_periods` from the default response so the initial models workspace stays lighter; use `expand=input_periods` for export/debug flows that need the full model input payload.
 
 Financial restatement tracking:
 

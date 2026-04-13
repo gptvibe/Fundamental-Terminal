@@ -266,4 +266,20 @@ describe("api route stability", () => {
       expect.objectContaining({ cache: "no-store" })
     );
   });
+
+  it("serializes model payload expansions only when requested", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyModels("AAPL", ["dcf", "dupont"], { dupontMode: "annual", expandInputPeriods: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend/api/companies/AAPL/models?model=dcf%2Cdupont&expand=input_periods&dupont_mode=annual",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
 });

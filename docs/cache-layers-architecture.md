@@ -14,6 +14,8 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 
 - Used for short-lived shared cache entries and coordination where cross-process reuse matters.
 - Reduces duplicate work when multiple requests converge on the same data close together.
+- If Redis is unavailable, the hot-response cache falls back to local in-process memory.
+- This fallback preserves availability, but cross-instance cache reuse and shared singleflight coordination become weaker because each backend process keeps its own hot cache.
 
 3. PostgreSQL persisted research tables
 
@@ -41,6 +43,12 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 - Reuse the existing refresh queue and SSE flow instead of inventing parallel status plumbing.
 - Keep backend and frontend contracts aligned whenever payload metadata changes.
 - Add contract tests when a hot endpoint response shape changes.
+
+## Operator Checks
+- Inspect startup logs for `shared_hot_cache.backend` to confirm the active backend mode.
+- Inspect runtime logs for `shared_hot_cache.local_fallback` when Redis operations fail and requests drop to process-local fallback.
+- Inspect `/api/internal/cache-metrics` for `hot_cache_backend_mode` plus `hot_cache.backend_details.startup_reason`, `fallback_events_total`, and `cross_instance_reuse`.
+- If the cache is in `local_memory_fallback`, verify `REDIS_URL`, Redis health, and network reachability from every app instance.
 
 ## Module Boundaries
 - Routers under `app/api/routers/` stay registration-only and may depend on FastAPI, Starlette, and `app/api/schemas/` only.

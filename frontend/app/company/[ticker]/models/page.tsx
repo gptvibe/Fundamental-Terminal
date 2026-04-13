@@ -266,11 +266,20 @@ export default function CompanyModelsPage() {
         throw new Error("Model outputs are still loading.");
       }
 
+      const exportModelData = await withPerformanceAuditSource(
+        {
+          pageRoute: "/company/[ticker]/models",
+          scenario: "models_page",
+          source: "models:export-expanded-models",
+        },
+        () => getCompanyModels(ticker, MODEL_NAMES, { dupontMode, expandInputPeriods: true })
+      );
+
       downloadJsonFile(`${normalizeExportFileStem(ticker, "company")}-model-outputs.json`, {
         exported_at: new Date().toISOString(),
         ticker,
         dupont_mode: dupontMode,
-        models: data,
+        models: exportModelData,
         financials: financialData,
         market_context: marketContextData,
         sector_context: sectorContextData,

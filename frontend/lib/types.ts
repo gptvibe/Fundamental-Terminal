@@ -1024,7 +1024,7 @@ export interface ModelPayload {
   model_name: string;
   model_version: string;
   created_at: string;
-  input_periods: Record<string, unknown> | Array<Record<string, unknown>>;
+  input_periods: Record<string, unknown> | Array<Record<string, unknown>> | null;
   result: Record<string, unknown>;
 }
 

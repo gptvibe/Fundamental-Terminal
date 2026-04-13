@@ -13,7 +13,7 @@ class ModelPayload(BaseModel):
     model_name: str
     model_version: str
     created_at: datetime
-    input_periods: dict[str, Any] | list[dict[str, Any]]
+    input_periods: dict[str, Any] | list[dict[str, Any]] | None = None
     result: dict[str, Any]
 
 

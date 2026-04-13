@@ -56,6 +56,7 @@ class _LocalCacheEntry:
 class SharedHotResponseCache:
     def __init__(self) -> None:
         self._namespace = settings.hot_response_cache_namespace
+        self._redis_configured = bool(str(settings.redis_url).strip())
         self._local_lock = asyncio.Lock()
         self._local_entries: dict[str, _LocalCacheEntry] = {}
         self._local_tag_index: dict[str, set[str]] = {}
@@ -63,11 +64,26 @@ class SharedHotResponseCache:
         self._local_routes: set[str] = set()
         self._inflight_lock = asyncio.Lock()
         self._inflight: dict[str, _InflightFill] = {}
+        self._startup_backend_reason: str | None = None
+        self._fallback_events_total = 0
+        self._last_fallback_reason: str | None = None
+        self._last_fallback_error: str | None = None
+        self._last_fallback_at: datetime | None = None
+        self._logged_runtime_fallback_operations: set[str] = set()
+        self._redis = None
         self._redis = self._build_redis_client()
 
     @property
     def backend(self) -> str:
         return "redis" if self._redis is not None else "local"
+
+    @property
+    def backend_mode(self) -> str:
+        if self._redis is None:
+            return "local_memory_fallback" if self._redis_configured else "local_memory"
+        if self._fallback_events_total > 0:
+            return "redis_with_local_fallbacks"
+        return "redis"
 
     @property
     def is_shared(self) -> bool:
@@ -132,8 +148,8 @@ class SharedHotResponseCache:
                     last_modified=last_modified,
                 )
                 return
-            except RedisError:
-                logger.warning("Shared hot cache store failed; falling back to local cache", exc_info=True)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="store", exc=exc)
 
         await self._store_local(
             logical_key,
@@ -213,8 +229,8 @@ class SharedHotResponseCache:
         if self._redis is not None:
             try:
                 deleted = self._invalidate_remote(tags)
-            except RedisError:
-                logger.warning("Shared hot cache invalidation failed; falling back to local cache", exc_info=True)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="invalidate", exc=exc)
                 deleted = await self._invalidate_local(tags)
         else:
             deleted = await self._invalidate_local(tags)
@@ -251,8 +267,10 @@ class SharedHotResponseCache:
         }
         return {
             "backend": self.backend,
+            "backend_mode": self.backend_mode,
             "shared": self.is_shared,
             "namespace": self._namespace,
+            "backend_details": self._backend_details(),
             "config": {
                 "ttl_seconds": settings.hot_response_cache_ttl_seconds,
                 "stale_ttl_seconds": settings.hot_response_cache_stale_ttl_seconds,
@@ -279,8 +297,8 @@ class SharedHotResponseCache:
         if self._redis is not None:
             try:
                 self._clear_remote()
-            except RedisError:
-                logger.warning("Unable to clear remote shared hot cache state", exc_info=True)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="clear", exc=exc)
 
     def clear_sync(self) -> None:
         self._run_async_compat(self.clear())
@@ -311,6 +329,12 @@ class SharedHotResponseCache:
 
     def _build_redis_client(self):
         if redis is None:
+            self._startup_backend_reason = "redis_dependency_missing"
+            self._emit_backend_log(
+                level=logging.WARNING,
+                reason=self._startup_backend_reason,
+                error="redis client dependency unavailable",
+            )
             return None
         try:
             client = redis.Redis.from_url(
@@ -320,9 +344,24 @@ class SharedHotResponseCache:
                 socket_connect_timeout=0.5,
             )
             client.ping()
+            self._startup_backend_reason = "redis_connected"
+            self._emit_backend_log(
+                level=logging.INFO,
+                reason=self._startup_backend_reason,
+            )
             return client
-        except Exception:
-            logger.warning("Redis unavailable for shared hot cache; using local fallback", exc_info=True)
+        except Exception as exc:
+            self._startup_backend_reason = "redis_connect_failed"
+            self._note_runtime_fallback(
+                operation="startup_connect",
+                exc=exc,
+                log_once=False,
+            )
+            self._emit_backend_log(
+                level=logging.WARNING,
+                reason=self._startup_backend_reason,
+                error=self._last_fallback_error,
+            )
             return None
 
     async def _fill_or_wait_remote(
@@ -401,8 +440,8 @@ class SharedHotResponseCache:
         if self._redis is not None:
             try:
                 return self._read_remote(logical_key)
-            except RedisError:
-                logger.warning("Shared hot cache read failed; falling back to local cache", exc_info=True)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="read", exc=exc)
         return await self._read_local(logical_key)
 
     def _read_remote(self, logical_key: str) -> HotCacheLookup | None:
@@ -629,8 +668,8 @@ class SharedHotResponseCache:
             try:
                 self._record_remote_metric(normalized_route, field, amount)
                 return
-            except RedisError:
-                logger.warning("Shared hot cache metrics write failed; falling back to local metrics", exc_info=True)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="metrics_write", exc=exc)
         await self._record_local_metric(normalized_route, field, amount)
 
     def _record_remote_metric(self, route: str, field: str, amount: float) -> None:
@@ -657,13 +696,78 @@ class SharedHotResponseCache:
         if self._redis is not None:
             try:
                 return self._snapshot_remote_metrics()
-            except RedisError:
-                logger.warning("Shared hot cache metrics snapshot failed; falling back to local metrics", exc_info=True)
+            except RedisError as exc:
+                self._note_runtime_fallback(operation="metrics_snapshot", exc=exc)
         async with self._local_lock:
             return {
                 route: dict(values)
                 for route, values in self._local_metrics.items()
             }
+
+    def _backend_details(self) -> dict[str, Any]:
+        fallback_active = self._redis is None and self._redis_configured
+        return {
+            "configured_backend": "redis" if self._redis_configured else "local",
+            "cache_scope": "cross-instance" if self.is_shared else "process-local",
+            "redis_configured": self._redis_configured,
+            "fallback_active": fallback_active,
+            "startup_reason": self._startup_backend_reason,
+            "fallback_events_total": self._fallback_events_total,
+            "last_fallback_reason": self._last_fallback_reason,
+            "last_fallback_error": self._last_fallback_error,
+            "last_fallback_at": self._last_fallback_at.isoformat() if self._last_fallback_at is not None else None,
+            "cross_instance_reuse": "enabled" if self.is_shared else "disabled",
+        }
+
+    def _emit_backend_log(
+        self,
+        *,
+        level: int,
+        reason: str,
+        error: str | None = None,
+    ) -> None:
+        emit_structured_log(
+            logger,
+            "shared_hot_cache.backend",
+            level=level,
+            backend=self.backend,
+            backend_mode=self.backend_mode,
+            cache_scope="cross-instance" if self.is_shared else "process-local",
+            redis_configured=self._redis_configured,
+            shared=self.is_shared,
+            startup_reason=reason,
+            fallback_reason=self._last_fallback_reason,
+            fallback_events_total=self._fallback_events_total,
+            error=error,
+        )
+
+    def _note_runtime_fallback(
+        self,
+        *,
+        operation: str,
+        exc: BaseException,
+        log_once: bool = True,
+    ) -> None:
+        self._fallback_events_total += 1
+        self._last_fallback_reason = f"redis_{operation}_failed"
+        self._last_fallback_error = f"{type(exc).__name__}: {exc}"
+        self._last_fallback_at = datetime.now(timezone.utc)
+        if log_once and operation in self._logged_runtime_fallback_operations:
+            return
+        self._logged_runtime_fallback_operations.add(operation)
+        emit_structured_log(
+            logger,
+            "shared_hot_cache.local_fallback",
+            level=logging.WARNING,
+            backend=self.backend,
+            backend_mode=self.backend_mode,
+            cache_scope="process-local-on-fallback",
+            operation=operation,
+            fallback_reason=self._last_fallback_reason,
+            error=self._last_fallback_error,
+            redis_configured=self._redis_configured,
+            shared=self.is_shared,
+        )
 
     def _snapshot_remote_metrics(self) -> dict[str, dict[str, float]]:
         assert self._redis is not None

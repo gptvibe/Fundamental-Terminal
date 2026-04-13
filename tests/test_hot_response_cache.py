@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import time
+from types import SimpleNamespace
 
+import app.services.hot_cache as hot_cache_module
 from app.api.handlers import _shared as shared_handlers
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState
 from app.api.schemas.financials import CompanyFinancialsResponse
-from app.services.hot_cache import shared_hot_response_cache
+from app.services.hot_cache import SharedHotResponseCache, shared_hot_response_cache
 
 
 def test_hot_cache_skips_company_missing_payloads(monkeypatch) -> None:
@@ -176,3 +179,57 @@ def test_shared_hot_cache_singleflight_coalesces_identical_local_fills(monkeypat
     assert metrics["fills"] >= 1
     assert metrics["avg_fill_time_ms"] >= 0
     assert metrics["coalesced_waits"] >= 1
+
+
+def test_shared_hot_cache_snapshot_reports_local_fallback_details(monkeypatch) -> None:
+    monkeypatch.setattr(hot_cache_module, "redis", None)
+
+    cache = SharedHotResponseCache()
+    metrics = asyncio.run(cache.snapshot_metrics())
+
+    assert metrics["backend"] == "local"
+    assert metrics["backend_mode"] == "local_memory_fallback"
+    assert metrics["backend_details"]["fallback_active"] is True
+    assert metrics["backend_details"]["startup_reason"] == "redis_dependency_missing"
+    assert metrics["backend_details"]["cross_instance_reuse"] == "disabled"
+
+
+def test_shared_hot_cache_logs_connect_fallback_on_startup(monkeypatch, caplog) -> None:
+    class _FailingRedisClient:
+        def ping(self) -> None:
+            raise RuntimeError("connection refused")
+
+    class _FakeRedisModule:
+        class Redis:
+            @staticmethod
+            def from_url(*_args, **_kwargs):
+                return _FailingRedisClient()
+
+    monkeypatch.setattr(hot_cache_module, "redis", _FakeRedisModule)
+    caplog.set_level(logging.WARNING, logger="app.services.hot_cache")
+
+    cache = SharedHotResponseCache()
+
+    assert cache.backend == "local"
+    messages = [record.message for record in caplog.records]
+    assert any('"event":"shared_hot_cache.local_fallback"' in message and '"operation":"startup_connect"' in message for message in messages)
+    assert any('"event":"shared_hot_cache.backend"' in message and '"startup_reason":"redis_connect_failed"' in message for message in messages)
+
+
+def test_shared_hot_cache_runtime_read_fallback_updates_metrics(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(SharedHotResponseCache, "_build_redis_client", lambda self: SimpleNamespace())
+    cache = SharedHotResponseCache()
+    monkeypatch.setattr(cache, "_read_remote", lambda *_args, **_kwargs: (_ for _ in ()).throw(hot_cache_module.RedisError("read failed")))
+    monkeypatch.setattr(cache, "_record_remote_metric", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cache, "_snapshot_remote_metrics", lambda: {"overall": {}})
+    caplog.set_level(logging.WARNING, logger="app.services.hot_cache")
+
+    cached = asyncio.run(cache.get("financials:ON", route="financials"))
+    metrics = asyncio.run(cache.snapshot_metrics())
+
+    assert cached is None
+    assert metrics["backend"] == "redis"
+    assert metrics["backend_mode"] == "redis_with_local_fallbacks"
+    assert metrics["backend_details"]["fallback_events_total"] >= 1
+    assert metrics["backend_details"]["last_fallback_reason"] == "redis_read_failed"
+    assert any('"event":"shared_hot_cache.local_fallback"' in record.message and '"operation":"read"' in record.message for record in caplog.records)

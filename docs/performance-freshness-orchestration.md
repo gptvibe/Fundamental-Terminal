@@ -29,6 +29,7 @@ This update hardens backend latency and refresh coordination without changing pr
   - `/api/companies/{ticker}/financials`
   - `/api/companies/{ticker}/models`
   - `/api/companies/{ticker}/peers`
+- Trimmed the default `/api/companies/{ticker}/models` payload by omitting bulky `input_periods` unless callers explicitly request `expand=input_periods`.
 - Added `ETag` and `Last-Modified` support for conditional GET on those endpoints.
 - Added persistent refresh dedupe/lock path in queueing (`company_refresh` dataset lock).
 - Added in-memory cache effectiveness counters and an inspection route:
@@ -93,3 +94,4 @@ Both were captured from local Docker runs against `AAPL` after a warm-up pass.
   - `HOT_RESPONSE_CACHE_TTL_SECONDS`
   - `HOT_RESPONSE_CACHE_STALE_TTL_SECONDS`
 - Cache effectiveness counters include hot cache hit/miss/stale/expired/store and conditional 304 counts.
+- Model export/debug flows that need full model input snapshots should call `/api/companies/{ticker}/models?expand=input_periods`; the default models workspace now keeps those inputs off the initial route payload.

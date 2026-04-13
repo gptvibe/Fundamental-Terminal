@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import statistics
 import sys
 import time
@@ -147,7 +148,7 @@ def run_performance_benchmarks(
     baseline_file: str | None = None,
 ) -> dict[str, Any]:
     suites: list[dict[str, Any]] = []
-    with _synthetic_benchmark_environment():
+    with _synthetic_benchmark_environment(), _muted_benchmark_loggers():
         suites.append(_run_hot_endpoint_suite(rounds=hot_rounds))
         suites.append(
             _run_company_brief_suite(
@@ -440,6 +441,24 @@ def _case_request_path(path: str, params: dict[str, str]) -> str:
     if not params:
         return path
     return f"{path}?{urlencode(params)}"
+
+
+@contextmanager
+def _muted_benchmark_loggers() -> Iterator[None]:
+    logger_names = (
+        "httpx",
+        "httpcore",
+        "app.main",
+        "app.services.hot_cache",
+    )
+    saved_levels = {name: logging.getLogger(name).level for name in logger_names}
+    try:
+        for name in logger_names:
+            logging.getLogger(name).setLevel(logging.WARNING)
+        yield
+    finally:
+        for name, level in saved_levels.items():
+            logging.getLogger(name).setLevel(level)
 
 
 @contextmanager

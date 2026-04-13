@@ -111,6 +111,9 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
     monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         sec_edgar,
@@ -175,6 +178,9 @@ def test_refresh_company_uses_cached_partial_insider_refresh(monkeypatch):
     monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         service.client,
@@ -231,6 +237,9 @@ def test_refresh_company_rebuilds_brief_after_cached_earnings_refresh(monkeypatc
     monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: stale)
     monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: recent)
     monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(service.client, "get_submissions", lambda cik: {"recent": {}, "cik": cik}, raising=False)
     monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {"a": object()}, raising=False)
@@ -258,6 +267,260 @@ def test_refresh_company_rebuilds_brief_after_cached_earnings_refresh(monkeypatc
     assert result.fetched_from_sec is True
     assert result.earnings_releases_written == 3
     assert cache_steps == ["earnings-model", "brief"]
+    assert reporter.completed == ["Refresh and compute complete."]
+
+
+def test_refresh_company_uses_cached_partial_filing_events_refresh(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+    recent = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = datetime.now(timezone.utc) - timedelta(days=3)
+    submissions_seen: list[str] = []
+    cache_steps: list[str] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(sec_edgar, "_latest_company_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_price_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_insider_trade_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_form144_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda cik: submissions_seen.append(cik) or {"recent": {}, "cik": cik},
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {"a": object()}, raising=False)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda *_args, **_kwargs: pytest.fail("Full SEC refresh should not run for cached filing-events refresh"),
+        raising=False,
+    )
+    monkeypatch.setattr(service, "refresh_events", lambda **_kwargs: 4)
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_research_brief_cache",
+        lambda *_args, **_kwargs: cache_steps.append("brief"),
+    )
+
+    result = service.refresh_company("MSFT", reporter=reporter)
+
+    assert result.status == "fetched"
+    assert result.fetched_from_sec is True
+    assert result.statements_written == 0
+    assert result.detail == "Cached 4 filing event rows"
+    assert submissions_seen == [company.cik]
+    assert cache_steps == ["brief"]
+    assert reporter.completed == ["Refresh and compute complete."]
+
+
+def test_refresh_company_uses_cached_partial_capital_markets_refresh(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+    recent = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = datetime.now(timezone.utc) - timedelta(days=3)
+    submissions_seen: list[str] = []
+    cache_steps: list[str] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(sec_edgar, "_latest_company_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_price_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_insider_trade_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_form144_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda cik: submissions_seen.append(cik) or {"recent": {}, "cik": cik},
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {"a": object()}, raising=False)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda *_args, **_kwargs: pytest.fail("Full SEC refresh should not run for cached capital-markets refresh"),
+        raising=False,
+    )
+    monkeypatch.setattr(service, "refresh_capital_markets", lambda **_kwargs: 3)
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_research_brief_cache",
+        lambda *_args, **_kwargs: cache_steps.append("brief"),
+    )
+
+    result = service.refresh_company("MSFT", reporter=reporter)
+
+    assert result.status == "fetched"
+    assert result.fetched_from_sec is True
+    assert result.statements_written == 0
+    assert result.detail == "Cached 3 capital markets rows"
+    assert submissions_seen == [company.cik]
+    assert cache_steps == ["brief"]
+    assert reporter.completed == ["Refresh and compute complete."]
+
+
+def test_refresh_company_uses_cached_partial_comment_letters_refresh(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+    recent = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = datetime.now(timezone.utc) - timedelta(days=3)
+    submissions_seen: list[str] = []
+    cache_steps: list[str] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(sec_edgar, "_latest_company_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_price_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_insider_trade_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_form144_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda cik: submissions_seen.append(cik) or {"recent": {}, "cik": cik},
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {"a": object()}, raising=False)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda *_args, **_kwargs: pytest.fail("Full SEC refresh should not run for cached comment-letter refresh"),
+        raising=False,
+    )
+    monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 2)
+    monkeypatch.setattr(
+        sec_edgar,
+        "_refresh_company_research_brief_cache",
+        lambda *_args, **_kwargs: cache_steps.append("brief"),
+    )
+
+    result = service.refresh_company("MSFT", reporter=reporter)
+
+    assert result.status == "fetched"
+    assert result.fetched_from_sec is True
+    assert result.statements_written == 0
+    assert result.detail == "Cached 2 SEC correspondence filings"
+    assert submissions_seen == [company.cik]
+    assert cache_steps == ["brief"]
+    assert reporter.completed == ["Refresh and compute complete."]
+
+
+def test_refresh_company_uses_full_sec_refresh_when_core_financials_are_stale(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+    recent = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = datetime.now(timezone.utc) - timedelta(days=3)
+    resolved: list[str] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(sec_edgar, "_latest_company_last_checked", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sec_edgar, "get_company_price_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_insider_trade_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_form144_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_earnings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "get_company_institutional_holdings_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_beneficial_ownership_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_filing_event_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_capital_markets_last_checked", lambda *_args, **_kwargs: recent)
+    monkeypatch.setattr(sec_edgar, "_latest_comment_letter_last_checked", lambda *_args, **_kwargs: stale)
+    monkeypatch.setattr(sec_edgar, "_latest_statement_has_segment_breakdown_key", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda identifier: resolved.append(identifier) or SimpleNamespace(
+            cik=company.cik,
+            ticker=identifier,
+            name=company.name,
+            exchange=company.exchange,
+            sector=company.sector,
+            sic=company.sic,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda *_args, **_kwargs: {
+            "tickers": [company.ticker],
+            "name": company.name,
+            "exchanges": [company.exchange],
+            "sicDescription": company.sector,
+            "sic": company.sic,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {}, raising=False)
+    monkeypatch.setattr(service.client, "get_companyfacts", lambda *_args, **_kwargs: {}, raising=False)
+    monkeypatch.setattr(service.filing_parser, "parse_financial_insights", lambda *_args, **_kwargs: [], raising=False)
+    monkeypatch.setattr(
+        service.market_data,
+        "get_market_profile",
+        lambda *_args, **_kwargs: sec_edgar.MarketProfile(sector="Technology", industry="Software"),
+        raising=False,
+    )
+    monkeypatch.setattr(sec_edgar, "_upsert_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(service, "refresh_statements", lambda **_kwargs: 1)
+    monkeypatch.setattr(service, "refresh_insiders", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_form144", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_institutional", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_beneficial_ownership", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_earnings", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_events", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_capital_markets", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_prices", lambda **_kwargs: 0)
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
+
+    result = service.refresh_company("MSFT", reporter=reporter)
+
+    assert resolved == ["MSFT"]
+    assert result.status == "fetched"
+    assert result.fetched_from_sec is True
+    assert result.statements_written == 1
+    assert "Normalized 1 filings" in result.detail
     assert reporter.completed == ["Refresh and compute complete."]
 
 

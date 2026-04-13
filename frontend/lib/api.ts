@@ -797,11 +797,14 @@ export function getCompanyInstitutionalHoldingsSummary(ticker: string): Promise<
 export function getCompanyModels(
   ticker: string,
   modelNames?: string[],
-  options?: { dupontMode?: "auto" | "annual" | "ttm"; asOf?: string | null }
+  options?: { dupontMode?: "auto" | "annual" | "ttm"; asOf?: string | null; expandInputPeriods?: boolean }
 ): Promise<CompanyModelsResponse> {
   const params = new URLSearchParams();
   if (modelNames?.length) {
     params.set("model", modelNames.join(","));
+  }
+  if (options?.expandInputPeriods) {
+    params.set("expand", "input_periods");
   }
   if (options?.dupontMode) {
     params.set("dupont_mode", options.dupontMode);

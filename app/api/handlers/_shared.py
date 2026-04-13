@@ -254,12 +254,14 @@ async def readiness_check() -> dict[str, str]:
 
 @app.get("/api/internal/cache-metrics")
 async def cache_metrics() -> dict[str, Any]:
+    hot_cache_metrics = await shared_hot_response_cache.snapshot_metrics()
     return {
         "search_cache": {
             "entries": len(_search_response_cache),
             "ttl_seconds": 0,
         },
-        "hot_cache": await shared_hot_response_cache.snapshot_metrics(),
+        "hot_cache_backend_mode": hot_cache_metrics["backend_mode"],
+        "hot_cache": hot_cache_metrics,
     }
 
 
@@ -1733,6 +1735,7 @@ async def company_models(
     ticker: str,
     background_tasks: BackgroundTasks,
     model: str | None = Query(default=None),
+    expand: str | None = Query(default=None, description="optional expansions: input_periods"),
     dupont_mode: str | None = Query(default=None, description="optional DuPont basis: auto|annual|ttm"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyModelsResponse:
@@ -1740,6 +1743,10 @@ async def company_models(
     requested_as_of = (as_of or "").strip() or None
     parsed_as_of = _validated_as_of(requested_as_of)
     requested_models = _parse_requested_models(model)
+    requested_expansions = {item.strip().lower() for item in (expand or "").split(",") if item.strip()}
+    if requested_expansions - {"input_periods"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expand must be one of: input_periods")
+    include_input_periods = "input_periods" in requested_expansions
     if not settings.valuation_workbench_enabled:
         requested_models = [
             item
@@ -1750,9 +1757,10 @@ async def company_models(
     if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
     normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    normalized_expansions = ",".join(sorted(requested_expansions)) or "default"
     hot_key = (
         f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
-        f":asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+        f":expand={normalized_expansions}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
     )
     hot_tags = _build_hot_cache_tags(
         ticker=normalized_ticker,
@@ -1849,7 +1857,14 @@ async def company_models(
                     ",".join(requested_models) if requested_models else "all",
                     status_counts,
                 )
-                serialized_models = [_serialize_model_payload(model_run, company_context=company_context) for model_run in models]
+                serialized_models = [
+                    _serialize_model_payload(
+                        model_run,
+                        company_context=company_context,
+                        include_input_periods=include_input_periods,
+                    )
+                    for model_run in models
+                ]
                 diagnostics = _diagnostics_for_models(serialized_models, refresh)
                 payload = CompanyModelsResponse(
                     company=_serialize_company(snapshot),
@@ -7144,6 +7159,8 @@ def _model_created_at(model_run: ModelRun | dict[str, Any]) -> datetime | None:
 def _serialize_model_payload(
     model_run: ModelRun | dict[str, Any],
     company_context: dict[str, Any] | None = None,
+    *,
+    include_input_periods: bool = True,
 ) -> ModelPayload:
     if isinstance(model_run, dict):
         model_name = _model_name(model_run)
@@ -7151,9 +7168,13 @@ def _serialize_model_payload(
         created_at = _model_created_at(model_run)
         if not isinstance(created_at, datetime):
             created_at = datetime.now(timezone.utc)
-        input_periods = model_run.get("input_periods")
-        if not isinstance(input_periods, (dict, list)):
-            input_periods = {}
+        input_periods: dict[str, Any] | list[dict[str, Any]] | None
+        if include_input_periods:
+            input_periods = model_run.get("input_periods")
+            if not isinstance(input_periods, (dict, list)):
+                input_periods = {}
+        else:
+            input_periods = None
         return ModelPayload(
             schema_version="2.0",
             model_name=model_name,
@@ -7171,7 +7192,7 @@ def _serialize_model_payload(
         model_name=model_run.model_name,
         model_version=model_run.model_version,
         created_at=model_run.created_at,
-        input_periods=model_run.input_periods,
+        input_periods=model_run.input_periods if include_input_periods else None,
         result=_sanitize_model_result_for_strict_official_mode(
             model_run.model_name,
             _model_result_payload(model_run, company_context=company_context),

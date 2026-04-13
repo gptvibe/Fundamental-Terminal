@@ -25,7 +25,7 @@ from app.config import SecClientConfig, build_sec_client_config, settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
-from app.models import BeneficialOwnershipReport, CommentLetter, Company, EarningsRelease, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
+from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, CommentLetter, Company, EarningsRelease, FilingEvent, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight, SUPPORTED_PARSER_FORMS
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -772,6 +772,9 @@ class RefreshPolicy:
     earnings_fresh: bool
     institutional_fresh: bool
     beneficial_fresh: bool
+    filings_fresh: bool
+    capital_markets_fresh: bool
+    comment_letters_fresh: bool
     has_segment_breakdown_key: bool
     relevant_last_checked_values: list[datetime | None]
 
@@ -787,6 +790,10 @@ class RefreshPolicy:
     def effective_beneficial_fresh(self) -> bool:
         return self.beneficial_fresh or not self.refresh_beneficial_ownership_data
 
+    @property
+    def effective_non_core_fresh(self) -> bool:
+        return self.filings_fresh and self.capital_markets_fresh and self.comment_letters_fresh
+
     def can_skip_sec_refresh(self) -> bool:
         return (
             self.company is not None
@@ -798,6 +805,7 @@ class RefreshPolicy:
             and self.effective_institutional_fresh
             and self.effective_beneficial_fresh
             and self.earnings_fresh
+            and self.effective_non_core_fresh
         )
 
     def needs_segment_backfill(self) -> bool:
@@ -816,8 +824,11 @@ class RefreshPolicy:
             and self.refresh_beneficial_ownership_data
             and self.statements_fresh
             and self.prices_fresh
+            and self.has_segment_breakdown_key
             and self.effective_insider_fresh
             and self.effective_institutional_fresh
+            and self.earnings_fresh
+            and self.effective_non_core_fresh
             and not self.beneficial_fresh
         )
 
@@ -831,6 +842,7 @@ class RefreshPolicy:
             and self.effective_insider_fresh
             and self.effective_institutional_fresh
             and self.effective_beneficial_fresh
+            and self.effective_non_core_fresh
             and not self.earnings_fresh
         )
 
@@ -843,6 +855,9 @@ class RefreshPolicy:
             and self.prices_fresh
             and self.has_segment_breakdown_key
             and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+            and self.effective_non_core_fresh
             and not self.effective_insider_fresh
         )
 
@@ -855,6 +870,9 @@ class RefreshPolicy:
             and self.prices_fresh
             and self.has_segment_breakdown_key
             and self.effective_insider_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+            and self.effective_non_core_fresh
             and not self.institutional_fresh
         )
 
@@ -867,6 +885,57 @@ class RefreshPolicy:
             and self.has_segment_breakdown_key
             and self.effective_insider_fresh
             and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+            and self.effective_non_core_fresh
+        )
+
+    def can_refresh_filings_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+            and self.capital_markets_fresh
+            and self.comment_letters_fresh
+            and not self.filings_fresh
+        )
+
+    def can_refresh_capital_markets_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+            and self.filings_fresh
+            and self.comment_letters_fresh
+            and not self.capital_markets_fresh
+        )
+
+    def can_refresh_comment_letters_only(self) -> bool:
+        return (
+            self.company is not None
+            and not self.force
+            and self.statements_fresh
+            and self.prices_fresh
+            and self.has_segment_breakdown_key
+            and self.effective_insider_fresh
+            and self.effective_institutional_fresh
+            and self.effective_beneficial_fresh
+            and self.earnings_fresh
+            and self.filings_fresh
+            and self.capital_markets_fresh
+            and not self.comment_letters_fresh
         )
 
 
@@ -2168,6 +2237,9 @@ class EdgarIngestionService:
         latest_beneficial_checked = (
             _latest_beneficial_ownership_last_checked(session, local_company) if local_company else None
         )
+        latest_filing_event_checked = _latest_filing_event_last_checked(session, local_company) if local_company else None
+        latest_capital_markets_checked = _latest_capital_markets_last_checked(session, local_company) if local_company else None
+        latest_comment_letter_checked = _latest_comment_letter_last_checked(session, local_company) if local_company else None
         has_segment_breakdown_key = (
             _latest_statement_has_segment_breakdown_key(session, local_company.id) if local_company else False
         )
@@ -2183,12 +2255,21 @@ class EdgarIngestionService:
         earnings_fresh = latest_earnings_checked is not None and latest_earnings_checked >= freshness_cutoff
         institutional_fresh = latest_institutional_checked is not None and latest_institutional_checked >= freshness_cutoff
         beneficial_fresh = latest_beneficial_checked is not None and latest_beneficial_checked >= freshness_cutoff
+        filings_fresh = latest_filing_event_checked is not None and latest_filing_event_checked >= freshness_cutoff
+        capital_markets_fresh = latest_capital_markets_checked is not None and latest_capital_markets_checked >= freshness_cutoff
+        comment_letters_fresh = latest_comment_letter_checked is not None and latest_comment_letter_checked >= freshness_cutoff
 
-        relevant_last_checked_values = [latest_statement_checked, latest_price_checked]
+        relevant_last_checked_values = [
+            latest_statement_checked,
+            latest_price_checked,
+            latest_earnings_checked,
+            latest_filing_event_checked,
+            latest_capital_markets_checked,
+            latest_comment_letter_checked,
+        ]
         if refresh_insider_data:
             relevant_last_checked_values.append(latest_insider_checked)
             relevant_last_checked_values.append(latest_form144_checked)
-        relevant_last_checked_values.append(latest_earnings_checked)
         if refresh_institutional_data:
             relevant_last_checked_values.append(latest_institutional_checked)
         if refresh_beneficial_ownership_data:
@@ -2207,6 +2288,9 @@ class EdgarIngestionService:
             earnings_fresh=earnings_fresh,
             institutional_fresh=institutional_fresh,
             beneficial_fresh=beneficial_fresh,
+            filings_fresh=filings_fresh,
+            capital_markets_fresh=capital_markets_fresh,
+            comment_letters_fresh=comment_letters_fresh,
             has_segment_breakdown_key=has_segment_breakdown_key,
             relevant_last_checked_values=relevant_last_checked_values,
         )
@@ -2466,6 +2550,113 @@ class EdgarIngestionService:
                 fetched_from_sec=False,
                 last_checked=checked_at,
                 detail=f"Cached {price_points_written} daily price bars",
+            )
+
+        if policy.can_refresh_filings_only():
+            session.commit()
+            reporter.step("sec", "Checking SEC for new 8-K filing events...")
+            submissions = self.client.get_submissions(local_company.cik)
+            filing_index = self.client.build_filing_index(submissions)
+            filing_events_written = self.refresh_events(
+                session=session,
+                company=local_company,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+            )
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=0,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    f"Cached {filing_events_written} filing event rows"
+                    if filing_events_written
+                    else "Checked 8-K filing events; no new entries"
+                ),
+            )
+
+        if policy.can_refresh_capital_markets_only():
+            session.commit()
+            reporter.step("sec", "Checking SEC for new capital markets filings...")
+            submissions = self.client.get_submissions(local_company.cik)
+            filing_index = self.client.build_filing_index(submissions)
+            capital_markets_written = self.refresh_capital_markets(
+                session=session,
+                company=local_company,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+            )
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=0,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    f"Cached {capital_markets_written} capital markets rows"
+                    if capital_markets_written
+                    else "Checked capital markets filings; no new entries"
+                ),
+            )
+
+        if policy.can_refresh_comment_letters_only():
+            session.commit()
+            reporter.step("sec", "Checking SEC for new correspondence filings...")
+            submissions = self.client.get_submissions(local_company.cik)
+            filing_index = self.client.build_filing_index(submissions)
+            comment_letters_written = self.refresh_comment_letters(
+                session=session,
+                company=local_company,
+                submissions=submissions,
+                filing_index=filing_index,
+                checked_at=checked_at,
+                reporter=reporter,
+                force=policy.force,
+            )
+            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            session.commit()
+            reporter.complete("Refresh and compute complete.")
+            return IngestionResult(
+                identifier=identifier,
+                company_id=local_company.id,
+                cik=local_company.cik,
+                ticker=local_company.ticker,
+                status="fetched",
+                statements_written=0,
+                insider_trades_written=0,
+                institutional_holdings_written=0,
+                beneficial_ownership_written=0,
+                price_points_written=0,
+                fetched_from_sec=True,
+                last_checked=checked_at,
+                detail=(
+                    f"Cached {comment_letters_written} SEC correspondence filings"
+                    if comment_letters_written
+                    else "Checked SEC correspondence filings; no new entries"
+                ),
             )
 
         return None
@@ -3329,10 +3520,37 @@ def _latest_comment_letter_last_checked(session: Session, company: Company) -> d
     if state_cache != "missing":
         return state_last_checked
 
-    if company.comment_letters_last_checked is not None:
-        return _normalize_datetime_value(company.comment_letters_last_checked)
+    company_last_checked = getattr(company, "comment_letters_last_checked", None)
+    if company_last_checked is not None:
+        return _normalize_datetime_value(company_last_checked)
 
     statement = select(func.max(CommentLetter.last_checked)).where(CommentLetter.company_id == company.id)
+    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _latest_filing_event_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "filings")
+    if state_cache != "missing":
+        return state_last_checked
+
+    company_last_checked = getattr(company, "filing_events_last_checked", None)
+    if company_last_checked is not None:
+        return _normalize_datetime_value(company_last_checked)
+
+    statement = select(func.max(FilingEvent.last_checked)).where(FilingEvent.company_id == company.id)
+    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+
+
+def _latest_capital_markets_last_checked(session: Session, company: Company) -> datetime | None:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "capital_markets")
+    if state_cache != "missing":
+        return state_last_checked
+
+    company_last_checked = getattr(company, "capital_markets_last_checked", None)
+    if company_last_checked is not None:
+        return _normalize_datetime_value(company_last_checked)
+
+    statement = select(func.max(CapitalMarketsEvent.last_checked)).where(CapitalMarketsEvent.company_id == company.id)
     return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
 
 
