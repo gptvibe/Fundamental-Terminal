@@ -229,6 +229,7 @@ def get_company_financial_restatements(
     company_id: int,
     *,
     limit: int = 200,
+    as_of: datetime | None = None,
 ) -> list[FinancialRestatement]:
     statement = (
         select(FinancialRestatement)
@@ -239,9 +240,20 @@ def get_company_financial_restatements(
             FinancialRestatement.period_end.desc(),
             FinancialRestatement.id.desc(),
         )
-        .limit(limit)
     )
-    return list(session.execute(statement).scalars())
+    if as_of is None:
+        statement = statement.limit(limit)
+        return list(session.execute(statement).scalars())
+
+    rows: list[FinancialRestatement] = []
+    for row in session.execute(statement).scalars():
+        effective_at = _financial_restatement_effective_at(row)
+        if effective_at is None or effective_at > as_of:
+            continue
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def select_point_in_time_financials(
@@ -492,6 +504,7 @@ def get_company_earnings_releases(
     company_id: int,
     *,
     limit: int = 100,
+    as_of: datetime | None = None,
 ) -> list[EarningsRelease]:
     statement = (
         select(EarningsRelease)
@@ -501,9 +514,20 @@ def get_company_earnings_releases(
             EarningsRelease.reported_period_end.desc().nullslast(),
             EarningsRelease.id.desc(),
         )
-        .limit(limit)
     )
-    return list(session.execute(statement).scalars())
+    if as_of is None:
+        statement = statement.limit(limit)
+        return list(session.execute(statement).scalars())
+
+    rows: list[EarningsRelease] = []
+    for row in session.execute(statement).scalars():
+        effective_at = _earnings_release_effective_at(row)
+        if effective_at is None or effective_at > as_of:
+            continue
+        rows.append(row)
+        if len(rows) >= limit:
+            break
+    return rows
 
 
 def get_company_earnings_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
@@ -525,16 +549,63 @@ def get_company_earnings_model_points(
     company_id: int,
     *,
     limit: int = 24,
+    as_of: datetime | None = None,
 ) -> list[EarningsModelPoint]:
     statement = (
         select(EarningsModelPoint)
         .where(EarningsModelPoint.company_id == company_id)
         .order_by(EarningsModelPoint.period_end.desc(), EarningsModelPoint.id.desc())
-        .limit(limit)
     )
-    rows = list(session.execute(statement).scalars())
+    if as_of is None:
+        statement = statement.limit(limit)
+        rows = list(session.execute(statement).scalars())
+        rows.sort(key=lambda item: item.period_end)
+        return rows
+
+    # No-lookahead rule: persisted earnings-model rows only become visible once the
+    # derived row itself has been materialized. We therefore filter historical reads
+    # by row materialization time instead of period_end so later recomputes do not
+    # leak into earlier `as_of` snapshots.
+    rows: list[EarningsModelPoint] = []
+    for row in session.execute(statement).scalars():
+        observed_at = _earnings_model_point_observed_at(row)
+        if observed_at is None or observed_at > as_of:
+            continue
+        rows.append(row)
+        if len(rows) >= limit:
+            break
     rows.sort(key=lambda item: item.period_end)
     return rows
+
+
+def _earnings_model_point_observed_at(point: EarningsModelPoint) -> datetime | None:
+    return _normalize_datetime(getattr(point, "last_updated", None)) or _normalize_datetime(getattr(point, "last_checked", None))
+
+
+def _earnings_release_effective_at(release: EarningsRelease) -> datetime | None:
+    acceptance_at = _normalize_datetime(getattr(release, "filing_acceptance_at", None))
+    if acceptance_at is not None:
+        return acceptance_at
+    filing_date = getattr(release, "filing_date", None)
+    if filing_date is not None:
+        return datetime.combine(filing_date, time.max, tzinfo=timezone.utc)
+    reported_period_end = getattr(release, "reported_period_end", None)
+    if reported_period_end is not None:
+        return datetime.combine(reported_period_end, time.max, tzinfo=timezone.utc)
+    return _normalize_datetime(getattr(release, "last_updated", None)) or _normalize_datetime(getattr(release, "last_checked", None))
+
+
+def _financial_restatement_effective_at(record: FinancialRestatement) -> datetime | None:
+    acceptance_at = _normalize_datetime(getattr(record, "filing_acceptance_at", None))
+    if acceptance_at is not None:
+        return acceptance_at
+    filing_date = getattr(record, "filing_date", None)
+    if filing_date is not None:
+        return datetime.combine(filing_date, time.max, tzinfo=timezone.utc)
+    period_end = getattr(record, "period_end", None)
+    if period_end is not None:
+        return datetime.combine(period_end, time.max, tzinfo=timezone.utc)
+    return _normalize_datetime(getattr(record, "last_updated", None)) or _normalize_datetime(getattr(record, "last_checked", None))
 
 
 def get_company_earnings_model_cache_status(session: Session, company_id: int) -> tuple[datetime | None, str]:

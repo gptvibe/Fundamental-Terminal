@@ -2579,6 +2579,13 @@ export interface CompanyChartsForecastDiagnosticsPayload {
   missing_data_penalty: number;
   quality_score: number | null;
   missing_inputs: string[];
+  sample_size: number;
+  scenario_dispersion: number | null;
+  sector_template: string | null;
+  guidance_usage: string | null;
+  historical_backtest_error_band: string | null;
+  backtest_weighted_error: number | null;
+  backtest_horizon_errors: Record<string, number | null>;
   components: CompanyChartsScoreComponentPayload[];
 }
 
@@ -2671,6 +2678,7 @@ export interface CompanyChartsCardsPayload {
   eps: CompanyChartsCardPayload;
   growth_summary: CompanyChartsComparisonCardPayload;
   forecast_assumptions: CompanyChartsAssumptionsCardPayload | null;
+  forecast_calculations?: CompanyChartsAssumptionsCardPayload | null;
 }
 
 export interface CompanyChartsMethodologyPayload {

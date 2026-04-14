@@ -46,7 +46,7 @@ describe("CompanyChartsPage", () => {
         secondary_badges: [
           { key: "quality", label: "Quality", score: 91, tone: "positive", detail: "Healthy reported margins." },
           { key: "momentum", label: "Momentum", score: 88, tone: "positive", detail: "Recent growth still strong." },
-          { key: "forecast_confidence", label: "Forecast Reliability", score: 78, tone: "neutral", detail: "Heuristic score from 3 annual periods, moderate revenue volatility, 0-point missing-data penalty, and latest earnings quality 0.95; history depth above thin-history threshold. Not statistical confidence." },
+          { key: "forecast_stability", label: "Forecast Stability", score: 72, tone: "neutral", detail: "Forecast stability uses the Technology sector template and 4 annual periods; historical backtest shows 11.0% weighted APE (moderate) across 3 point-in-time walk-forward snapshots; guidance status management_guidance_applied; scenario dispersion 18.0% bull/bear spread. This is a conservative stability signal, not statistical confidence." },
         ],
         thesis: "Reported growth remains strong, while forecast values stay clearly labeled as projections.",
         unavailable_notes: ["Value is hidden until a trustworthy valuation comparator is available."],
@@ -59,7 +59,7 @@ describe("CompanyChartsPage", () => {
           { key: "quality", label: "Quality", score: 91, normalized_score: 0.91, tone: "positive", detail: "Margins and cash conversion." },
           { key: "momentum", label: "Momentum", score: 88, normalized_score: 0.88, tone: "positive", detail: "Recent drift remains strong." },
           { key: "value", label: "Value", score: null, normalized_score: null, tone: "unavailable", detail: null, unavailable_reason: "Waiting for trustworthy benchmark support." },
-          { key: "forecast_confidence", label: "Forecast Reliability", score: 78, normalized_score: 0.78, tone: "neutral", detail: "Heuristic score from 3 annual periods, moderate revenue volatility, 0-point missing-data penalty, and latest earnings quality 0.95; history depth above thin-history threshold. Not statistical confidence." },
+          { key: "forecast_stability", label: "Forecast Stability", score: 72, normalized_score: 0.72, tone: "neutral", detail: "Forecast stability uses the Technology sector template and 4 annual periods; historical backtest shows 11.0% weighted APE (moderate) across 3 point-in-time walk-forward snapshots; guidance status management_guidance_applied; scenario dispersion 18.0% bull/bear spread. This is a conservative stability signal, not statistical confidence." },
         ],
       },
       legend: {
@@ -156,32 +156,39 @@ describe("CompanyChartsPage", () => {
         },
       },
       forecast_methodology: {
-        version: "company_charts_dashboard_v3",
-        label: "Deterministic projection with heuristic reliability overlay",
+        version: "company_charts_dashboard_v6",
+        label: "Deterministic projection with empirical stability overlay",
         summary: "Forecasts are generated from persisted historical official inputs with guarded trend and margin rules.",
-        disclaimer: "Forecast reliability is a heuristic stability signal derived from historical official data. It is not a probability, prediction interval, or statistical confidence measure, and forecast values are not reported results or analyst consensus.",
+        disclaimer: "Forecast stability is a conservative communication aid grounded in historical walk-forward error, not a probability, prediction interval, or statistical confidence measure. Forecast values remain projections rather than reported results or analyst consensus.",
         forecast_horizon_years: 3,
-        score_name: "Forecast Reliability",
+        score_name: "Forecast Stability",
         heuristic: true,
-        score_components: ["History depth", "Growth volatility", "Missing-data penalty", "Latest earnings quality"],
-        confidence_label: "Heuristic reliability: Moderate reliability",
+        score_components: ["Historical backtest", "History depth", "Cyclicality", "Scenario dispersion"],
+        confidence_label: "Forecast stability: Moderate stability",
       },
       forecast_diagnostics: {
-        score_key: "forecast_confidence",
-        score_name: "Forecast Reliability",
+        score_key: "forecast_stability",
+        score_name: "Forecast Stability",
         heuristic: true,
-        final_score: 78,
-        summary: "Heuristic score from 3 annual periods, moderate revenue volatility, 0-point missing-data penalty, and latest earnings quality 0.95; history depth above thin-history threshold. Not statistical confidence.",
-        history_depth_years: 3,
+        final_score: 72,
+        summary: "Forecast stability uses the Technology sector template and 4 annual periods; historical backtest shows 11.0% weighted APE (moderate) across 3 point-in-time walk-forward snapshots; guidance status management_guidance_applied; scenario dispersion 18.0% bull/bear spread. This is a conservative stability signal, not statistical confidence.",
+        history_depth_years: 4,
         thin_history: false,
         growth_volatility: 0.12,
         growth_volatility_band: "moderate",
         missing_data_penalty: 0,
         quality_score: 0.95,
         missing_inputs: [],
+        sample_size: 3,
+        scenario_dispersion: 0.18,
+        sector_template: "Technology",
+        guidance_usage: "management_guidance_applied",
+        historical_backtest_error_band: "moderate",
+        backtest_weighted_error: 0.11,
+        backtest_horizon_errors: { "1": 0.08, "2": 0.12, "3": 0.14 },
         components: [],
       },
-      payload_version: "company_charts_dashboard_v3",
+      payload_version: "company_charts_dashboard_v6",
       provenance: [],
       as_of: "2026-04-13",
       last_refreshed_at: "2026-04-13T00:00:00Z",
@@ -209,7 +216,7 @@ describe("CompanyChartsPage", () => {
     expect(screen.getByText("Actual vs Forecast")).toBeTruthy();
     expect(screen.getByText("Revenue Growth")).toBeTruthy();
     expect(screen.getByText("Forecast Assumptions")).toBeTruthy();
-    expect(screen.getByText(/Forecast reliability is a heuristic stability signal/i)).toBeTruthy();
+    expect(screen.getByText(/Forecast stability is a conservative communication aid/i)).toBeTruthy();
     expect(screen.getByText("NVIDIA Corp")).toBeTruthy();
   });
 });

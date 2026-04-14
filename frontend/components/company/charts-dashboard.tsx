@@ -154,6 +154,7 @@ export function CompanyChartsDashboard({ payload }: { payload: CompanyChartsDash
           <MetricChartCard card={payload.cards.eps} palette={CARD_PALETTES.eps} />
           <GrowthSummaryCard card={payload.cards.growth_summary} />
           {payload.cards.forecast_assumptions ? <ForecastAssumptionsCard card={payload.cards.forecast_assumptions} /> : null}
+          {payload.cards.forecast_calculations ? <ForecastAssumptionsCard card={payload.cards.forecast_calculations} /> : null}
         </section>
       </div>
     </div>

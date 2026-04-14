@@ -70,7 +70,7 @@ DERIVED_METRICS_INPUT_FINGERPRINT_VERSION = "derived-metrics-inputs-v1"
 CAPITAL_STRUCTURE_INPUT_FINGERPRINT_VERSION = "capital-structure-inputs-v1"
 EARNINGS_MODELS_INPUT_FINGERPRINT_VERSION = "earnings-models-inputs-v1"
 COMPANY_RESEARCH_BRIEF_INPUT_FINGERPRINT_VERSION = "company-research-brief-inputs-v1"
-CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v3"
+CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v6"
 
 CANONICAL_FACTS: dict[str, list[tuple[str, list[str]]]] = {
     "revenue": [
@@ -3305,7 +3305,7 @@ def _build_company_charts_dashboard_inputs_fingerprint(session: Session, company
     return build_payload_version_hash(
         version=CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION,
         payload={
-            "schema_version": "company_charts_dashboard_v3",
+            "schema_version": "company_charts_dashboard_v6",
             "company": {
                 "ticker": company.ticker,
                 "cik": company.cik,
