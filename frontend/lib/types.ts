@@ -2557,6 +2557,31 @@ export interface CompanyChartsFactorValuePayload {
   unavailable_reason?: string | null;
 }
 
+export interface CompanyChartsScoreComponentPayload {
+  key: string;
+  label: string;
+  value: number | null;
+  display_value: string | null;
+  impact: number;
+  detail: string | null;
+}
+
+export interface CompanyChartsForecastDiagnosticsPayload {
+  score_key: string;
+  score_name: string;
+  heuristic: boolean;
+  final_score: number | null;
+  summary: string | null;
+  history_depth_years: number;
+  thin_history: boolean;
+  growth_volatility: number | null;
+  growth_volatility_band: string | null;
+  missing_data_penalty: number;
+  quality_score: number | null;
+  missing_inputs: string[];
+  components: CompanyChartsScoreComponentPayload[];
+}
+
 export interface CompanyChartsFactorsPayload {
   primary: CompanyChartsFactorValuePayload | null;
   supporting: CompanyChartsFactorValuePayload[];
@@ -2654,6 +2679,9 @@ export interface CompanyChartsMethodologyPayload {
   summary: string;
   disclaimer: string;
   forecast_horizon_years: number;
+  score_name?: string;
+  heuristic?: boolean;
+  score_components?: string[];
   confidence_label: string | null;
 }
 
@@ -2667,6 +2695,7 @@ export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   legend: CompanyChartsLegendPayload;
   cards: CompanyChartsCardsPayload;
   forecast_methodology: CompanyChartsMethodologyPayload;
+  forecast_diagnostics?: CompanyChartsForecastDiagnosticsPayload;
   payload_version: string;
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;

@@ -19,9 +19,11 @@ from app.contracts.company_charts import (
     CompanyChartsDashboardResponse,
     CompanyChartsFactorValuePayload,
     CompanyChartsFactorsPayload,
+    CompanyChartsForecastDiagnosticsPayload,
     CompanyChartsLegendItemPayload,
     CompanyChartsLegendPayload,
     CompanyChartsMethodologyPayload,
+    CompanyChartsScoreComponentPayload,
     CompanyChartsScoreBadgePayload,
     CompanyChartsSeriesPayload,
     CompanyChartsSeriesPointPayload,
@@ -33,9 +35,44 @@ from app.services.cache_queries import get_company_earnings_model_points, get_co
 from app.services.refresh_state import mark_dataset_checked
 
 
-CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v1"
-CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v1"
+CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v3"
+CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v3"
 ANNUAL_FILING_TYPES = {"10-K", "20-F", "40-F"}
+FORECAST_RELIABILITY_BASE_SCORE = 78
+FORECAST_RELIABILITY_MIN_SCORE = 20
+FORECAST_RELIABILITY_MAX_SCORE = 95
+FORECAST_RELIABILITY_TARGET_HISTORY_PERIODS = 5
+FORECAST_RELIABILITY_THIN_HISTORY_PERIODS = 3
+FORECAST_RELIABILITY_HISTORY_GAP_PENALTY = 6
+FORECAST_RELIABILITY_EXTRA_HISTORY_BONUS = 2
+FORECAST_RELIABILITY_VOLATILITY_WINDOW = 4
+FORECAST_RELIABILITY_VOLATILITY_PENALTY_MULTIPLIER = 12
+FORECAST_RELIABILITY_MISSING_REVENUE_POINT_PENALTY = 4
+FORECAST_RELIABILITY_MISSING_QUALITY_SIGNAL_PENALTY = 6
+FORECAST_RELIABILITY_QUALITY_NEUTRAL = 0.5
+FORECAST_RELIABILITY_QUALITY_ADJUSTMENT_MULTIPLIER = 20
+FORECAST_RELIABILITY_VOLATILITY_BANDS = (
+    (0.08, "stable"),
+    (0.18, "moderate"),
+    (0.3, "elevated"),
+)
+REVENUE_FORECAST_GROWTH_FLOOR = -0.18
+REVENUE_FORECAST_GROWTH_CAP = 0.30
+REVENUE_FORECAST_TERMINAL_GROWTH = 0.03
+REVENUE_FORECAST_REVERSION_SPEED = 0.45
+REVENUE_FORECAST_RECENT_WEIGHTS = (0.2, 0.3, 0.5)
+REVENUE_FORECAST_RECENT_BLEND_WEIGHT = 0.65
+REVENUE_FORECAST_CAGR_BLEND_WEIGHT = 0.35
+MARGIN_FORECAST_NORMALIZATION_WINDOW = 3
+MARGIN_FORECAST_PROFILES = {
+    "operating": {"floor": -0.15, "cap": 0.45, "normalized_recent_weight": 0.35, "reversion_weights": (0.35, 0.65, 0.85)},
+    "net_income": {"floor": -0.18, "cap": 0.25, "normalized_recent_weight": 0.25, "reversion_weights": (0.45, 0.75, 0.9)},
+    "cash_flow": {"floor": -0.2, "cap": 0.3, "normalized_recent_weight": 0.3, "reversion_weights": (0.4, 0.65, 0.85)},
+    "capex": {"floor": -0.02, "cap": 0.18, "normalized_recent_weight": 0.3, "reversion_weights": (0.3, 0.55, 0.75)},
+}
+DILUTED_SHARE_FORECAST_CHANGE_FLOOR = -0.05
+DILUTED_SHARE_FORECAST_CHANGE_CAP = 0.06
+DILUTED_SHARE_FORECAST_REVERSION_SPEED = 0.5
 
 
 def get_company_charts_dashboard_snapshot(session: Session, company_id: int, *, as_of: datetime | None = None, schema_version: str = CHARTS_DASHBOARD_SCHEMA_VERSION) -> CompanyChartsDashboardSnapshot | None:
@@ -73,7 +110,8 @@ def build_company_charts_dashboard_response(
     growth_forecast = _forecast_growth_series(revenue_forecast, growth_curve)
     profit_series = _margin_projected_series(annuals, revenue_actual, revenue_forecast, [("operating_income", "EBIT"), ("net_income", "Net Income"), ("ebitda_proxy", "EBITDA")])
     cash_series = _margin_projected_series(annuals, revenue_actual, revenue_forecast, [("operating_cash_flow", "Operating CF"), ("free_cash_flow", "Free CF"), ("capex", "Capex")])
-    eps_actual, eps_forecast = _eps_series(annuals, revenue_forecast)
+    net_income_forecast = _series_points_by_key(profit_series, "net_income_forecast")
+    eps_actual, eps_forecast = _eps_series(annuals, net_income_forecast.points if net_income_forecast is not None else [])
 
     hist_3y = _cagr([_point_value(point) for point in revenue_actual[-4:]]) if len(revenue_actual) >= 4 else None
     exp_1y = _growth_rate(_point_value(revenue_forecast[0]) if revenue_forecast else None, _point_value(revenue_actual[-1]) if revenue_actual else None)
@@ -89,7 +127,8 @@ def build_company_charts_dashboard_response(
     )
     momentum_score = _score(_blend(exp_1y, getattr(earnings_points[-1], "earnings_momentum_drift", None) if earnings_points else None), -0.1, 0.3)
     growth_score = _score(_blend(hist_3y, exp_1y), -0.1, 0.35)
-    confidence_score = _confidence_score(annuals, revenue_actual, earnings_points)
+    forecast_reliability = _forecast_reliability_profile(annuals, revenue_actual, earnings_points)
+    confidence_score = int(forecast_reliability.final_score or 0)
 
     factors = CompanyChartsFactorsPayload(
         primary=CompanyChartsFactorValuePayload(key="growth", label="Growth", score=growth_score, normalized_score=_norm(growth_score), tone=_tone(growth_score), detail=f"Hist 3Y CAGR {_pct(hist_3y)}; forecast 1Y {_pct(exp_1y)}."),
@@ -97,7 +136,14 @@ def build_company_charts_dashboard_response(
             CompanyChartsFactorValuePayload(key="quality", label="Quality", score=quality_score, normalized_score=_norm(quality_score), tone=_tone(quality_score), detail="Margins and cash conversion from reported periods."),
             CompanyChartsFactorValuePayload(key="momentum", label="Momentum", score=momentum_score, normalized_score=_norm(momentum_score), tone=_tone(momentum_score), detail="Recent growth and earnings drift."),
             CompanyChartsFactorValuePayload(key="value", label="Value", score=None, normalized_score=None, tone="unavailable", unavailable_reason="Hidden until a trustworthy valuation input set is available."),
-            CompanyChartsFactorValuePayload(key="forecast_confidence", label="Forecast Confidence", score=confidence_score, normalized_score=_norm(confidence_score), tone=_tone(confidence_score), detail=f"Based on {len(annuals)} annual periods and persisted quality signals."),
+            CompanyChartsFactorValuePayload(
+                key=forecast_reliability.score_key,
+                label=forecast_reliability.score_name,
+                score=confidence_score,
+                normalized_score=_norm(confidence_score),
+                tone=_tone(confidence_score),
+                detail=forecast_reliability.summary,
+            ),
         ],
     )
 
@@ -135,7 +181,11 @@ def build_company_charts_dashboard_response(
         ]
     )
     title = "Growth Outlook"
-    thesis = f"{company.name} reported {_pct(hist_3y)} 3Y revenue CAGR; the base-case projection implies {_pct(exp_1y)} next-year growth with {_confidence_label(confidence_score).lower()} confidence." if hist_3y is not None and exp_1y is not None else "Historical official filings are normalized first, and projected values remain explicitly labeled as forecast."
+    thesis = (
+        f"{company.name} reported {_pct(hist_3y)} 3Y revenue CAGR; the base-case projection implies {_pct(exp_1y)} next-year growth with {_reliability_label(confidence_score).lower()} on a heuristic score."
+        if hist_3y is not None and exp_1y is not None
+        else "Historical official filings are normalized first, projected values remain explicitly labeled as forecast, and forecast reliability is heuristic rather than statistical."
+    )
     secondary_badges = [
         CompanyChartsScoreBadgePayload(key=item.key, label=item.label, score=item.score, tone=item.tone, detail=item.detail, unavailable_reason=item.unavailable_reason)
         for item in factors.supporting
@@ -153,10 +203,11 @@ def build_company_charts_dashboard_response(
             thesis=thesis,
             unavailable_notes=[
                 "Forecast values are dashed or muted and never presented as reported results.",
+                "Forecast reliability is a heuristic stability signal, not a probability or confidence interval.",
                 "Value stays explicitly unavailable until a trustworthy valuation input set exists.",
             ],
             freshness_badges=[f"Updated {timestamp.date().isoformat()}", f"Reported through FY{latest_period.year}" if latest_period is not None else "Awaiting annual history"],
-            source_badges=["Official filings", "Deterministic forecast v1", "Benchmark hidden unless trustworthy"],
+            source_badges=["Official filings", "Deterministic forecast v3", "Heuristic reliability overlay", "Benchmark hidden unless trustworthy"],
         ),
         factors=factors,
         legend=CompanyChartsLegendPayload(title="Actual vs Forecast", items=[
@@ -177,11 +228,24 @@ def build_company_charts_dashboard_response(
             forecast_assumptions=CompanyChartsAssumptionsCardPayload(items=[
                 CompanyChartsAssumptionItemPayload(key="horizon", label="Forecast Horizon", value="3 fiscal years", detail="Annual-only forecast surface."),
                 CompanyChartsAssumptionItemPayload(key="growth_guardrails", label="Growth Guardrails", value="-18% to +30%", detail="Forecast revenue growth is clipped."),
-                CompanyChartsAssumptionItemPayload(key="history_depth", label="History Depth", value=f"{len(annuals)} annual periods", detail="More history improves trend stability."),
+                CompanyChartsAssumptionItemPayload(key="history_depth", label="History Depth", value=f"{forecast_reliability.history_depth_years} annual periods", detail="Shorter annual history makes deterministic extrapolation less stable."),
+                CompanyChartsAssumptionItemPayload(key="growth_volatility_band", label="Growth Volatility Band", value=(forecast_reliability.growth_volatility_band or "Unavailable").title(), detail="Band is based on average absolute year-over-year revenue moves."),
+                CompanyChartsAssumptionItemPayload(key="missing_data_penalty", label="Missing-Data Penalty", value=f"{forecast_reliability.missing_data_penalty} pts", detail="Missing revenue rows or missing latest earnings quality reduce the heuristic reliability score."),
+                CompanyChartsAssumptionItemPayload(key="thin_history", label="Thin History", value="Yes" if forecast_reliability.thin_history else "No", detail="Flags forecasts built from fewer than three annual filing periods."),
                 CompanyChartsAssumptionItemPayload(key="base_case_next_year", label="Base-Case Next Year", value=_pct(exp_1y), detail="Implied next-year revenue growth."),
             ]),
         ),
-        forecast_methodology=CompanyChartsMethodologyPayload(version=CHARTS_DASHBOARD_SCHEMA_VERSION, label="Deterministic internal projection", summary="Annual historical official filings are normalized, then projected with guarded trend, margin, and share-count rules.", disclaimer="Forecast values are internal projections derived from historical official data. They are not reported results and are not analyst consensus.", confidence_label=_confidence_label(confidence_score)),
+        forecast_methodology=CompanyChartsMethodologyPayload(
+            version=CHARTS_DASHBOARD_SCHEMA_VERSION,
+            label="Deterministic projection with heuristic reliability overlay",
+            summary="Annual historical official filings are normalized into a deterministic three-year projection, then paired with a heuristic reliability score based on history depth, revenue volatility, missing-data penalties, and latest earnings quality.",
+            disclaimer="Forecast reliability is a heuristic stability signal derived from historical official data. It is not a probability, prediction interval, or statistical confidence measure, and forecast values are not reported results or analyst consensus.",
+            score_name=forecast_reliability.score_name,
+            heuristic=True,
+            score_components=[component.label for component in forecast_reliability.components],
+            confidence_label=f"Heuristic reliability: {_reliability_label(confidence_score)}",
+        ),
+        forecast_diagnostics=forecast_reliability,
         payload_version=payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,
         refresh=RefreshState(triggered=False, reason="fresh", ticker=company.ticker, job_id=None),
         diagnostics=diagnostics,
@@ -232,20 +296,32 @@ def _forecast_revenue(actual: list[CompanyChartsSeriesPointPayload]) -> tuple[li
     values = [_point_value(point) for point in actual]
     if not values:
         return [], []
-    growths = [_growth_rate(cur, prev) for prev, cur in zip(values, values[1:]) if _growth_rate(cur, prev) is not None]
-    latest = growths[-1] if growths else 0.0
-    average = fmean(growths[-3:]) if growths else latest
-    cagr = _cagr(values[-4:]) if len(values) >= 4 else average
-    base = _clip(((latest * 0.45) + (average * 0.2) + ((cagr or average) * 0.35)), -0.18, 0.30)
+    historical_growth = _historical_growth_rates(values)
+    # Clamp extreme years before averaging so one anomalous filing does not dominate the baseline.
+    winsorized_growth = [_clip(value, REVENUE_FORECAST_GROWTH_FLOOR, REVENUE_FORECAST_GROWTH_CAP) for value in historical_growth]
+    recent_growth = _weighted_recent_growth(winsorized_growth)
+    cagr_growth = _cagr(values[-4:]) if len(values) >= 2 else None
+    cagr_growth = _clip(cagr_growth, REVENUE_FORECAST_GROWTH_FLOOR, REVENUE_FORECAST_GROWTH_CAP) if cagr_growth is not None else None
+
+    recent_component = recent_growth if recent_growth is not None else REVENUE_FORECAST_TERMINAL_GROWTH
+    cagr_component = cagr_growth if cagr_growth is not None else recent_component
+    baseline_growth = _clip(
+        (recent_component * REVENUE_FORECAST_RECENT_BLEND_WEIGHT) + (cagr_component * REVENUE_FORECAST_CAGR_BLEND_WEIGHT),
+        REVENUE_FORECAST_GROWTH_FLOOR,
+        REVENUE_FORECAST_GROWTH_CAP,
+    )
     current = values[-1]
     year = actual[-1].fiscal_year or datetime.now(timezone.utc).year
     points: list[CompanyChartsSeriesPointPayload] = []
     curve: list[float] = []
+    current_growth = baseline_growth
     for index in range(1, 4):
-        growth = _clip(base * (0.92 ** (index - 1)), -0.18, 0.30)
+        growth = _clip(current_growth, REVENUE_FORECAST_GROWTH_FLOOR, REVENUE_FORECAST_GROWTH_CAP)
         current *= 1 + growth
         curve.append(growth)
         points.append(CompanyChartsSeriesPointPayload(period_label=f"FY{year + index}E", fiscal_year=year + index, period_end=None, value=_round(current, 2), series_kind="forecast"))
+        # Revert each forward year toward a modest terminal rate instead of extending the latest regime unchanged.
+        current_growth = growth + ((REVENUE_FORECAST_TERMINAL_GROWTH - growth) * REVENUE_FORECAST_REVERSION_SPEED)
     return points, curve
 
 
@@ -272,11 +348,7 @@ def _margin_projected_series(statements: list[Any], revenue_actual: list[Company
         actual_points: list[CompanyChartsSeriesPointPayload] = []
         margins: list[float] = []
         for statement in statements:
-            value = _statement_value(statement, key) if key != "ebitda_proxy" else _ebitda_proxy(statement)
-            if value is None and key == "free_cash_flow":
-                operating_cash_flow = _statement_value(statement, "operating_cash_flow")
-                capex = _statement_value(statement, "capex")
-                value = operating_cash_flow - capex if operating_cash_flow is not None and capex is not None else None
+            value = _metric_projection_value(statement, key)
             if value is None:
                 continue
             actual_points.append(CompanyChartsSeriesPointPayload(period_label=f"FY{statement.period_end.year}", fiscal_year=statement.period_end.year, period_end=statement.period_end, value=_round(value, 2), series_kind="actual"))
@@ -286,45 +358,48 @@ def _margin_projected_series(statements: list[Any], revenue_actual: list[Company
         if not actual_points:
             continue
         payloads.append(_series(f"{key}_actual", f"{label} Reported", "usd", "line", "actual", "solid", actual_points))
-        if margins and forecast_revenue:
-            base_margin = _clip((margins[-1] * 0.65) + (fmean(margins[-3:]) * 0.35), -0.25, 0.45 if key != "capex" else 0.25)
-            forecast_points = [CompanyChartsSeriesPointPayload(period_label=f"FY{year}E", fiscal_year=year, period_end=None, value=_round(revenue * base_margin, 2), series_kind="forecast") for year, revenue in sorted(forecast_revenue.items())]
+        margin_path = _margin_convergence_path(margins, key, len(forecast_revenue))
+        if margin_path and forecast_revenue:
+            forecast_points = [
+                CompanyChartsSeriesPointPayload(period_label=f"FY{year}E", fiscal_year=year, period_end=None, value=_round(revenue * margin, 2), series_kind="forecast")
+                for (year, revenue), margin in zip(sorted(forecast_revenue.items()), margin_path)
+            ]
             payloads.append(_series(f"{key}_forecast", f"{label} Forecast", "usd", "line", "forecast", "dashed", forecast_points))
     return payloads
 
 
-def _eps_series(statements: list[Any], revenue_forecast: list[CompanyChartsSeriesPointPayload]) -> tuple[list[CompanyChartsSeriesPointPayload], list[CompanyChartsSeriesPointPayload]]:
+def _eps_series(statements: list[Any], net_income_forecast: list[CompanyChartsSeriesPointPayload]) -> tuple[list[CompanyChartsSeriesPointPayload], list[CompanyChartsSeriesPointPayload]]:
     actual: list[CompanyChartsSeriesPointPayload] = []
     shares_history: list[float] = []
-    margin_history: list[float] = []
     for statement in statements:
         shares = _statement_value(statement, "weighted_average_shares_diluted")
-        revenue = _statement_value(statement, "revenue")
         net_income = _statement_value(statement, "net_income")
         if shares not in (None, 0):
             shares_history.append(float(shares))
-        if net_income is not None and revenue not in (None, 0):
-            margin_history.append(float(net_income) / float(revenue))
         eps = _statement_value(statement, "eps")
         if eps is None and net_income is not None and shares not in (None, 0):
             eps = float(net_income) / float(shares)
         if eps is not None:
             actual.append(CompanyChartsSeriesPointPayload(period_label=f"FY{statement.period_end.year}", fiscal_year=statement.period_end.year, period_end=statement.period_end, value=_round(eps, 3), series_kind="actual"))
-    if not revenue_forecast or not shares_history or not margin_history:
+    if not net_income_forecast or not shares_history:
         return actual, []
-    share_growths = [_growth_rate(cur, prev) for prev, cur in zip(shares_history, shares_history[1:]) if _growth_rate(cur, prev) is not None]
-    share_growth = _clip(fmean(share_growths[-3:]) if share_growths else 0.0, -0.03, 0.06)
-    last_shares = shares_history[-1]
-    margin = _clip(fmean(margin_history[-3:]), -0.2, 0.3)
+    share_forecast = _forecast_diluted_shares(shares_history, len(net_income_forecast))
+    if not share_forecast:
+        return actual, []
     forecast = []
-    for point in revenue_forecast:
-        last_shares *= 1 + share_growth
-        forecast.append(CompanyChartsSeriesPointPayload(period_label=point.period_label, fiscal_year=point.fiscal_year, period_end=None, value=_round((_point_value(point) * margin) / last_shares if last_shares else None, 3), series_kind="forecast"))
+    for point, diluted_shares in zip(net_income_forecast, share_forecast):
+        # Suppress forecast EPS if the share bridge becomes unusable instead of fabricating a denominator.
+        value = _point_value(point) / diluted_shares if diluted_shares > 0 else None
+        forecast.append(CompanyChartsSeriesPointPayload(period_label=point.period_label, fiscal_year=point.fiscal_year, period_end=None, value=_round(value, 3), series_kind="forecast"))
     return actual, forecast
 
 
 def _series(key: str, label: str, unit: str, chart_type: str, series_kind: str, stroke_style: str, points: list[CompanyChartsSeriesPointPayload]) -> CompanyChartsSeriesPayload:
     return CompanyChartsSeriesPayload(key=key, label=label, unit=unit, chart_type=chart_type, series_kind=series_kind, stroke_style=stroke_style, points=points)
+
+
+def _series_points_by_key(series_list: list[CompanyChartsSeriesPayload], key: str) -> CompanyChartsSeriesPayload | None:
+    return next((series for series in series_list if series.key == key), None)
 
 
 def _statement_value(statement: Any, key: str) -> float | None:
@@ -349,6 +424,18 @@ def _ebitda_proxy(statement: Any) -> float | None:
     return float(operating_income or 0) + float(depreciation or 0)
 
 
+def _metric_projection_value(statement: Any, key: str) -> float | None:
+    if key == "ebitda_proxy":
+        return _ebitda_proxy(statement)
+    value = _statement_value(statement, key)
+    if value is None and key == "free_cash_flow":
+        operating_cash_flow = _statement_value(statement, "operating_cash_flow")
+        capex = _statement_value(statement, "capex")
+        # Some filings persist OCF and capex but omit explicit FCF, so derive FCF from the available cash flow fields.
+        value = operating_cash_flow - capex if operating_cash_flow is not None and capex is not None else None
+    return value
+
+
 def _point_value(point: CompanyChartsSeriesPointPayload) -> float:
     return float(point.value or 0)
 
@@ -357,6 +444,98 @@ def _growth_rate(current: float | None, previous: float | None) -> float | None:
     if current is None or previous in (None, 0):
         return None
     return (float(current) / float(previous)) - 1
+
+
+def _historical_growth_rates(values: list[float]) -> list[float]:
+    growths: list[float] = []
+    for previous, current in zip(values, values[1:]):
+        growth = _growth_rate(current, previous)
+        if growth is not None:
+            growths.append(growth)
+    return growths
+
+
+def _weighted_recent_growth(growths: list[float]) -> float | None:
+    if not growths:
+        return None
+    window = growths[-len(REVENUE_FORECAST_RECENT_WEIGHTS):]
+    weights = REVENUE_FORECAST_RECENT_WEIGHTS[-len(window):]
+    total_weight = sum(weights)
+    if total_weight == 0:
+        return None
+    return sum(value * weight for value, weight in zip(window, weights)) / total_weight
+
+
+def _metric_margin_profile(key: str) -> dict[str, Any]:
+    if key in {"operating_income", "ebitda_proxy"}:
+        return MARGIN_FORECAST_PROFILES["operating"]
+    if key == "net_income":
+        return MARGIN_FORECAST_PROFILES["net_income"]
+    if key in {"operating_cash_flow", "free_cash_flow"}:
+        return MARGIN_FORECAST_PROFILES["cash_flow"]
+    if key == "capex":
+        return MARGIN_FORECAST_PROFILES["capex"]
+    return MARGIN_FORECAST_PROFILES["operating"]
+
+
+def _normalized_margin(margins: list[float], key: str) -> float | None:
+    if not margins:
+        return None
+    profile = _metric_margin_profile(key)
+    floor = float(profile["floor"])
+    cap = float(profile["cap"])
+    recent_weight = float(profile["normalized_recent_weight"])
+    # Winsorize observed margins first so unusually strong or weak years do not anchor the full forecast path.
+    winsorized = [_clip(value, floor, cap) for value in margins]
+    recent_window = winsorized[-min(MARGIN_FORECAST_NORMALIZATION_WINDOW, len(winsorized)) :]
+    history_average = fmean(winsorized)
+    recent_average = fmean(recent_window)
+    normalized = (history_average * (1 - recent_weight)) + (recent_average * recent_weight)
+    return _clip(normalized, floor, cap)
+
+
+def _margin_convergence_path(margins: list[float], key: str, horizon: int) -> list[float]:
+    if not margins or horizon <= 0:
+        return []
+    profile = _metric_margin_profile(key)
+    floor = float(profile["floor"])
+    cap = float(profile["cap"])
+    reversion_weights = tuple(float(weight) for weight in profile["reversion_weights"])
+    recent_margin = _clip(margins[-1], floor, cap)
+    normalized_margin = _normalized_margin(margins, key)
+    if normalized_margin is None:
+        return []
+    path: list[float] = []
+    for index in range(horizon):
+        weight = reversion_weights[min(index, len(reversion_weights) - 1)]
+        margin = recent_margin + ((normalized_margin - recent_margin) * weight)
+        path.append(_clip(margin, floor, cap))
+    return path
+
+
+def _forecast_diluted_shares(shares_history: list[float], horizon: int) -> list[float]:
+    if not shares_history or horizon <= 0:
+        return []
+    latest_shares = float(shares_history[-1])
+    if latest_shares <= 0:
+        return []
+
+    share_growths = [
+        _clip(value, DILUTED_SHARE_FORECAST_CHANGE_FLOOR, DILUTED_SHARE_FORECAST_CHANGE_CAP)
+        for value in _historical_growth_rates(shares_history)
+    ]
+    # Start from the recent buyback/dilution trend, then mean-revert toward flat share count to avoid runaway bridges.
+    current_growth = _weighted_recent_growth(share_growths) if share_growths else 0.0
+    current_growth = _clip(current_growth or 0.0, DILUTED_SHARE_FORECAST_CHANGE_FLOOR, DILUTED_SHARE_FORECAST_CHANGE_CAP)
+
+    forecast: list[float] = []
+    shares = latest_shares
+    for _ in range(horizon):
+        growth = _clip(current_growth, DILUTED_SHARE_FORECAST_CHANGE_FLOOR, DILUTED_SHARE_FORECAST_CHANGE_CAP)
+        shares *= 1 + growth
+        forecast.append(shares)
+        current_growth = growth + ((0.0 - growth) * DILUTED_SHARE_FORECAST_REVERSION_SPEED)
+    return forecast
 
 
 def _cagr(values: list[float]) -> float | None:
@@ -383,15 +562,99 @@ def _score(value: float | None, lower: float, upper: float) -> int | None:
     return int(round(((_clip(value, lower, upper) - lower) / (upper - lower)) * 100))
 
 
+def _forecast_reliability_profile(statements: list[Any], revenue_actual: list[CompanyChartsSeriesPointPayload], earnings_points: list[Any]) -> CompanyChartsForecastDiagnosticsPayload:
+    history_depth = len(statements)
+    thin_history = history_depth < FORECAST_RELIABILITY_THIN_HISTORY_PERIODS
+    revenue_values = [_point_value(point) for point in revenue_actual]
+    growths = _historical_growth_rates(revenue_values)
+    volatility_window = growths[-FORECAST_RELIABILITY_VOLATILITY_WINDOW:] if growths else []
+    average_absolute_growth = (
+        sum(abs(value) for value in volatility_window) / len(volatility_window)
+        if volatility_window
+        else None
+    )
+    volatility_band = _growth_volatility_band(average_absolute_growth)
+
+    # Penalize shallow filing history because shorter histories make deterministic extrapolation fragile.
+    history_penalty = max(0, FORECAST_RELIABILITY_TARGET_HISTORY_PERIODS - history_depth) * FORECAST_RELIABILITY_HISTORY_GAP_PENALTY
+    # Reward deeper filing histories only modestly once the target history depth is met.
+    history_bonus = max(0, history_depth - FORECAST_RELIABILITY_TARGET_HISTORY_PERIODS) * FORECAST_RELIABILITY_EXTRA_HISTORY_BONUS
+    # Penalize unstable top-line histories because large year-over-year swings reduce projection stability.
+    volatility_penalty = int(round((average_absolute_growth or 0.0) * FORECAST_RELIABILITY_VOLATILITY_PENALTY_MULTIPLIER))
+
+    missing_inputs: list[str] = []
+    missing_data_penalty = 0
+    missing_revenue_points = max(0, history_depth - len(revenue_actual))
+    if missing_revenue_points > 0:
+        missing_data_penalty += missing_revenue_points * FORECAST_RELIABILITY_MISSING_REVENUE_POINT_PENALTY
+        missing_inputs.append("reported_revenue_history_gaps")
+    elif not revenue_actual:
+        missing_inputs.append("reported_revenue_history_missing")
+
+    raw_quality = getattr(earnings_points[-1], "quality_score", None) if earnings_points else None
+    normalized_quality = _normalized_earnings_quality(raw_quality)
+    if normalized_quality is not None:
+        # Reward or penalize the latest earnings quality around a neutral midpoint because cleaner recent filings tend to make the current trend more usable.
+        quality_adjustment = int(round((normalized_quality - FORECAST_RELIABILITY_QUALITY_NEUTRAL) * FORECAST_RELIABILITY_QUALITY_ADJUSTMENT_MULTIPLIER))
+    else:
+        quality_adjustment = 0
+        missing_data_penalty += FORECAST_RELIABILITY_MISSING_QUALITY_SIGNAL_PENALTY
+        missing_inputs.append("latest_earnings_quality_missing")
+
+    score = FORECAST_RELIABILITY_BASE_SCORE + history_bonus - history_penalty - volatility_penalty - missing_data_penalty + quality_adjustment
+    final_score = int(_clip(score, FORECAST_RELIABILITY_MIN_SCORE, FORECAST_RELIABILITY_MAX_SCORE))
+
+    components = [
+        CompanyChartsScoreComponentPayload(
+            key="history_depth",
+            label="History depth",
+            value=history_depth,
+            display_value=f"{history_depth} annual periods",
+            impact=history_bonus - history_penalty,
+            detail="Shorter annual filing history lowers reliability, while deeper history earns only a modest bonus once the minimum target is met.",
+        ),
+        CompanyChartsScoreComponentPayload(
+            key="growth_volatility",
+            label="Growth volatility",
+            value=_round(average_absolute_growth, 4),
+            display_value=(f"{(average_absolute_growth or 0.0) * 100:.0f}% avg abs YoY ({volatility_band})" if average_absolute_growth is not None else "Unavailable"),
+            impact=-volatility_penalty,
+            detail="Large year-over-year revenue swings lower projection stability.",
+        ),
+        CompanyChartsScoreComponentPayload(
+            key="missing_data_penalty",
+            label="Missing-data penalty",
+            value=missing_data_penalty,
+            display_value=f"{missing_data_penalty} pts",
+            impact=-missing_data_penalty,
+            detail="Missing reported revenue rows or a missing latest earnings quality signal reduce the heuristic score.",
+        ),
+        CompanyChartsScoreComponentPayload(
+            key="latest_earnings_quality",
+            label="Latest earnings quality",
+            value=_round(float(raw_quality), 3) if isinstance(raw_quality, (int, float)) else None,
+            display_value=_format_quality_display(raw_quality),
+            impact=quality_adjustment,
+            detail="Cleaner recent earnings inputs support a slightly higher reliability score.",
+        ),
+    ]
+
+    return CompanyChartsForecastDiagnosticsPayload(
+        final_score=final_score,
+        summary=_forecast_reliability_summary(history_depth, volatility_band, missing_data_penalty, thin_history, raw_quality),
+        history_depth_years=history_depth,
+        thin_history=thin_history,
+        growth_volatility=_round(average_absolute_growth, 4),
+        growth_volatility_band=volatility_band,
+        missing_data_penalty=missing_data_penalty,
+        quality_score=_round(float(raw_quality), 3) if isinstance(raw_quality, (int, float)) else None,
+        missing_inputs=missing_inputs,
+        components=components,
+    )
+
+
 def _confidence_score(statements: list[Any], revenue_actual: list[CompanyChartsSeriesPointPayload], earnings_points: list[Any]) -> int:
-    score = 78 - max(0, 5 - len(statements)) * 6
-    growths = [_growth_rate(cur, prev) for prev, cur in zip([_point_value(point) for point in revenue_actual], [_point_value(point) for point in revenue_actual][1:]) if _growth_rate(cur, prev) is not None]
-    if growths:
-        score -= int(round((sum(abs(value) for value in growths[-4:]) / len(growths[-4:])) * 12))
-    quality = getattr(earnings_points[-1], "quality_score", None) if earnings_points else None
-    if isinstance(quality, (int, float)):
-        score += int(round((float(quality) - 0.5) * 20))
-    return int(_clip(score, 20, 95))
+    return int(_forecast_reliability_profile(statements, revenue_actual, earnings_points).final_score or FORECAST_RELIABILITY_MIN_SCORE)
 
 
 def _norm(value: int | None) -> float | None:
@@ -414,14 +677,49 @@ def _pct(value: float | None) -> str:
     return "N/A" if value is None else f"{value * 100:.0f}%"
 
 
-def _confidence_label(score: int | None) -> str:
+def _normalized_earnings_quality(value: float | None) -> float | None:
+    if not isinstance(value, (int, float)):
+        return None
+    quality = float(value)
+    if 0 <= quality <= 1:
+        return quality
+    if quality >= 0:
+        return quality / 100.0
+    return quality
+
+
+def _format_quality_display(value: float | None) -> str:
+    if not isinstance(value, (int, float)):
+        return "Missing"
+    quality = float(value)
+    if 1 < quality <= 100:
+        return f"{quality:.2f}%"
+    return f"{quality:.2f}"
+
+
+def _forecast_reliability_summary(history_depth: int, volatility_band: str, missing_data_penalty: int, thin_history: bool, quality: float | None) -> str:
+    quality_text = f"latest earnings quality {_format_quality_display(quality)}" if isinstance(quality, (int, float)) else "missing latest earnings quality"
+    thin_history_text = "thin history flagged" if thin_history else "history depth above thin-history threshold"
+    return f"Heuristic score from {history_depth} annual periods, {volatility_band} revenue volatility, {missing_data_penalty}-point missing-data penalty, and {quality_text}; {thin_history_text}. Not statistical confidence."
+
+
+def _growth_volatility_band(value: float | None) -> str:
+    if value is None:
+        return "unavailable"
+    for threshold, label in FORECAST_RELIABILITY_VOLATILITY_BANDS:
+        if value < threshold:
+            return label
+    return "high"
+
+
+def _reliability_label(score: int | None) -> str:
     if score is None:
-        return "Moderate"
+        return "Moderate reliability"
     if score >= 80:
-        return "High"
+        return "High reliability"
     if score >= 60:
-        return "Moderate"
-    return "Guarded"
+        return "Moderate reliability"
+    return "Guarded reliability"
 
 
 def _round(value: float | None, digits: int) -> float | None:

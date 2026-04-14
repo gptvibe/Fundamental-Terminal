@@ -46,7 +46,7 @@ describe("CompanyChartsPage", () => {
         secondary_badges: [
           { key: "quality", label: "Quality", score: 91, tone: "positive", detail: "Healthy reported margins." },
           { key: "momentum", label: "Momentum", score: 88, tone: "positive", detail: "Recent growth still strong." },
-          { key: "forecast_confidence", label: "Forecast Confidence", score: 78, tone: "neutral", detail: "Three annual reported periods available." },
+          { key: "forecast_confidence", label: "Forecast Reliability", score: 78, tone: "neutral", detail: "Heuristic score from 3 annual periods, moderate revenue volatility, 0-point missing-data penalty, and latest earnings quality 0.95; history depth above thin-history threshold. Not statistical confidence." },
         ],
         thesis: "Reported growth remains strong, while forecast values stay clearly labeled as projections.",
         unavailable_notes: ["Value is hidden until a trustworthy valuation comparator is available."],
@@ -59,7 +59,7 @@ describe("CompanyChartsPage", () => {
           { key: "quality", label: "Quality", score: 91, normalized_score: 0.91, tone: "positive", detail: "Margins and cash conversion." },
           { key: "momentum", label: "Momentum", score: 88, normalized_score: 0.88, tone: "positive", detail: "Recent drift remains strong." },
           { key: "value", label: "Value", score: null, normalized_score: null, tone: "unavailable", detail: null, unavailable_reason: "Waiting for trustworthy benchmark support." },
-          { key: "forecast_confidence", label: "Forecast Confidence", score: 78, normalized_score: 0.78, tone: "neutral", detail: "Guardrailed deterministic projection." },
+          { key: "forecast_confidence", label: "Forecast Reliability", score: 78, normalized_score: 0.78, tone: "neutral", detail: "Heuristic score from 3 annual periods, moderate revenue volatility, 0-point missing-data penalty, and latest earnings quality 0.95; history depth above thin-history threshold. Not statistical confidence." },
         ],
       },
       legend: {
@@ -156,14 +156,32 @@ describe("CompanyChartsPage", () => {
         },
       },
       forecast_methodology: {
-        version: "company_charts_dashboard_v1",
-        label: "Deterministic internal projection",
+        version: "company_charts_dashboard_v3",
+        label: "Deterministic projection with heuristic reliability overlay",
         summary: "Forecasts are generated from persisted historical official inputs with guarded trend and margin rules.",
-        disclaimer: "Forecast values are projections derived in-house from historical official data and are not reported results or analyst consensus.",
+        disclaimer: "Forecast reliability is a heuristic stability signal derived from historical official data. It is not a probability, prediction interval, or statistical confidence measure, and forecast values are not reported results or analyst consensus.",
         forecast_horizon_years: 3,
-        confidence_label: "Medium confidence",
+        score_name: "Forecast Reliability",
+        heuristic: true,
+        score_components: ["History depth", "Growth volatility", "Missing-data penalty", "Latest earnings quality"],
+        confidence_label: "Heuristic reliability: Moderate reliability",
       },
-      payload_version: "company_charts_dashboard_v1",
+      forecast_diagnostics: {
+        score_key: "forecast_confidence",
+        score_name: "Forecast Reliability",
+        heuristic: true,
+        final_score: 78,
+        summary: "Heuristic score from 3 annual periods, moderate revenue volatility, 0-point missing-data penalty, and latest earnings quality 0.95; history depth above thin-history threshold. Not statistical confidence.",
+        history_depth_years: 3,
+        thin_history: false,
+        growth_volatility: 0.12,
+        growth_volatility_band: "moderate",
+        missing_data_penalty: 0,
+        quality_score: 0.95,
+        missing_inputs: [],
+        components: [],
+      },
+      payload_version: "company_charts_dashboard_v3",
       provenance: [],
       as_of: "2026-04-13",
       last_refreshed_at: "2026-04-13T00:00:00Z",
@@ -191,7 +209,7 @@ describe("CompanyChartsPage", () => {
     expect(screen.getByText("Actual vs Forecast")).toBeTruthy();
     expect(screen.getByText("Revenue Growth")).toBeTruthy();
     expect(screen.getByText("Forecast Assumptions")).toBeTruthy();
-    expect(screen.getByText(/Forecast values are projections derived in-house/i)).toBeTruthy();
+    expect(screen.getByText(/Forecast reliability is a heuristic stability signal/i)).toBeTruthy();
     expect(screen.getByText("NVIDIA Corp")).toBeTruthy();
   });
 });

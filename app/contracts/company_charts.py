@@ -36,6 +36,31 @@ class CompanyChartsFactorValuePayload(BaseModel):
     unavailable_reason: str | None = None
 
 
+class CompanyChartsScoreComponentPayload(BaseModel):
+    key: str
+    label: str
+    value: Number = None
+    display_value: str | None = None
+    impact: int = 0
+    detail: str | None = None
+
+
+class CompanyChartsForecastDiagnosticsPayload(BaseModel):
+    score_key: str = "forecast_confidence"
+    score_name: str = "Forecast Reliability"
+    heuristic: bool = True
+    final_score: Number = None
+    summary: str | None = None
+    history_depth_years: int = 0
+    thin_history: bool = False
+    growth_volatility: Number = None
+    growth_volatility_band: str | None = None
+    missing_data_penalty: int = 0
+    quality_score: Number = None
+    missing_inputs: list[str] = Field(default_factory=list)
+    components: list[CompanyChartsScoreComponentPayload] = Field(default_factory=list)
+
+
 class CompanyChartsFactorsPayload(BaseModel):
     primary: CompanyChartsFactorValuePayload | None = None
     supporting: list[CompanyChartsFactorValuePayload] = Field(default_factory=list)
@@ -133,6 +158,9 @@ class CompanyChartsMethodologyPayload(BaseModel):
     summary: str
     disclaimer: str
     forecast_horizon_years: int = 3
+    score_name: str = "Forecast Reliability"
+    heuristic: bool = True
+    score_components: list[str] = Field(default_factory=list)
     confidence_label: str | None = None
 
 
@@ -147,12 +175,13 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     cards: CompanyChartsCardsPayload = Field(default_factory=CompanyChartsCardsPayload)
     forecast_methodology: CompanyChartsMethodologyPayload = Field(
         default_factory=lambda: CompanyChartsMethodologyPayload(
-            version="company_charts_dashboard_v1",
+            version="company_charts_dashboard_v3",
             label="Deterministic internal projection",
             summary="Forecasts are generated from persisted historical official inputs with guarded trend and margin rules.",
             disclaimer="Forecast values are projections derived in-house from historical official data and are not reported results or analyst consensus.",
         )
     )
-    payload_version: str = "company_charts_dashboard_v1"
+    forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)
+    payload_version: str = "company_charts_dashboard_v3"
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
