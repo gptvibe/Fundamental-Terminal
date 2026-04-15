@@ -44,8 +44,8 @@ from app.services.company_charts_driver_model import build_driver_forecast_bundl
 from app.services.refresh_state import mark_dataset_checked
 
 
-CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v7"
-CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v7"
+CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v8"
+CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v8"
 ANNUAL_FILING_TYPES = {"10-K", "20-F", "40-F"}
 FORECAST_STABILITY_MIN_SCORE = 20
 FORECAST_STABILITY_MAX_SCORE = 90
@@ -432,7 +432,7 @@ def _build_forecast_state(
             "profit_subtitle": "Explicit cost and below-the-line schedules drive the base case.",
             "cash_subtitle": "Operating working-capital schedules reconcile balance-sheet movement into cash flow.",
             "methodology_label": "Driver-based integrated forecast",
-            "methodology_summary": "Revenue is modeled from price, volume, market growth, market share, segment mix, guidance, and backlog or capacity overlays when available. EBIT flows from explicit variable, semi-variable, and fixed cost schedules; operating working capital is forecast through receivables, inventory, payables, deferred revenue, and accrued operating-liability days while excluding cash and financing items; pretax income then bridges through debt-funded interest expense, cash yield, and other income or expense; operating cash flow subtracts delta operating working capital, capex covers maintenance capital plus positive-growth fixed-capital reinvestment from sales-to-capital, and free cash flow and diluted EPS are layered on top with disclosed cash, debt, SBC, buybacks, acquisition dilution, and convert dilution where available. Forecast Stability is then calibrated against point-in-time walk-forward backtests for revenue, EBIT, EPS, and FCF before conservative penalties are applied. When disclosure is sparse, the engine uses conservative component-level fallbacks before dropping all the way back to the older guarded heuristic path.",
+            "methodology_summary": "Revenue is modeled from a pricing proxy, residual-implied demand growth, and share or mix proxies, then layered with segment rollups, guidance, and backlog or capacity overlays when available. EBIT flows from explicit variable, semi-variable, and fixed cost schedules; operating working capital is forecast through receivables, inventory, payables, deferred revenue, and accrued operating-liability days while excluding cash and financing items; pretax income then bridges through debt-funded interest expense, cash yield, and other income or expense; operating cash flow subtracts delta operating working capital, capex covers maintenance capital plus positive-growth fixed-capital reinvestment from sales-to-capital, and free cash flow and diluted EPS are layered on top with disclosed cash, debt, SBC, buybacks, acquisition dilution, and convert dilution where available. Forecast Stability is then calibrated against point-in-time walk-forward backtests for revenue, EBIT, EPS, and FCF before conservative penalties are applied. When disclosure is sparse, the engine uses conservative component-level fallbacks before dropping all the way back to the older guarded heuristic path.",
             "methodology_disclaimer": "Scenario outputs are internally derived from official inputs and remain explicitly labeled as forecast rather than reported results or analyst consensus.",
             "methodology_heuristic": False,
         }

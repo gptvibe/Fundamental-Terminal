@@ -72,7 +72,7 @@ RSU_DILUTION_CAP = 0.06
 ACQUISITION_SHARE_ISSUANCE_CAP = 0.06
 PROXY_LATENT_DILUTION_CAP = 0.03
 PROXY_LATENT_DILUTION_FULL_WEIGHT_OBS = 3.0
-FORECAST_FORMULA_REVENUE = "Prior revenue x (1 + price + market growth + share)"
+FORECAST_FORMULA_REVENUE = "Prior revenue x (1 + residual demand + share/mix proxy + price proxy + price-volume cross term)"
 FORECAST_FORMULA_MARGIN = "Revenue - variable costs - semi-variable costs - fixed costs"
 FORECAST_FORMULA_PRETAX = "EBIT - interest expense + interest income + other income or expense"
 FORECAST_FORMULA_TAX = "Pretax income x effective tax rate"
@@ -145,15 +145,31 @@ class _ScenarioTweaks:
 class _RevenueDrivers:
     mode: str
     segment_basis: str | None
-    pricing_growth: float
-    market_growth: float
-    market_share_change: float
-    volume_growth: float
+    pricing_growth_proxy: float
+    residual_market_growth: float
+    share_shift_proxy: float
+    volume_growth_proxy: float
     guidance_anchor: float | None
     backlog_floor_growth: float | None
     capacity_growth_cap: float | None
     utilization_ratio: float | None
     segment_profiles: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def pricing_growth(self) -> float:
+        return self.pricing_growth_proxy
+
+    @property
+    def market_growth(self) -> float:
+        return self.residual_market_growth
+
+    @property
+    def market_share_change(self) -> float:
+        return self.share_shift_proxy
+
+    @property
+    def volume_growth(self) -> float:
+        return self.volume_growth_proxy
 
 
 @dataclass(slots=True)
@@ -325,6 +341,7 @@ def build_driver_forecast_bundle(
         dilution_schedule,
     )
     calculation_rows = _build_calculation_rows(
+        history,
         revenue_drivers,
         cost_schedule,
         reinvestment_schedule,
@@ -460,16 +477,16 @@ def _derive_revenue_drivers(history: list[dict[str, Any]], releases: list[Any]) 
     recent_growth = _weighted_recent_growth(revenue_growth)
     cagr_growth = _cagr([row["revenue"] for row in history[-4:] if row["revenue"] is not None])
     realized_growth = _blend_optional(recent_growth, cagr_growth) or TERMINAL_MARKET_GROWTH
-    pricing_growth = _pricing_growth_proxy(history)
-    share_trend = _share_shift_proxy(history)
-    market_growth = _clip(realized_growth - pricing_growth - share_trend, -0.05, 0.18)
-    volume_growth = _clip(market_growth + share_trend, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
+    pricing_growth_proxy = _pricing_growth_proxy(history)
+    share_shift_proxy = _share_shift_proxy(history)
+    residual_market_growth = _clip(realized_growth - pricing_growth_proxy - share_shift_proxy, -0.05, 0.18)
+    volume_growth_proxy = _clip(residual_market_growth + share_shift_proxy, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
 
     backlog_floor_growth = _backlog_floor_growth(history[-1])
     capacity_growth_cap, utilization_ratio = _capacity_constraint(history[-1], _sales_to_capital(history))
-    segment_profiles, segment_basis = _segment_profiles(history, market_growth, pricing_growth)
+    segment_profiles, segment_basis = _segment_profiles(history, residual_market_growth, pricing_growth_proxy)
 
-    mode = "bottom_up_segment" if segment_profiles else "top_down_market_share"
+    mode = "bottom_up_segment_proxy_decomposition" if segment_profiles else "top_down_proxy_decomposition"
     if guidance_anchor is not None:
         mode = f"{mode}+guidance"
     if backlog_floor_growth is not None:
@@ -480,10 +497,10 @@ def _derive_revenue_drivers(history: list[dict[str, Any]], releases: list[Any]) 
     return _RevenueDrivers(
         mode=mode,
         segment_basis=segment_basis,
-        pricing_growth=pricing_growth,
-        market_growth=market_growth,
-        market_share_change=share_trend,
-        volume_growth=volume_growth,
+        pricing_growth_proxy=pricing_growth_proxy,
+        residual_market_growth=residual_market_growth,
+        share_shift_proxy=share_shift_proxy,
+        volume_growth_proxy=volume_growth_proxy,
         guidance_anchor=guidance_anchor,
         backlog_floor_growth=backlog_floor_growth,
         capacity_growth_cap=capacity_growth_cap,
@@ -1136,9 +1153,9 @@ def _top_down_revenue_projection(
     results: list[tuple[int, float, float]] = []
     revenue = latest_revenue
     for index in range(horizon_years):
-        demand_growth = _mean_revert(revenue_drivers.market_growth + tweaks.demand_shift, TERMINAL_MARKET_GROWTH, 0.30 + (index * 0.15))
-        share_change = _mean_revert(revenue_drivers.market_share_change + tweaks.share_shift, 0.0, 0.40 + (index * 0.15))
-        price_growth = _mean_revert(revenue_drivers.pricing_growth + tweaks.price_shift, TERMINAL_PRICE_GROWTH, 0.35 + (index * 0.15))
+        demand_growth = _mean_revert(revenue_drivers.residual_market_growth + tweaks.demand_shift, TERMINAL_MARKET_GROWTH, 0.30 + (index * 0.15))
+        share_change = _mean_revert(revenue_drivers.share_shift_proxy + tweaks.share_shift, 0.0, 0.40 + (index * 0.15))
+        price_growth = _mean_revert(revenue_drivers.pricing_growth_proxy + tweaks.price_shift, TERMINAL_PRICE_GROWTH, 0.35 + (index * 0.15))
         revenue_growth = _clip(demand_growth + share_change + price_growth + (max(demand_growth, 0.0) * price_growth), REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
         revenue = _apply_revenue_overlays(revenue, revenue_growth, revenue_drivers, index)
         growth = _growth_rate(revenue, latest_revenue if index == 0 else results[-1][1]) or 0.0
@@ -1160,9 +1177,9 @@ def _bottom_up_revenue_projection(
         next_segment_revenues: dict[str, float] = {}
         for segment in revenue_drivers.segment_profiles:
             previous_segment_revenue = segment_revenues[segment["segment_id"]]
-            demand_growth = _mean_revert(segment["base_growth"] - segment["price_growth"] + tweaks.demand_shift, revenue_drivers.market_growth, 0.30 + (index * 0.12))
-            share_change = _mean_revert(segment["share_change"] + tweaks.share_shift, 0.0, 0.40 + (index * 0.15))
-            price_growth = _mean_revert(segment["price_growth"] + tweaks.price_shift, TERMINAL_PRICE_GROWTH, 0.35 + (index * 0.15))
+            demand_growth = _mean_revert(segment["base_growth"] - segment["price_growth_proxy"] + tweaks.demand_shift, revenue_drivers.residual_market_growth, 0.30 + (index * 0.12))
+            share_change = _mean_revert(segment["share_mix_shift_proxy"] + tweaks.share_shift, 0.0, 0.40 + (index * 0.15))
+            price_growth = _mean_revert(segment["price_growth_proxy"] + tweaks.price_shift, TERMINAL_PRICE_GROWTH, 0.35 + (index * 0.15))
             segment_growth = _clip(demand_growth + share_change + price_growth + (max(demand_growth, 0.0) * price_growth), REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
             next_segment_revenues[segment["segment_id"]] = previous_segment_revenue * (1.0 + segment_growth)
         raw_total = sum(next_segment_revenues.values())
@@ -1191,6 +1208,25 @@ def _apply_revenue_overlays(previous_revenue: float, revenue_growth: float, reve
     return previous_revenue * (1.0 + growth)
 
 
+def _revenue_mode_display(mode: str) -> str:
+    base, *modifiers = mode.split("+")
+    base_label = {
+        "top_down_proxy_decomposition": "Top-down proxy decomposition",
+        "bottom_up_segment_proxy_decomposition": "Bottom-up segment rollup with proxy decomposition",
+        "top_down_market_share": "Top-down proxy decomposition",
+        "bottom_up_segment": "Bottom-up segment rollup with proxy decomposition",
+    }.get(base, base.replace("_", " "))
+    modifier_label = {
+        "guidance": "guidance",
+        "backlog": "backlog overlay",
+        "capacity": "capacity cap",
+    }
+    cleaned_modifiers = [modifier_label.get(modifier, modifier.replace("_", " ")) for modifier in modifiers]
+    if not cleaned_modifiers:
+        return base_label
+    return f"{base_label} + {' + '.join(cleaned_modifiers)}"
+
+
 def _build_assumption_rows(
     history: list[dict[str, Any]],
     revenue_drivers: _RevenueDrivers,
@@ -1203,20 +1239,20 @@ def _build_assumption_rows(
         {
             "key": "revenue_method",
             "label": "Revenue Method",
-            "value": revenue_drivers.mode.replace("_", " ").title(),
-            "detail": "Top-down market-share logic is used by default and automatically upgrades to bottom-up segment aggregation when segment history is available.",
+            "value": _revenue_mode_display(revenue_drivers.mode),
+            "detail": "The default path decomposes realized growth into a pricing proxy, residual-implied demand growth, and a share / mix proxy; when segment history is available, the engine upgrades to a bottom-up segment rollup using the same proxy stack.",
         },
         {
             "key": "price_volume",
-            "label": "Price x Volume",
-            "value": f"{_pct(revenue_drivers.pricing_growth)} price / {_pct(revenue_drivers.volume_growth)} volume",
-            "detail": "Revenue growth is built from explicit pricing, market growth, and market-share assumptions instead of a single historical extrapolation.",
+            "label": "Price Proxy x Growth Stack",
+            "value": f"{_pct(revenue_drivers.pricing_growth_proxy)} price proxy / {_pct(revenue_drivers.volume_growth_proxy)} combined volume proxy",
+            "detail": "No direct unit-volume dataset is available here; the combined volume proxy is the residual demand component plus the share / mix proxy after removing the pricing proxy from realized growth.",
         },
         {
-            "key": "market_share",
-            "label": "Market Growth + Share",
-            "value": f"{_pct(revenue_drivers.market_growth)} market / {_pct(revenue_drivers.market_share_change)} share",
-            "detail": "The top-down path uses market growth plus share change; the bottom-up path applies the same logic at the segment level.",
+            "key": "share_mix_proxy",
+            "label": "Residual Demand / Share-Mix Proxy",
+            "value": f"{_pct(revenue_drivers.residual_market_growth)} residual demand / {_pct(revenue_drivers.share_shift_proxy)} share-mix proxy",
+            "detail": "No external market-size or true market-share dataset is wired into this engine, so residual demand growth and share / mix shift are inferred from realized growth after removing the pricing proxy. The bottom-up path applies the same proxy decomposition inside disclosed segments.",
         },
         {
             "key": "guidance_overlay",
@@ -1300,6 +1336,7 @@ def _build_assumption_rows(
 
 
 def _build_calculation_rows(
+    history: list[dict[str, Any]],
     revenue_drivers: _RevenueDrivers,
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
@@ -1311,12 +1348,15 @@ def _build_calculation_rows(
     base_margin = _safe_divide(_first_value(base_scenario.operating_income.values), _first_value(base_scenario.revenue.values))
     base_eps = _first_value(base_scenario.eps.values)
     base_bridge = base_scenario.bridge[0] if base_scenario.bridge else None
+    base_share_bridge = base_scenario.share_bridge[0] if base_scenario.share_bridge else None
+    revenue_formula_value, revenue_formula_detail = _revenue_formula_copy(revenue_drivers, history[-1]["revenue"] or 0.0, base_scenario)
+    eps_formula_value, eps_formula_detail = _eps_formula_copy(dilution_schedule, base_bridge, base_share_bridge, base_eps)
     return [
         {
             "key": "formula_revenue",
             "label": "Revenue Formula",
-            "value": FORECAST_FORMULA_REVENUE,
-            "detail": "Year-one revenue is then overlaid with any point-in-time-safe guidance, backlog floors, and capacity caps.",
+            "value": revenue_formula_value,
+            "detail": revenue_formula_detail,
         },
         {
             "key": "formula_margin",
@@ -1390,8 +1430,8 @@ def _build_calculation_rows(
         {
             "key": "formula_eps",
             "label": "Diluted EPS Formula",
-            "value": FORECAST_FORMULA_EPS,
-            "detail": f"Base case next-year EPS {_money(base_eps)} at {_pct(base_margin)} operating margin.",
+            "value": eps_formula_value,
+            "detail": eps_formula_detail or f"Base case next-year EPS {_money(base_eps)} at {_pct(base_margin)} operating margin.",
         },
         {
             "key": "segment_basis",
@@ -1402,12 +1442,220 @@ def _build_calculation_rows(
     ]
 
 
+def _join_with_and(parts: list[str]) -> str:
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return ", ".join(parts[:-1]) + f", and {parts[-1]}"
+
+
+def _revenue_overlay_labels(revenue_drivers: _RevenueDrivers) -> list[str]:
+    labels: list[str] = []
+    if revenue_drivers.guidance_anchor is not None:
+        labels.append("year-one guidance blend")
+    if revenue_drivers.backlog_floor_growth is not None:
+        labels.append("year-one backlog floor")
+    if revenue_drivers.capacity_growth_cap is not None:
+        labels.append("capacity cap")
+    return labels
+
+
+def _top_down_year_one_revenue_components(revenue_drivers: _RevenueDrivers) -> dict[str, float]:
+    demand_effect = _mean_revert(revenue_drivers.residual_market_growth, TERMINAL_MARKET_GROWTH, 0.30)
+    share_effect = _mean_revert(revenue_drivers.share_shift_proxy, 0.0, 0.40)
+    price_effect = _mean_revert(revenue_drivers.pricing_growth_proxy, TERMINAL_PRICE_GROWTH, 0.35)
+    cross_term = max(demand_effect, 0.0) * price_effect
+    raw_growth = _clip(demand_effect + share_effect + price_effect + cross_term, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
+    return {
+        "demand_effect": demand_effect,
+        "share_effect": share_effect,
+        "price_effect": price_effect,
+        "cross_term": cross_term,
+        "raw_growth": raw_growth,
+    }
+
+
+def _bottom_up_year_one_revenue_components(revenue_drivers: _RevenueDrivers) -> dict[str, float]:
+    profiles = revenue_drivers.segment_profiles
+    total_revenue = sum(float(segment["latest_revenue"]) for segment in profiles) or 0.0
+    if total_revenue <= 0:
+        return _top_down_year_one_revenue_components(revenue_drivers)
+
+    weighted_demand = 0.0
+    weighted_share = 0.0
+    weighted_price = 0.0
+    weighted_cross = 0.0
+    next_total = 0.0
+    for segment in profiles:
+        segment_revenue = float(segment["latest_revenue"])
+        weight = segment_revenue / total_revenue
+        demand_effect = _mean_revert((float(segment["base_growth"]) - float(segment["price_growth_proxy"])), revenue_drivers.residual_market_growth, 0.30)
+        share_effect = _mean_revert(float(segment["share_mix_shift_proxy"]), 0.0, 0.40)
+        price_effect = _mean_revert(float(segment["price_growth_proxy"]), TERMINAL_PRICE_GROWTH, 0.35)
+        cross_term = max(demand_effect, 0.0) * price_effect
+        segment_growth = _clip(demand_effect + share_effect + price_effect + cross_term, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
+        weighted_demand += weight * demand_effect
+        weighted_share += weight * share_effect
+        weighted_price += weight * price_effect
+        weighted_cross += weight * cross_term
+        next_total += segment_revenue * (1.0 + segment_growth)
+
+    return {
+        "demand_effect": weighted_demand,
+        "share_effect": weighted_share,
+        "price_effect": weighted_price,
+        "cross_term": weighted_cross,
+        "raw_growth": _growth_rate(next_total, total_revenue) or 0.0,
+    }
+
+
+def _year_one_revenue_components(revenue_drivers: _RevenueDrivers) -> dict[str, float]:
+    if revenue_drivers.segment_profiles:
+        return _bottom_up_year_one_revenue_components(revenue_drivers)
+    return _top_down_year_one_revenue_components(revenue_drivers)
+
+
+def _apply_year_one_revenue_overlays(
+    previous_revenue: float,
+    raw_growth: float,
+    revenue_drivers: _RevenueDrivers,
+) -> tuple[float, list[str]]:
+    growth = raw_growth
+    overlay_details: list[str] = []
+
+    if revenue_drivers.guidance_anchor is not None:
+        guided_growth = _growth_rate(revenue_drivers.guidance_anchor, previous_revenue)
+        if guided_growth is not None and 0.5 <= (revenue_drivers.guidance_anchor / previous_revenue) <= 1.6:
+            blended_growth = (growth * 0.35) + (guided_growth * 0.65)
+            overlay_details.append(
+                f"Guidance blend active: 35% model {_pct(growth)} + 65% guided {_pct(guided_growth)} toward {_money(revenue_drivers.guidance_anchor)} = {_pct(blended_growth)}."
+            )
+            growth = blended_growth
+        else:
+            overlay_details.append(
+                f"Guidance anchor {_money(revenue_drivers.guidance_anchor)} visible but skipped because it fails the 0.5x-1.6x sanity gate."
+            )
+
+    if revenue_drivers.backlog_floor_growth is not None:
+        floored_growth = max(growth, revenue_drivers.backlog_floor_growth)
+        overlay_details.append(
+            f"Backlog floor active: max({_pct(growth)}, {_pct(revenue_drivers.backlog_floor_growth)}) = {_pct(floored_growth)}."
+        )
+        growth = floored_growth
+
+    if revenue_drivers.capacity_growth_cap is not None:
+        capped_growth = min(growth, revenue_drivers.capacity_growth_cap)
+        utilization_text = (
+            f" at {_pct(revenue_drivers.utilization_ratio)} utilization"
+            if revenue_drivers.utilization_ratio is not None
+            else ""
+        )
+        overlay_details.append(
+            f"Capacity cap active{utilization_text}: min({_pct(growth)}, {_pct(revenue_drivers.capacity_growth_cap)}) = {_pct(capped_growth)}."
+        )
+        growth = capped_growth
+
+    clipped_growth = _clip(growth, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
+    if clipped_growth != growth:
+        overlay_details.append(
+            f"Growth guardrail clip applies: {_pct(growth)} -> {_pct(clipped_growth)} within {_pct(REVENUE_GROWTH_FLOOR)} to {_pct(REVENUE_GROWTH_CAP)}."
+        )
+    return clipped_growth, overlay_details
+
+
+def _revenue_formula_copy(
+    revenue_drivers: _RevenueDrivers,
+    previous_revenue: float,
+    base_scenario: DriverForecastScenario,
+) -> tuple[str, str]:
+    if revenue_drivers.segment_profiles:
+        value = "Sum(segment revenue x (1 + segment residual-demand effect + segment share/mix proxy effect + segment price proxy effect + price-volume cross term))"
+    else:
+        value = "Prior revenue x (1 + residual-demand effect + share/mix proxy effect + price proxy effect + price-volume cross term)"
+
+    overlay_labels = _revenue_overlay_labels(revenue_drivers)
+    if overlay_labels:
+        suffix = _join_with_and(overlay_labels)
+        if revenue_drivers.segment_profiles:
+            value = f"{value}, then scale the segment rollup to the company-level {suffix}"
+        else:
+            value = f"{value}, then apply the {suffix}"
+
+    components = _year_one_revenue_components(revenue_drivers)
+    final_growth, overlay_details = _apply_year_one_revenue_overlays(previous_revenue, components["raw_growth"], revenue_drivers)
+    next_year = base_scenario.revenue.years[0] if base_scenario.revenue.years else None
+    next_revenue = _first_value(base_scenario.revenue.values)
+    detail_parts = [
+        (
+            f"Weighted FY{next_year}E segment effects"
+            if revenue_drivers.segment_profiles and next_year is not None
+            else f"FY{next_year}E effects" if next_year is not None else "Year-one effects"
+        )
+        + f": residual demand {_pct(components['demand_effect'])}, share/mix {_pct(components['share_effect'])}, "
+        f"price proxy {_pct(components['price_effect'])}, cross term {_pct(components['cross_term'])}, raw growth {_pct(components['raw_growth'])}."
+    ]
+    if revenue_drivers.segment_profiles:
+        detail_parts.append(
+            f"Bottom-up basis: {(revenue_drivers.segment_basis or 'mixed').replace('_', ' ')} segments are projected first and then rescaled to company overlays."
+        )
+    else:
+        detail_parts.append(
+            f"Driver seed decomposes realized growth into price proxy {_pct(revenue_drivers.pricing_growth_proxy)}, residual-implied demand growth {_pct(revenue_drivers.residual_market_growth)}, and share/mix proxy {_pct(revenue_drivers.share_shift_proxy)}."
+        )
+    detail_parts.extend(overlay_details)
+    if next_year is not None:
+        detail_parts.append(f"Final FY{next_year}E growth {_pct(final_growth)} drives revenue to {_money(next_revenue)}.")
+    return value, " ".join(detail_parts)
+
+
+def _eps_formula_copy(
+    dilution_schedule: _DilutionSchedule,
+    base_bridge: _ForecastBridgePoint | None,
+    base_share_bridge: _ForecastShareBridgePoint | None,
+    base_eps: float | None,
+) -> tuple[str, str | None]:
+    if dilution_schedule.uses_proxy_fallback:
+        value = "Net income / diluted shares, with basic shares rolled by proxy net dilution and diluted shares topped up by a latent dilution overlay"
+    else:
+        value = (
+            "Net income / diluted shares, with basic shares = prior basic + RSU or SBC issuance + acquisition issuance - buybacks "
+            "and diluted shares = basic + options or warrants + convertibles"
+        )
+
+    if base_bridge is None or base_share_bridge is None:
+        return value, None
+
+    if base_share_bridge.uses_proxy_fallback:
+        detail = (
+            f"FY{base_share_bridge.year}E proxy fallback: starting basic {_shares(dilution_schedule.starting_basic_shares)} + "
+            f"proxy net change {_shares(base_share_bridge.proxy_net_change_shares)} = ending basic {_shares(base_share_bridge.basic_shares)}; "
+            f"latent dilution overlay {_shares(base_share_bridge.latent_dilution_shares)} from {_pct(dilution_schedule.proxy_latent_dilution_rate)} reaches "
+            f"{_shares(base_share_bridge.diluted_shares)} diluted shares. Proxy basis: {dilution_schedule.fallback_basis}. "
+            f"EPS = {_money(base_bridge.net_income)} / {_shares(base_share_bridge.diluted_shares)} = {_money(base_eps)}."
+        )
+    else:
+        detail = (
+            f"FY{base_share_bridge.year}E explicit bridge: starting basic {_shares(dilution_schedule.starting_basic_shares)} + "
+            f"RSU or SBC {_shares(base_share_bridge.rsu_shares)} + acquisitions {_shares(base_share_bridge.acquisition_shares)} - "
+            f"buybacks {_shares(base_share_bridge.buyback_retirement_shares)} + options or warrants {_shares(base_share_bridge.option_warrant_dilution_shares)} + "
+            f"convertibles {_shares(base_share_bridge.convertible_dilution_shares)} = {_shares(base_share_bridge.diluted_shares)} diluted shares. "
+            f"Starting basis: {dilution_schedule.starting_basis}. Options and warrants: {dilution_schedule.option_basis}. "
+            f"RSU or SBC issuance: {dilution_schedule.rsu_basis}. Buybacks: {dilution_schedule.buyback_basis}. "
+            f"Acquisition issuance: {dilution_schedule.acquisition_basis}. Convertibles: {dilution_schedule.convert_basis}. "
+            f"EPS = {_money(base_bridge.net_income)} / {_shares(base_share_bridge.diluted_shares)} = {_money(base_eps)}."
+        )
+    return value, detail
+
+
 def _build_highlights(revenue_drivers: _RevenueDrivers, base: DriverForecastScenario, bull: DriverForecastScenario, bear: DriverForecastScenario) -> list[str]:
     base_margin = _safe_divide(_first_value(base.operating_income.values), _first_value(base.revenue.values))
     bull_eps = _first_value(bull.eps.values)
     bear_eps = _first_value(bear.eps.values)
     return [
-        f"Base next-year revenue {_pct(_first_value(base.revenue_growth.values))} via {revenue_drivers.mode.replace('_', ' ')}.",
+        f"Base next-year revenue {_pct(_first_value(base.revenue_growth.values))} via {_revenue_mode_display(revenue_drivers.mode).lower()}.",
         f"Base next-year EBIT margin {_pct(base_margin)} from explicit cost buckets.",
         f"Bull / Bear next-year EPS {_money(bull_eps)} / {_money(bear_eps)} after explicit interest, tax, and dilution schedules.",
     ]
@@ -1535,7 +1783,7 @@ def _capacity_constraint(latest: dict[str, Any], sales_to_capital: float | None)
     return capacity_growth_cap, utilization
 
 
-def _segment_profiles(history: list[dict[str, Any]], market_growth: float, pricing_growth: float) -> tuple[list[dict[str, Any]], str | None]:
+def _segment_profiles(history: list[dict[str, Any]], residual_market_growth: float, pricing_growth_proxy: float) -> tuple[list[dict[str, Any]], str | None]:
     latest_segments = history[-1]["segments"]
     if len(latest_segments) < 2:
         return [], None
@@ -1557,8 +1805,8 @@ def _segment_profiles(history: list[dict[str, Any]], market_growth: float, prici
                 share_series.append(share)
         if len(revenues) < 2:
             continue
-        base_growth = _blend_optional(_weighted_recent_growth(_historical_growth_rates(revenues)), _cagr(revenues[-4:])) or market_growth
-        share_change = _weighted_recent_growth([current - previous for previous, current in zip(share_series, share_series[1:])]) or 0.0
+        base_growth = _blend_optional(_weighted_recent_growth(_historical_growth_rates(revenues)), _cagr(revenues[-4:])) or residual_market_growth
+        share_mix_shift_proxy = _weighted_recent_growth([current - previous for previous, current in zip(share_series, share_series[1:])]) or 0.0
         operating_margin = _safe_divide(latest_segment.get("operating_income"), latest_segment.get("revenue")) or 0.0
         profiles.append(
             {
@@ -1567,8 +1815,8 @@ def _segment_profiles(history: list[dict[str, Any]], market_growth: float, prici
                 "kind": latest_segment.get("kind"),
                 "latest_revenue": float(latest_segment["revenue"]),
                 "base_growth": _clip(base_growth, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP),
-                "price_growth": _clip(pricing_growth + (operating_margin * 0.02), PRICE_GROWTH_FLOOR, PRICE_GROWTH_CAP),
-                "share_change": _clip(share_change, SHARE_CHANGE_FLOOR, SHARE_CHANGE_CAP),
+                "price_growth_proxy": _clip(pricing_growth_proxy + (operating_margin * 0.02), PRICE_GROWTH_FLOOR, PRICE_GROWTH_CAP),
+                "share_mix_shift_proxy": _clip(share_mix_shift_proxy, SHARE_CHANGE_FLOOR, SHARE_CHANGE_CAP),
             }
         )
     return (profiles, basis) if len(profiles) >= 2 else ([], None)
@@ -1669,7 +1917,7 @@ def _statement_value(statement: Any, key: str) -> float | None:
                 return alias_value
         return None
     if key == "convertible_dilution_shares":
-        for alias in ("dilutive_convertible_shares", "convertible_shares"):
+        for alias in ("convertible_dilution_shares", "dilutive_convertible_shares", "convertible_shares"):
             alias_value = _as_float(data.get(alias))
             if alias_value is not None:
                 return alias_value

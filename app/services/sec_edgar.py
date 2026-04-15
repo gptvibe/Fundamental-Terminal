@@ -3305,7 +3305,7 @@ def _build_company_charts_dashboard_inputs_fingerprint(session: Session, company
     return build_payload_version_hash(
         version=CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION,
         payload={
-            "schema_version": "company_charts_dashboard_v7",
+            "schema_version": "company_charts_dashboard_v8",
             "company": {
                 "ticker": company.ticker,
                 "cik": company.cik,

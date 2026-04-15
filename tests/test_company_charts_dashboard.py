@@ -126,6 +126,119 @@ def _standard_driver_regression_statements() -> list[SimpleNamespace]:
     ]
 
 
+def _explicit_dilution_driver_statements() -> list[SimpleNamespace]:
+    return [
+        _statement(
+            2023,
+            {
+                "revenue": 900.0,
+                "gross_profit": 405.0,
+                "operating_income": 135.0,
+                "pretax_income": 108.0,
+                "income_tax_expense": 21.6,
+                "net_income": 86.4,
+                "operating_cash_flow": 126.0,
+                "free_cash_flow": 81.0,
+                "capex": 45.0,
+                "depreciation_and_amortization": 27.0,
+                "weighted_average_shares_basic": 98.0,
+                "weighted_average_diluted_shares": 100.0,
+                "accounts_receivable": 108.0,
+                "inventory": 45.0,
+                "accounts_payable": 63.0,
+                "current_assets": 360.0,
+                "current_liabilities": 180.0,
+                "total_assets": 990.0,
+                "cash_and_cash_equivalents": 90.0,
+                "total_debt": 135.0,
+                "interest_expense": 7.2,
+                "interest_income": 0.9,
+                "other_income_expense": 0.0,
+                "stock_based_compensation": 13.5,
+                "share_buybacks": 18.0,
+                "rsu_shares": 2.0,
+                "acquisition_shares_issued": 1.0,
+                "shares_repurchased": 1.5,
+                "share_price": 20.0,
+                "option_warrant_dilution_shares": 2.0,
+                "convertible_dilution_shares": 1.0,
+            },
+        ),
+        _statement(
+            2024,
+            {
+                "revenue": 1000.0,
+                "gross_profit": 450.0,
+                "operating_income": 150.0,
+                "pretax_income": 120.0,
+                "income_tax_expense": 24.0,
+                "net_income": 96.0,
+                "operating_cash_flow": 140.0,
+                "free_cash_flow": 90.0,
+                "capex": 50.0,
+                "depreciation_and_amortization": 30.0,
+                "weighted_average_shares_basic": 99.0,
+                "weighted_average_diluted_shares": 102.0,
+                "accounts_receivable": 120.0,
+                "inventory": 50.0,
+                "accounts_payable": 70.0,
+                "current_assets": 400.0,
+                "current_liabilities": 200.0,
+                "total_assets": 1100.0,
+                "cash_and_cash_equivalents": 100.0,
+                "total_debt": 150.0,
+                "interest_expense": 8.0,
+                "interest_income": 1.0,
+                "other_income_expense": 0.0,
+                "stock_based_compensation": 15.0,
+                "share_buybacks": 20.0,
+                "rsu_shares": 2.2,
+                "acquisition_shares_issued": 1.2,
+                "shares_repurchased": 1.4,
+                "share_price": 22.0,
+                "option_warrant_dilution_shares": 2.1,
+                "convertible_dilution_shares": 1.1,
+            },
+        ),
+        _statement(
+            2025,
+            {
+                "revenue": 1100.0,
+                "gross_profit": 495.0,
+                "operating_income": 165.0,
+                "pretax_income": 132.0,
+                "income_tax_expense": 26.4,
+                "net_income": 105.6,
+                "operating_cash_flow": 154.0,
+                "free_cash_flow": 99.0,
+                "capex": 55.0,
+                "depreciation_and_amortization": 33.0,
+                "weighted_average_shares_basic": 100.0,
+                "weighted_average_diluted_shares": 104.0,
+                "accounts_receivable": 132.0,
+                "inventory": 55.0,
+                "accounts_payable": 77.0,
+                "current_assets": 440.0,
+                "current_liabilities": 220.0,
+                "total_assets": 1210.0,
+                "cash_and_cash_equivalents": 110.0,
+                "total_debt": 165.0,
+                "interest_expense": 8.8,
+                "interest_income": 1.1,
+                "other_income_expense": 0.0,
+                "stock_based_compensation": 16.5,
+                "share_buybacks": 22.0,
+                "rsu_shares": 2.4,
+                "acquisition_shares_issued": 1.1,
+                "shares_repurchased": 1.3,
+                "share_price": 24.0,
+                "option_warrant_dilution_shares": 2.2,
+                "convertible_dilution_shares": 1.2,
+            },
+        ),
+    ]
+
+
 def _series_by_key(series: list[charts_service.CompanyChartsSeriesPayload], key: str) -> charts_service.CompanyChartsSeriesPayload:
     return next(item for item in series if item.key == key)
 
@@ -516,12 +629,12 @@ def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, stat
 def test_top_down_revenue_projection_uses_driver_stack_and_guidance_overlay():
     history = driver_model._normalize_statements(_standard_driver_regression_statements())
     drivers = driver_model._RevenueDrivers(
-        mode="top_down_market_share+guidance",
+        mode="top_down_proxy_decomposition+guidance",
         segment_basis=None,
-        pricing_growth=0.04,
-        market_growth=0.08,
-        market_share_change=0.03,
-        volume_growth=0.0,
+        pricing_growth_proxy=0.04,
+        residual_market_growth=0.08,
+        share_shift_proxy=0.03,
+        volume_growth_proxy=0.0,
         guidance_anchor=1300.0,
         backlog_floor_growth=None,
         capacity_growth_cap=None,
@@ -552,12 +665,12 @@ def test_top_down_revenue_projection_uses_driver_stack_and_guidance_overlay():
 
 def test_apply_revenue_overlays_respects_backlog_floor_then_capacity_cap():
     no_capacity = driver_model._RevenueDrivers(
-        mode="top_down_market_share+backlog",
+        mode="top_down_proxy_decomposition+backlog",
         segment_basis=None,
-        pricing_growth=0.0,
-        market_growth=0.0,
-        market_share_change=0.0,
-        volume_growth=0.0,
+        pricing_growth_proxy=0.0,
+        residual_market_growth=0.0,
+        share_shift_proxy=0.0,
+        volume_growth_proxy=0.0,
         guidance_anchor=None,
         backlog_floor_growth=0.24,
         capacity_growth_cap=None,
@@ -565,12 +678,12 @@ def test_apply_revenue_overlays_respects_backlog_floor_then_capacity_cap():
         segment_profiles=[],
     )
     with_capacity = driver_model._RevenueDrivers(
-        mode="top_down_market_share+backlog+capacity",
+        mode="top_down_proxy_decomposition+backlog+capacity",
         segment_basis=None,
-        pricing_growth=0.0,
-        market_growth=0.0,
-        market_share_change=0.0,
-        volume_growth=0.0,
+        pricing_growth_proxy=0.0,
+        residual_market_growth=0.0,
+        share_shift_proxy=0.0,
+        volume_growth_proxy=0.0,
         guidance_anchor=None,
         backlog_floor_growth=0.24,
         capacity_growth_cap=0.12,
@@ -1038,6 +1151,102 @@ def test_driver_forecast_bundle_uses_treasury_stock_method_for_option_dilution()
     assert "Treasury stock method" in dilution_assumption["detail"]
 
 
+def test_driver_forecast_bundle_uses_treasury_stock_method_for_warrant_dilution():
+    statements = [
+        _statement(
+            2023,
+            {
+                "revenue": 1000.0,
+                "operating_income": 150.0,
+                "pretax_income": 138.0,
+                "income_tax_expense": 28.0,
+                "net_income": 110.0,
+                "operating_cash_flow": 155.0,
+                "free_cash_flow": 115.0,
+                "capex": 40.0,
+                "depreciation_and_amortization": 22.0,
+                "weighted_average_shares_basic": 96.0,
+                "weighted_average_diluted_shares": 100.0,
+                "accounts_receivable": 120.0,
+                "inventory": 25.0,
+                "accounts_payable": 60.0,
+                "cash_and_cash_equivalents": 100.0,
+                "current_debt": 20.0,
+                "long_term_debt": 80.0,
+                "warrants_outstanding": 10.0,
+                "warrant_exercise_price": 15.0,
+                "share_price": 30.0,
+            },
+        ),
+        _statement(
+            2024,
+            {
+                "revenue": 1100.0,
+                "operating_income": 165.0,
+                "pretax_income": 151.0,
+                "income_tax_expense": 31.0,
+                "net_income": 120.0,
+                "operating_cash_flow": 168.0,
+                "free_cash_flow": 125.0,
+                "capex": 43.0,
+                "depreciation_and_amortization": 24.0,
+                "weighted_average_shares_basic": 97.0,
+                "weighted_average_diluted_shares": 101.0,
+                "accounts_receivable": 128.0,
+                "inventory": 26.0,
+                "accounts_payable": 63.0,
+                "cash_and_cash_equivalents": 108.0,
+                "current_debt": 18.0,
+                "long_term_debt": 76.0,
+                "warrants_outstanding": 10.0,
+                "warrant_exercise_price": 15.0,
+                "share_price": 30.0,
+            },
+        ),
+        _statement(
+            2025,
+            {
+                "revenue": 1210.0,
+                "operating_income": 182.0,
+                "pretax_income": 166.0,
+                "income_tax_expense": 34.0,
+                "net_income": 132.0,
+                "operating_cash_flow": 182.0,
+                "free_cash_flow": 136.0,
+                "capex": 46.0,
+                "depreciation_and_amortization": 26.0,
+                "weighted_average_shares_basic": 98.0,
+                "weighted_average_diluted_shares": 103.0,
+                "accounts_receivable": 136.0,
+                "inventory": 27.0,
+                "accounts_payable": 66.0,
+                "cash_and_cash_equivalents": 116.0,
+                "current_debt": 16.0,
+                "long_term_debt": 72.0,
+                "warrants_outstanding": 10.0,
+                "warrant_exercise_price": 15.0,
+                "share_price": 30.0,
+            },
+        ),
+    ]
+
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    share_bridge = bundle.scenarios["base"].share_bridge[0]
+    dilution_assumption = next(row for row in bundle.assumption_rows if row["key"] == "dilution")
+
+    assert share_bridge.uses_proxy_fallback is False
+    assert share_bridge.option_warrant_dilution_shares == pytest.approx(5.0, abs=1e-6)
+    assert share_bridge.diluted_shares == pytest.approx(103.0, abs=1e-6)
+    assert bundle.scenarios["base"].eps.values[0] == pytest.approx(
+        bundle.scenarios["base"].net_income.values[0] / share_bridge.diluted_shares,
+        abs=1e-6,
+    )
+    assert dilution_assumption["value"] == "98 basic + 5 TSM + 0 RSU / SBC + 0 converts"
+    assert "Treasury stock method using disclosed share price" in dilution_assumption["detail"]
+
+
 def test_driver_forecast_bundle_adds_direct_rsu_issuance_into_diluted_shares_and_eps():
     statements = [
         _statement(
@@ -1124,6 +1333,101 @@ def test_driver_forecast_bundle_adds_direct_rsu_issuance_into_diluted_shares_and
     assert bundle.scenarios["base"].eps.values[0] == pytest.approx(
         bundle.scenarios["base"].net_income.values[0] / share_bridge.diluted_shares,
         abs=1e-6,
+    )
+
+
+def test_driver_forecast_bundle_infers_rsu_issuance_from_residual_share_bridge():
+    statements = [
+        _statement(
+            2023,
+            {
+                "revenue": 1000.0,
+                "operating_income": 150.0,
+                "pretax_income": 138.0,
+                "income_tax_expense": 28.0,
+                "net_income": 110.0,
+                "operating_cash_flow": 155.0,
+                "free_cash_flow": 115.0,
+                "capex": 40.0,
+                "depreciation_and_amortization": 22.0,
+                "weighted_average_shares_basic": 96.0,
+                "weighted_average_diluted_shares": 96.0,
+                "accounts_receivable": 120.0,
+                "inventory": 25.0,
+                "accounts_payable": 60.0,
+                "cash_and_cash_equivalents": 100.0,
+                "current_debt": 20.0,
+                "long_term_debt": 80.0,
+                "shares_issued": 2.0,
+            },
+        ),
+        _statement(
+            2024,
+            {
+                "revenue": 1100.0,
+                "operating_income": 165.0,
+                "pretax_income": 151.0,
+                "income_tax_expense": 31.0,
+                "net_income": 120.0,
+                "operating_cash_flow": 168.0,
+                "free_cash_flow": 125.0,
+                "capex": 43.0,
+                "depreciation_and_amortization": 24.0,
+                "weighted_average_shares_basic": 97.0,
+                "weighted_average_diluted_shares": 97.0,
+                "accounts_receivable": 128.0,
+                "inventory": 26.0,
+                "accounts_payable": 63.0,
+                "cash_and_cash_equivalents": 108.0,
+                "current_debt": 18.0,
+                "long_term_debt": 76.0,
+                "shares_issued": 2.0,
+            },
+        ),
+        _statement(
+            2025,
+            {
+                "revenue": 1210.0,
+                "operating_income": 182.0,
+                "pretax_income": 166.0,
+                "income_tax_expense": 34.0,
+                "net_income": 132.0,
+                "operating_cash_flow": 182.0,
+                "free_cash_flow": 136.0,
+                "capex": 46.0,
+                "depreciation_and_amortization": 26.0,
+                "weighted_average_shares_basic": 98.0,
+                "weighted_average_diluted_shares": 98.0,
+                "accounts_receivable": 136.0,
+                "inventory": 27.0,
+                "accounts_payable": 66.0,
+                "cash_and_cash_equivalents": 116.0,
+                "current_debt": 16.0,
+                "long_term_debt": 72.0,
+                "shares_issued": 2.0,
+            },
+        ),
+    ]
+
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    share_bridge = bundle.scenarios["base"].share_bridge[0]
+    dilution_assumption = next(row for row in bundle.assumption_rows if row["key"] == "dilution")
+
+    assert share_bridge.uses_proxy_fallback is False
+    assert share_bridge.rsu_shares == pytest.approx(2.0, abs=1e-6)
+    assert share_bridge.basic_shares == pytest.approx(100.0, abs=1e-6)
+    assert share_bridge.diluted_shares == pytest.approx(100.0, abs=1e-6)
+    assert bundle.scenarios["base"].eps.values[0] == pytest.approx(
+        bundle.scenarios["base"].net_income.values[0] / share_bridge.diluted_shares,
+        abs=1e-6,
+    )
+    assert dilution_assumption["detail"] == (
+        "Starting basis: Basic weighted-average shares. Options and warrants: No option or warrant disclosure. "
+        "RSU / SBC issuance: Residual issued-share bridge after acquisition issuance. "
+        "Buybacks: No explicit repurchased-share disclosure. Acquisition issuance: No acquisition share issuance disclosure. "
+        "Convertibles: No convertible share disclosure."
     )
 
 
@@ -1219,6 +1523,102 @@ def test_driver_forecast_bundle_uses_if_converted_shares_when_convertible_is_dil
     )
     assert dilution_assumption["value"] == "98 basic + 0 TSM + 0 RSU / SBC + 3 converts"
     assert "Direct dilutive convertible shares" in dilution_assumption["detail"]
+
+
+def test_driver_forecast_bundle_uses_conversion_price_to_gate_if_converted_dilution():
+    statements = [
+        _statement(
+            2023,
+            {
+                "revenue": 1000.0,
+                "operating_income": 150.0,
+                "pretax_income": 138.0,
+                "income_tax_expense": 28.0,
+                "net_income": 110.0,
+                "operating_cash_flow": 155.0,
+                "free_cash_flow": 115.0,
+                "capex": 40.0,
+                "depreciation_and_amortization": 22.0,
+                "weighted_average_shares_basic": 96.0,
+                "weighted_average_diluted_shares": 99.0,
+                "accounts_receivable": 120.0,
+                "inventory": 25.0,
+                "accounts_payable": 60.0,
+                "cash_and_cash_equivalents": 100.0,
+                "current_debt": 20.0,
+                "long_term_debt": 80.0,
+                "convertible_dilution_shares": 4.0,
+                "convertible_conversion_price": 15.0,
+                "share_price": 30.0,
+            },
+        ),
+        _statement(
+            2024,
+            {
+                "revenue": 1100.0,
+                "operating_income": 165.0,
+                "pretax_income": 151.0,
+                "income_tax_expense": 31.0,
+                "net_income": 120.0,
+                "operating_cash_flow": 168.0,
+                "free_cash_flow": 125.0,
+                "capex": 43.0,
+                "depreciation_and_amortization": 24.0,
+                "weighted_average_shares_basic": 97.0,
+                "weighted_average_diluted_shares": 100.0,
+                "accounts_receivable": 128.0,
+                "inventory": 26.0,
+                "accounts_payable": 63.0,
+                "cash_and_cash_equivalents": 108.0,
+                "current_debt": 18.0,
+                "long_term_debt": 76.0,
+                "convertible_dilution_shares": 4.0,
+                "convertible_conversion_price": 15.0,
+                "share_price": 30.0,
+            },
+        ),
+        _statement(
+            2025,
+            {
+                "revenue": 1210.0,
+                "operating_income": 182.0,
+                "pretax_income": 166.0,
+                "income_tax_expense": 34.0,
+                "net_income": 132.0,
+                "operating_cash_flow": 182.0,
+                "free_cash_flow": 136.0,
+                "capex": 46.0,
+                "depreciation_and_amortization": 26.0,
+                "weighted_average_shares_basic": 98.0,
+                "weighted_average_diluted_shares": 102.0,
+                "accounts_receivable": 136.0,
+                "inventory": 27.0,
+                "accounts_payable": 66.0,
+                "cash_and_cash_equivalents": 116.0,
+                "current_debt": 16.0,
+                "long_term_debt": 72.0,
+                "convertible_dilution_shares": 4.0,
+                "convertible_conversion_price": 15.0,
+                "share_price": 30.0,
+            },
+        ),
+    ]
+
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    share_bridge = bundle.scenarios["base"].share_bridge[0]
+    dilution_assumption = next(row for row in bundle.assumption_rows if row["key"] == "dilution")
+
+    assert share_bridge.uses_proxy_fallback is False
+    assert share_bridge.convertible_dilution_shares == pytest.approx(98.0 * driver_model.CONVERT_DILUTION_CAP, abs=1e-6)
+    assert share_bridge.diluted_shares == pytest.approx(98.0 + (98.0 * driver_model.CONVERT_DILUTION_CAP), abs=1e-6)
+    assert bundle.scenarios["base"].eps.values[0] == pytest.approx(
+        bundle.scenarios["base"].net_income.values[0] / share_bridge.diluted_shares,
+        abs=1e-6,
+    )
+    assert dilution_assumption["value"] == "98 basic + 0 TSM + 0 RSU / SBC + 4 converts"
+    assert "If-converted shares using disclosed share price" in dilution_assumption["detail"]
 
 
 def test_driver_forecast_bundle_lets_buybacks_offset_rsu_dilution():
@@ -1317,6 +1717,99 @@ def test_driver_forecast_bundle_lets_buybacks_offset_rsu_dilution():
         "RSU / SBC issuance: Direct RSU or stock-award shares. Buybacks: Direct repurchased-share disclosure. "
         "Acquisition issuance: No acquisition share issuance disclosure. Convertibles: No convertible share disclosure."
     )
+
+
+def test_driver_forecast_bundle_translates_buyback_cash_into_retirement_shares():
+    statements = [
+        _statement(
+            2023,
+            {
+                "revenue": 1000.0,
+                "operating_income": 150.0,
+                "pretax_income": 138.0,
+                "income_tax_expense": 28.0,
+                "net_income": 110.0,
+                "operating_cash_flow": 155.0,
+                "free_cash_flow": 115.0,
+                "capex": 40.0,
+                "depreciation_and_amortization": 22.0,
+                "weighted_average_shares_basic": 96.0,
+                "weighted_average_diluted_shares": 96.0,
+                "accounts_receivable": 120.0,
+                "inventory": 25.0,
+                "accounts_payable": 60.0,
+                "cash_and_cash_equivalents": 100.0,
+                "current_debt": 20.0,
+                "long_term_debt": 80.0,
+                "share_buybacks": 40.0,
+                "share_price": 20.0,
+            },
+        ),
+        _statement(
+            2024,
+            {
+                "revenue": 1100.0,
+                "operating_income": 165.0,
+                "pretax_income": 151.0,
+                "income_tax_expense": 31.0,
+                "net_income": 120.0,
+                "operating_cash_flow": 168.0,
+                "free_cash_flow": 125.0,
+                "capex": 43.0,
+                "depreciation_and_amortization": 24.0,
+                "weighted_average_shares_basic": 97.0,
+                "weighted_average_diluted_shares": 97.0,
+                "accounts_receivable": 128.0,
+                "inventory": 26.0,
+                "accounts_payable": 63.0,
+                "cash_and_cash_equivalents": 108.0,
+                "current_debt": 18.0,
+                "long_term_debt": 76.0,
+                "share_buybacks": 40.0,
+                "share_price": 20.0,
+            },
+        ),
+        _statement(
+            2025,
+            {
+                "revenue": 1210.0,
+                "operating_income": 182.0,
+                "pretax_income": 166.0,
+                "income_tax_expense": 34.0,
+                "net_income": 132.0,
+                "operating_cash_flow": 182.0,
+                "free_cash_flow": 136.0,
+                "capex": 46.0,
+                "depreciation_and_amortization": 26.0,
+                "weighted_average_shares_basic": 98.0,
+                "weighted_average_diluted_shares": 98.0,
+                "accounts_receivable": 136.0,
+                "inventory": 27.0,
+                "accounts_payable": 66.0,
+                "cash_and_cash_equivalents": 116.0,
+                "current_debt": 16.0,
+                "long_term_debt": 72.0,
+                "share_buybacks": 40.0,
+                "share_price": 20.0,
+            },
+        ),
+    ]
+
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    share_bridge = bundle.scenarios["base"].share_bridge[0]
+    dilution_assumption = next(row for row in bundle.assumption_rows if row["key"] == "dilution")
+
+    assert share_bridge.uses_proxy_fallback is False
+    assert share_bridge.buyback_retirement_shares == pytest.approx(2.0, abs=1e-6)
+    assert share_bridge.basic_shares == pytest.approx(96.0, abs=1e-6)
+    assert share_bridge.diluted_shares == pytest.approx(96.0, abs=1e-6)
+    assert bundle.scenarios["base"].eps.values[0] == pytest.approx(
+        bundle.scenarios["base"].net_income.values[0] / share_bridge.diluted_shares,
+        abs=1e-6,
+    )
+    assert "Repurchase cash translated into shares using disclosed share price" in dilution_assumption["detail"]
 
 
 def test_driver_forecast_bundle_uses_proxy_fallback_when_disclosure_is_incomplete():
@@ -1663,22 +2156,34 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
     base_scenario, bridge = _assert_base_bridge_formulas(bundle, statements)
     calculation_rows = {row["key"]: row for row in bundle.calculation_rows}
 
-    assert calculation_rows["formula_revenue"]["value"] == driver_model.FORECAST_FORMULA_REVENUE
+    assert calculation_rows["formula_revenue"]["value"] == (
+        "Prior revenue x (1 + residual-demand effect + share/mix proxy effect + price proxy effect + price-volume cross term), "
+        "then apply the year-one guidance blend"
+    )
     assert calculation_rows["formula_margin"]["value"] == driver_model.FORECAST_FORMULA_MARGIN
     assert calculation_rows["formula_pretax"]["value"] == driver_model.FORECAST_FORMULA_PRETAX
     assert calculation_rows["formula_tax"]["value"] == driver_model.FORECAST_FORMULA_TAX
     assert calculation_rows["formula_reinvestment"]["value"] == driver_model.FORECAST_FORMULA_CAPEX
     assert calculation_rows["formula_ocf"]["value"] == driver_model.FORECAST_FORMULA_OCF
     assert calculation_rows["formula_fcf"]["value"] == driver_model.FORECAST_FORMULA_FCF
-    assert calculation_rows["formula_eps"]["value"] == driver_model.FORECAST_FORMULA_EPS
+    assert calculation_rows["formula_eps"]["value"] == (
+        "Net income / diluted shares, with basic shares rolled by proxy net dilution and diluted shares topped up by a latent dilution overlay"
+    )
+    assert calculation_rows["formula_revenue"]["value"] != "Prior revenue x (1 + price + market growth + share)"
+    assert calculation_rows["formula_eps"]["value"] != "Net income / diluted shares"
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_pretax"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_tax"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_reinvestment"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_ocf"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_fcf"]["detail"]
+    assert "Guidance blend active: 35% model 8.8% + 65% guided 9.1% toward $1200.00 = 9.0%." in calculation_rows["formula_revenue"]["detail"]
+    assert "residual-implied demand growth 8.6%" in calculation_rows["formula_revenue"]["detail"]
+    assert "share/mix proxy 0.0%" in calculation_rows["formula_revenue"]["detail"]
     assert calculation_rows["formula_eps"]["detail"] == (
-        f"Base case next-year EPS {driver_model._money(base_scenario.eps.values[0])} "
-        f"at {driver_model._pct(driver_model._safe_divide(base_scenario.operating_income.values[0], base_scenario.revenue.values[0]))} operating margin."
+        "FY2026E proxy fallback: starting basic 100 + proxy net change 0 = ending basic 100; "
+        "latent dilution overlay 0 from 0.0% reaches 100 diluted shares. "
+        "Proxy basis: Historical diluted-share growth with revenue-scaled SBC, buyback, acquisition, and convert proxies. "
+        f"EPS = {driver_model._money(base_scenario.net_income.values[0])} / 100 = {driver_model._money(base_scenario.eps.values[0])}."
     )
 
 
@@ -1730,6 +2235,125 @@ def test_build_company_charts_dashboard_response_preserves_exact_driver_formula_
     expected_formula_rows = [row for row in expected_bundle.calculation_rows if str(row.get("key", "")).startswith("formula_")]
 
     assert actual_formula_rows == expected_formula_rows
+    formula_items = {item.key: item for item in response.cards.forecast_calculations.items}
+    assert formula_items["formula_revenue"].value == (
+        "Prior revenue x (1 + residual-demand effect + share/mix proxy effect + price proxy effect + price-volume cross term), "
+        "then apply the year-one guidance blend"
+    )
+    assert formula_items["formula_revenue"].detail == (
+        "FY2026E effects: residual demand 6.9%, share/mix 0.0%, price proxy 1.7%, cross term 0.1%, raw growth 8.8%. "
+        "Driver seed decomposes realized growth into price proxy 1.9%, residual-implied demand growth 8.6%, and share/mix proxy 0.0%. "
+        "Guidance blend active: 35% model 8.8% + 65% guided 9.1% toward $1200.00 = 9.0%. "
+        "Final FY2026E growth 9.0% drives revenue to $1198.85."
+    )
+    assert formula_items["formula_eps"].value == (
+        "Net income / diluted shares, with basic shares rolled by proxy net dilution and diluted shares topped up by a latent dilution overlay"
+    )
+    assert formula_items["formula_eps"].detail == (
+        "FY2026E proxy fallback: starting basic 100 + proxy net change 0 = ending basic 100; "
+        "latent dilution overlay 0 from 0.0% reaches 100 diluted shares. "
+        "Proxy basis: Historical diluted-share growth with revenue-scaled SBC, buyback, acquisition, and convert proxies. "
+        "EPS = $95.65 / 100 = $0.96."
+    )
+
+
+def test_build_company_charts_dashboard_response_preserves_explicit_driver_formula_copy(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _explicit_dilution_driver_statements()
+    expected_bundle = driver_model.build_driver_forecast_bundle(statements, [])
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    assert expected_bundle is not None
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.cards.forecast_calculations is not None
+
+    actual_formula_rows = [
+        {"key": item.key, "label": item.label, "value": item.value, "detail": item.detail}
+        for item in response.cards.forecast_calculations.items
+        if item.key.startswith("formula_")
+    ]
+    expected_formula_rows = [row for row in expected_bundle.calculation_rows if str(row.get("key", "")).startswith("formula_")]
+
+    assert actual_formula_rows == expected_formula_rows
+    formula_items = {item.key: item for item in response.cards.forecast_calculations.items}
+    assert formula_items["formula_revenue"].value != "Prior revenue x (1 + price + market growth + share)"
+    assert formula_items["formula_eps"].value != "Net income / diluted shares"
+    assert formula_items["formula_eps"].value == (
+        "Net income / diluted shares, with basic shares = prior basic + RSU or SBC issuance + acquisition issuance - buybacks "
+        "and diluted shares = basic + options or warrants + convertibles"
+    )
+    assert formula_items["formula_eps"].detail == (
+        "FY2026E explicit bridge: starting basic 100 + RSU or SBC 2 + acquisitions 1 - buybacks 1 + options or warrants 2 + "
+        "convertibles 1 = 105 diluted shares. Starting basis: Basic weighted-average shares. "
+        "Options and warrants: Direct dilutive option or warrant shares. RSU or SBC issuance: Direct RSU or stock-award shares. "
+        "Buybacks: Direct repurchased-share disclosure. Acquisition issuance: Direct acquisition share issuance. "
+        "Convertibles: Direct dilutive convertible shares. EPS = $109.37 / 105 = $1.04."
+    )
+
+
+def test_driver_formula_copy_calls_out_backlog_floor_and_capacity_cap():
+    statements = _standard_driver_regression_statements()
+    latest_data = dict(statements[-1].data)
+    latest_data["order_backlog"] = 2200.0
+    latest_data["capacity_utilization"] = 98.0
+    statements[-1] = SimpleNamespace(
+        period_end=statements[-1].period_end,
+        filing_type=statements[-1].filing_type,
+        last_checked=statements[-1].last_checked,
+        data=latest_data,
+    )
+
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    formula_revenue = next(row for row in bundle.calculation_rows if row["key"] == "formula_revenue")
+    assert formula_revenue["value"] == (
+        "Prior revenue x (1 + residual-demand effect + share/mix proxy effect + price proxy effect + price-volume cross term), "
+        "then apply the year-one backlog floor and capacity cap"
+    )
+    assert formula_revenue["detail"] == (
+        "FY2026E effects: residual demand 6.9%, share/mix 0.0%, price proxy 1.7%, cross term 0.1%, raw growth 8.8%. "
+        "Driver seed decomposes realized growth into price proxy 1.9%, residual-implied demand growth 8.6%, and share/mix proxy 0.0%. "
+        "Backlog floor active: max(8.8%, 20.0%) = 20.0%. "
+        "Capacity cap active at 98.0% utilization: min(20.0%, 3.7%) = 3.7%. "
+        "Final FY2026E growth 3.7% drives revenue to $1141.07."
+    )
+
+
+def test_driver_formula_copy_calls_out_explicit_dilution_bridge():
+    bundle = driver_model.build_driver_forecast_bundle(_explicit_dilution_driver_statements(), [])
+
+    assert bundle is not None
+    formula_eps = next(row for row in bundle.calculation_rows if row["key"] == "formula_eps")
+    assert formula_eps["value"] == (
+        "Net income / diluted shares, with basic shares = prior basic + RSU or SBC issuance + acquisition issuance - buybacks "
+        "and diluted shares = basic + options or warrants + convertibles"
+    )
+    assert formula_eps["detail"] == (
+        "FY2026E explicit bridge: starting basic 100 + RSU or SBC 2 + acquisitions 1 - buybacks 1 + options or warrants 2 + "
+        "convertibles 1 = 105 diluted shares. Starting basis: Basic weighted-average shares. "
+        "Options and warrants: Direct dilutive option or warrant shares. RSU or SBC issuance: Direct RSU or stock-award shares. "
+        "Buybacks: Direct repurchased-share disclosure. Acquisition issuance: Direct acquisition share issuance. "
+        "Convertibles: Direct dilutive convertible shares. EPS = $109.37 / 105 = $1.04."
+    )
 
 
 def test_build_company_charts_dashboard_response_falls_back_when_driver_inputs_are_too_thin(monkeypatch):
