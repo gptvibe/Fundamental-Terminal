@@ -2,8 +2,9 @@
 
 ## Summary
 
-The charts dashboard now prefers a driver-based "three-statement-lite" forecast engine for `/company/[ticker]/charts`.
-When statement coverage is too thin, it explicitly falls back to the older guarded heuristic model instead of fabricating driver inputs.
+The charts dashboard now prefers a driver-based integrated forecast engine for `/company/[ticker]/charts`.
+The payload contract is unchanged: the endpoint still emits base / bull / bear scenario series plus the same assumptions and calculations cards.
+When statement coverage is too thin, it still falls back to the older guarded heuristic model instead of fabricating driver inputs.
 
 ## Migration Path
 
@@ -24,12 +25,38 @@ When statement coverage is too thin, it explicitly falls back to the older guard
   When segment history exists, each segment is forecast separately and then summed back to company revenue before overlays.
 - Operating income:
   `EBIT = Revenue - variable costs - semi-variable costs - fixed costs`
+- Pretax bridge:
+  `Pretax income = EBIT - interest expense + interest income + other income/expense`
+- Taxes:
+  `Taxes = Pretax income * effective tax rate`
+- Net income:
+  `Net income = Pretax income - taxes`
 - Reinvestment:
-  `Incremental reinvestment = Delta revenue / sales-to-capital + Delta working capital`
+  `Incremental reinvestment = Delta revenue / sales-to-capital + Delta operating working capital`
+- Operating working capital:
+  `Operating NWC = Accounts receivable + Inventory - Accounts payable - Deferred revenue - Accrued operating liabilities`
+- Receivables driver:
+  `Accounts receivable = Revenue * DSO / 365`
+- Inventory driver:
+  `Inventory = Cost of revenue * DIO / 365`
+- Payables driver:
+  `Accounts payable = Cost of revenue * DPO / 365`
+- Deferred revenue / contract liabilities:
+  `Deferred revenue = Revenue * deferred-revenue days / 365`
+- Accrued operating liabilities:
+  `Accrued operating liabilities = Cash operating cost * accrued-liability days / 365`
+- Operating cash flow:
+  `OCF = Net income + D&A + SBC - Delta operating working capital`
 - Free cash flow:
-  `FCF = Net income + D&A + SBC - Delta working capital - Capex`
+  `FCF = OCF - Capex`
+- Cash and debt support:
+  `Ending cash / debt = Opening cash / debt adjusted for free cash flow, target cash buffer, and debt paydown or draw`
+- Interest support:
+  `Interest expense = Average debt * debt cost`
+  `Interest income = Average cash * cash yield`
 - Diluted shares:
-  `Diluted shares(t) = Diluted shares(t-1) * (1 + SBC dilution + acquisition / convert dilution - buyback retirement)`
+  `Basic shares(t) = Basic shares(t-1) + RSU / SBC shares + acquisition shares issued - buyback retirement shares`
+  `Diluted shares(t) = Basic shares(t) + treasury-stock options / warrants + if-converted shares`
 - EPS:
   `EPS = Net income / diluted shares`
 
@@ -37,23 +64,58 @@ When statement coverage is too thin, it explicitly falls back to the older guard
 
 - Price, market growth, market share, and segment growth are inferred from historical filing trends.
 - Guidance uses the latest observable earnings-release midpoint at the selected `as_of`.
-- Working-capital days come from `(current assets - current liabilities) / revenue * 365`.
+- DSO comes from `accounts_receivable / revenue * 365`.
+- DIO and DPO come from `inventory / cost_of_revenue * 365` and `accounts_payable / cost_of_revenue * 365` when disclosure exists; cost of revenue is taken directly when filed and proxied conservatively when not.
+- Deferred-revenue days and accrued-operating-liability days are built only when those balances are disclosed.
+- Cash, marketable securities, short-term investments, short-term debt, current maturities, and other financing items are excluded from operating working capital.
 - Sales-to-capital comes from `revenue / total assets`.
-- SBC, buybacks, acquisitions, and converts feed the share-count bridge when disclosed.
+- Opening cash uses disclosed `cash_and_short_term_investments` or `cash_and_cash_equivalents` when available.
+- Opening debt uses disclosed `total_debt`, or `current_debt + long_term_debt` as fallback.
+- Debt cost uses historical `interest_expense / average debt` when disclosed.
+- Cash yield uses historical `interest_income / average cash` when disclosed.
+- Other income/expense uses direct disclosure first, then a residual bridge from pretax income if available.
+- Effective tax rate uses historical `income_tax_expense / pretax income` when disclosed.
+- The diluted-share bridge starts from disclosed basic weighted-average shares when available, then layers on treasury-stock-method option and warrant dilution, disclosed RSU or stock-award issuance, explicit buyback retirement, acquisition share issuance, and if-converted shares for dilutive converts.
+- If the filings do not disclose enough share-bridge components to support that build, the engine falls back to the older historical-share-drift proxy and labels that fallback explicitly in the assumptions card.
+
+## Fallback Behavior
+
+The driver engine still prefers explicit disclosure, but it uses conservative shortcuts when filings are incomplete:
+
+- If cash balances are missing, opening cash falls back to a target cash ratio derived from historical cash-to-revenue, or a conservative default when no cash history exists.
+- If debt balances are missing, opening debt starts at zero until forecast free cash flow would otherwise push cash below the target buffer, at which point the model draws debt.
+- If receivables are missing, DSO falls back to a conservative default rather than using total current assets.
+- If inventory is missing, the inventory schedule stays at zero unless filings disclose inventory explicitly.
+- If payables are missing, DPO falls back to a conservative payable-days assumption rather than using total current liabilities.
+- If deferred revenue or accrued operating liabilities are missing, those liability schedules default to zero instead of backfilling financing-heavy current-liability buckets.
+- If historical debt cost is missing, new or existing debt accrues at a default debt rate rather than a company-specific disclosed rate.
+- If historical cash yield is missing, surplus cash earns a default cash yield.
+- If other income/expense is not directly disclosed, the engine back-solves it from the historical pretax bridge when possible; otherwise it assumes zero.
+- If historical tax data is missing, taxes default to a conservative effective tax rate, with capped tax benefits on loss-making forecast years.
+- If explicit share-bridge disclosures are missing, diluted shares fall back to historical diluted-share drift with revenue-scaled SBC, buyback, acquisition, and convert proxies, and that fallback is called out directly in the assumptions output.
+- If annual history is too thin to support explicit revenue, cost, reinvestment, and dilution schedules, the entire driver engine is bypassed and the older heuristic forecast remains the fallback.
+
+These shortcuts are intentionally narrow: they preserve a full EBIT -> EBT -> Net income -> OCF -> FCF bridge without reintroducing the old `net_income = EBIT * conversion` shortcut.
+They also preserve working-capital release in declining revenue scenarios because the operating working-capital balances are explicitly re-scaled down with the lower revenue and cost base.
 
 ## No-Lookahead Rule
 
 - Financial statements are filtered with the existing `as_of` behavior.
 - Earnings-model diagnostics are filtered by row materialization time.
 - Earnings-release guidance is filtered by filing acceptance time, then filing date, then reported period timing as fallback.
+- Operating working-capital schedules are built only from statement balances observable at the selected `as_of`.
+- Cash, debt, interest, other-income, and tax schedules are built only from statements observable at the selected `as_of`.
+- Basic-share, option, warrant, RSU, repurchase, acquisition-share, and convertible inputs are built only from disclosures observable at the selected `as_of`.
 - Historical charts snapshots must never use releases or derived model rows that were not observable at the requested `as_of`.
 
 ## Forecast Stability Notes
 
 - The charts payload now labels the diagnostic as `Forecast Stability`, not `Forecast Reliability`.
-- Stability is anchored to point-in-time walk-forward revenue backtests across 1Y, 2Y, and 3Y horizons.
+- Stability is anchored to point-in-time walk-forward backtests for revenue, EBIT, EPS, and FCF across 1Y, 2Y, and 3Y horizons.
 - Horizon errors are combined as a weighted APE:
   `Weighted error = 50% * 1Y + 30% * 2Y + 20% * 3Y`
+- Metric errors are then combined into the empirical anchor with explicit weights:
+  `Composite error = 50% * Revenue + 20% * EBIT + 15% * EPS + 15% * FCF`
 - Sector templates do not replace company evidence; they only define conservative error buckets for labeling the realized backtest as `tight`, `moderate`, `wide`, or `very_wide`.
 - The final score starts from the empirical error bucket, then subtracts explicit penalties for:
   - short history
@@ -63,4 +125,5 @@ When statement coverage is too thin, it explicitly falls back to the older guard
   - accounting restatements
   - unstable diluted share count
   - wide bull/base/bear scenario dispersion
+- Missing metric backtests do not get silently zero-filled; the composite anchor reweights only across the metrics that have point-in-time realized samples at that horizon, and the metric-specific sample counts remain visible in diagnostics.
 - Missing parser-confidence data is treated as a penalty, never as a boost.

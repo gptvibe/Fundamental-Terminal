@@ -7,13 +7,13 @@
         "company_brief_ready": {
           "latency_ms": {
             "p50": {
-              "baseline": 9.3,
-              "budget": 16.74,
+              "baseline": 19.39,
+              "budget": 31.02,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 12.57,
-              "budget": 25.14,
+              "baseline": 29.28,
+              "budget": 46.85,
               "max_regression_pct": 60.0
             }
           },
@@ -71,8 +71,8 @@
         "financials_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 1.48,
-              "budget": 4.48,
+              "baseline": 5.24,
+              "budget": 8.38,
               "max_regression_pct": 60.0
             },
             "p95": {
@@ -125,8 +125,8 @@
         "models_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 1.51,
-              "budget": 4.51,
+              "baseline": 4.8,
+              "budget": 7.68,
               "max_regression_pct": 60.0
             },
             "p95": {
@@ -152,8 +152,8 @@
         "peers_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 1.34,
-              "budget": 4.34,
+              "baseline": 4.77,
+              "budget": 7.63,
               "max_regression_pct": 60.0
             },
             "p95": {

@@ -1,24 +1,30 @@
 {
   "baseline_file": "scripts/performance_regression_baseline.json",
   "evaluation": {
-    "failure_count": 2,
+    "failure_count": 3,
     "failures": [
       {
         "case": "financials_payload",
-        "message": "observed 4.65, explicit budget 4.48",
+        "message": "observed 5.24, explicit budget 4.48",
         "metric": "latency_ms.p50",
         "suite": "hot_endpoints"
       },
       {
-        "case": "company_brief_ready",
-        "message": "observed 18.98, explicit budget 16.74",
+        "case": "models_payload",
+        "message": "observed 4.80, explicit budget 4.51",
         "metric": "latency_ms.p50",
-        "suite": "company_brief_concurrency"
+        "suite": "hot_endpoints"
+      },
+      {
+        "case": "peers_payload",
+        "message": "observed 4.77, explicit budget 4.34",
+        "metric": "latency_ms.p50",
+        "suite": "hot_endpoints"
       }
     ],
     "status": "regression"
   },
-  "generated_at": "2026-04-15T01:29:45.147955+00:00",
+  "generated_at": "2026-04-15T01:32:18.332601+00:00",
   "schema_version": "performance_regression_summary_v1",
   "suites": [
     {
@@ -29,18 +35,18 @@
       "results": [
         {
           "_raw_durations_ms": [
-            3.8406,
-            2.2746,
-            2.2986,
-            2.3953,
-            2.193,
-            2.3734,
-            3.1499,
-            3.059,
-            2.9485,
-            3.993,
-            2.9198,
-            2.8603
+            3.1016,
+            3.4185,
+            2.6541,
+            2.947,
+            3.9715,
+            2.8053,
+            3.1859,
+            4.1517,
+            5.8353,
+            6.2909,
+            4.0198,
+            2.8271
           ],
           "_raw_payload_sizes": [
             766,
@@ -71,11 +77,11 @@
             200
           ],
           "latency_ms": {
-            "avg": 2.86,
-            "max": 3.99,
-            "min": 2.19,
-            "p50": 2.89,
-            "p95": 3.84
+            "avg": 3.77,
+            "max": 6.29,
+            "min": 2.65,
+            "p50": 3.3,
+            "p95": 5.84
           },
           "name": "company_search",
           "path": "/api/companies/search?query=AAPL&refresh=false",
@@ -91,18 +97,18 @@
         },
         {
           "_raw_durations_ms": [
-            4.6969,
-            5.3763,
-            5.7495,
-            5.5514,
-            6.8116,
-            4.6004,
-            4.5236,
-            4.2435,
-            4.7415,
-            4.0063,
-            4.2398,
-            4.1421
+            5.5772,
+            5.1195,
+            5.4774,
+            5.3586,
+            5.3905,
+            5.398,
+            3.7858,
+            5.7401,
+            4.4804,
+            4.8403,
+            4.7205,
+            4.7979
           ],
           "_raw_payload_sizes": [
             4040,
@@ -133,11 +139,11 @@
             200
           ],
           "latency_ms": {
-            "avg": 4.89,
-            "max": 6.81,
-            "min": 4.01,
-            "p50": 4.65,
-            "p95": 5.75
+            "avg": 5.06,
+            "max": 5.74,
+            "min": 3.79,
+            "p50": 5.24,
+            "p95": 5.58
           },
           "name": "financials_payload",
           "path": "/api/companies/AAPL/financials",
@@ -153,18 +159,18 @@
         },
         {
           "_raw_durations_ms": [
-            4.7063,
-            3.881,
-            4.0959,
-            4.1831,
-            4.0903,
-            3.6492,
-            3.8501,
-            3.7608,
-            3.9895,
-            3.8784,
-            3.6375,
-            4.1374
+            5.2052,
+            5.295,
+            4.245,
+            5.2954,
+            4.7825,
+            4.825,
+            4.7144,
+            3.9752,
+            5.8077,
+            3.9478,
+            5.0686,
+            4.7823
           ],
           "_raw_payload_sizes": [
             5135,
@@ -195,11 +201,11 @@
             200
           ],
           "latency_ms": {
-            "avg": 3.99,
-            "max": 4.71,
-            "min": 3.64,
-            "p50": 3.94,
-            "p95": 4.18
+            "avg": 4.83,
+            "max": 5.81,
+            "min": 3.95,
+            "p50": 4.8,
+            "p95": 5.3
           },
           "name": "models_payload",
           "path": "/api/companies/AAPL/models?model=ratios%2Cdupont%2Cdcf%2Creverse_dcf%2Croic%2Ccapital_allocation",
@@ -215,18 +221,18 @@
         },
         {
           "_raw_durations_ms": [
-            4.2081,
-            4.272,
-            4.0204,
-            3.5965,
-            3.8219,
-            3.4294,
-            4.0059,
-            3.6498,
-            3.9303,
-            3.5345,
-            4.2739,
-            3.6685
+            5.0711,
+            3.6282,
+            5.1266,
+            4.3423,
+            4.3737,
+            4.7862,
+            4.1644,
+            5.0361,
+            4.1613,
+            5.6924,
+            5.2964,
+            4.7579
           ],
           "_raw_payload_sizes": [
             3631,
@@ -257,11 +263,11 @@
             200
           ],
           "latency_ms": {
-            "avg": 3.87,
-            "max": 4.27,
-            "min": 3.43,
-            "p50": 3.88,
-            "p95": 4.27
+            "avg": 4.7,
+            "max": 5.69,
+            "min": 3.63,
+            "p50": 4.77,
+            "p95": 5.3
           },
           "name": "peers_payload",
           "path": "/api/companies/AAPL/peers",
@@ -277,18 +283,18 @@
         },
         {
           "_raw_durations_ms": [
-            1.029,
-            0.9558,
-            0.8665,
-            0.8132,
-            1.0311,
-            1.2351,
-            0.9867,
-            0.9462,
-            0.8736,
-            0.8753,
-            0.8449,
-            0.8895
+            0.9856,
+            1.0364,
+            0.9314,
+            1.023,
+            1.4666,
+            1.3497,
+            1.0798,
+            1.0441,
+            1.136,
+            1.096,
+            0.9304,
+            2.1891
           ],
           "_raw_payload_sizes": [
             3615,
@@ -319,11 +325,11 @@
             200
           ],
           "latency_ms": {
-            "avg": 0.95,
-            "max": 1.24,
-            "min": 0.81,
-            "p50": 0.92,
-            "p95": 1.03
+            "avg": 1.19,
+            "max": 2.19,
+            "min": 0.93,
+            "p50": 1.06,
+            "p95": 1.47
           },
           "name": "metrics_timeseries_payload",
           "path": "/api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=12",
@@ -351,30 +357,30 @@
       "results": [
         {
           "_raw_durations_ms": [
-            15.6431,
-            16.0985,
-            21.4296,
-            20.7083,
-            22.8485,
-            21.6852,
-            16.9385,
-            16.1036,
-            21.9321,
-            18.9097,
-            16.9594,
-            14.8529,
-            17.8971,
-            17.4596,
-            19.0559,
-            22.6516,
-            23.0876,
-            20.0866,
-            22.5426,
-            15.2886,
-            28.0755,
-            19.627,
-            15.4479,
-            16.0946
+            12.2998,
+            21.8878,
+            21.0549,
+            19.8008,
+            21.9249,
+            16.4377,
+            20.3909,
+            21.2012,
+            27.0528,
+            21.3432,
+            20.2209,
+            16.7651,
+            24.0387,
+            18.8094,
+            19.4099,
+            17.4478,
+            30.3236,
+            22.6737,
+            18.7069,
+            12.0247,
+            20.2195,
+            18.174,
+            21.0756,
+            17.969
           ],
           "_raw_payload_sizes": [
             10640,
@@ -429,11 +435,11 @@
             200
           ],
           "latency_ms": {
-            "avg": 19.23,
-            "max": 28.08,
-            "min": 14.85,
-            "p50": 18.98,
-            "p95": 23.09
+            "avg": 20.05,
+            "max": 30.32,
+            "min": 12.02,
+            "p50": 20.22,
+            "p95": 27.05
           },
           "name": "company_brief_ready",
           "path": "/api/companies/AAPL/brief",

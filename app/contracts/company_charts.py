@@ -65,6 +65,10 @@ class CompanyChartsForecastDiagnosticsPayload(BaseModel):
     historical_backtest_error_band: str | None = None
     backtest_weighted_error: Number = None
     backtest_horizon_errors: dict[str, Number] = Field(default_factory=dict)
+    backtest_metric_weights: dict[str, Number] = Field(default_factory=dict)
+    backtest_metric_errors: dict[str, Number] = Field(default_factory=dict)
+    backtest_metric_horizon_errors: dict[str, dict[str, Number]] = Field(default_factory=dict)
+    backtest_metric_sample_sizes: dict[str, int] = Field(default_factory=dict)
     components: list[CompanyChartsScoreComponentPayload] = Field(default_factory=list)
 
 
@@ -183,13 +187,13 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     cards: CompanyChartsCardsPayload = Field(default_factory=CompanyChartsCardsPayload)
     forecast_methodology: CompanyChartsMethodologyPayload = Field(
         default_factory=lambda: CompanyChartsMethodologyPayload(
-            version="company_charts_dashboard_v6",
+            version="company_charts_dashboard_v7",
             label="Deterministic internal projection",
             summary="Forecasts are generated from persisted historical official inputs with guarded trend and margin rules.",
             disclaimer="Forecast values are projections derived in-house from historical official data and are not reported results or analyst consensus.",
         )
     )
     forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)
-    payload_version: str = "company_charts_dashboard_v6"
+    payload_version: str = "company_charts_dashboard_v7"
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)

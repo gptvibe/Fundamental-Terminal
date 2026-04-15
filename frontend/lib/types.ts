@@ -2586,6 +2586,10 @@ export interface CompanyChartsForecastDiagnosticsPayload {
   historical_backtest_error_band: string | null;
   backtest_weighted_error: number | null;
   backtest_horizon_errors: Record<string, number | null>;
+  backtest_metric_weights: Record<string, number | null>;
+  backtest_metric_errors: Record<string, number | null>;
+  backtest_metric_horizon_errors: Record<string, Record<string, number | null>>;
+  backtest_metric_sample_sizes: Record<string, number>;
   components: CompanyChartsScoreComponentPayload[];
 }
 

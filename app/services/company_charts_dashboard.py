@@ -44,8 +44,8 @@ from app.services.company_charts_driver_model import build_driver_forecast_bundl
 from app.services.refresh_state import mark_dataset_checked
 
 
-CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v6"
-CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v6"
+CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v7"
+CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v7"
 ANNUAL_FILING_TYPES = {"10-K", "20-F", "40-F"}
 FORECAST_STABILITY_MIN_SCORE = 20
 FORECAST_STABILITY_MAX_SCORE = 90
@@ -59,6 +59,18 @@ FORECAST_STABILITY_MISSING_QUALITY_SIGNAL_PENALTY = 6
 FORECAST_STABILITY_LOW_QUALITY_PENALTY = 4
 FORECAST_STABILITY_BACKTEST_HORIZONS = (1, 2, 3)
 FORECAST_STABILITY_BACKTEST_WEIGHTS = {1: 0.5, 2: 0.3, 3: 0.2}
+FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS = {
+    "revenue": 0.5,
+    "operating_income": 0.2,
+    "eps": 0.15,
+    "free_cash_flow": 0.15,
+}
+FORECAST_STABILITY_BACKTEST_METRIC_LABELS = {
+    "revenue": "Revenue",
+    "operating_income": "EBIT",
+    "eps": "EPS",
+    "free_cash_flow": "FCF",
+}
 FORECAST_STABILITY_VOLATILITY_BANDS = (
     (0.08, "stable"),
     (0.18, "moderate"),
@@ -244,7 +256,7 @@ def build_company_charts_dashboard_response(
             thesis=thesis,
             unavailable_notes=[
                 "Forecast values are dashed or muted and never presented as reported results.",
-                "Forecast stability is calibrated from point-in-time walk-forward errors and explicit risk penalties, not a probability or confidence interval.",
+                "Forecast stability is calibrated from point-in-time revenue, EBIT, EPS, and FCF walk-forward errors plus explicit risk penalties, not a probability or confidence interval.",
                 "Value stays explicitly unavailable until a trustworthy valuation input set exists.",
             ],
             freshness_badges=[
@@ -358,7 +370,7 @@ def _build_forecast_state(
                 if hist_3y is not None and exp_1y is not None
                 else "Historical official filings are normalized first, forecast paths stay clearly labeled, and the driver engine separates assumptions from calculations for auditability."
             ),
-            "source_badges": ["Official filings", "Driver-based forecast v1", "Base / bull / bear scenarios", "Empirical stability overlay"],
+            "source_badges": ["Official filings", "Driver-based integrated forecast", "Base / bull / bear scenarios", "Empirical stability overlay"],
             "revenue_card": CompanyChartsCardPayload(
                 key="revenue",
                 title="Revenue",
@@ -415,10 +427,10 @@ def _build_forecast_state(
             ),
             "assumptions_card": CompanyChartsAssumptionsCardPayload(items=_rows_to_assumption_items(driver_bundle.assumption_rows)),
             "calculations_card": CompanyChartsAssumptionsCardPayload(key="forecast_calculations", title="Forecast Calculations", items=_rows_to_assumption_items(driver_bundle.calculation_rows + driver_bundle.sensitivity_rows)),
-            "profit_subtitle": "Explicit cost schedules drive the base case.",
-            "cash_subtitle": "Reinvestment links growth to cash needs.",
-            "methodology_label": "Driver-based three-statement-lite forecast",
-            "methodology_summary": "Revenue is modeled from price, volume, market growth, market share, segment mix, guidance, and backlog or capacity overlays when available. Margins flow from explicit variable, semi-variable, and fixed cost schedules; reinvestment links growth to working capital, capex, and sales-to-capital; EPS layers in SBC, buybacks, acquisition dilution, and convert dilution where disclosed. The older guarded heuristic path remains the fallback when driver coverage is too thin.",
+            "profit_subtitle": "Explicit cost and below-the-line schedules drive the base case.",
+            "cash_subtitle": "Operating working-capital schedules reconcile balance-sheet movement into cash flow.",
+            "methodology_label": "Driver-based integrated forecast",
+            "methodology_summary": "Revenue is modeled from price, volume, market growth, market share, segment mix, guidance, and backlog or capacity overlays when available. EBIT flows from explicit variable, semi-variable, and fixed cost schedules; operating working capital is forecast through receivables, inventory, payables, deferred revenue, and accrued operating-liability days while excluding cash and financing items; pretax income then bridges through debt-funded interest expense, cash yield, and other income or expense; taxes, operating cash flow, free cash flow, and diluted EPS are layered on top with disclosed cash, debt, SBC, buybacks, acquisition dilution, and convert dilution where available. Forecast Stability is then calibrated against point-in-time walk-forward backtests for revenue, EBIT, EPS, and FCF before conservative penalties are applied. When disclosure is sparse, the engine uses conservative component-level fallbacks before dropping all the way back to the older guarded heuristic path.",
             "methodology_disclaimer": "Scenario outputs are internally derived from official inputs and remain explicitly labeled as forecast rather than reported results or analyst consensus.",
             "methodology_heuristic": False,
         }
@@ -442,7 +454,7 @@ def _build_forecast_state(
         "thesis": (
             f"{company_name} reported {_pct(hist_3y)} 3Y revenue CAGR; the base-case projection implies {_pct(exp_1y)} next-year growth with heuristic guardrails."
             if hist_3y is not None and exp_1y is not None
-                else "Historical official filings are normalized first, projected values remain explicitly labeled as forecast, and forecast stability remains guarded when empirical history is thin."
+                else "Historical official filings are normalized first, projected values remain explicitly labeled as forecast, and forecast stability remains guarded when multi-metric empirical history is thin."
             ),
         "source_badges": ["Official filings", "Deterministic forecast v3", "Empirical stability overlay", "Benchmark hidden unless trustworthy"],
         "revenue_card": CompanyChartsCardPayload(key="revenue", title="Revenue", subtitle="Reported history with guarded projection", metric_label="Revenue", unit_label="USD", empty_state="Reported revenue history is unavailable." if not revenue_actual else None, series=[_series("revenue_actual", "Reported", "usd", "line", "actual", "solid", revenue_actual), _series("revenue_forecast", "Forecast", "usd", "line", "forecast", "dashed", revenue_forecast)], highlights=[item for item in [f"Hist 3Y CAGR {_pct(hist_3y)}" if hist_3y is not None else None, f"Base-case next year {_pct(exp_1y)}" if exp_1y is not None else None] if item]),
@@ -465,8 +477,8 @@ def _build_forecast_state(
         "profit_subtitle": "Margin-based projections with guardrails",
         "cash_subtitle": "Cash generation stays visually distinct from projections",
         "methodology_label": "Deterministic projection with empirical stability overlay",
-        "methodology_summary": "Annual historical official filings are normalized into a deterministic three-year projection, then paired with a point-in-time walk-forward stability score calibrated to realized forecast error bands and explicit penalties for cyclicality, structural breaks, M&A, restatements, and share-count instability.",
-        "methodology_disclaimer": "Forecast stability is a conservative communication aid grounded in historical walk-forward error, not a probability, prediction interval, or statistical confidence measure. Forecast values remain projections rather than reported results or analyst consensus.",
+        "methodology_summary": "Annual historical official filings are normalized into a deterministic three-year projection, then paired with a point-in-time walk-forward stability score calibrated to realized revenue, EBIT, EPS, and FCF error bands plus explicit penalties for cyclicality, structural breaks, M&A, restatements, and share-count instability.",
+        "methodology_disclaimer": "Forecast stability is a conservative communication aid grounded in historical multi-metric walk-forward error, not a probability, prediction interval, or statistical confidence measure. Forecast values remain projections rather than reported results or analyst consensus.",
         "methodology_heuristic": True,
     }
 
@@ -913,7 +925,7 @@ def _forecast_stability_profile(
     )
     volatility_band = _growth_volatility_band(average_absolute_growth)
     sector_template = _forecast_stability_sector_template(company)
-    backtest = _walk_forward_revenue_backtest(session, company, statements, earnings_releases)
+    backtest = _walk_forward_forecast_backtest(session, company, statements, earnings_releases)
 
     missing_inputs: list[str] = []
     missing_data_penalty = 0
@@ -965,11 +977,14 @@ def _forecast_stability_profile(
     components = [
         CompanyChartsScoreComponentPayload(
             key="backtest_error",
-            label="Historical backtest",
+            label="Historical backtests",
             value=_round(backtest["weighted_error"], 4),
             display_value=_backtest_display(backtest["weighted_error"], backtest["error_band"], backtest["sample_size"]),
             impact=int(round(empirical_score - FORECAST_STABILITY_BASE_SCORE)),
-            detail="Point-in-time walk-forward revenue errors anchor the stability score before risk penalties are applied.",
+            detail=(
+                "Point-in-time walk-forward revenue, EBIT, EPS, and FCF errors anchor the stability score before risk penalties are applied. "
+                f"Metric weights: {_metric_weight_display(backtest['metric_weights'])}."
+            ),
         ),
         CompanyChartsScoreComponentPayload(
             key="history_depth",
@@ -1053,6 +1068,7 @@ def _forecast_stability_profile(
             backtest["sample_size"],
             backtest["weighted_error"],
             backtest["error_band"],
+            backtest["metric_weights"],
             guidance_usage,
             scenario_dispersion,
         ),
@@ -1070,12 +1086,19 @@ def _forecast_stability_profile(
         historical_backtest_error_band=backtest["error_band"],
         backtest_weighted_error=_round(backtest["weighted_error"], 4),
         backtest_horizon_errors={str(key): _round(value, 4) for key, value in backtest["horizon_errors"].items()},
+        backtest_metric_weights={key: _round(value, 4) for key, value in backtest["metric_weights"].items()},
+        backtest_metric_errors={key: _round(value, 4) for key, value in backtest["metric_errors"].items()},
+        backtest_metric_horizon_errors={
+            key: {str(horizon): _round(value, 4) for horizon, value in horizon_errors.items()}
+            for key, horizon_errors in backtest["metric_horizon_errors"].items()
+        },
+        backtest_metric_sample_sizes={key: int(value) for key, value in backtest["metric_sample_sizes"].items()},
         components=components,
     )
 
 
 def _empirical_stability_score(weighted_error: float | None, sample_size: int, sector_template: dict[str, Any]) -> int:
-    if weighted_error is None or sample_size <= 0:
+    if weighted_error is None or sample_size < len(FORECAST_STABILITY_BACKTEST_HORIZONS):
         return FORECAST_STABILITY_BASE_SCORE
     tight = float(sector_template["tight"])
     moderate = float(sector_template["moderate"])
@@ -1089,20 +1112,27 @@ def _empirical_stability_score(weighted_error: float | None, sample_size: int, s
     return 46
 
 
-def _walk_forward_revenue_backtest(
+def _walk_forward_forecast_backtest(
     session: Session,
     company: Company,
     statements: list[Any],
     earnings_releases: list[Any],
 ) -> dict[str, Any]:
-    horizon_errors: dict[int, list[float]] = {horizon: [] for horizon in FORECAST_STABILITY_BACKTEST_HORIZONS}
-    revenue_by_year = {
-        statement.period_end.year: revenue
-        for statement in statements
-        if getattr(statement, "period_end", None) is not None
-        for revenue in [_statement_value(statement, "revenue")]
-        if revenue is not None
+    metric_horizon_errors: dict[str, dict[int, list[float]]] = {
+        metric: {horizon: [] for horizon in FORECAST_STABILITY_BACKTEST_HORIZONS}
+        for metric in FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS
     }
+    metric_actuals_by_year = {
+        metric: {
+            statement.period_end.year: value
+            for statement in statements
+            if getattr(statement, "period_end", None) is not None
+            for value in [_actual_metric_value(statement, metric)]
+            if value is not None
+        }
+        for metric in FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS
+    }
+    metric_sample_sizes = {metric: 0 for metric in FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS}
     sample_size = 0
     for cutoff_index in range(1, len(statements) - 1):
         historical = statements[: cutoff_index + 1]
@@ -1115,26 +1145,39 @@ def _walk_forward_revenue_backtest(
         growth_actual = _growth_series(revenue_actual, "actual")
         hist_3y = _cagr([_point_value(point) for point in revenue_actual[-4:]]) if len(revenue_actual) >= 4 else None
         forecast_state = _build_forecast_state(historical, revenue_actual, growth_actual, hist_3y, driver_bundle, company.name)
-        forecast_points = _primary_revenue_forecast_points(forecast_state)
         realized_snapshot = False
-        for point in forecast_points:
-            if point.fiscal_year is None:
-                continue
-            horizon = point.fiscal_year - historical[-1].period_end.year
-            if horizon not in FORECAST_STABILITY_BACKTEST_HORIZONS:
-                continue
-            realized_error = _absolute_percentage_error(_point_value(point), revenue_by_year.get(point.fiscal_year))
-            if realized_error is None:
-                continue
-            horizon_errors[horizon].append(realized_error)
-            realized_snapshot = True
+        for metric in FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS:
+            metric_points = _forecast_metric_points(forecast_state, metric)
+            realized_metric = False
+            for point in metric_points:
+                if point.fiscal_year is None:
+                    continue
+                horizon = point.fiscal_year - historical[-1].period_end.year
+                if horizon not in FORECAST_STABILITY_BACKTEST_HORIZONS:
+                    continue
+                realized_error = _absolute_percentage_error(_point_value(point), metric_actuals_by_year[metric].get(point.fiscal_year))
+                if realized_error is None:
+                    continue
+                metric_horizon_errors[metric][horizon].append(realized_error)
+                realized_metric = True
+                realized_snapshot = True
+            if realized_metric:
+                metric_sample_sizes[metric] += 1
         if realized_snapshot:
             sample_size += 1
 
-    horizon_means = {
-        horizon: (sum(errors) / len(errors) if errors else None)
-        for horizon, errors in horizon_errors.items()
+    metric_horizon_means = {
+        metric: {
+            horizon: (sum(errors) / len(errors) if errors else None)
+            for horizon, errors in horizon_errors.items()
+        }
+        for metric, horizon_errors in metric_horizon_errors.items()
     }
+    metric_errors = {
+        metric: _weighted_backtest_error(horizon_errors)
+        for metric, horizon_errors in metric_horizon_means.items()
+    }
+    horizon_means = _weighted_metric_horizon_errors(metric_horizon_means)
     weighted_error = _weighted_backtest_error(horizon_means)
     error_band = _error_band(weighted_error, _forecast_stability_sector_template(company))
     return {
@@ -1142,7 +1185,20 @@ def _walk_forward_revenue_backtest(
         "weighted_error": weighted_error,
         "error_band": error_band,
         "horizon_errors": horizon_means,
+        "metric_weights": dict(FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS),
+        "metric_errors": metric_errors,
+        "metric_horizon_errors": metric_horizon_means,
+        "metric_sample_sizes": metric_sample_sizes,
     }
+
+
+def _walk_forward_revenue_backtest(
+    session: Session,
+    company: Company,
+    statements: list[Any],
+    earnings_releases: list[Any],
+) -> dict[str, Any]:
+    return _walk_forward_forecast_backtest(session, company, statements, earnings_releases)
 
 
 def _primary_revenue_forecast_points(forecast_state: dict[str, Any]) -> list[CompanyChartsSeriesPointPayload]:
@@ -1153,6 +1209,53 @@ def _primary_revenue_forecast_points(forecast_state: dict[str, Any]) -> list[Com
         if matched is not None:
             return list(matched.points)
     return []
+
+
+def _forecast_metric_points(forecast_state: dict[str, Any], metric: str) -> list[CompanyChartsSeriesPointPayload]:
+    if metric == "revenue":
+        return _primary_revenue_forecast_points(forecast_state)
+    if metric == "operating_income":
+        matched = _series_points_by_key(forecast_state.get("profit_series", []), "operating_income_forecast")
+        return list(matched.points) if matched is not None else []
+    if metric == "free_cash_flow":
+        matched = _series_points_by_key(forecast_state.get("cash_series", []), "free_cash_flow_forecast")
+        return list(matched.points) if matched is not None else []
+    if metric == "eps":
+        eps_card = forecast_state.get("eps_card")
+        series = getattr(eps_card, "series", [])
+        for key in ("eps_base", "eps_forecast"):
+            matched = next((item for item in series if item.key == key), None)
+            if matched is not None:
+                return list(matched.points)
+    return []
+
+
+def _actual_metric_value(statement: Any, metric: str) -> float | None:
+    if metric in {"revenue", "operating_income", "free_cash_flow"}:
+        return _metric_projection_value(statement, metric)
+    if metric == "eps":
+        eps = _statement_value(statement, "eps")
+        if eps is not None:
+            return eps
+        net_income = _statement_value(statement, "net_income")
+        diluted_shares = _statement_value(statement, "weighted_average_shares_diluted")
+        return _safe_divide(net_income, diluted_shares)
+    return None
+
+
+def _weighted_metric_horizon_errors(metric_horizon_errors: dict[str, dict[int, float | None]]) -> dict[int, float | None]:
+    horizon_means: dict[int, float | None] = {}
+    for horizon in FORECAST_STABILITY_BACKTEST_HORIZONS:
+        weighted_sum = 0.0
+        total_weight = 0.0
+        for metric, weight in FORECAST_STABILITY_BACKTEST_METRIC_WEIGHTS.items():
+            value = metric_horizon_errors.get(metric, {}).get(horizon)
+            if value is None:
+                continue
+            weighted_sum += float(value) * float(weight)
+            total_weight += float(weight)
+        horizon_means[horizon] = (weighted_sum / total_weight) if total_weight > 0 else None
+    return horizon_means
 
 
 def _weighted_backtest_error(horizon_errors: dict[int, float | None]) -> float | None:
@@ -1170,9 +1273,12 @@ def _weighted_backtest_error(horizon_errors: dict[int, float | None]) -> float |
 
 
 def _absolute_percentage_error(predicted: float | None, actual: float | None) -> float | None:
-    if predicted is None or actual is None or actual <= 0:
+    if predicted is None or actual is None:
         return None
-    return abs(float(predicted) - float(actual)) / float(actual)
+    denominator = abs(float(actual))
+    if denominator <= 0:
+        return None
+    return abs(float(predicted) - float(actual)) / denominator
 
 
 def _forecast_stability_sector_template(company: Company) -> dict[str, Any]:
@@ -1310,7 +1416,19 @@ def _earnings_release_effective_at(release: Any) -> datetime | None:
 def _backtest_display(weighted_error: float | None, error_band: str, sample_size: int) -> str:
     if weighted_error is None or sample_size <= 0:
         return "Insufficient walk-forward sample"
-    return f"{weighted_error * 100:.1f}% weighted APE ({error_band}) across {sample_size} snapshots"
+    return f"{weighted_error * 100:.1f}% composite weighted APE ({error_band}) across {sample_size} snapshots"
+
+
+def _metric_weight_display(metric_weights: dict[str, float]) -> str:
+    parts = [
+        f"{FORECAST_STABILITY_BACKTEST_METRIC_LABELS.get(metric, metric).upper()} {weight * 100:.0f}%"
+        for metric, weight in metric_weights.items()
+    ]
+    if not parts:
+        return "No metric weights"
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + f", and {parts[-1]}"
 
 
 def _dispersion_display(value: float | None) -> str:
@@ -1365,18 +1483,19 @@ def _forecast_stability_summary(
     sample_size: int,
     weighted_error: float | None,
     error_band: str,
+    metric_weights: dict[str, float],
     guidance_usage: str,
     scenario_dispersion: float | None,
 ) -> str:
     backtest_text = (
-        f"{weighted_error * 100:.1f}% weighted APE ({error_band}) across {sample_size} point-in-time walk-forward snapshots"
+        f"{weighted_error * 100:.1f}% composite weighted APE ({error_band}) across {sample_size} point-in-time walk-forward snapshots with {_metric_weight_display(metric_weights)}"
         if weighted_error is not None and sample_size > 0
         else "insufficient walk-forward sample, so the score stays conservative"
     )
     dispersion_text = _dispersion_display(scenario_dispersion).lower()
     return (
         f"Forecast stability uses the {sector_template} sector template and {history_depth} annual periods; "
-        f"historical backtest shows {backtest_text}; guidance status {guidance_usage}; scenario dispersion {dispersion_text}. "
+        f"historical backtests show {backtest_text}; guidance status {guidance_usage}; scenario dispersion {dispersion_text}. "
         "This is a conservative stability signal, not statistical confidence."
     )
 

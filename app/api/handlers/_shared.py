@@ -3030,7 +3030,7 @@ def _empty_company_charts_response(*, refresh: RefreshState, as_of: str | None) 
             thesis="Reported history is being assembled and forecast projections will appear once preprocessing completes.",
             unavailable_notes=[
                 "Forecasts are always labeled and are never blended into reported history.",
-                "Forecast stability is conservative and not a statistical confidence measure.",
+                "Forecast stability is conservative, uses multi-metric walk-forward backtests, and is not a statistical confidence measure.",
             ],
         ),
         factors=CompanyChartsFactorsPayload(),
@@ -3050,8 +3050,8 @@ def _empty_company_charts_response(*, refresh: RefreshState, as_of: str | None) 
         forecast_methodology=CompanyChartsMethodologyPayload(
             version=CHARTS_DASHBOARD_SCHEMA_VERSION,
             label="Deterministic projection with empirical stability overlay",
-            summary="Forecasts use persisted historical official inputs, guarded trend extrapolation, bounded margin assumptions, and a separate walk-forward stability score.",
-            disclaimer="Forecast stability is conservative, based on historical walk-forward error plus risk penalties, and is not a probability or statistical confidence measure.",
+            summary="Forecasts use persisted historical official inputs, guarded trend extrapolation, bounded margin assumptions, and a separate multi-metric walk-forward stability score.",
+            disclaimer="Forecast stability is conservative, based on historical revenue, EBIT, EPS, and FCF walk-forward error plus risk penalties, and is not a probability or statistical confidence measure.",
         ),
         payload_version=CHARTS_DASHBOARD_SCHEMA_VERSION,
         refresh=refresh,

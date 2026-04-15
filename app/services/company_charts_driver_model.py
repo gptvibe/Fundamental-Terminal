@@ -23,14 +23,42 @@ SEMI_VARIABLE_COST_RATIO_FLOOR = 0.03
 SEMI_VARIABLE_COST_RATIO_CAP = 0.25
 FIXED_COST_GROWTH_FLOOR = 0.00
 FIXED_COST_GROWTH_CAP = 0.08
-WORKING_CAPITAL_DAYS_FLOOR = -20.0
-WORKING_CAPITAL_DAYS_CAP = 120.0
+DSO_FLOOR = 5.0
+DSO_CAP = 150.0
+DIO_FLOOR = 0.0
+DIO_CAP = 180.0
+DPO_FLOOR = 0.0
+DPO_CAP = 180.0
+DEFERRED_REVENUE_DAYS_FLOOR = 0.0
+DEFERRED_REVENUE_DAYS_CAP = 120.0
+ACCRUED_OPERATING_LIABILITY_DAYS_FLOOR = 0.0
+ACCRUED_OPERATING_LIABILITY_DAYS_CAP = 120.0
+DEFAULT_DSO = 45.0
+DEFAULT_DIO = 0.0
+DEFAULT_DPO = 30.0
+DEFAULT_DEFERRED_REVENUE_DAYS = 0.0
+DEFAULT_ACCRUED_OPERATING_LIABILITY_DAYS = 0.0
+COST_OF_REVENUE_RATIO_FLOOR = 0.05
+COST_OF_REVENUE_RATIO_CAP = 0.95
 SALES_TO_CAPITAL_FLOOR = 0.35
 SALES_TO_CAPITAL_CAP = 2.50
 CAPEX_INTENSITY_FLOOR = 0.02
 CAPEX_INTENSITY_CAP = 0.25
 DEPRECIATION_RATIO_FLOOR = 0.01
 DEPRECIATION_RATIO_CAP = 0.20
+CASH_RATIO_FLOOR = 0.01
+CASH_RATIO_CAP = 0.30
+DEBT_INTEREST_RATE_CAP = 0.18
+CASH_YIELD_CAP = 0.10
+OTHER_INCOME_RATIO_FLOOR = -0.08
+OTHER_INCOME_RATIO_CAP = 0.08
+EFFECTIVE_TAX_RATE_FLOOR = 0.00
+EFFECTIVE_TAX_RATE_CAP = 0.35
+LOSS_TAX_BENEFIT_CAP = 0.15
+DEFAULT_CASH_RATIO = 0.06
+DEFAULT_DEBT_INTEREST_RATE = 0.045
+DEFAULT_CASH_YIELD = 0.015
+DEFAULT_EFFECTIVE_TAX_RATE = 0.21
 SBC_EXPENSE_RATIO_CAP = 0.08
 SBC_DILUTION_FLOOR = 0.00
 SBC_DILUTION_CAP = 0.04
@@ -39,6 +67,9 @@ BUYBACK_RETIREMENT_CAP = 0.05
 ACQUISITION_DILUTION_CAP = 0.04
 CONVERT_DILUTION_CAP = 0.04
 DILUTION_CAP = 0.08
+OPTION_WARRANT_DILUTION_CAP = 0.12
+RSU_DILUTION_CAP = 0.06
+ACQUISITION_SHARE_ISSUANCE_CAP = 0.06
 
 
 @dataclass(slots=True)
@@ -61,6 +92,8 @@ class DriverForecastScenario:
     capex: DriverForecastLine
     diluted_shares: DriverForecastLine
     eps: DriverForecastLine
+    bridge: list[_ForecastBridgePoint] = field(default_factory=list)
+    share_bridge: list[_ForecastShareBridgePoint] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -122,8 +155,24 @@ class _CostSchedule:
 
 
 @dataclass(slots=True)
+class _OperatingWorkingCapitalSchedule:
+    dso: float
+    dio: float
+    dpo: float
+    deferred_revenue_days: float
+    accrued_operating_liability_days: float
+    cost_of_revenue_ratio: float
+    starting_accounts_receivable: float
+    starting_inventory: float
+    starting_accounts_payable: float
+    starting_deferred_revenue: float
+    starting_accrued_operating_liabilities: float
+    basis_detail: str
+
+
+@dataclass(slots=True)
 class _ReinvestmentSchedule:
-    working_capital_days: float
+    operating_working_capital: _OperatingWorkingCapitalSchedule
     sales_to_capital: float
     capex_intensity: float
     depreciation_ratio: float
@@ -132,12 +181,82 @@ class _ReinvestmentSchedule:
 
 @dataclass(slots=True)
 class _DilutionSchedule:
-    starting_shares: float
+    starting_basic_shares: float
+    starting_diluted_shares: float
     sbc_expense_ratio: float
-    sbc_dilution_rate: float
-    buyback_retirement_rate: float
-    acquisition_dilution_rate: float
-    convert_dilution_rate: float
+    annual_rsu_shares: float
+    annual_buyback_shares: float
+    annual_acquisition_shares: float
+    option_warrant_dilution_shares: float
+    convertible_dilution_shares: float
+    uses_proxy_fallback: bool
+    proxy_net_dilution_rate: float
+    starting_basis: str
+    option_basis: str
+    rsu_basis: str
+    buyback_basis: str
+    acquisition_basis: str
+    convert_basis: str
+    fallback_basis: str
+
+
+@dataclass(slots=True)
+class _ForecastShareBridgePoint:
+    year: int
+    basic_shares: float
+    rsu_shares: float
+    acquisition_shares: float
+    buyback_retirement_shares: float
+    option_warrant_dilution_shares: float
+    convertible_dilution_shares: float
+    proxy_net_change_shares: float
+    diluted_shares: float
+    uses_proxy_fallback: bool
+
+
+@dataclass(slots=True)
+class _BelowLineSchedule:
+    starting_cash: float
+    starting_debt: float
+    target_cash_ratio: float
+    debt_interest_rate: float
+    cash_yield: float
+    other_income_ratio: float
+    effective_tax_rate: float
+    cash_basis: str
+    debt_basis: str
+    interest_basis: str
+    other_basis: str
+    tax_basis: str
+
+
+@dataclass(slots=True)
+class _ForecastBridgePoint:
+    year: int
+    ebit: float
+    interest_expense: float
+    interest_income: float
+    other_income_expense: float
+    pretax_income: float
+    taxes: float
+    net_income: float
+    depreciation: float
+    stock_based_compensation: float
+    delta_working_capital: float
+    operating_cash_flow: float
+    capex: float
+    free_cash_flow: float
+    beginning_cash: float
+    ending_cash: float
+    beginning_debt: float
+    ending_debt: float
+    beginning_operating_working_capital: float
+    ending_operating_working_capital: float
+    accounts_receivable: float
+    inventory: float
+    accounts_payable: float
+    deferred_revenue: float
+    accrued_operating_liabilities: float
 
 
 def build_driver_forecast_bundle(
@@ -164,8 +283,8 @@ def build_driver_forecast_bundle(
 
     revenue_drivers = _derive_revenue_drivers(history, releases)
     cost_schedule = _derive_cost_schedule(history)
-    reinvestment_schedule = _derive_reinvestment_schedule(history)
-    net_income_conversion = _derive_net_income_conversion(history)
+    reinvestment_schedule = _derive_reinvestment_schedule(history, cost_schedule)
+    below_line_schedule = _derive_below_line_schedule(history)
     latest_year = int(history[-1]["year"])
     scenario_tweaks = _scenario_tweaks()
 
@@ -176,8 +295,8 @@ def build_driver_forecast_bundle(
             revenue_drivers,
             cost_schedule,
             reinvestment_schedule,
+            below_line_schedule,
             dilution_schedule,
-            net_income_conversion=net_income_conversion,
             scenario_key=scenario_key,
             horizon_years=horizon_years,
             latest_year=latest_year,
@@ -189,14 +308,15 @@ def build_driver_forecast_bundle(
         revenue_drivers,
         cost_schedule,
         reinvestment_schedule,
+        below_line_schedule,
         dilution_schedule,
     )
     calculation_rows = _build_calculation_rows(
         revenue_drivers,
         cost_schedule,
         reinvestment_schedule,
+        below_line_schedule,
         dilution_schedule,
-        net_income_conversion,
         scenarios["base"],
     )
     highlights = _build_highlights(revenue_drivers, scenarios["base"], scenarios["bull"], scenarios["bear"])
@@ -239,10 +359,42 @@ def _normalize_statements(statements: list[Any]) -> list[dict[str, Any]]:
                 "free_cash_flow": _statement_value(statement, "free_cash_flow"),
                 "capex": _statement_value(statement, "capex"),
                 "depreciation": _statement_value(statement, "depreciation_and_amortization"),
+                "pretax_income": _statement_value(statement, "pretax_income"),
+                "income_tax_expense": _statement_value(statement, "income_tax_expense"),
+                "interest_expense": _statement_value(statement, "interest_expense"),
+                "interest_income": _statement_value(statement, "interest_income"),
+                "other_income_expense": _statement_value(statement, "other_income_expense"),
+                "cash_balance": _statement_value(statement, "cash_balance"),
+                "basic_shares": _statement_value(statement, "weighted_average_shares_basic"),
                 "shares": _statement_value(statement, "weighted_average_shares_diluted"),
+                "current_debt": _statement_value(statement, "current_debt"),
+                "long_term_debt": _statement_value(statement, "long_term_debt"),
+                "total_debt": _statement_value(statement, "total_debt"),
+                "debt_issuance": _statement_value(statement, "debt_issuance"),
+                "debt_repayment": _statement_value(statement, "debt_repayment"),
+                "shares_issued": _statement_value(statement, "shares_issued"),
+                "shares_repurchased": _statement_value(statement, "shares_repurchased"),
+                "share_price": _statement_value(statement, "share_price"),
+                "option_warrant_dilution_shares": _statement_value(statement, "option_warrant_dilution_shares"),
+                "options_outstanding": _statement_value(statement, "options_outstanding"),
+                "warrants_outstanding": _statement_value(statement, "warrants_outstanding"),
+                "option_exercise_price": _statement_value(statement, "option_exercise_price"),
+                "warrant_exercise_price": _statement_value(statement, "warrant_exercise_price"),
+                "rsu_shares": _statement_value(statement, "rsu_shares"),
+                "acquisition_shares_issued": _statement_value(statement, "acquisition_shares_issued"),
+                "convertible_dilution_shares": _statement_value(statement, "convertible_dilution_shares"),
+                "convertible_conversion_price": _statement_value(statement, "convertible_conversion_price"),
+                "convertible_is_dilutive": _statement_value(statement, "convertible_is_dilutive"),
+                "gross_profit": _statement_value(statement, "gross_profit"),
+                "cost_of_revenue": _statement_value(statement, "cost_of_revenue"),
                 "total_assets": _statement_value(statement, "total_assets"),
                 "current_assets": _statement_value(statement, "current_assets"),
                 "current_liabilities": _statement_value(statement, "current_liabilities"),
+                "accounts_receivable": _statement_value(statement, "accounts_receivable"),
+                "inventory": _statement_value(statement, "inventory"),
+                "accounts_payable": _statement_value(statement, "accounts_payable"),
+                "deferred_revenue": _statement_value(statement, "deferred_revenue"),
+                "accrued_operating_liabilities": _statement_value(statement, "accrued_operating_liabilities"),
                 "stock_based_compensation": _statement_value(statement, "stock_based_compensation"),
                 "share_buybacks": _statement_value(statement, "share_buybacks"),
                 "acquisitions": _statement_value(statement, "acquisitions"),
@@ -387,13 +539,13 @@ def _derive_cost_schedule(history: list[dict[str, Any]]) -> _CostSchedule:
     )
 
 
-def _derive_reinvestment_schedule(history: list[dict[str, Any]]) -> _ReinvestmentSchedule:
+def _derive_reinvestment_schedule(history: list[dict[str, Any]], cost_schedule: _CostSchedule) -> _ReinvestmentSchedule:
     latest = history[-1]
     capex_intensity = _clip(_median_abs_ratio(history, "capex", "revenue") or 0.05, CAPEX_INTENSITY_FLOOR, CAPEX_INTENSITY_CAP)
     depreciation_ratio = _clip(_median_abs_ratio(history, "depreciation", "revenue") or (capex_intensity * 0.75), DEPRECIATION_RATIO_FLOOR, DEPRECIATION_RATIO_CAP)
     latest_depreciation = abs(latest["depreciation"] or 0.0) or (latest["revenue"] or 0.0) * depreciation_ratio
     return _ReinvestmentSchedule(
-        working_capital_days=_working_capital_days(history),
+        operating_working_capital=_derive_operating_working_capital_schedule(history, cost_schedule),
         sales_to_capital=_sales_to_capital(history) or 1.25,
         capex_intensity=capex_intensity,
         depreciation_ratio=depreciation_ratio,
@@ -401,66 +553,240 @@ def _derive_reinvestment_schedule(history: list[dict[str, Any]]) -> _Reinvestmen
     )
 
 
-def _derive_dilution_schedule(history: list[dict[str, Any]]) -> _DilutionSchedule | None:
-    share_history = [row["shares"] for row in history if row["shares"] is not None and row["shares"] > 0]
-    if not share_history:
-        return None
-
+def _derive_operating_working_capital_schedule(history: list[dict[str, Any]], cost_schedule: _CostSchedule) -> _OperatingWorkingCapitalSchedule:
     latest = history[-1]
-    starting_shares = float(share_history[-1])
-    share_growth = _weighted_recent_growth(_historical_growth_rates(share_history))
-    sbc_expense_ratio = _clip(_median_abs_ratio(history, "stock_based_compensation", "revenue") or 0.0, 0.0, SBC_EXPENSE_RATIO_CAP)
+    direct_cost_ratios: list[float] = []
+    dso_values: list[float] = []
+    dio_values: list[float] = []
+    dpo_values: list[float] = []
+    deferred_values: list[float] = []
+    accrued_values: list[float] = []
 
-    explicit_sbc_rate = _clip(max((sbc_expense_ratio * 0.18), max(share_growth or 0.0, 0.0) * 0.65), SBC_DILUTION_FLOOR, SBC_DILUTION_CAP)
-    buyback_rate = _clip(max((_median_abs_ratio(history, "share_buybacks", "revenue") or 0.0) * 0.12, max(-(share_growth or 0.0), 0.0) * 0.65), BUYBACK_RETIREMENT_FLOOR, BUYBACK_RETIREMENT_CAP)
-    acquisition_rate = _clip((_median_abs_ratio(history, "acquisitions", "revenue") or 0.0) * 0.05, 0.0, ACQUISITION_DILUTION_CAP)
+    for row in history:
+        revenue = row["revenue"]
+        if revenue in (None, 0):
+            continue
+        resolved_cost_of_revenue = _resolved_cost_of_revenue(row)
+        if resolved_cost_of_revenue not in (None, 0):
+            direct_cost_ratios.append(_clip(resolved_cost_of_revenue / revenue, COST_OF_REVENUE_RATIO_FLOOR, COST_OF_REVENUE_RATIO_CAP))
 
-    latest_data = getattr(latest["statement"], "data", None)
-    convert_rate = 0.0
-    if isinstance(latest_data, dict):
-        convert_rate = _clip(
-            _as_float(
-                latest_data.get("convertible_dilution_rate")
-                or latest_data.get("convert_dilution_rate")
-                or latest_data.get("convertible_share_dilution")
+    cost_of_revenue_ratio = median(direct_cost_ratios) if direct_cost_ratios else _clip(cost_schedule.variable_cost_ratio, COST_OF_REVENUE_RATIO_FLOOR, COST_OF_REVENUE_RATIO_CAP)
+
+    for row in history:
+        revenue = row["revenue"]
+        if revenue in (None, 0):
+            continue
+        resolved_cost_of_revenue = _resolved_cost_of_revenue(row, cost_of_revenue_ratio)
+        cash_operating_cost = _historical_cash_operating_cost(row, resolved_cost_of_revenue)
+
+        accounts_receivable = row["accounts_receivable"]
+        if accounts_receivable is not None:
+            dso_values.append(_clip((accounts_receivable / revenue) * 365.0, DSO_FLOOR, DSO_CAP))
+
+        inventory = row["inventory"]
+        if inventory is not None and resolved_cost_of_revenue not in (None, 0):
+            dio_values.append(_clip((inventory / resolved_cost_of_revenue) * 365.0, DIO_FLOOR, DIO_CAP))
+
+        accounts_payable = row["accounts_payable"]
+        if accounts_payable is not None and resolved_cost_of_revenue not in (None, 0):
+            dpo_values.append(_clip((accounts_payable / resolved_cost_of_revenue) * 365.0, DPO_FLOOR, DPO_CAP))
+
+        deferred_revenue = row["deferred_revenue"]
+        if deferred_revenue is not None:
+            deferred_values.append(_clip((deferred_revenue / revenue) * 365.0, DEFERRED_REVENUE_DAYS_FLOOR, DEFERRED_REVENUE_DAYS_CAP))
+
+        accrued_operating_liabilities = row["accrued_operating_liabilities"]
+        if accrued_operating_liabilities is not None and cash_operating_cost not in (None, 0):
+            accrued_values.append(
+                _clip(
+                    (accrued_operating_liabilities / cash_operating_cost) * 365.0,
+                    ACCRUED_OPERATING_LIABILITY_DAYS_FLOOR,
+                    ACCRUED_OPERATING_LIABILITY_DAYS_CAP,
+                )
             )
-            or 0.0,
-            0.0,
-            CONVERT_DILUTION_CAP,
-        )
-        if convert_rate == 0.0:
-            convertible_shares = _as_float(latest_data.get("convertible_shares") or latest_data.get("dilutive_convertible_shares"))
-            convert_rate = _clip(_safe_divide(convertible_shares, starting_shares) or 0.0, 0.0, CONVERT_DILUTION_CAP)
 
-    explicit_net = explicit_sbc_rate + acquisition_rate + convert_rate - buyback_rate
-    if share_growth is not None:
-        gap = share_growth - explicit_net
-        if gap > 0:
-            explicit_sbc_rate = _clip(explicit_sbc_rate + (gap * 0.7), SBC_DILUTION_FLOOR, SBC_DILUTION_CAP)
-        elif gap < 0:
-            buyback_rate = _clip(buyback_rate + (abs(gap) * 0.7), BUYBACK_RETIREMENT_FLOOR, BUYBACK_RETIREMENT_CAP)
+    dso = median(dso_values) if dso_values else DEFAULT_DSO
+    dio = median(dio_values) if dio_values else DEFAULT_DIO
+    dpo = median(dpo_values) if dpo_values else DEFAULT_DPO
+    deferred_revenue_days = median(deferred_values) if deferred_values else DEFAULT_DEFERRED_REVENUE_DAYS
+    accrued_operating_liability_days = median(accrued_values) if accrued_values else DEFAULT_ACCRUED_OPERATING_LIABILITY_DAYS
 
-    return _DilutionSchedule(
-        starting_shares=starting_shares,
-        sbc_expense_ratio=sbc_expense_ratio,
-        sbc_dilution_rate=explicit_sbc_rate,
-        buyback_retirement_rate=buyback_rate,
-        acquisition_dilution_rate=acquisition_rate,
-        convert_dilution_rate=convert_rate,
+    latest_revenue = latest["revenue"] or 0.0
+    latest_cost_of_revenue = _resolved_cost_of_revenue(latest, cost_of_revenue_ratio) or (latest_revenue * cost_of_revenue_ratio)
+    latest_cash_operating_cost = _historical_cash_operating_cost(latest, latest_cost_of_revenue) or max(latest_cost_of_revenue, 0.0)
+
+    starting_accounts_receivable = latest["accounts_receivable"] if latest["accounts_receivable"] is not None else _days_to_balance(latest_revenue, dso)
+    starting_inventory = latest["inventory"] if latest["inventory"] is not None else _days_to_balance(latest_cost_of_revenue, dio)
+    starting_accounts_payable = latest["accounts_payable"] if latest["accounts_payable"] is not None else _days_to_balance(latest_cost_of_revenue, dpo)
+    starting_deferred_revenue = latest["deferred_revenue"] if latest["deferred_revenue"] is not None else _days_to_balance(latest_revenue, deferred_revenue_days)
+    starting_accrued_operating_liabilities = (
+        latest["accrued_operating_liabilities"]
+        if latest["accrued_operating_liabilities"] is not None
+        else _days_to_balance(latest_cash_operating_cost, accrued_operating_liability_days)
+    )
+
+    basis_detail = "; ".join(
+        [
+            _schedule_basis("AR", dso_values, DEFAULT_DSO),
+            _schedule_basis("Inventory", dio_values, DEFAULT_DIO),
+            _schedule_basis("AP", dpo_values, DEFAULT_DPO),
+            _schedule_basis("Deferred revenue", deferred_values, DEFAULT_DEFERRED_REVENUE_DAYS),
+            _schedule_basis("Accrued operating liabilities", accrued_values, DEFAULT_ACCRUED_OPERATING_LIABILITY_DAYS),
+        ]
+    )
+
+    return _OperatingWorkingCapitalSchedule(
+        dso=dso,
+        dio=dio,
+        dpo=dpo,
+        deferred_revenue_days=deferred_revenue_days,
+        accrued_operating_liability_days=accrued_operating_liability_days,
+        cost_of_revenue_ratio=cost_of_revenue_ratio,
+        starting_accounts_receivable=max(0.0, starting_accounts_receivable),
+        starting_inventory=max(0.0, starting_inventory),
+        starting_accounts_payable=max(0.0, starting_accounts_payable),
+        starting_deferred_revenue=max(0.0, starting_deferred_revenue),
+        starting_accrued_operating_liabilities=max(0.0, starting_accrued_operating_liabilities),
+        basis_detail=basis_detail,
     )
 
 
-def _derive_net_income_conversion(history: list[dict[str, Any]]) -> float:
-    ratios: list[float] = []
+def _derive_dilution_schedule(history: list[dict[str, Any]]) -> _DilutionSchedule | None:
+    diluted_share_history = [row["shares"] for row in history if row["shares"] is not None and row["shares"] > 0]
+    basic_share_history = [row["basic_shares"] for row in history if row["basic_shares"] is not None and row["basic_shares"] > 0]
+    if not diluted_share_history and not basic_share_history:
+        return None
+
+    latest = history[-1]
+    starting_basic_shares = float(basic_share_history[-1]) if basic_share_history else float(diluted_share_history[-1])
+    starting_diluted_shares = float(diluted_share_history[-1]) if diluted_share_history else starting_basic_shares
+    sbc_expense_ratio = _clip(_median_abs_ratio(history, "stock_based_compensation", "revenue") or 0.0, 0.0, SBC_EXPENSE_RATIO_CAP)
+
+    starting_basis = "Basic weighted-average shares" if basic_share_history else "Diluted weighted-average shares fallback"
+    latest_share_price, share_price_basis = _latest_share_price(history)
+
+    option_warrant_dilution_shares, option_basis = _derive_option_warrant_dilution_shares(latest, starting_basic_shares, latest_share_price, share_price_basis)
+    annual_acquisition_shares, acquisition_basis = _derive_acquisition_share_issuance(history, starting_basic_shares)
+    annual_rsu_shares, rsu_basis = _derive_rsu_share_issuance(history, annual_acquisition_shares, starting_basic_shares)
+    annual_buyback_shares, buyback_basis = _derive_buyback_retirement_shares(history, latest_share_price, share_price_basis, starting_basic_shares)
+    convertible_dilution_shares, convert_basis = _derive_convertible_dilution_shares(latest, starting_basic_shares, latest_share_price, share_price_basis)
+    proxy_net_dilution_rate, fallback_basis = _derive_proxy_net_dilution_rate(history, starting_diluted_shares)
+
+    uses_proxy_fallback = not any(
+        value > 0
+        for value in (
+            option_warrant_dilution_shares,
+            annual_rsu_shares,
+            annual_buyback_shares,
+            annual_acquisition_shares,
+            convertible_dilution_shares,
+        )
+    )
+
+    return _DilutionSchedule(
+        starting_basic_shares=starting_basic_shares,
+        starting_diluted_shares=starting_diluted_shares,
+        sbc_expense_ratio=sbc_expense_ratio,
+        annual_rsu_shares=annual_rsu_shares,
+        annual_buyback_shares=annual_buyback_shares,
+        annual_acquisition_shares=annual_acquisition_shares,
+        option_warrant_dilution_shares=option_warrant_dilution_shares,
+        convertible_dilution_shares=convertible_dilution_shares,
+        uses_proxy_fallback=uses_proxy_fallback,
+        proxy_net_dilution_rate=proxy_net_dilution_rate,
+        starting_basis=starting_basis,
+        option_basis=option_basis,
+        rsu_basis=rsu_basis,
+        buyback_basis=buyback_basis,
+        acquisition_basis=acquisition_basis,
+        convert_basis=convert_basis,
+        fallback_basis=fallback_basis,
+    )
+
+
+def _derive_below_line_schedule(history: list[dict[str, Any]]) -> _BelowLineSchedule:
+    latest = history[-1]
+    latest_revenue = latest["revenue"] or 0.0
+    target_cash_ratio = _clip(_median_abs_ratio(history, "cash_balance", "revenue") or DEFAULT_CASH_RATIO, CASH_RATIO_FLOOR, CASH_RATIO_CAP)
+
+    latest_cash = latest["cash_balance"]
+    starting_cash = latest_cash if latest_cash is not None else (latest_revenue * target_cash_ratio)
+    cash_basis = "Disclosed cash balance" if latest_cash is not None else "Cash ratio fallback"
+
+    latest_debt = latest["total_debt"]
+    if latest_debt is None:
+        latest_debt = _sum_non_null(latest["current_debt"], latest["long_term_debt"])
+    starting_debt = max(0.0, latest_debt or 0.0)
+    debt_basis = (
+        "Disclosed debt balance"
+        if latest["total_debt"] is not None or latest["current_debt"] is not None or latest["long_term_debt"] is not None
+        else "No debt disclosed"
+    )
+
+    debt_rates: list[float] = []
+    cash_yields: list[float] = []
+    other_income_ratios: list[float] = []
+    tax_rates: list[float] = []
+    derived_other_count = 0
+    direct_other_count = 0
+
+    previous_row: dict[str, Any] | None = None
     for row in history:
-        operating_income = row["operating_income"]
-        net_income = row["net_income"]
-        if operating_income in (None, 0) or net_income is None:
-            continue
-        ratio = net_income / operating_income
-        if isfinite(ratio):
-            ratios.append(_clip(ratio, -0.8, 1.1))
-    return median(ratios) if ratios else 0.78
+        interest_expense = _positive_amount(row["interest_expense"])
+        average_debt = _average_balance(previous_row["total_debt"] if previous_row is not None else None, row["total_debt"])
+        if interest_expense is not None and average_debt not in (None, 0):
+            debt_rates.append(_clip(interest_expense / average_debt, 0.0, DEBT_INTEREST_RATE_CAP))
+
+        interest_income = _positive_amount(row["interest_income"])
+        average_cash = _average_balance(previous_row["cash_balance"] if previous_row is not None else None, row["cash_balance"])
+        if interest_income is not None and average_cash not in (None, 0):
+            cash_yields.append(_clip(interest_income / average_cash, 0.0, CASH_YIELD_CAP))
+
+        other_income = row["other_income_expense"]
+        if other_income is not None:
+            direct_other_count += 1
+        else:
+            other_income = _derived_other_income_expense(row)
+            if other_income is not None:
+                derived_other_count += 1
+        if row["revenue"] not in (None, 0) and other_income is not None:
+            other_income_ratios.append(_clip(other_income / row["revenue"], OTHER_INCOME_RATIO_FLOOR, OTHER_INCOME_RATIO_CAP))
+
+        pretax_income = row["pretax_income"]
+        income_tax_expense = row["income_tax_expense"]
+        if pretax_income is not None and pretax_income > 0 and income_tax_expense is not None:
+            tax_rates.append(_clip(abs(income_tax_expense) / pretax_income, EFFECTIVE_TAX_RATE_FLOOR, EFFECTIVE_TAX_RATE_CAP))
+
+        previous_row = row
+
+    debt_interest_rate = median(debt_rates) if debt_rates else DEFAULT_DEBT_INTEREST_RATE
+    cash_yield = median(cash_yields) if cash_yields else DEFAULT_CASH_YIELD
+    other_income_ratio = median(other_income_ratios) if other_income_ratios else 0.0
+    effective_tax_rate = median(tax_rates) if tax_rates else DEFAULT_EFFECTIVE_TAX_RATE
+
+    interest_basis = "Disclosed interest rates" if debt_rates or cash_yields else "Default cash and debt rates"
+    if direct_other_count:
+        other_basis = "Disclosed other income or expense"
+    elif derived_other_count:
+        other_basis = "Residual bridge fallback"
+    else:
+        other_basis = "Zero other income fallback"
+    tax_basis = "Disclosed effective tax rate" if tax_rates else "Default tax rate"
+
+    return _BelowLineSchedule(
+        starting_cash=max(0.0, starting_cash),
+        starting_debt=starting_debt,
+        target_cash_ratio=target_cash_ratio,
+        debt_interest_rate=debt_interest_rate,
+        cash_yield=cash_yield,
+        other_income_ratio=other_income_ratio,
+        effective_tax_rate=effective_tax_rate,
+        cash_basis=cash_basis,
+        debt_basis=debt_basis,
+        interest_basis=interest_basis,
+        other_basis=other_basis,
+        tax_basis=tax_basis,
+    )
 
 
 def _scenario_tweaks() -> dict[str, _ScenarioTweaks]:
@@ -476,9 +802,9 @@ def _project_scenario(
     revenue_drivers: _RevenueDrivers,
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
+    below_line_schedule: _BelowLineSchedule,
     dilution_schedule: _DilutionSchedule,
     *,
-    net_income_conversion: float,
     scenario_key: str,
     horizon_years: int,
     latest_year: int,
@@ -491,11 +817,20 @@ def _project_scenario(
     )
 
     previous_revenue = history[-1]["revenue"] or 0.0
-    previous_working_capital = previous_revenue * (reinvestment_schedule.working_capital_days / 365.0)
+    operating_working_capital_schedule = reinvestment_schedule.operating_working_capital
+    previous_working_capital = _operating_working_capital_total(
+        operating_working_capital_schedule.starting_accounts_receivable,
+        operating_working_capital_schedule.starting_inventory,
+        operating_working_capital_schedule.starting_accounts_payable,
+        operating_working_capital_schedule.starting_deferred_revenue,
+        operating_working_capital_schedule.starting_accrued_operating_liabilities,
+    )
     previous_depreciation = reinvestment_schedule.latest_depreciation
     semi_cost = previous_revenue * cost_schedule.semi_variable_cost_ratio
     fixed_cost = cost_schedule.fixed_cost_base
-    shares = dilution_schedule.starting_shares
+    cash_balance = below_line_schedule.starting_cash
+    debt_balance = below_line_schedule.starting_debt
+    basic_shares = dilution_schedule.starting_basic_shares
 
     years: list[int] = []
     revenue_values: list[float] = []
@@ -508,6 +843,8 @@ def _project_scenario(
     capex_values: list[float] = []
     diluted_shares_values: list[float] = []
     eps_values: list[float] = []
+    bridge_points: list[_ForecastBridgePoint] = []
+    share_bridge_points: list[_ForecastShareBridgePoint] = []
 
     for year, revenue, revenue_growth in revenue_projection:
         years.append(year)
@@ -527,10 +864,17 @@ def _project_scenario(
         operating_income = revenue - variable_cost - semi_cost - fixed_cost
         depreciation = max(0.0, (previous_depreciation * 0.50) + ((revenue * reinvestment_schedule.depreciation_ratio) * 0.50))
         ebitda = operating_income + depreciation
-        net_income = operating_income * net_income_conversion
 
-        working_capital_days = _clip(reinvestment_schedule.working_capital_days + tweaks.working_capital_days_shift, WORKING_CAPITAL_DAYS_FLOOR, WORKING_CAPITAL_DAYS_CAP)
-        target_working_capital = revenue * (working_capital_days / 365.0)
+        cost_of_revenue = max(revenue * operating_working_capital_schedule.cost_of_revenue_ratio, variable_cost)
+        cash_operating_cost = max(0.0, revenue - operating_income - depreciation)
+        working_capital_point = _project_operating_working_capital_point(
+            revenue=revenue,
+            cost_of_revenue=cost_of_revenue,
+            cash_operating_cost=cash_operating_cost,
+            schedule=operating_working_capital_schedule,
+            days_shift=tweaks.working_capital_days_shift,
+        )
+        target_working_capital = working_capital_point["total"]
         delta_working_capital = target_working_capital - previous_working_capital
 
         sales_to_capital = _clip(reinvestment_schedule.sales_to_capital + tweaks.sales_to_capital_shift, SALES_TO_CAPITAL_FLOOR, SALES_TO_CAPITAL_CAP)
@@ -538,21 +882,75 @@ def _project_scenario(
 
         maintenance_capex = max(revenue * reinvestment_schedule.capex_intensity, depreciation)
         capex = max(maintenance_capex, depreciation + max(growth_reinvestment, 0.0))
-        operating_cash_flow = net_income + depreciation + (revenue * dilution_schedule.sbc_expense_ratio) - delta_working_capital
-        free_cash_flow = operating_cash_flow - capex
-
-        net_dilution = _clip(
-            dilution_schedule.sbc_dilution_rate
-            + tweaks.sbc_shift
-            + dilution_schedule.acquisition_dilution_rate
-            + dilution_schedule.convert_dilution_rate
-            - max(0.0, dilution_schedule.buyback_retirement_rate + tweaks.buyback_shift)
-            + tweaks.dilution_shift,
-            SHARE_CHANGE_FLOOR,
-            DILUTION_CAP,
+        stock_based_compensation = revenue * dilution_schedule.sbc_expense_ratio
+        bridge_point = _project_below_line_bridge(
+            year=year,
+            revenue=revenue,
+            ebit=operating_income,
+            depreciation=depreciation,
+            stock_based_compensation=stock_based_compensation,
+            delta_working_capital=delta_working_capital,
+            capex=capex,
+            opening_cash=cash_balance,
+            opening_debt=debt_balance,
+            beginning_operating_working_capital=previous_working_capital,
+            ending_operating_working_capital=target_working_capital,
+            accounts_receivable=working_capital_point["accounts_receivable"],
+            inventory=working_capital_point["inventory"],
+            accounts_payable=working_capital_point["accounts_payable"],
+            deferred_revenue=working_capital_point["deferred_revenue"],
+            accrued_operating_liabilities=working_capital_point["accrued_operating_liabilities"],
+            schedule=below_line_schedule,
         )
-        shares = max(1e-6, shares * (1.0 + net_dilution))
-        eps = _safe_divide(net_income, shares)
+        net_income = bridge_point.net_income
+        operating_cash_flow = bridge_point.operating_cash_flow
+        free_cash_flow = bridge_point.free_cash_flow
+
+        if dilution_schedule.uses_proxy_fallback:
+            proxy_net_dilution = _clip(
+                dilution_schedule.proxy_net_dilution_rate
+                + tweaks.sbc_shift
+                - tweaks.buyback_shift
+                + tweaks.dilution_shift,
+                SHARE_CHANGE_FLOOR,
+                DILUTION_CAP,
+            )
+            proxy_net_change_shares = max(-basic_shares, basic_shares * proxy_net_dilution)
+            basic_shares = max(1e-6, basic_shares + proxy_net_change_shares)
+            diluted_shares = basic_shares
+            share_bridge_point = _ForecastShareBridgePoint(
+                year=year,
+                basic_shares=basic_shares,
+                rsu_shares=0.0,
+                acquisition_shares=0.0,
+                buyback_retirement_shares=0.0,
+                option_warrant_dilution_shares=0.0,
+                convertible_dilution_shares=0.0,
+                proxy_net_change_shares=proxy_net_change_shares,
+                diluted_shares=diluted_shares,
+                uses_proxy_fallback=True,
+            )
+        else:
+            rsu_shares = max(0.0, dilution_schedule.annual_rsu_shares + max(0.0, tweaks.sbc_shift * basic_shares))
+            acquisition_shares = max(0.0, dilution_schedule.annual_acquisition_shares + max(0.0, tweaks.dilution_shift * basic_shares))
+            buyback_retirement_shares = max(0.0, dilution_schedule.annual_buyback_shares + (tweaks.buyback_shift * basic_shares))
+            option_warrant_dilution_shares = dilution_schedule.option_warrant_dilution_shares
+            convertible_dilution_shares = dilution_schedule.convertible_dilution_shares
+            basic_shares = max(1e-6, basic_shares + rsu_shares + acquisition_shares - buyback_retirement_shares)
+            diluted_shares = max(1e-6, basic_shares + option_warrant_dilution_shares + convertible_dilution_shares)
+            share_bridge_point = _ForecastShareBridgePoint(
+                year=year,
+                basic_shares=basic_shares,
+                rsu_shares=rsu_shares,
+                acquisition_shares=acquisition_shares,
+                buyback_retirement_shares=buyback_retirement_shares,
+                option_warrant_dilution_shares=option_warrant_dilution_shares,
+                convertible_dilution_shares=convertible_dilution_shares,
+                proxy_net_change_shares=0.0,
+                diluted_shares=diluted_shares,
+                uses_proxy_fallback=False,
+            )
+        eps = _safe_divide(net_income, diluted_shares)
 
         operating_income_values.append(operating_income)
         net_income_values.append(net_income)
@@ -560,12 +958,16 @@ def _project_scenario(
         operating_cash_flow_values.append(operating_cash_flow)
         free_cash_flow_values.append(free_cash_flow)
         capex_values.append(capex)
-        diluted_shares_values.append(shares)
+        diluted_shares_values.append(diluted_shares)
         eps_values.append(eps if eps is not None else 0.0)
+        bridge_points.append(bridge_point)
+        share_bridge_points.append(share_bridge_point)
 
         previous_revenue = revenue
         previous_working_capital = target_working_capital
         previous_depreciation = depreciation
+        cash_balance = bridge_point.ending_cash
+        debt_balance = bridge_point.ending_debt
 
     return DriverForecastScenario(
         key=scenario_key,
@@ -580,7 +982,123 @@ def _project_scenario(
         capex=DriverForecastLine(years=years, values=capex_values),
         diluted_shares=DriverForecastLine(years=years, values=diluted_shares_values),
         eps=DriverForecastLine(years=years, values=eps_values),
+        bridge=bridge_points,
+        share_bridge=share_bridge_points,
     )
+
+
+def _project_below_line_bridge(
+    *,
+    year: int,
+    revenue: float,
+    ebit: float,
+    depreciation: float,
+    stock_based_compensation: float,
+    delta_working_capital: float,
+    capex: float,
+    opening_cash: float,
+    opening_debt: float,
+    beginning_operating_working_capital: float,
+    ending_operating_working_capital: float,
+    accounts_receivable: float,
+    inventory: float,
+    accounts_payable: float,
+    deferred_revenue: float,
+    accrued_operating_liabilities: float,
+    schedule: _BelowLineSchedule,
+) -> _ForecastBridgePoint:
+    ending_cash = opening_cash
+    ending_debt = opening_debt
+    other_income_expense = revenue * schedule.other_income_ratio
+
+    for _ in range(2):
+        average_cash = _average_balance(opening_cash, ending_cash) or 0.0
+        average_debt = _average_balance(opening_debt, ending_debt) or 0.0
+        interest_expense = average_debt * schedule.debt_interest_rate
+        interest_income = average_cash * schedule.cash_yield
+        pretax_income = ebit - interest_expense + interest_income + other_income_expense
+        taxes = _project_taxes(pretax_income, schedule.effective_tax_rate)
+        net_income = pretax_income - taxes
+        operating_cash_flow = net_income + depreciation + stock_based_compensation - delta_working_capital
+        free_cash_flow = operating_cash_flow - capex
+        ending_cash, ending_debt = _roll_forward_cash_and_debt(
+            opening_cash,
+            opening_debt,
+            free_cash_flow,
+            revenue,
+            schedule.target_cash_ratio,
+        )
+
+    average_cash = _average_balance(opening_cash, ending_cash) or 0.0
+    average_debt = _average_balance(opening_debt, ending_debt) or 0.0
+    interest_expense = average_debt * schedule.debt_interest_rate
+    interest_income = average_cash * schedule.cash_yield
+    pretax_income = ebit - interest_expense + interest_income + other_income_expense
+    taxes = _project_taxes(pretax_income, schedule.effective_tax_rate)
+    net_income = pretax_income - taxes
+    operating_cash_flow = net_income + depreciation + stock_based_compensation - delta_working_capital
+    free_cash_flow = operating_cash_flow - capex
+    ending_cash, ending_debt = _roll_forward_cash_and_debt(
+        opening_cash,
+        opening_debt,
+        free_cash_flow,
+        revenue,
+        schedule.target_cash_ratio,
+    )
+
+    return _ForecastBridgePoint(
+        year=year,
+        ebit=ebit,
+        interest_expense=interest_expense,
+        interest_income=interest_income,
+        other_income_expense=other_income_expense,
+        pretax_income=pretax_income,
+        taxes=taxes,
+        net_income=net_income,
+        depreciation=depreciation,
+        stock_based_compensation=stock_based_compensation,
+        delta_working_capital=delta_working_capital,
+        operating_cash_flow=operating_cash_flow,
+        capex=capex,
+        free_cash_flow=free_cash_flow,
+        beginning_cash=opening_cash,
+        ending_cash=ending_cash,
+        beginning_debt=opening_debt,
+        ending_debt=ending_debt,
+        beginning_operating_working_capital=beginning_operating_working_capital,
+        ending_operating_working_capital=ending_operating_working_capital,
+        accounts_receivable=accounts_receivable,
+        inventory=inventory,
+        accounts_payable=accounts_payable,
+        deferred_revenue=deferred_revenue,
+        accrued_operating_liabilities=accrued_operating_liabilities,
+    )
+
+
+def _roll_forward_cash_and_debt(
+    opening_cash: float,
+    opening_debt: float,
+    free_cash_flow: float,
+    revenue: float,
+    target_cash_ratio: float,
+) -> tuple[float, float]:
+    target_cash = max(0.0, revenue * target_cash_ratio)
+    pre_financing_cash = opening_cash + free_cash_flow
+    if pre_financing_cash < target_cash:
+        debt_draw = target_cash - pre_financing_cash
+        return target_cash, opening_debt + debt_draw
+
+    excess_cash = pre_financing_cash - target_cash
+    debt_repayment = min(opening_debt, max(0.0, excess_cash))
+    ending_debt = max(0.0, opening_debt - debt_repayment)
+    ending_cash = pre_financing_cash - debt_repayment
+    return max(0.0, ending_cash), ending_debt
+
+
+def _project_taxes(pretax_income: float, effective_tax_rate: float) -> float:
+    if pretax_income >= 0:
+        return pretax_income * effective_tax_rate
+    return pretax_income * min(effective_tax_rate, LOSS_TAX_BENEFIT_CAP)
 
 
 def _top_down_revenue_projection(
@@ -654,6 +1172,7 @@ def _build_assumption_rows(
     revenue_drivers: _RevenueDrivers,
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
+    below_line_schedule: _BelowLineSchedule,
     dilution_schedule: _DilutionSchedule,
 ) -> list[dict[str, str]]:
     return [
@@ -688,10 +1207,25 @@ def _build_assumption_rows(
             "detail": "Operating leverage is driven by separate variable, semi-variable, and fixed cost buckets.",
         },
         {
+            "key": "operating_working_capital",
+            "label": "Operating Working Capital",
+            "value": (
+                f"{reinvestment_schedule.operating_working_capital.dso:.0f} DSO / "
+                f"{reinvestment_schedule.operating_working_capital.dio:.0f} DIO / "
+                f"{reinvestment_schedule.operating_working_capital.dpo:.0f} DPO"
+            ),
+            "detail": (
+                f"Deferred revenue {reinvestment_schedule.operating_working_capital.deferred_revenue_days:.0f} days; "
+                f"accrued operating liabilities {reinvestment_schedule.operating_working_capital.accrued_operating_liability_days:.0f} days. "
+                f"Excludes cash, short-term investments, short-term debt, current maturities, and other financing items. "
+                f"{reinvestment_schedule.operating_working_capital.basis_detail}"
+            ),
+        },
+        {
             "key": "reinvestment",
-            "label": "Reinvestment",
-            "value": f"{reinvestment_schedule.working_capital_days:.0f} WC days / {reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital",
-            "detail": "Growth is linked to working capital and incremental capital intensity instead of using margin mean reversion alone.",
+            "label": "Incremental Capital",
+            "value": f"{reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital",
+            "detail": "Growth reinvestment combines incremental fixed capital with explicit operating working-capital schedules instead of a single blended current-asset minus current-liability shortcut.",
         },
         {
             "key": "capex_dep",
@@ -700,10 +1234,37 @@ def _build_assumption_rows(
             "detail": "Maintenance and growth capex are separated through the reinvestment schedule.",
         },
         {
+            "key": "below_line_bridge",
+            "label": "Below-The-Line Bridge",
+            "value": f"{_pct(below_line_schedule.debt_interest_rate)} debt cost / {_pct(below_line_schedule.cash_yield)} cash yield / {_pct(below_line_schedule.effective_tax_rate)} tax",
+            "detail": "Pretax income explicitly bridges from EBIT through interest expense, interest income, other income or expense, and taxes instead of using a flat EBIT-to-net conversion.",
+        },
+        {
+            "key": "cash_debt_support",
+            "label": "Cash + Debt Support",
+            "value": f"{_money(below_line_schedule.starting_cash)} cash / {_money(below_line_schedule.starting_debt)} debt",
+            "detail": f"Cash basis: {below_line_schedule.cash_basis}. Debt basis: {below_line_schedule.debt_basis}. Interest basis: {below_line_schedule.interest_basis}. Other basis: {below_line_schedule.other_basis}. Tax basis: {below_line_schedule.tax_basis}.",
+        },
+        {
             "key": "dilution",
             "label": "Dilution Bridge",
-            "value": f"{_pct(dilution_schedule.sbc_dilution_rate)} SBC / {_pct(dilution_schedule.buyback_retirement_rate)} buybacks",
-            "detail": "Share count explicitly models SBC issuance, repurchases, acquisition dilution, and convert dilution when available.",
+            "value": (
+                "Proxy fallback from historical share drift"
+                if dilution_schedule.uses_proxy_fallback
+                else (
+                    f"{_shares(dilution_schedule.starting_basic_shares)} basic + {_shares(dilution_schedule.option_warrant_dilution_shares)} TSM + "
+                    f"{_shares(dilution_schedule.annual_rsu_shares)} RSU / SBC + {_shares(dilution_schedule.convertible_dilution_shares)} converts"
+                )
+            ),
+            "detail": (
+                f"Fallback basis: {dilution_schedule.fallback_basis}."
+                if dilution_schedule.uses_proxy_fallback
+                else (
+                    f"Starting basis: {dilution_schedule.starting_basis}. Options and warrants: {dilution_schedule.option_basis}. "
+                    f"RSU / SBC issuance: {dilution_schedule.rsu_basis}. Buybacks: {dilution_schedule.buyback_basis}. "
+                    f"Acquisition issuance: {dilution_schedule.acquisition_basis}. Convertibles: {dilution_schedule.convert_basis}."
+                )
+            ),
         },
         {
             "key": "history_depth",
@@ -718,12 +1279,13 @@ def _build_calculation_rows(
     revenue_drivers: _RevenueDrivers,
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
+    below_line_schedule: _BelowLineSchedule,
     dilution_schedule: _DilutionSchedule,
-    net_income_conversion: float,
     base_scenario: DriverForecastScenario,
 ) -> list[dict[str, str]]:
     base_margin = _safe_divide(_first_value(base_scenario.operating_income.values), _first_value(base_scenario.revenue.values))
     base_eps = _first_value(base_scenario.eps.values)
+    base_bridge = base_scenario.bridge[0] if base_scenario.bridge else None
     return [
         {
             "key": "formula_revenue",
@@ -738,16 +1300,61 @@ def _build_calculation_rows(
             "detail": f"Base variable cost ratio {_pct(cost_schedule.variable_cost_ratio)}; semi-variable cost ratio {_pct(cost_schedule.semi_variable_cost_ratio)}.",
         },
         {
+            "key": "formula_pretax",
+            "label": "Pretax Income Formula",
+            "value": "EBIT - interest expense + interest income + other income or expense",
+            "detail": (
+                f"Base FY{base_bridge.year}E: EBIT {_money(base_bridge.ebit)}, interest expense {_money(base_bridge.interest_expense)}, interest income {_money(base_bridge.interest_income)}, other {_money(base_bridge.other_income_expense)}, pretax {_money(base_bridge.pretax_income)}."
+                if base_bridge is not None
+                else f"Interest runs at {_pct(below_line_schedule.debt_interest_rate)} on average debt and cash earns {_pct(below_line_schedule.cash_yield)}."
+            ),
+        },
+        {
+            "key": "formula_tax",
+            "label": "Tax Formula",
+            "value": "Pretax income x effective tax rate",
+            "detail": (
+                f"Base FY{base_bridge.year}E taxes {_money(base_bridge.taxes)} on pretax income {_money(base_bridge.pretax_income)} at {_pct(below_line_schedule.effective_tax_rate)}."
+                if base_bridge is not None
+                else f"Effective tax rate {_pct(below_line_schedule.effective_tax_rate)} from {below_line_schedule.tax_basis.lower()}."
+            ),
+        },
+        {
             "key": "formula_reinvestment",
             "label": "Reinvestment Formula",
-            "value": "Delta revenue / sales-to-capital + delta working capital",
-            "detail": f"Working capital runs at {reinvestment_schedule.working_capital_days:.0f} days and capex intensity at {_pct(reinvestment_schedule.capex_intensity)}.",
+            "value": "Delta revenue / sales-to-capital + delta operating working capital",
+            "detail": (
+                f"Operating working capital uses {reinvestment_schedule.operating_working_capital.dso:.0f} DSO, "
+                f"{reinvestment_schedule.operating_working_capital.dio:.0f} DIO, "
+                f"{reinvestment_schedule.operating_working_capital.dpo:.0f} DPO, "
+                f"{reinvestment_schedule.operating_working_capital.deferred_revenue_days:.0f} deferred-revenue days, and "
+                f"{reinvestment_schedule.operating_working_capital.accrued_operating_liability_days:.0f} accrued-liability days; capex intensity {_pct(reinvestment_schedule.capex_intensity)}."
+            ),
+        },
+        {
+            "key": "formula_ocf",
+            "label": "Operating Cash Flow Formula",
+            "value": "Net income + D&A + SBC - delta working capital",
+            "detail": (
+                f"Base FY{base_bridge.year}E: net income {_money(base_bridge.net_income)} + D&A {_money(base_bridge.depreciation)} + SBC {_money(base_bridge.stock_based_compensation)} - delta WC {_money(base_bridge.delta_working_capital)} = OCF {_money(base_bridge.operating_cash_flow)}."
+                if base_bridge is not None
+                else (
+                    f"SBC expense ratio {_pct(dilution_schedule.sbc_expense_ratio)}; "
+                    f"working-capital schedule {reinvestment_schedule.operating_working_capital.dso:.0f} / "
+                    f"{reinvestment_schedule.operating_working_capital.dio:.0f} / "
+                    f"{reinvestment_schedule.operating_working_capital.dpo:.0f} days."
+                )
+            ),
         },
         {
             "key": "formula_fcf",
             "label": "Free Cash Flow Formula",
-            "value": "Net income + D&A + SBC - delta working capital - capex",
-            "detail": f"SBC expense ratio {_pct(dilution_schedule.sbc_expense_ratio)}; net income conversion {net_income_conversion:.2f}x EBIT.",
+            "value": "Operating cash flow - capex",
+            "detail": (
+                f"Base FY{base_bridge.year}E: OCF {_money(base_bridge.operating_cash_flow)} - capex {_money(base_bridge.capex)} = FCF {_money(base_bridge.free_cash_flow)}."
+                if base_bridge is not None
+                else "Cash and debt balances roll forward from free cash flow after preserving a target cash buffer."
+            ),
         },
         {
             "key": "formula_eps",
@@ -771,7 +1378,7 @@ def _build_highlights(revenue_drivers: _RevenueDrivers, base: DriverForecastScen
     return [
         f"Base next-year revenue {_pct(_first_value(base.revenue_growth.values))} via {revenue_drivers.mode.replace('_', ' ')}.",
         f"Base next-year EBIT margin {_pct(base_margin)} from explicit cost buckets.",
-        f"Bull / Bear next-year EPS {_money(bull_eps)} / {_money(bear_eps)} with explicit dilution.",
+        f"Bull / Bear next-year EPS {_money(bull_eps)} / {_money(bear_eps)} after explicit interest, tax, and dilution schedules.",
     ]
 
 
@@ -944,18 +1551,6 @@ def _preferred_segment_basis(segments: list[dict[str, Any]]) -> str | None:
     return max(counts.items(), key=lambda item: item[1])[0] if counts else None
 
 
-def _working_capital_days(history: list[dict[str, Any]]) -> float:
-    values: list[float] = []
-    for row in history:
-        revenue = row["revenue"]
-        current_assets = row["current_assets"]
-        current_liabilities = row["current_liabilities"]
-        if revenue in (None, 0) or current_assets is None or current_liabilities is None:
-            continue
-        values.append(_clip(((current_assets - current_liabilities) / revenue) * 365.0, WORKING_CAPITAL_DAYS_FLOOR, WORKING_CAPITAL_DAYS_CAP))
-    return median(values) if values else 12.0
-
-
 def _sales_to_capital(history: list[dict[str, Any]]) -> float | None:
     values: list[float] = []
     for row in history:
@@ -974,8 +1569,92 @@ def _statement_value(statement: Any, key: str) -> float | None:
     if not isinstance(data, dict):
         return None
     value = data.get(key)
+    if key == "weighted_average_shares_basic":
+        for alias in ("weighted_average_shares_basic", "weighted_average_basic_shares"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
     if key == "weighted_average_shares_diluted":
         value = data.get("weighted_average_shares_diluted", data.get("weighted_average_diluted_shares"))
+    if key == "shares_issued":
+        for alias in ("shares_issued", "common_shares_issued"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "shares_repurchased":
+        for alias in ("shares_repurchased", "common_shares_repurchased"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "share_price":
+        for alias in ("current_share_price", "market_price", "share_price"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "option_warrant_dilution_shares":
+        for alias in ("option_warrant_dilution_shares", "dilutive_option_warrant_shares", "dilutive_option_shares"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "options_outstanding":
+        for alias in ("options_outstanding", "employee_stock_options_outstanding", "in_the_money_options_outstanding"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "warrants_outstanding":
+        for alias in ("warrants_outstanding", "dilutive_warrants_outstanding", "in_the_money_warrants_outstanding"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "option_exercise_price":
+        for alias in ("option_exercise_price", "options_average_exercise_price", "average_option_strike"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "warrant_exercise_price":
+        for alias in ("warrant_exercise_price", "warrants_average_exercise_price", "average_warrant_strike"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "rsu_shares":
+        for alias in ("rsu_shares", "restricted_stock_units", "unvested_rsu_shares", "stock_award_shares", "dilutive_rsu_shares"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "acquisition_shares_issued":
+        for alias in ("acquisition_shares_issued", "shares_issued_for_acquisition", "acquisition_share_issuance"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "convertible_dilution_shares":
+        for alias in ("dilutive_convertible_shares", "convertible_shares"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "convertible_conversion_price":
+        for alias in ("convertible_conversion_price", "convert_conversion_price", "conversion_price"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "convertible_is_dilutive":
+        for alias in ("convertible_is_dilutive", "convert_is_dilutive", "convertible_dilutive"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
     if key == "free_cash_flow":
         direct_value = _as_float(value)
         if direct_value is not None:
@@ -984,6 +1663,84 @@ def _statement_value(statement: Any, key: str) -> float | None:
         capex = _as_float(data.get("capex"))
         if operating_cash_flow is not None and capex is not None:
             return operating_cash_flow - capex
+        return None
+    if key == "pretax_income":
+        for alias in (
+            "pretax_income",
+            "income_before_tax",
+            "income_before_income_taxes",
+            "income_before_taxes",
+            "earnings_before_tax",
+            "pretax_earnings",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "income_tax_expense":
+        for alias in ("income_tax_expense", "provision_for_income_taxes"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "interest_income":
+        for alias in ("interest_income", "interest_and_investment_income", "investment_income"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "other_income_expense":
+        for alias in (
+            "other_income_expense",
+            "other_non_operating_income_expense",
+            "non_operating_income_expense",
+            "other_income",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "cash_balance":
+        for alias in ("cash_and_short_term_investments", "cash_and_cash_equivalents", "cash_equivalents"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "total_debt":
+        direct_value = _as_float(data.get("total_debt"))
+        if direct_value is not None:
+            return direct_value
+        current_debt = _as_float(data.get("current_debt"))
+        long_term_debt = _as_float(data.get("long_term_debt"))
+        return _sum_non_null(current_debt, long_term_debt)
+    if key == "gross_profit":
+        return _as_float(data.get("gross_profit"))
+    if key == "cost_of_revenue":
+        direct_value = _as_float(data.get("cost_of_revenue") or data.get("cost_of_goods_sold"))
+        if direct_value is not None:
+            return direct_value
+        revenue = _as_float(data.get("revenue"))
+        gross_profit = _as_float(data.get("gross_profit"))
+        if revenue is not None and gross_profit is not None:
+            return max(0.0, revenue - gross_profit)
+        return None
+    if key == "deferred_revenue":
+        for alias in ("deferred_revenue", "contract_liabilities", "current_contract_liabilities", "deferred_income"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "accrued_operating_liabilities":
+        for alias in (
+            "accrued_operating_liabilities",
+            "accrued_liabilities",
+            "accrued_expenses",
+            "accrued_compensation",
+            "other_accrued_liabilities",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
         return None
     return _as_float(value)
 
@@ -1069,6 +1826,301 @@ def _median_abs_ratio(history: list[dict[str, Any]], numerator_key: str, denomin
     return median(ratios) if ratios else None
 
 
+def _positive_amount(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return abs(float(value)) if isfinite(float(value)) else None
+
+
+def _average_balance(opening: float | None, ending: float | None) -> float | None:
+    if opening is None and ending is None:
+        return None
+    if opening is None:
+        return ending
+    if ending is None:
+        return opening
+    return (opening + ending) / 2.0
+
+
+def _derived_other_income_expense(row: dict[str, Any]) -> float | None:
+    pretax_income = row.get("pretax_income")
+    operating_income = row.get("operating_income")
+    if pretax_income is None or operating_income is None:
+        return None
+    interest_expense = _positive_amount(row.get("interest_expense")) or 0.0
+    interest_income = _positive_amount(row.get("interest_income")) or 0.0
+    return pretax_income - operating_income + interest_expense - interest_income
+
+
+def _sum_non_null(*values: float | None) -> float | None:
+    present = [float(value) for value in values if value is not None and isfinite(float(value))]
+    return sum(present) if present else None
+
+
+def _latest_share_price(history: list[dict[str, Any]]) -> tuple[float | None, str]:
+    for row in reversed(history):
+        share_price = row.get("share_price")
+        if share_price is not None and share_price > 0:
+            return float(share_price), "Disclosed share price"
+        repurchase_cash = _positive_amount(row.get("share_buybacks"))
+        repurchased_shares = _positive_amount(row.get("shares_repurchased"))
+        implied_price = _safe_divide(repurchase_cash, repurchased_shares)
+        if implied_price is not None and implied_price > 0:
+            return implied_price, "Implied repurchase price"
+    return None, "No disclosed share price"
+
+
+def _clip_share_amount(amount: float | None, starting_basic_shares: float, cap_rate: float) -> float:
+    if amount is None or amount <= 0:
+        return 0.0
+    share_cap = max(1e-6, starting_basic_shares * cap_rate)
+    return _clip(float(amount), 0.0, share_cap)
+
+
+def _treasury_stock_increment(instrument_shares: float | None, strike_price: float | None, share_price: float | None) -> float:
+    if instrument_shares is None or instrument_shares <= 0 or share_price is None or share_price <= 0 or strike_price is None:
+        return 0.0
+    if share_price <= strike_price:
+        return 0.0
+    repurchased_shares = (float(instrument_shares) * float(strike_price)) / float(share_price)
+    return max(0.0, float(instrument_shares) - repurchased_shares)
+
+
+def _derive_option_warrant_dilution_shares(
+    latest: dict[str, Any],
+    starting_basic_shares: float,
+    latest_share_price: float | None,
+    share_price_basis: str,
+) -> tuple[float, str]:
+    direct_shares = latest.get("option_warrant_dilution_shares")
+    if direct_shares is not None and direct_shares > 0:
+        return _clip_share_amount(direct_shares, starting_basic_shares, OPTION_WARRANT_DILUTION_CAP), "Direct dilutive option or warrant shares"
+
+    option_increment = _treasury_stock_increment(latest.get("options_outstanding"), latest.get("option_exercise_price"), latest_share_price)
+    warrant_increment = _treasury_stock_increment(latest.get("warrants_outstanding"), latest.get("warrant_exercise_price"), latest_share_price)
+    total_increment = _clip_share_amount(option_increment + warrant_increment, starting_basic_shares, OPTION_WARRANT_DILUTION_CAP)
+    if total_increment > 0:
+        return total_increment, f"Treasury stock method using {share_price_basis.lower()}"
+    if latest.get("options_outstanding") or latest.get("warrants_outstanding"):
+        return 0.0, "Outstanding options or warrants disclosed, but TSM inputs are incomplete"
+    return 0.0, "No option or warrant disclosure"
+
+
+def _derive_acquisition_share_issuance(history: list[dict[str, Any]], starting_basic_shares: float) -> tuple[float, str]:
+    direct_values: list[float] = []
+    inferred_values: list[float] = []
+    for row in history:
+        direct_value = row.get("acquisition_shares_issued")
+        if direct_value is not None and direct_value > 0:
+            direct_values.append(direct_value)
+            continue
+        shares_issued = row.get("shares_issued")
+        acquisitions = row.get("acquisitions")
+        if shares_issued is not None and shares_issued > 0 and acquisitions is not None and acquisitions > 0:
+            inferred_values.append(shares_issued)
+    if direct_values:
+        return _clip_share_amount(median(direct_values), starting_basic_shares, ACQUISITION_SHARE_ISSUANCE_CAP), "Direct acquisition share issuance"
+    if inferred_values:
+        return _clip_share_amount(median(inferred_values), starting_basic_shares, ACQUISITION_SHARE_ISSUANCE_CAP), "Issued shares aligned with acquisition activity"
+    return 0.0, "No acquisition share issuance disclosure"
+
+
+def _derive_rsu_share_issuance(history: list[dict[str, Any]], annual_acquisition_shares: float, starting_basic_shares: float) -> tuple[float, str]:
+    direct_values: list[float] = []
+    residual_values: list[float] = []
+    for row in history:
+        direct_value = row.get("rsu_shares")
+        if direct_value is not None and direct_value > 0:
+            direct_values.append(direct_value)
+        shares_issued = row.get("shares_issued")
+        acquisition_shares = row.get("acquisition_shares_issued")
+        if shares_issued is not None and shares_issued > 0:
+            residual_issued = shares_issued - max(acquisition_shares or annual_acquisition_shares, 0.0)
+            if residual_issued > 0:
+                residual_values.append(residual_issued)
+    if direct_values:
+        return _clip_share_amount(median(direct_values), starting_basic_shares, RSU_DILUTION_CAP), "Direct RSU or stock-award shares"
+    if residual_values:
+        return _clip_share_amount(median(residual_values), starting_basic_shares, RSU_DILUTION_CAP), "Residual issued-share bridge after acquisition issuance"
+    return 0.0, "No RSU or stock-award share disclosure"
+
+
+def _derive_buyback_retirement_shares(
+    history: list[dict[str, Any]],
+    latest_share_price: float | None,
+    share_price_basis: str,
+    starting_basic_shares: float,
+) -> tuple[float, str]:
+    direct_values: list[float] = []
+    implied_values: list[float] = []
+    for row in history:
+        direct_value = row.get("shares_repurchased")
+        if direct_value is not None and direct_value > 0:
+            direct_values.append(direct_value)
+            continue
+        repurchase_cash = _positive_amount(row.get("share_buybacks"))
+        local_share_price = row.get("share_price") or latest_share_price
+        if repurchase_cash is not None and local_share_price is not None and local_share_price > 0:
+            implied_values.append(repurchase_cash / local_share_price)
+    if direct_values:
+        return _clip_share_amount(median(direct_values), starting_basic_shares, BUYBACK_RETIREMENT_CAP), "Direct repurchased-share disclosure"
+    if implied_values:
+        return _clip_share_amount(median(implied_values), starting_basic_shares, BUYBACK_RETIREMENT_CAP), f"Repurchase cash translated into shares using {share_price_basis.lower()}"
+    return 0.0, "No explicit repurchased-share disclosure"
+
+
+def _derive_convertible_dilution_shares(
+    latest: dict[str, Any],
+    starting_basic_shares: float,
+    latest_share_price: float | None,
+    share_price_basis: str,
+) -> tuple[float, str]:
+    direct_shares = latest.get("convertible_dilution_shares")
+    latest_data = getattr(latest.get("statement"), "data", None)
+    if direct_shares is None and isinstance(latest_data, dict):
+        direct_rate = _as_float(
+            latest_data.get("convertible_dilution_rate")
+            or latest_data.get("convert_dilution_rate")
+            or latest_data.get("convertible_share_dilution")
+        )
+        if direct_rate is not None and direct_rate > 0:
+            direct_shares = direct_rate * starting_basic_shares
+    if direct_shares is None or direct_shares <= 0:
+        return 0.0, "No convertible share disclosure"
+
+    is_dilutive_flag = latest.get("convertible_is_dilutive")
+    conversion_price = latest.get("convertible_conversion_price")
+    is_dilutive = False
+    if is_dilutive_flag is not None:
+        is_dilutive = is_dilutive_flag > 0
+    elif latest_share_price is not None and conversion_price is not None:
+        is_dilutive = latest_share_price > conversion_price
+    else:
+        is_dilutive = True
+
+    if not is_dilutive:
+        return 0.0, "Convertible disclosure present but out of the money"
+    return _clip_share_amount(direct_shares, starting_basic_shares, CONVERT_DILUTION_CAP), (
+        f"If-converted shares using {share_price_basis.lower()}"
+        if latest_share_price is not None and conversion_price is not None
+        else "Direct dilutive convertible shares"
+    )
+
+
+def _derive_proxy_net_dilution_rate(history: list[dict[str, Any]], starting_diluted_shares: float) -> tuple[float, str]:
+    share_history = [row["shares"] for row in history if row["shares"] is not None and row["shares"] > 0]
+    share_growth = _weighted_recent_growth(_historical_growth_rates(share_history))
+    sbc_expense_ratio = _clip(_median_abs_ratio(history, "stock_based_compensation", "revenue") or 0.0, 0.0, SBC_EXPENSE_RATIO_CAP)
+    sbc_rate = _clip(max((sbc_expense_ratio * 0.18), max(share_growth or 0.0, 0.0) * 0.65), SBC_DILUTION_FLOOR, SBC_DILUTION_CAP)
+    buyback_rate = _clip(max((_median_abs_ratio(history, "share_buybacks", "revenue") or 0.0) * 0.12, max(-(share_growth or 0.0), 0.0) * 0.65), BUYBACK_RETIREMENT_FLOOR, BUYBACK_RETIREMENT_CAP)
+    acquisition_rate = _clip((_median_abs_ratio(history, "acquisitions", "revenue") or 0.0) * 0.05, 0.0, ACQUISITION_DILUTION_CAP)
+    convert_rate = _clip(_safe_divide(_first_non_null_dilution_value(history, "convertible_dilution_shares"), starting_diluted_shares) or 0.0, 0.0, CONVERT_DILUTION_CAP)
+
+    explicit_net = sbc_rate + acquisition_rate + convert_rate - buyback_rate
+    if share_growth is not None:
+        gap = share_growth - explicit_net
+        if gap > 0:
+            sbc_rate = _clip(sbc_rate + (gap * 0.7), SBC_DILUTION_FLOOR, SBC_DILUTION_CAP)
+        elif gap < 0:
+            buyback_rate = _clip(buyback_rate + (abs(gap) * 0.7), BUYBACK_RETIREMENT_FLOOR, BUYBACK_RETIREMENT_CAP)
+    return sbc_rate + acquisition_rate + convert_rate - buyback_rate, "Historical diluted-share growth with revenue-scaled SBC, buyback, acquisition, and convert proxies"
+
+
+def _first_non_null_dilution_value(history: list[dict[str, Any]], key: str) -> float | None:
+    for row in reversed(history):
+        value = row.get(key)
+        if value is not None and value > 0:
+            return float(value)
+    return None
+
+
+def _resolved_cost_of_revenue(row: dict[str, Any], fallback_ratio: float | None = None) -> float | None:
+    direct_value = row.get("cost_of_revenue")
+    if direct_value is not None:
+        return max(0.0, float(direct_value))
+    revenue = row.get("revenue")
+    gross_profit = row.get("gross_profit")
+    if revenue is not None and gross_profit is not None:
+        return max(0.0, float(revenue) - float(gross_profit))
+    if revenue is not None and fallback_ratio is not None:
+        return max(0.0, float(revenue) * float(fallback_ratio))
+    operating_cost = _operating_cost(row)
+    return max(0.0, float(operating_cost)) if operating_cost is not None else None
+
+
+def _historical_cash_operating_cost(row: dict[str, Any], resolved_cost_of_revenue: float | None) -> float | None:
+    revenue = row.get("revenue")
+    operating_income = row.get("operating_income")
+    depreciation = row.get("depreciation") or 0.0
+    if revenue is not None and operating_income is not None:
+        return max(0.0, float(revenue) - float(operating_income) - float(depreciation))
+    return resolved_cost_of_revenue
+
+
+def _days_to_balance(base_amount: float | None, days: float) -> float:
+    if base_amount is None:
+        return 0.0
+    return max(0.0, float(base_amount) * (days / 365.0))
+
+
+def _schedule_basis(label: str, values: list[float], default_days: float) -> str:
+    if values:
+        return f"{label} median from disclosure"
+    if default_days == 0:
+        return f"{label} assumed 0 when undisclosed"
+    return f"{label} fallback {default_days:.0f} days"
+
+
+def _operating_working_capital_total(
+    accounts_receivable: float,
+    inventory: float,
+    accounts_payable: float,
+    deferred_revenue: float,
+    accrued_operating_liabilities: float,
+) -> float:
+    return accounts_receivable + inventory - accounts_payable - deferred_revenue - accrued_operating_liabilities
+
+
+def _project_operating_working_capital_point(
+    *,
+    revenue: float,
+    cost_of_revenue: float,
+    cash_operating_cost: float,
+    schedule: _OperatingWorkingCapitalSchedule,
+    days_shift: float,
+) -> dict[str, float]:
+    accounts_receivable_days = _clip(schedule.dso + days_shift, DSO_FLOOR, DSO_CAP)
+    inventory_days = _clip(schedule.dio + days_shift, DIO_FLOOR, DIO_CAP)
+    accounts_payable_days = _clip(schedule.dpo - days_shift, DPO_FLOOR, DPO_CAP)
+    deferred_revenue_days = _clip(schedule.deferred_revenue_days - days_shift, DEFERRED_REVENUE_DAYS_FLOOR, DEFERRED_REVENUE_DAYS_CAP)
+    accrued_operating_liabilities_days = _clip(
+        schedule.accrued_operating_liability_days - days_shift,
+        ACCRUED_OPERATING_LIABILITY_DAYS_FLOOR,
+        ACCRUED_OPERATING_LIABILITY_DAYS_CAP,
+    )
+
+    accounts_receivable = _days_to_balance(revenue, accounts_receivable_days)
+    inventory = _days_to_balance(cost_of_revenue, inventory_days)
+    accounts_payable = _days_to_balance(cost_of_revenue, accounts_payable_days)
+    deferred_revenue = _days_to_balance(revenue, deferred_revenue_days)
+    accrued_operating_liabilities = _days_to_balance(cash_operating_cost, accrued_operating_liabilities_days)
+
+    return {
+        "accounts_receivable": accounts_receivable,
+        "inventory": inventory,
+        "accounts_payable": accounts_payable,
+        "deferred_revenue": deferred_revenue,
+        "accrued_operating_liabilities": accrued_operating_liabilities,
+        "total": _operating_working_capital_total(
+            accounts_receivable,
+            inventory,
+            accounts_payable,
+            deferred_revenue,
+            accrued_operating_liabilities,
+        ),
+    }
+
+
 def _mean_revert(current: float, target: float, speed: float) -> float:
     normalized_speed = _clip(speed, 0.0, 1.0)
     return current + ((target - current) * normalized_speed)
@@ -1102,6 +2154,18 @@ def _money(value: float | None) -> str:
     if abs(value) >= 1_000_000:
         return f"${value / 1_000_000:.1f}M"
     return f"${value:.2f}"
+
+
+def _shares(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    if abs(value) >= 1_000_000_000:
+        return f"{value / 1_000_000_000:.2f}B"
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if abs(value) >= 1_000:
+        return f"{value / 1_000:.1f}K"
+    return f"{value:.0f}"
 
 
 def _pct(value: float | None) -> str:
