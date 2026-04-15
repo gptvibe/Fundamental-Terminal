@@ -243,6 +243,7 @@ def build_company_charts_dashboard_response(
         CompanyChartsScoreBadgePayload(key=item.key, label=item.label, score=item.score, tone=item.tone, detail=item.detail, unavailable_reason=item.unavailable_reason)
         for item in factors.supporting
     ]
+    stability_label = f"Forecast stability: {_stability_label(confidence_score)}"
 
     return CompanyChartsDashboardResponse(
         company=company_payload,
@@ -288,7 +289,8 @@ def build_company_charts_dashboard_response(
             score_name=forecast_stability.score_name,
             heuristic=bool(forecast_state["methodology_heuristic"]),
             score_components=[component.label for component in forecast_stability.components],
-            confidence_label=f"Forecast stability: {_stability_label(confidence_score)}",
+            stability_label=stability_label,
+            confidence_label=stability_label,
         ),
         forecast_diagnostics=forecast_stability,
         payload_version=payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,

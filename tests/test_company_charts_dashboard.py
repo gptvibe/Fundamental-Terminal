@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -438,15 +439,19 @@ def test_build_company_charts_dashboard_response_uses_driver_model_with_guidance
     assert any(item.label == "Management Guidance" for item in response.cards.forecast_assumptions.items)
     assert any(item.label == "Operating Working Capital" for item in response.cards.forecast_assumptions.items)
     assert any(item.label == "Below-The-Line Bridge" for item in response.cards.forecast_assumptions.items)
+    assert any(item.label == "Fixed-Capital Reinvestment" for item in response.cards.forecast_assumptions.items)
     assert any(item.label == "Growth Sensitivity" for item in response.cards.forecast_calculations.items)
     assert any(item.label == "Pretax Income Formula" for item in response.cards.forecast_calculations.items)
     assert any(item.label == "Operating Cash Flow Formula" for item in response.cards.forecast_calculations.items)
     calculation_items = {item.key: item for item in response.cards.forecast_calculations.items}
     assert calculation_items["formula_reinvestment"].label == "Capex Formula"
-    assert calculation_items["formula_reinvestment"].value == "max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)"
+    assert calculation_items["formula_reinvestment"].value == driver_model.FORECAST_FORMULA_CAPEX
     assert "flows through OCF, not capex" in str(calculation_items["formula_reinvestment"].detail)
-    assert calculation_items["formula_ocf"].value == "Net income + D&A + SBC - delta operating working capital"
+    assert calculation_items["formula_ocf"].value == driver_model.FORECAST_FORMULA_OCF
     assert "delta operating WC" in str(calculation_items["formula_ocf"].detail)
+    expected_stability_label = f"Forecast stability: {charts_service._stability_label(response.forecast_diagnostics.final_score)}"
+    assert response.forecast_methodology.stability_label == expected_stability_label
+    assert response.forecast_methodology.confidence_label == response.forecast_methodology.stability_label
 
 
 def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, statements: list[SimpleNamespace]) -> tuple[driver_model.DriverForecastScenario, driver_model._ForecastBridgePoint]:
@@ -1658,14 +1663,14 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
     base_scenario, bridge = _assert_base_bridge_formulas(bundle, statements)
     calculation_rows = {row["key"]: row for row in bundle.calculation_rows}
 
-    assert calculation_rows["formula_revenue"]["value"] == "Prior revenue x (1 + price + market growth + share)"
-    assert calculation_rows["formula_margin"]["value"] == "Revenue - variable costs - semi-variable costs - fixed costs"
-    assert calculation_rows["formula_pretax"]["value"] == "EBIT - interest expense + interest income + other income or expense"
-    assert calculation_rows["formula_tax"]["value"] == "Pretax income x effective tax rate"
-    assert calculation_rows["formula_reinvestment"]["value"] == "max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)"
-    assert calculation_rows["formula_ocf"]["value"] == "Net income + D&A + SBC - delta operating working capital"
-    assert calculation_rows["formula_fcf"]["value"] == "Operating cash flow - capex"
-    assert calculation_rows["formula_eps"]["value"] == "Net income / diluted shares"
+    assert calculation_rows["formula_revenue"]["value"] == driver_model.FORECAST_FORMULA_REVENUE
+    assert calculation_rows["formula_margin"]["value"] == driver_model.FORECAST_FORMULA_MARGIN
+    assert calculation_rows["formula_pretax"]["value"] == driver_model.FORECAST_FORMULA_PRETAX
+    assert calculation_rows["formula_tax"]["value"] == driver_model.FORECAST_FORMULA_TAX
+    assert calculation_rows["formula_reinvestment"]["value"] == driver_model.FORECAST_FORMULA_CAPEX
+    assert calculation_rows["formula_ocf"]["value"] == driver_model.FORECAST_FORMULA_OCF
+    assert calculation_rows["formula_fcf"]["value"] == driver_model.FORECAST_FORMULA_FCF
+    assert calculation_rows["formula_eps"]["value"] == driver_model.FORECAST_FORMULA_EPS
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_pretax"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_tax"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_reinvestment"]["detail"]
@@ -1675,6 +1680,15 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
         f"Base case next-year EPS {driver_model._money(base_scenario.eps.values[0])} "
         f"at {driver_model._pct(driver_model._safe_divide(base_scenario.operating_income.values[0], base_scenario.revenue.values[0]))} operating margin."
     )
+
+
+def test_driver_forecast_docs_match_backend_formula_wording():
+    docs_text = Path("docs/company-charts-driver-forecast.md").read_text(encoding="utf-8")
+
+    assert f"`{driver_model.FORECAST_FORMULA_FIXED_CAPITAL_REINVESTMENT}`" in docs_text
+    assert f"`{driver_model.FORECAST_FORMULA_OCF}`" in docs_text
+    assert f"`{driver_model.FORECAST_FORMULA_CAPEX}`" in docs_text
+    assert "Delta operating working capital flows through OCF, not capex." in docs_text
 
 
 def test_build_company_charts_dashboard_response_falls_back_when_driver_inputs_are_too_thin(monkeypatch):

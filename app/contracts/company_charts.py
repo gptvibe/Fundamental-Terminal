@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date as DateType
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.contracts.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
 
@@ -173,7 +173,16 @@ class CompanyChartsMethodologyPayload(BaseModel):
     score_name: str = "Forecast Stability"
     heuristic: bool = True
     score_components: list[str] = Field(default_factory=list)
+    stability_label: str | None = None
     confidence_label: str | None = None
+
+    @model_validator(mode="after")
+    def _sync_stability_labels(self) -> CompanyChartsMethodologyPayload:
+        if self.stability_label is None and self.confidence_label is not None:
+            self.stability_label = self.confidence_label
+        elif self.confidence_label is None and self.stability_label is not None:
+            self.confidence_label = self.stability_label
+        return self
 
 
 class CompanyChartsDashboardResponse(ProvenanceEnvelope):
@@ -188,9 +197,9 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     forecast_methodology: CompanyChartsMethodologyPayload = Field(
         default_factory=lambda: CompanyChartsMethodologyPayload(
             version="company_charts_dashboard_v7",
-            label="Deterministic internal projection",
-            summary="Forecasts are generated from persisted historical official inputs with guarded trend and margin rules.",
-            disclaimer="Forecast values are projections derived in-house from historical official data and are not reported results or analyst consensus.",
+            label="Deterministic projection with empirical stability overlay",
+            summary="Forecasts use persisted historical official inputs, guarded trend extrapolation, bounded margin assumptions, and a separate multi-metric walk-forward stability score.",
+            disclaimer="Forecast stability is conservative, based on historical revenue, EBIT, EPS, and FCF walk-forward error plus risk penalties, and is not a probability or statistical confidence measure.",
         )
     )
     forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)

@@ -66,7 +66,7 @@ def test_company_charts_refreshes_inline_for_uncached_ticker(monkeypatch):
         cards=main_module.CompanyChartsCardsPayload(),
         forecast_methodology=main_module.CompanyChartsMethodologyPayload(
             version="company_charts_dashboard_v7",
-            label="Deterministic internal projection",
+            label="Deterministic projection with empirical stability overlay",
             summary="Inline refresh compute",
             disclaimer="Forecast values are projections.",
         ),
@@ -204,7 +204,7 @@ def test_company_charts_returns_persisted_payload_when_snapshot_exists(monkeypat
         ),
         forecast_methodology=main_module.CompanyChartsMethodologyPayload(
             version="company_charts_dashboard_v7",
-            label="Deterministic internal projection",
+            label="Deterministic projection with empirical stability overlay",
             summary="Forecasts extend reported trends with guarded assumptions.",
             disclaimer="Forecast values are projections and not reported results.",
         ),
@@ -271,7 +271,7 @@ def test_company_charts_builds_inline_when_snapshot_missing(monkeypatch):
         cards=main_module.CompanyChartsCardsPayload(),
         forecast_methodology=main_module.CompanyChartsMethodologyPayload(
             version="company_charts_dashboard_v7",
-            label="Deterministic internal projection",
+            label="Deterministic projection with empirical stability overlay",
             summary="Inline compute",
             disclaimer="Forecast values are projections.",
         ),

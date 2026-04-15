@@ -9,6 +9,7 @@ When statement coverage is too thin, it still falls back to the older guarded he
 ## Canonical Capex Note
 
 The canonical implementation keeps `Delta operating working capital` in `OCF`, not in `capex`.
+Delta operating working capital flows through OCF, not capex.
 `Sales-to-capital` is used only to size positive-growth fixed-capital reinvestment, while maintenance capex is still floored by capex intensity and depreciation.
 That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF` bridge without double counting working-capital movement.
 
@@ -50,13 +51,13 @@ That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF
 - Accrued operating liabilities:
   `Accrued operating liabilities = Cash operating cost * accrued-liability days / 365`
 - Fixed-capital reinvestment:
-  `Incremental fixed-capital reinvestment = max(Delta revenue, 0) / sales-to-capital`
+  `max(delta revenue, 0) / sales-to-capital`
 - Maintenance capex:
   `Maintenance capex = max(Revenue * capex intensity, D&A)`
 - Operating cash flow:
-  `OCF = Net income + D&A + SBC - Delta operating working capital`
+  `Net income + D&A + SBC - delta operating working capital`
 - Capex:
-  `Capex = max(Maintenance capex, D&A + Incremental fixed-capital reinvestment)`
+  `max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)`
 - Free cash flow:
   `FCF = OCF - Capex`
 - Cash and debt support:

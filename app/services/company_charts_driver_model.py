@@ -72,6 +72,15 @@ RSU_DILUTION_CAP = 0.06
 ACQUISITION_SHARE_ISSUANCE_CAP = 0.06
 PROXY_LATENT_DILUTION_CAP = 0.03
 PROXY_LATENT_DILUTION_FULL_WEIGHT_OBS = 3.0
+FORECAST_FORMULA_REVENUE = "Prior revenue x (1 + price + market growth + share)"
+FORECAST_FORMULA_MARGIN = "Revenue - variable costs - semi-variable costs - fixed costs"
+FORECAST_FORMULA_PRETAX = "EBIT - interest expense + interest income + other income or expense"
+FORECAST_FORMULA_TAX = "Pretax income x effective tax rate"
+FORECAST_FORMULA_FIXED_CAPITAL_REINVESTMENT = "max(delta revenue, 0) / sales-to-capital"
+FORECAST_FORMULA_CAPEX = "max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)"
+FORECAST_FORMULA_OCF = "Net income + D&A + SBC - delta operating working capital"
+FORECAST_FORMULA_FCF = "Operating cash flow - capex"
+FORECAST_FORMULA_EPS = "Net income / diluted shares"
 
 
 @dataclass(slots=True)
@@ -1238,7 +1247,7 @@ def _build_assumption_rows(
         },
         {
             "key": "reinvestment",
-            "label": "Incremental Capital",
+            "label": "Fixed-Capital Reinvestment",
             "value": f"{reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital",
             "detail": "Sales-to-capital sizes positive-growth fixed-capital reinvestment only; delta operating working capital is modeled separately in operating cash flow so the bridge does not double count it.",
         },
@@ -1306,19 +1315,19 @@ def _build_calculation_rows(
         {
             "key": "formula_revenue",
             "label": "Revenue Formula",
-            "value": "Prior revenue x (1 + price + market growth + share)",
+            "value": FORECAST_FORMULA_REVENUE,
             "detail": "Year-one revenue is then overlaid with any point-in-time-safe guidance, backlog floors, and capacity caps.",
         },
         {
             "key": "formula_margin",
             "label": "Operating Income Formula",
-            "value": "Revenue - variable costs - semi-variable costs - fixed costs",
+            "value": FORECAST_FORMULA_MARGIN,
             "detail": f"Base variable cost ratio {_pct(cost_schedule.variable_cost_ratio)}; semi-variable cost ratio {_pct(cost_schedule.semi_variable_cost_ratio)}.",
         },
         {
             "key": "formula_pretax",
             "label": "Pretax Income Formula",
-            "value": "EBIT - interest expense + interest income + other income or expense",
+            "value": FORECAST_FORMULA_PRETAX,
             "detail": (
                 f"Base FY{base_bridge.year}E: EBIT {_money(base_bridge.ebit)}, interest expense {_money(base_bridge.interest_expense)}, interest income {_money(base_bridge.interest_income)}, other {_money(base_bridge.other_income_expense)}, pretax {_money(base_bridge.pretax_income)}."
                 if base_bridge is not None
@@ -1328,7 +1337,7 @@ def _build_calculation_rows(
         {
             "key": "formula_tax",
             "label": "Tax Formula",
-            "value": "Pretax income x effective tax rate",
+            "value": FORECAST_FORMULA_TAX,
             "detail": (
                 f"Base FY{base_bridge.year}E taxes {_money(base_bridge.taxes)} on pretax income {_money(base_bridge.pretax_income)} at {_pct(below_line_schedule.effective_tax_rate)}."
                 if base_bridge is not None
@@ -1338,7 +1347,7 @@ def _build_calculation_rows(
         {
             "key": "formula_reinvestment",
             "label": "Capex Formula",
-            "value": "max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)",
+            "value": FORECAST_FORMULA_CAPEX,
             "detail": (
                 (
                     f"Base FY{base_bridge.year}E: maintenance capex is the higher of {_money((base_revenue or 0.0) * reinvestment_schedule.capex_intensity)} and D&A {_money(base_bridge.depreciation)}; "
@@ -1356,7 +1365,7 @@ def _build_calculation_rows(
         {
             "key": "formula_ocf",
             "label": "Operating Cash Flow Formula",
-            "value": "Net income + D&A + SBC - delta operating working capital",
+            "value": FORECAST_FORMULA_OCF,
             "detail": (
                 f"Base FY{base_bridge.year}E: net income {_money(base_bridge.net_income)} + D&A {_money(base_bridge.depreciation)} + SBC {_money(base_bridge.stock_based_compensation)} - delta operating WC {_money(base_bridge.delta_working_capital)} = OCF {_money(base_bridge.operating_cash_flow)}."
                 if base_bridge is not None
@@ -1371,7 +1380,7 @@ def _build_calculation_rows(
         {
             "key": "formula_fcf",
             "label": "Free Cash Flow Formula",
-            "value": "Operating cash flow - capex",
+            "value": FORECAST_FORMULA_FCF,
             "detail": (
                 f"Base FY{base_bridge.year}E: OCF {_money(base_bridge.operating_cash_flow)} - capex {_money(base_bridge.capex)} = FCF {_money(base_bridge.free_cash_flow)}."
                 if base_bridge is not None
@@ -1381,7 +1390,7 @@ def _build_calculation_rows(
         {
             "key": "formula_eps",
             "label": "Diluted EPS Formula",
-            "value": "Net income / diluted shares",
+            "value": FORECAST_FORMULA_EPS,
             "detail": f"Base case next-year EPS {_money(base_eps)} at {_pct(base_margin)} operating margin.",
         },
         {
