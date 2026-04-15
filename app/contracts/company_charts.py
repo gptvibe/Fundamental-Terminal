@@ -197,8 +197,8 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     forecast_methodology: CompanyChartsMethodologyPayload = Field(
         default_factory=lambda: CompanyChartsMethodologyPayload(
             version="company_charts_dashboard_v7",
-            label="Deterministic projection with empirical stability overlay",
-            summary="Forecasts use persisted historical official inputs, guarded trend extrapolation, bounded margin assumptions, and a separate multi-metric walk-forward stability score.",
+            label="Driver-based integrated forecast",
+            summary="Revenue is modeled from price, volume, market growth, market share, segment mix, guidance, and backlog or capacity overlays when available. EBIT flows from explicit variable, semi-variable, and fixed cost schedules; operating working capital is forecast through receivables, inventory, payables, deferred revenue, and accrued operating-liability days while excluding cash and financing items; pretax income then bridges through debt-funded interest expense, cash yield, and other income or expense; operating cash flow subtracts delta operating working capital, capex covers maintenance capital plus positive-growth fixed-capital reinvestment from sales-to-capital, and free cash flow and diluted EPS are layered on top with disclosed cash, debt, SBC, buybacks, acquisition dilution, and convert dilution where available. Forecast Stability is then calibrated against point-in-time walk-forward backtests for revenue, EBIT, EPS, and FCF before conservative penalties are applied. When disclosure is sparse, the engine uses conservative component-level fallbacks before dropping all the way back to the older guarded heuristic path.",
             disclaimer="Forecast stability is conservative, based on historical revenue, EBIT, EPS, and FCF walk-forward error plus risk penalties, and is not a probability or statistical confidence measure.",
         )
     )

@@ -50,14 +50,14 @@ That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF
   `Deferred revenue = Revenue * deferred-revenue days / 365`
 - Accrued operating liabilities:
   `Accrued operating liabilities = Cash operating cost * accrued-liability days / 365`
-- Fixed-capital reinvestment:
-  `max(delta revenue, 0) / sales-to-capital`
+- Growth reinvestment:
+  `Growth reinvestment = max(delta revenue, 0) / sales-to-capital`
 - Maintenance capex:
   `Maintenance capex = max(Revenue * capex intensity, D&A)`
-- Operating cash flow:
-  `Net income + D&A + SBC - delta operating working capital`
 - Capex:
-  `max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)`
+  `Capex = max(maintenance capex, D&A + growth reinvestment)`
+- Operating cash flow:
+  `OCF = Net income + D&A + SBC - delta operating working capital`
 - Free cash flow:
   `FCF = OCF - Capex`
 - Cash and debt support:

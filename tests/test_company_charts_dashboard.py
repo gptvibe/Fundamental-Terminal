@@ -1685,10 +1685,51 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
 def test_driver_forecast_docs_match_backend_formula_wording():
     docs_text = Path("docs/company-charts-driver-forecast.md").read_text(encoding="utf-8")
 
-    assert f"`{driver_model.FORECAST_FORMULA_FIXED_CAPITAL_REINVESTMENT}`" in docs_text
-    assert f"`{driver_model.FORECAST_FORMULA_OCF}`" in docs_text
-    assert f"`{driver_model.FORECAST_FORMULA_CAPEX}`" in docs_text
+    assert f"`Growth reinvestment = {driver_model.FORECAST_FORMULA_FIXED_CAPITAL_REINVESTMENT}`" in docs_text
+    assert f"`OCF = {driver_model.FORECAST_FORMULA_OCF}`" in docs_text
+    assert "`Capex = max(maintenance capex, D&A + growth reinvestment)`" in docs_text
+    assert "`FCF = OCF - Capex`" in docs_text
     assert "Delta operating working capital flows through OCF, not capex." in docs_text
+
+
+def test_build_company_charts_dashboard_response_preserves_exact_driver_formula_copy(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    expected_bundle = driver_model.build_driver_forecast_bundle(statements, [release])
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    assert expected_bundle is not None
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.cards.forecast_calculations is not None
+
+    actual_formula_rows = [
+        {"key": item.key, "label": item.label, "value": item.value, "detail": item.detail}
+        for item in response.cards.forecast_calculations.items
+        if item.key.startswith("formula_")
+    ]
+
+    expected_formula_rows = [row for row in expected_bundle.calculation_rows if str(row.get("key", "")).startswith("formula_")]
+
+    assert actual_formula_rows == expected_formula_rows
 
 
 def test_build_company_charts_dashboard_response_falls_back_when_driver_inputs_are_too_thin(monkeypatch):
