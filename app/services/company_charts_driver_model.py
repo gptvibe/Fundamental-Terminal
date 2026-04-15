@@ -70,6 +70,8 @@ DILUTION_CAP = 0.08
 OPTION_WARRANT_DILUTION_CAP = 0.12
 RSU_DILUTION_CAP = 0.06
 ACQUISITION_SHARE_ISSUANCE_CAP = 0.06
+PROXY_LATENT_DILUTION_CAP = 0.03
+PROXY_LATENT_DILUTION_FULL_WEIGHT_OBS = 3.0
 
 
 @dataclass(slots=True)
@@ -191,6 +193,7 @@ class _DilutionSchedule:
     convertible_dilution_shares: float
     uses_proxy_fallback: bool
     proxy_net_dilution_rate: float
+    proxy_latent_dilution_rate: float
     starting_basis: str
     option_basis: str
     rsu_basis: str
@@ -209,6 +212,7 @@ class _ForecastShareBridgePoint:
     buyback_retirement_shares: float
     option_warrant_dilution_shares: float
     convertible_dilution_shares: float
+    latent_dilution_shares: float
     proxy_net_change_shares: float
     diluted_shares: float
     uses_proxy_fallback: bool
@@ -671,6 +675,7 @@ def _derive_dilution_schedule(history: list[dict[str, Any]]) -> _DilutionSchedul
     annual_buyback_shares, buyback_basis = _derive_buyback_retirement_shares(history, latest_share_price, share_price_basis, starting_basic_shares)
     convertible_dilution_shares, convert_basis = _derive_convertible_dilution_shares(latest, starting_basic_shares, latest_share_price, share_price_basis)
     proxy_net_dilution_rate, fallback_basis = _derive_proxy_net_dilution_rate(history, starting_diluted_shares)
+    proxy_latent_dilution_rate, proxy_latent_basis = _derive_proxy_latent_dilution_rate(history)
 
     uses_proxy_fallback = not any(
         value > 0
@@ -682,6 +687,8 @@ def _derive_dilution_schedule(history: list[dict[str, Any]]) -> _DilutionSchedul
             convertible_dilution_shares,
         )
     )
+    if uses_proxy_fallback and proxy_latent_basis is not None:
+        fallback_basis = f"{fallback_basis}. {proxy_latent_basis}"
 
     return _DilutionSchedule(
         starting_basic_shares=starting_basic_shares,
@@ -694,6 +701,7 @@ def _derive_dilution_schedule(history: list[dict[str, Any]]) -> _DilutionSchedul
         convertible_dilution_shares=convertible_dilution_shares,
         uses_proxy_fallback=uses_proxy_fallback,
         proxy_net_dilution_rate=proxy_net_dilution_rate,
+        proxy_latent_dilution_rate=proxy_latent_dilution_rate,
         starting_basis=starting_basis,
         option_basis=option_basis,
         rsu_basis=rsu_basis,
@@ -917,7 +925,12 @@ def _project_scenario(
             )
             proxy_net_change_shares = max(-basic_shares, basic_shares * proxy_net_dilution)
             basic_shares = max(1e-6, basic_shares + proxy_net_change_shares)
-            diluted_shares = basic_shares
+            # Proxy fallback keeps the share-count drift conservative and only adds
+            # a latent dilution overlay when filings historically showed diluted
+            # shares running above basic shares. The overlay is tightly capped and
+            # phased in by the amount of historical support instead of fabricated.
+            latent_dilution_shares = max(0.0, basic_shares * dilution_schedule.proxy_latent_dilution_rate)
+            diluted_shares = max(1e-6, basic_shares + latent_dilution_shares)
             share_bridge_point = _ForecastShareBridgePoint(
                 year=year,
                 basic_shares=basic_shares,
@@ -926,6 +939,7 @@ def _project_scenario(
                 buyback_retirement_shares=0.0,
                 option_warrant_dilution_shares=0.0,
                 convertible_dilution_shares=0.0,
+                latent_dilution_shares=latent_dilution_shares,
                 proxy_net_change_shares=proxy_net_change_shares,
                 diluted_shares=diluted_shares,
                 uses_proxy_fallback=True,
@@ -946,6 +960,7 @@ def _project_scenario(
                 buyback_retirement_shares=buyback_retirement_shares,
                 option_warrant_dilution_shares=option_warrant_dilution_shares,
                 convertible_dilution_shares=convertible_dilution_shares,
+                latent_dilution_shares=0.0,
                 proxy_net_change_shares=0.0,
                 diluted_shares=diluted_shares,
                 uses_proxy_fallback=False,
@@ -1225,13 +1240,13 @@ def _build_assumption_rows(
             "key": "reinvestment",
             "label": "Incremental Capital",
             "value": f"{reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital",
-            "detail": "Growth reinvestment combines incremental fixed capital with explicit operating working-capital schedules instead of a single blended current-asset minus current-liability shortcut.",
+            "detail": "Sales-to-capital sizes positive-growth fixed-capital reinvestment only; delta operating working capital is modeled separately in operating cash flow so the bridge does not double count it.",
         },
         {
             "key": "capex_dep",
             "label": "Capex / Depreciation",
             "value": f"{_pct(reinvestment_schedule.capex_intensity)} capex / {_pct(reinvestment_schedule.depreciation_ratio)} D&A",
-            "detail": "Maintenance and growth capex are separated through the reinvestment schedule.",
+            "detail": "Capex is the higher of maintenance capex and depreciation plus positive-growth fixed-capital reinvestment.",
         },
         {
             "key": "below_line_bridge",
@@ -1283,6 +1298,7 @@ def _build_calculation_rows(
     dilution_schedule: _DilutionSchedule,
     base_scenario: DriverForecastScenario,
 ) -> list[dict[str, str]]:
+    base_revenue = _first_value(base_scenario.revenue.values)
     base_margin = _safe_divide(_first_value(base_scenario.operating_income.values), _first_value(base_scenario.revenue.values))
     base_eps = _first_value(base_scenario.eps.values)
     base_bridge = base_scenario.bridge[0] if base_scenario.bridge else None
@@ -1321,22 +1337,28 @@ def _build_calculation_rows(
         },
         {
             "key": "formula_reinvestment",
-            "label": "Reinvestment Formula",
-            "value": "Delta revenue / sales-to-capital + delta operating working capital",
+            "label": "Capex Formula",
+            "value": "max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)",
             "detail": (
-                f"Operating working capital uses {reinvestment_schedule.operating_working_capital.dso:.0f} DSO, "
-                f"{reinvestment_schedule.operating_working_capital.dio:.0f} DIO, "
-                f"{reinvestment_schedule.operating_working_capital.dpo:.0f} DPO, "
-                f"{reinvestment_schedule.operating_working_capital.deferred_revenue_days:.0f} deferred-revenue days, and "
-                f"{reinvestment_schedule.operating_working_capital.accrued_operating_liability_days:.0f} accrued-liability days; capex intensity {_pct(reinvestment_schedule.capex_intensity)}."
+                (
+                    f"Base FY{base_bridge.year}E: maintenance capex is the higher of {_money((base_revenue or 0.0) * reinvestment_schedule.capex_intensity)} and D&A {_money(base_bridge.depreciation)}; "
+                    f"positive-growth fixed capital uses {reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital. "
+                    f"Delta operating working capital {_money(base_bridge.delta_working_capital)} flows through OCF, not capex."
+                )
+                if base_bridge is not None
+                else (
+                    f"Maintenance capex uses {_pct(reinvestment_schedule.capex_intensity)} of revenue with a D&A floor; "
+                    f"positive-growth fixed capital uses {reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital. "
+                    "Delta operating working capital flows through OCF, not capex."
+                )
             ),
         },
         {
             "key": "formula_ocf",
             "label": "Operating Cash Flow Formula",
-            "value": "Net income + D&A + SBC - delta working capital",
+            "value": "Net income + D&A + SBC - delta operating working capital",
             "detail": (
-                f"Base FY{base_bridge.year}E: net income {_money(base_bridge.net_income)} + D&A {_money(base_bridge.depreciation)} + SBC {_money(base_bridge.stock_based_compensation)} - delta WC {_money(base_bridge.delta_working_capital)} = OCF {_money(base_bridge.operating_cash_flow)}."
+                f"Base FY{base_bridge.year}E: net income {_money(base_bridge.net_income)} + D&A {_money(base_bridge.depreciation)} + SBC {_money(base_bridge.stock_based_compensation)} - delta operating WC {_money(base_bridge.delta_working_capital)} = OCF {_money(base_bridge.operating_cash_flow)}."
                 if base_bridge is not None
                 else (
                     f"SBC expense ratio {_pct(dilution_schedule.sbc_expense_ratio)}; "
@@ -2024,6 +2046,26 @@ def _derive_proxy_net_dilution_rate(history: list[dict[str, Any]], starting_dilu
         elif gap < 0:
             buyback_rate = _clip(buyback_rate + (abs(gap) * 0.7), BUYBACK_RETIREMENT_FLOOR, BUYBACK_RETIREMENT_CAP)
     return sbc_rate + acquisition_rate + convert_rate - buyback_rate, "Historical diluted-share growth with revenue-scaled SBC, buyback, acquisition, and convert proxies"
+
+
+def _derive_proxy_latent_dilution_rate(history: list[dict[str, Any]]) -> tuple[float, str | None]:
+    spread_rates: list[float] = []
+    for row in history:
+        diluted_shares = row.get("shares")
+        basic_shares = row.get("basic_shares")
+        spread_rate = _safe_divide((diluted_shares - basic_shares) if diluted_shares is not None and basic_shares is not None else None, basic_shares)
+        if spread_rate is not None and spread_rate > 0:
+            spread_rates.append(spread_rate)
+    if not spread_rates:
+        return 0.0, None
+
+    support_weight = min(1.0, len(spread_rates) / PROXY_LATENT_DILUTION_FULL_WEIGHT_OBS)
+    median_spread_rate = median(spread_rates)
+    latent_dilution_rate = _clip(median_spread_rate, 0.0, PROXY_LATENT_DILUTION_CAP) * support_weight
+    return latent_dilution_rate, (
+        "Latent dilution overlay uses the historical median diluted-vs-basic spread, "
+        f"capped at {_pct(PROXY_LATENT_DILUTION_CAP)} and weighted by {len(spread_rates)} supporting periods."
+    )
 
 
 def _first_non_null_dilution_value(history: list[dict[str, Any]], key: str) -> float | None:

@@ -6,6 +6,12 @@ The charts dashboard now prefers a driver-based integrated forecast engine for `
 The payload contract is unchanged: the endpoint still emits base / bull / bear scenario series plus the same assumptions and calculations cards.
 When statement coverage is too thin, it still falls back to the older guarded heuristic model instead of fabricating driver inputs.
 
+## Canonical Capex Note
+
+The canonical implementation keeps `Delta operating working capital` in `OCF`, not in `capex`.
+`Sales-to-capital` is used only to size positive-growth fixed-capital reinvestment, while maintenance capex is still floored by capex intensity and depreciation.
+That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF` bridge without double counting working-capital movement.
+
 ## Migration Path
 
 1. `build_company_charts_dashboard_response(...)` now loads annual statements, point-in-time-safe earnings-model diagnostics, and point-in-time-safe earnings releases.
@@ -31,8 +37,6 @@ When statement coverage is too thin, it still falls back to the older guarded he
   `Taxes = Pretax income * effective tax rate`
 - Net income:
   `Net income = Pretax income - taxes`
-- Reinvestment:
-  `Incremental reinvestment = Delta revenue / sales-to-capital + Delta operating working capital`
 - Operating working capital:
   `Operating NWC = Accounts receivable + Inventory - Accounts payable - Deferred revenue - Accrued operating liabilities`
 - Receivables driver:
@@ -45,8 +49,14 @@ When statement coverage is too thin, it still falls back to the older guarded he
   `Deferred revenue = Revenue * deferred-revenue days / 365`
 - Accrued operating liabilities:
   `Accrued operating liabilities = Cash operating cost * accrued-liability days / 365`
+- Fixed-capital reinvestment:
+  `Incremental fixed-capital reinvestment = max(Delta revenue, 0) / sales-to-capital`
+- Maintenance capex:
+  `Maintenance capex = max(Revenue * capex intensity, D&A)`
 - Operating cash flow:
   `OCF = Net income + D&A + SBC - Delta operating working capital`
+- Capex:
+  `Capex = max(Maintenance capex, D&A + Incremental fixed-capital reinvestment)`
 - Free cash flow:
   `FCF = OCF - Capex`
 - Cash and debt support:
@@ -68,7 +78,7 @@ When statement coverage is too thin, it still falls back to the older guarded he
 - DIO and DPO come from `inventory / cost_of_revenue * 365` and `accounts_payable / cost_of_revenue * 365` when disclosure exists; cost of revenue is taken directly when filed and proxied conservatively when not.
 - Deferred-revenue days and accrued-operating-liability days are built only when those balances are disclosed.
 - Cash, marketable securities, short-term investments, short-term debt, current maturities, and other financing items are excluded from operating working capital.
-- Sales-to-capital comes from `revenue / total assets`.
+- Sales-to-capital comes from `revenue / total assets` and is used only for positive-growth fixed-capital reinvestment, not for a second working-capital charge.
 - Opening cash uses disclosed `cash_and_short_term_investments` or `cash_and_cash_equivalents` when available.
 - Opening debt uses disclosed `total_debt`, or `current_debt + long_term_debt` as fallback.
 - Debt cost uses historical `interest_expense / average debt` when disclosed.
