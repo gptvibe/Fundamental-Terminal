@@ -649,6 +649,94 @@ def test_build_company_charts_dashboard_response_populates_new_card_math_from_dr
     assert forecast_fcf == pytest.approx(forecast_ocf - forecast_capex, abs=0.25)
 
 
+def test_build_fcf_outlook_card_falls_back_to_base_cash_series_when_driver_bridge_is_missing():
+    forecast_year = 2026
+    profit_series = [
+        charts_service._series(
+            "net_income_forecast",
+            "Net Income Base",
+            "usd",
+            "line",
+            "forecast",
+            "dashed",
+            [
+                charts_service.CompanyChartsSeriesPointPayload(
+                    period_label=f"FY{forecast_year}E",
+                    fiscal_year=forecast_year,
+                    period_end=None,
+                    value=125.0,
+                    series_kind="forecast",
+                )
+            ],
+        )
+    ]
+    cash_series = [
+        charts_service._series(
+            "operating_cash_flow_forecast",
+            "Operating CF Base",
+            "usd",
+            "line",
+            "forecast",
+            "dashed",
+            [
+                charts_service.CompanyChartsSeriesPointPayload(
+                    period_label=f"FY{forecast_year}E",
+                    fiscal_year=forecast_year,
+                    period_end=None,
+                    value=180.0,
+                    series_kind="forecast",
+                )
+            ],
+        ),
+        charts_service._series(
+            "capex_forecast",
+            "Capex Base",
+            "usd",
+            "line",
+            "forecast",
+            "dashed",
+            [
+                charts_service.CompanyChartsSeriesPointPayload(
+                    period_label=f"FY{forecast_year}E",
+                    fiscal_year=forecast_year,
+                    period_end=None,
+                    value=55.0,
+                    series_kind="forecast",
+                )
+            ],
+        ),
+        charts_service._series(
+            "free_cash_flow_forecast",
+            "Free CF Base",
+            "usd",
+            "line",
+            "forecast",
+            "dashed",
+            [
+                charts_service.CompanyChartsSeriesPointPayload(
+                    period_label=f"FY{forecast_year}E",
+                    fiscal_year=forecast_year,
+                    period_end=None,
+                    value=125.0,
+                    series_kind="forecast",
+                )
+            ],
+        ),
+    ]
+    driver_bundle = SimpleNamespace(scenarios={"base": SimpleNamespace(bridge=[])} )
+
+    card = charts_service._build_fcf_outlook_card([], profit_series, cash_series, driver_bundle)
+
+    assert card is not None
+    assert {series.key for series in card.series} == {
+        "fcf_net_income_forecast",
+        "fcf_ocf_forecast",
+        "fcf_capex_forecast",
+        "fcf_fcf_forecast",
+    }
+    assert any("detailed bridge payload was unavailable" in highlight for highlight in card.highlights)
+
+
 def test_company_charts_dashboard_response_round_trips_new_cards_through_snapshot_payload(monkeypatch):
     company = SimpleNamespace(
         id=1,

@@ -44,8 +44,8 @@ from app.services.company_charts_driver_model import build_driver_forecast_bundl
 from app.services.refresh_state import mark_dataset_checked
 
 
-CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v8"
-CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v8"
+CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v9"
+CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v9"
 ANNUAL_FILING_TYPES = {"10-K", "20-F", "40-F"}
 FORECAST_STABILITY_MIN_SCORE = 20
 FORECAST_STABILITY_MAX_SCORE = 90
@@ -905,6 +905,27 @@ def _build_fcf_outlook_card(
         "Reported and forecast cash-flow bridge items remain labeled separately so the FCF path stays audit-friendly.",
     ]
 
+    forecast_net_income = _series_points_by_key(profit_series, "net_income_forecast")
+    forecast_operating_cash_flow = _series_points_by_key(cash_series, "operating_cash_flow_forecast")
+    forecast_capex = _series_points_by_key(cash_series, "capex_forecast")
+    forecast_free_cash_flow = _series_points_by_key(cash_series, "free_cash_flow_forecast")
+
+    def _append_forecast_series_from_visible_base() -> bool:
+        appended = False
+        if forecast_net_income is not None:
+            series.append(_series("fcf_net_income_forecast", "Net Income Forecast", "usd", "line", "forecast", "dashed", forecast_net_income.points))
+            appended = True
+        if forecast_operating_cash_flow is not None:
+            series.append(_series("fcf_ocf_forecast", "Operating CF Forecast", "usd", "line", "forecast", "dashed", forecast_operating_cash_flow.points))
+            appended = True
+        if forecast_capex is not None:
+            series.append(_series("fcf_capex_forecast", "Capex Forecast", "usd", "line", "forecast", "dashed", forecast_capex.points))
+            appended = True
+        if forecast_free_cash_flow is not None:
+            series.append(_series("fcf_fcf_forecast", "Free CF Forecast", "usd", "line", "forecast", "dashed", forecast_free_cash_flow.points))
+            appended = True
+        return appended
+
     if driver_bundle is not None:
         base_scenario = getattr(driver_bundle, "scenarios", {}).get("base") if isinstance(getattr(driver_bundle, "scenarios", None), dict) else None
         bridge_points = list(getattr(base_scenario, "bridge", []) or []) if base_scenario is not None else []
@@ -921,20 +942,11 @@ def _build_fcf_outlook_card(
                 ]
             )
             highlights.append("Base-case FCF bridge keeps net income, D&A, SBC, operating working capital, and capex explicit in forecast mode.")
+        elif _append_forecast_series_from_visible_base():
+            highlights.append("Driver mode fell back to the visible base net income, operating cash flow, capex, and free cash flow series because the detailed bridge payload was unavailable for this ticker.")
     else:
-        forecast_net_income = _series_points_by_key(profit_series, "net_income_forecast")
-        forecast_operating_cash_flow = _series_points_by_key(cash_series, "operating_cash_flow_forecast")
-        forecast_capex = _series_points_by_key(cash_series, "capex_forecast")
-        forecast_free_cash_flow = _series_points_by_key(cash_series, "free_cash_flow_forecast")
-        if forecast_net_income is not None:
-            series.append(_series("fcf_net_income_forecast", "Net Income Forecast", "usd", "line", "forecast", "dashed", forecast_net_income.points))
-        if forecast_operating_cash_flow is not None:
-            series.append(_series("fcf_ocf_forecast", "Operating CF Forecast", "usd", "line", "forecast", "dashed", forecast_operating_cash_flow.points))
-        if forecast_capex is not None:
-            series.append(_series("fcf_capex_forecast", "Capex Forecast", "usd", "line", "forecast", "dashed", forecast_capex.points))
-        if forecast_free_cash_flow is not None:
-            series.append(_series("fcf_fcf_forecast", "Free CF Forecast", "usd", "line", "forecast", "dashed", forecast_free_cash_flow.points))
-        highlights.append("Heuristic mode exposes the earnings-to-cash path through net income, operating cash flow, capex, and free cash flow without a detailed working-capital bridge.")
+        if _append_forecast_series_from_visible_base():
+            highlights.append("Heuristic mode exposes the earnings-to-cash path through net income, operating cash flow, capex, and free cash flow without a detailed working-capital bridge.")
 
     if not series:
         return None
