@@ -456,6 +456,7 @@ def _normalize_segments(statement: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         return []
     normalized: list[dict[str, Any]] = []
+    company_revenue = _as_float(data.get("revenue")) if isinstance(data, dict) else None
     total_revenue = 0.0
     for item in payload:
         revenue = _as_float(item.get("revenue")) if isinstance(item, dict) else None
@@ -469,7 +470,9 @@ def _normalize_segments(statement: Any) -> list[dict[str, Any]]:
         if revenue is None or revenue <= 0:
             continue
         share = _as_float(item.get("share_of_revenue"))
-        if share is None and total_revenue > 0:
+        if company_revenue is not None and company_revenue > 0:
+            share = revenue / company_revenue
+        elif share is None and total_revenue > 0:
             share = revenue / total_revenue
         segment_id = str(item.get("segment_id") or item.get("segment_name") or "unknown")
         normalized.append(
@@ -1867,17 +1870,28 @@ def _segment_profiles(history: list[dict[str, Any]], residual_market_growth: flo
     if len(latest_segments) < 2:
         return [], None
     basis = _preferred_segment_basis(latest_segments)
+    if basis is None:
+        return [], None
+    latest_segments = _segments_for_basis(latest_segments, basis)
+    if len(latest_segments) < 2:
+        return [], None
     profiles: list[dict[str, Any]] = []
     for latest_segment in latest_segments:
         segment_id = latest_segment["segment_id"]
         revenues: list[float] = []
         share_series: list[float] = []
         for row in history:
-            match = next((segment for segment in row["segments"] if segment["segment_id"] == segment_id), None)
+            row_segments = _segments_for_basis(row["segments"], basis)
+            row_segment_total = _segments_total_revenue(row_segments)
+            match = next((segment for segment in row_segments if segment["segment_id"] == segment_id), None)
             if match is None:
                 continue
-            revenue = _as_float(match.get("revenue"))
-            share = _as_float(match.get("share_of_revenue"))
+            revenue = _scaled_segment_revenue(
+                _as_float(match.get("revenue")),
+                row.get("revenue"),
+                row_segment_total,
+            )
+            share = _safe_divide(revenue, row.get("revenue"))
             if revenue is not None:
                 revenues.append(revenue)
             if share is not None:
@@ -1892,13 +1906,30 @@ def _segment_profiles(history: list[dict[str, Any]], residual_market_growth: flo
                 "segment_id": segment_id,
                 "segment_name": latest_segment["segment_name"],
                 "kind": latest_segment.get("kind"),
-                "latest_revenue": float(latest_segment["revenue"]),
+                "latest_revenue": float(revenues[-1]),
                 "base_growth": _clip(base_growth, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP),
                 "price_growth_proxy": _clip(pricing_growth_proxy + (operating_margin * 0.02), PRICE_GROWTH_FLOOR, PRICE_GROWTH_CAP),
                 "share_mix_shift_proxy": _clip(share_mix_shift_proxy, SHARE_CHANGE_FLOOR, SHARE_CHANGE_CAP),
             }
         )
     return (profiles, basis) if len(profiles) >= 2 else ([], None)
+
+
+def _segments_for_basis(segments: list[dict[str, Any]], basis: str) -> list[dict[str, Any]]:
+    return [segment for segment in segments if str(segment.get("kind") or "other") == basis]
+
+
+def _segments_total_revenue(segments: list[dict[str, Any]]) -> float:
+    return sum(revenue for revenue in (_as_float(segment.get("revenue")) for segment in segments) if revenue not in (None, 0))
+
+
+def _scaled_segment_revenue(segment_revenue: float | None, company_revenue: float | None, basis_total_revenue: float) -> float | None:
+    if segment_revenue is None or segment_revenue <= 0:
+        return None
+    if company_revenue in (None, 0) or basis_total_revenue <= 0:
+        return segment_revenue
+    # Normalize partial same-basis disclosures back to the company total before rolling them forward.
+    return float(segment_revenue) * (float(company_revenue) / basis_total_revenue)
 
 
 def _preferred_segment_basis(segments: list[dict[str, Any]]) -> str | None:

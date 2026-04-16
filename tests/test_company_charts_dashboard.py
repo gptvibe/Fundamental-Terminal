@@ -876,6 +876,44 @@ def test_top_down_revenue_projection_uses_driver_stack_and_guidance_overlay():
     assert growth == pytest.approx(expected_growth, abs=1e-6)
 
 
+def test_driver_forecast_bundle_normalizes_partial_segment_coverage_before_bottom_up_rollup():
+    statements = [
+        _driver_forecast_statement(2023, 1000.0, receivables_days=52.0, inventory_days=34.0, payable_days=28.0),
+        _driver_forecast_statement(2024, 1100.0, receivables_days=52.0, inventory_days=34.0, payable_days=28.0),
+        _driver_forecast_statement(2025, 1210.0, receivables_days=52.0, inventory_days=34.0, payable_days=28.0),
+    ]
+    segment_payloads = [
+        [
+            {"segment_id": "client", "segment_name": "Client", "kind": "business", "revenue": 420.0, "operating_income": 84.0},
+            {"segment_id": "data_center", "segment_name": "Data Center", "kind": "business", "revenue": 280.0, "operating_income": 56.0},
+            {"segment_id": "americas", "segment_name": "Americas", "kind": "geography", "revenue": 1000.0, "operating_income": 140.0},
+        ],
+        [
+            {"segment_id": "client", "segment_name": "Client", "kind": "business", "revenue": 462.0, "operating_income": 92.4},
+            {"segment_id": "data_center", "segment_name": "Data Center", "kind": "business", "revenue": 308.0, "operating_income": 61.6},
+            {"segment_id": "americas", "segment_name": "Americas", "kind": "geography", "revenue": 1100.0, "operating_income": 154.0},
+        ],
+        [
+            {"segment_id": "client", "segment_name": "Client", "kind": "business", "revenue": 508.2, "operating_income": 101.64},
+            {"segment_id": "data_center", "segment_name": "Data Center", "kind": "business", "revenue": 338.8, "operating_income": 67.76},
+            {"segment_id": "americas", "segment_name": "Americas", "kind": "geography", "revenue": 1210.0, "operating_income": 169.4},
+        ],
+    ]
+    for statement, segment_breakdown in zip(statements, segment_payloads):
+        statement.data["segment_breakdown"] = segment_breakdown
+
+    history = driver_model._normalize_statements(statements)
+    segment_profiles, segment_basis = driver_model._segment_profiles(history, residual_market_growth=0.08, pricing_growth_proxy=0.02)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert segment_basis == "business"
+    assert sum(profile["latest_revenue"] for profile in segment_profiles) == pytest.approx(1210.0, abs=1e-6)
+    assert bundle is not None
+    assert bundle.scenarios["base"].revenue.values[0] > 1210.0
+    assert bundle.scenarios["base"].revenue_growth.values[0] > 0.0
+    assert bundle.scenarios["base"].revenue_growth.values[0] != pytest.approx(driver_model.REVENUE_GROWTH_FLOOR, abs=1e-6)
+
+
 def test_apply_revenue_overlays_respects_backlog_floor_then_capacity_cap():
     no_capacity = driver_model._RevenueDrivers(
         mode="top_down_proxy_decomposition+backlog",
