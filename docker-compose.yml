@@ -40,6 +40,7 @@ services:
     image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
     container_name: fundamental-terminal-backend
     pull_policy: always
+    init: true
     restart: unless-stopped
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
@@ -59,7 +60,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz').read()\""]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz').read()"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -73,6 +74,7 @@ services:
     image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
     container_name: fundamental-terminal-data-fetcher
     pull_policy: always
+    init: true
     restart: unless-stopped
     command: ["/bin/sh", "/app/docker/backend/start-worker.sh"]
     environment:
