@@ -1,0 +1,351 @@
+// @vitest-environment jsdom
+
+import fs from "node:fs";
+import path from "node:path";
+
+import * as React from "react";
+import { render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { CompanyChartsDashboard, MetricChartTooltipContent } from "@/components/company/charts-dashboard";
+import type { CompanyChartsDashboardResponse } from "@/lib/types";
+
+vi.mock("recharts", () => {
+  function Wrapper({ children }: { children?: React.ReactNode }) {
+    return React.createElement("div", null, children);
+  }
+
+  return {
+    Area: Wrapper,
+    Bar: Wrapper,
+    CartesianGrid: Wrapper,
+    ComposedChart: Wrapper,
+    LabelList: Wrapper,
+    Line: Wrapper,
+    ReferenceArea: Wrapper,
+    ReferenceLine: Wrapper,
+    ResponsiveContainer: Wrapper,
+    Tooltip: Wrapper,
+    XAxis: Wrapper,
+    YAxis: Wrapper,
+  };
+});
+
+function makePayload(overrides?: Partial<CompanyChartsDashboardResponse>): CompanyChartsDashboardResponse {
+  return {
+    company: {
+      ticker: "ACME",
+      cik: "0000001",
+      name: "Acme Corp",
+      sector: "Technology",
+      market_sector: "Technology",
+      market_industry: "Software",
+      oil_exposure_type: "non_oil",
+      oil_support_status: "unsupported",
+      oil_support_reasons: [],
+      strict_official_mode: true,
+      last_checked: "2026-04-13T00:00:00Z",
+      last_checked_financials: "2026-04-13T00:00:00Z",
+      last_checked_prices: null,
+      last_checked_insiders: null,
+      last_checked_institutional: null,
+      last_checked_filings: null,
+      cache_state: "fresh",
+    },
+    title: "Growth Outlook",
+    build_state: "ready",
+    build_status: "Charts dashboard ready.",
+    summary: {
+      headline: "Growth Outlook",
+      primary_score: { key: "growth", label: "Growth", score: 88, tone: "positive", detail: "Strong trend persistence.", unavailable_reason: null },
+      secondary_badges: [],
+      thesis: "Reported and projected values stay distinct.",
+      unavailable_notes: [],
+      freshness_badges: ["Updated 2026-04-13"],
+      source_badges: ["Official filings"],
+    },
+    factors: {
+      primary: { key: "growth", label: "Growth", score: 88, normalized_score: 0.88, tone: "positive", detail: "Strong trend.", unavailable_reason: null },
+      supporting: [],
+    },
+    legend: {
+      title: "Actual vs Forecast",
+      items: [
+        { key: "actual", label: "Reported", style: "solid", tone: "actual", description: "Historical filings." },
+        { key: "forecast", label: "Forecast", style: "dashed", tone: "forecast", description: "Projected path." },
+      ],
+    },
+    cards: {
+      revenue: makeMetricCard("revenue", "Revenue"),
+      revenue_outlook_bridge: makeMetricCard("revenue_outlook_bridge", "Revenue Outlook Bridge"),
+      revenue_growth: makeMetricCard("revenue_growth", "Revenue Growth", "percent", "bar"),
+      profit_metric: makeMetricCard("profit_metric", "Profit Metrics"),
+      margin_path: makeMetricCard("margin_path", "Margin Path", "percent"),
+      cash_flow_metric: makeMetricCard("cash_flow_metric", "Cash Flow Metrics"),
+      fcf_outlook: makeMetricCard("fcf_outlook", "FCF Outlook"),
+      eps: makeMetricCard("eps", "EPS", "usd_per_share", "bar"),
+      growth_summary: {
+        key: "growth_summary",
+        title: "Growth Summary",
+        subtitle: "Company growth only",
+        comparisons: [
+          { key: "hist_3y", label: "Hist 3Y", company_value: 0.25, benchmark_value: null, benchmark_label: null, unit: "percent", company_label: "Company", benchmark_available: false },
+        ],
+        empty_state: null,
+      },
+      forecast_assumptions: {
+        key: "forecast_assumptions",
+        title: "Forecast Assumptions",
+        items: [
+          { key: "revenue_method", label: "Revenue Method", value: "Driver", detail: null },
+          { key: "growth_guardrail", label: "Growth Guardrail", value: "Default clip", detail: "Fallback default clip remains active." },
+          { key: "history_depth", label: "History Depth", value: "5 annual periods", detail: null },
+          { key: "cash_support", label: "Cash + Debt Support", value: "$90M cash", detail: null },
+          { key: "dilution", label: "Dilution Bridge", value: "Proxy fallback", detail: "Proxy fallback from historical share drift." },
+        ],
+        empty_state: null,
+      },
+      forecast_calculations: {
+        key: "forecast_calculations",
+        title: "Forecast Calculations",
+        items: [{ key: "formula_revenue", label: "Revenue Formula", value: "Prior revenue x (1 + growth)", detail: "Year-one bridge." }],
+        empty_state: null,
+      },
+    },
+    forecast_methodology: {
+      version: "company_charts_dashboard_v8",
+      label: "Driver-based integrated forecast",
+      summary: "Forecasts are generated from official inputs.",
+      disclaimer: "Forecast values are projections.",
+      forecast_horizon_years: 3,
+      score_name: "Forecast Stability",
+      heuristic: false,
+      score_components: ["History depth"],
+      confidence_label: "Forecast stability: Moderate stability",
+    },
+    forecast_diagnostics: {
+      score_key: "forecast_stability",
+      score_name: "Forecast Stability",
+      heuristic: false,
+      final_score: 72,
+      summary: "Moderate stability.",
+      history_depth_years: 5,
+      thin_history: false,
+      growth_volatility: 0.12,
+      growth_volatility_band: "moderate",
+      missing_data_penalty: 0,
+      quality_score: 0.9,
+      missing_inputs: [],
+      sample_size: 3,
+      scenario_dispersion: 0.1,
+      sector_template: "Technology",
+      guidance_usage: "management_guidance_applied",
+      historical_backtest_error_band: "moderate",
+      backtest_weighted_error: 0.1,
+      backtest_horizon_errors: {},
+      backtest_metric_weights: {},
+      backtest_metric_errors: {},
+      backtest_metric_horizon_errors: {},
+      backtest_metric_sample_sizes: {},
+      components: [],
+    },
+    payload_version: "company_charts_dashboard_v8",
+    provenance: [],
+    as_of: "2026-04-13",
+    last_refreshed_at: "2026-04-13T00:00:00Z",
+    source_mix: {
+      source_ids: [],
+      source_tiers: [],
+      primary_source_ids: [],
+      fallback_source_ids: [],
+      official_only: true,
+    },
+    confidence_flags: [],
+    refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    diagnostics: {
+      coverage_ratio: 1,
+      fallback_ratio: 0,
+      stale_flags: [],
+      parser_confidence: 0.9,
+      missing_field_flags: [],
+      reconciliation_penalty: null,
+      reconciliation_disagreement_count: 0,
+    },
+    ...overrides,
+  };
+}
+
+function makeMetricCard(
+  key: string,
+  title: string,
+  unit: "usd" | "usd_per_share" | "percent" = "usd",
+  chartType: "line" | "bar" = "line"
+) {
+  return {
+    key,
+    title,
+    subtitle: `${title} subtitle`,
+    metric_label: title,
+    unit_label: unit,
+    empty_state: null,
+    highlights: [],
+    series: [
+      {
+        key: `${key}_actual`,
+        label: "Reported",
+        unit,
+        chart_type: chartType,
+        series_kind: "actual" as const,
+        stroke_style: "solid" as const,
+        points: [{ period_label: "FY2025", fiscal_year: 2025, period_end: "2025-12-31", value: unit === "percent" ? 0.25 : 100, series_kind: "actual" as const, annotation: null }],
+      },
+      {
+        key: `${key}_forecast`,
+        label: "Forecast",
+        unit,
+        chart_type: chartType,
+        series_kind: "forecast" as const,
+        stroke_style: "dashed" as const,
+        points: [{ period_label: "FY2026E", fiscal_year: 2026, period_end: null, value: unit === "percent" ? 0.28 : 120, series_kind: "forecast" as const, annotation: "Projection" }],
+      },
+    ],
+  };
+}
+
+describe("CompanyChartsDashboard", () => {
+  it("renders the requested dashboard matrix and forecast detail rows", () => {
+    render(React.createElement(CompanyChartsDashboard, { payload: makePayload() }));
+
+    const assumptionsStrip = screen.getByText("Key Assumptions").closest("section");
+    const detailsGrid = screen.getByLabelText("Forecast details");
+    const dashboard = screen.getByLabelText("Growth outlook dashboard");
+    const summary = screen.getByLabelText("Growth outlook summary");
+    const detailCards = screen.getByLabelText("Growth outlook details");
+    expect(assumptionsStrip).toBeTruthy();
+    if (!assumptionsStrip) {
+      throw new Error("Expected key assumptions strip.");
+    }
+    expect(detailsGrid).toBeTruthy();
+    expect(dashboard).toBeTruthy();
+    expect(summary).toBeTruthy();
+    expect(detailCards).toBeTruthy();
+
+    expect(screen.getByText("Revenue Outlook Bridge")).toBeTruthy();
+    expect(screen.getByText("Margin Path")).toBeTruthy();
+    expect(screen.getByText("FCF Outlook")).toBeTruthy();
+    expect(within(detailsGrid).getByText("Forecast Calculations")).toBeTruthy();
+    expect(within(detailsGrid).getByText("Forecast Assumptions")).toBeTruthy();
+    expect(screen.getByText("Key Assumptions")).toBeTruthy();
+    expect(screen.getByText("SEC-Derived Outlook")).toBeTruthy();
+    expect(screen.getByText("SEC EDGAR filings only")).toBeTruthy();
+    expect(screen.getByText("No third-party consensus or price prediction content")).toBeTruthy();
+    expect(screen.getByText("Projected periods begin at the divider and use a soft shaded region inside each chart.")).toBeTruthy();
+    expect(screen.getAllByText("Reported").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Projected").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("FY2025").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/FY2026E/i).length).toBeGreaterThan(0);
+    expect(within(assumptionsStrip).getByText("Revenue Method")).toBeTruthy();
+    expect(within(assumptionsStrip).getAllByText("Fallback").length).toBeGreaterThan(0);
+
+    const matrixTitles = within(dashboard)
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent);
+    expect(matrixTitles).toEqual([
+      "Revenue",
+      "Revenue Growth",
+      "Profit Metrics",
+      "Cash Flow Metrics",
+      "EPS",
+      "Growth Summary",
+    ]);
+
+    expect(within(summary).queryByText("Revenue")).toBeNull();
+    expect(within(detailCards).getByText("Revenue Outlook Bridge")).toBeTruthy();
+  });
+
+  it("labels tooltip rows as reported or projected", () => {
+    const payload = makePayload();
+
+    render(
+      React.createElement(MetricChartTooltipContent, {
+        active: true,
+        label: "FY2026E",
+        seriesList: payload.cards.revenue.series,
+        payload: [
+          {
+            dataKey: "revenue_forecast",
+            name: "Forecast",
+            color: "#7be0a7",
+            value: 120,
+            payload: {
+              periodLabel: "FY2026E",
+              forecastZone: true,
+              values: { revenue_forecast: 120 },
+              pointMeta: {
+                revenue_forecast: {
+                  annotation: "Projection",
+                  seriesKind: "forecast",
+                },
+              },
+            },
+          },
+        ] as never,
+      })
+    );
+
+    expect(screen.getByText("Projected period")).toBeTruthy();
+    expect(screen.getByText("Projected")).toBeTruthy();
+    expect(screen.getByText("Projection")).toBeTruthy();
+    expect(screen.getByText("$120")).toBeTruthy();
+  });
+
+  it("omits optional forecast cards and keeps the strip graceful when fields are missing", () => {
+    const baseline = makePayload();
+    const payload = makePayload({
+      cards: {
+        ...baseline.cards,
+        revenue_outlook_bridge: null,
+        margin_path: null,
+        fcf_outlook: null,
+        forecast_calculations: null,
+        forecast_assumptions: {
+          key: "forecast_assumptions",
+          title: "Forecast Assumptions",
+          items: [
+            { key: "blank", label: "", value: "", detail: null },
+            { key: "history_depth", label: "History Depth", value: "4 annual periods", detail: null },
+          ],
+          empty_state: null,
+        },
+      },
+    });
+
+    render(React.createElement(CompanyChartsDashboard, { payload }));
+
+    const assumptionsStrip = screen.getByText("Key Assumptions").closest("section");
+    const detailsGrid = screen.getByLabelText("Forecast details");
+    expect(assumptionsStrip).toBeTruthy();
+    if (!assumptionsStrip) {
+      throw new Error("Expected key assumptions strip.");
+    }
+
+    expect(screen.queryByText("Revenue Outlook Bridge")).toBeNull();
+    expect(screen.queryByText("Margin Path")).toBeNull();
+    expect(screen.queryByText("FCF Outlook")).toBeNull();
+    expect(within(detailsGrid).getByText("Forecast Assumptions")).toBeTruthy();
+    expect(screen.getByText("Key Assumptions")).toBeTruthy();
+    expect(within(assumptionsStrip).getByText("History Depth")).toBeTruthy();
+    expect(screen.getByText("Revenue")).toBeTruthy();
+    expect(screen.getByText("Forecast Assumptions")).toBeTruthy();
+  });
+
+  it("defines a consistent minimum height for metric chart cards", () => {
+    const css = fs.readFileSync(path.resolve(process.cwd(), "app/globals.css"), "utf8");
+
+    expect(css).toContain(".charts-page-shell {");
+    expect(css).toContain("width: 100%;");
+    expect(css).toContain(".charts-card-matrix {");
+    expect(css).toContain("min-height: 316px;");
+    expect(css).toContain(".charts-dashboard-matrix {");
+  });
+});

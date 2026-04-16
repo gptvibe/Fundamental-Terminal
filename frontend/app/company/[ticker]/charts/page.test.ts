@@ -225,7 +225,13 @@ describe("CompanyChartsPage", () => {
     expect(screen.getByText("Actual vs Forecast")).toBeTruthy();
     expect(screen.getByText("Revenue Growth")).toBeTruthy();
     expect(screen.getByText("Forecast Assumptions")).toBeTruthy();
-    expect(screen.getByText(/Forecast stability is a conservative communication aid/i)).toBeTruthy();
+    expect(screen.getByText("SEC-Derived Outlook")).toBeTruthy();
+    expect(screen.getByText("SEC EDGAR filings only")).toBeTruthy();
+    expect(screen.getByText("No third-party consensus or price prediction content")).toBeTruthy();
+    expect(screen.getByText("Point-in-time inputs only")).toBeTruthy();
+    expect(screen.getByText("Guarded fallback when disclosures are thin")).toBeTruthy();
+    expect(screen.getByText("Deterministic projection with empirical stability overlay")).toBeTruthy();
+    expect(screen.getByText(/Forecasts are generated from persisted historical official inputs/i)).toBeTruthy();
     expect(screen.getByText("NVIDIA Corp")).toBeTruthy();
   });
 });

@@ -162,6 +162,9 @@ class CompanyChartsCardsPayload(BaseModel):
     growth_summary: CompanyChartsComparisonCardPayload = Field(default_factory=CompanyChartsComparisonCardPayload)
     forecast_assumptions: CompanyChartsAssumptionsCardPayload | None = None
     forecast_calculations: CompanyChartsAssumptionsCardPayload | None = None
+    revenue_outlook_bridge: CompanyChartsCardPayload | None = None
+    margin_path: CompanyChartsCardPayload | None = None
+    fcf_outlook: CompanyChartsCardPayload | None = None
 
 
 class CompanyChartsMethodologyPayload(BaseModel):

@@ -46,13 +46,16 @@ export default function CompanyChartsPage() {
     return (
       <div className="charts-page-shell charts-page-shell-loading" aria-label="Charts loading state">
         <div className="charts-loading-hero" />
-        <div className="charts-loading-grid">
-          <div className="charts-loading-panel" />
-          <div className="charts-loading-card-grid">
-            {Array.from({ length: 6 }, (_, index) => (
-              <div key={index} className="charts-loading-card" />
-            ))}
-          </div>
+        <div className="charts-loading-dashboard-grid">
+          <div className="charts-loading-panel charts-loading-summary-panel" />
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="charts-loading-card charts-loading-card-compact" />
+          ))}
+        </div>
+        <div className="charts-loading-card-grid">
+          {Array.from({ length: 3 }, (_, index) => (
+            <div key={index} className="charts-loading-card" />
+          ))}
         </div>
       </div>
     );

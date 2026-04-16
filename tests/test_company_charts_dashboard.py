@@ -276,6 +276,19 @@ def _factor_by_key(response: charts_service.CompanyChartsDashboardResponse, key:
     return next(item for item in response.factors.supporting if item.key == key)
 
 
+def _card_series_by_key(
+    card: charts_service.CompanyChartsCardPayload,
+    key: str,
+) -> charts_service.CompanyChartsSeriesPayload:
+    return next(item for item in card.series if item.key == key)
+
+
+def _first_series_value(card: charts_service.CompanyChartsCardPayload, key: str) -> float:
+    value = _card_series_by_key(card, key).points[0].value
+    assert isinstance(value, (int, float))
+    return float(value)
+
+
 def test_build_company_charts_dashboard_response_separates_actual_and_forecast(monkeypatch):
     company = SimpleNamespace(
         id=1,
@@ -562,9 +575,121 @@ def test_build_company_charts_dashboard_response_uses_driver_model_with_guidance
     assert "flows through OCF, not capex" in str(calculation_items["formula_reinvestment"].detail)
     assert calculation_items["formula_ocf"].value == driver_model.FORECAST_FORMULA_OCF
     assert "delta operating WC" in str(calculation_items["formula_ocf"].detail)
+    assert response.cards.revenue_outlook_bridge is not None
+    assert response.cards.margin_path is not None
+    assert response.cards.fcf_outlook is not None
+    assert response.cards.revenue.title == "Revenue"
+    assert response.cards.cash_flow_metric.title == "Cash Flow Metrics"
     expected_stability_label = f"Forecast stability: {charts_service._stability_label(response.forecast_diagnostics.final_score)}"
     assert response.forecast_methodology.stability_label == expected_stability_label
     assert response.forecast_methodology.confidence_label == response.forecast_methodology.stability_label
+
+
+def test_build_company_charts_dashboard_response_populates_new_card_math_from_driver_bundle(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [release])
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    assert bundle is not None
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.cards.revenue_outlook_bridge is not None
+    assert response.cards.margin_path is not None
+    assert response.cards.fcf_outlook is not None
+
+    revenue_bridge = response.cards.revenue_outlook_bridge
+    start_value = _first_series_value(revenue_bridge, "revenue_bridge_start")
+    end_value = _first_series_value(revenue_bridge, "revenue_bridge_end")
+    component_total = sum(
+        float(point.value or 0.0)
+        for series in revenue_bridge.series
+        if series.key not in {"revenue_bridge_start", "revenue_bridge_end"}
+        for point in series.points
+    )
+    assert end_value == pytest.approx(start_value + component_total, abs=0.25)
+
+    margin_path = response.cards.margin_path
+    gross_margin_actual = _first_series_value(margin_path, "gross_margin_actual")
+    gross_margin_forecast = _first_series_value(margin_path, "gross_margin_forecast")
+    operating_margin_forecast = _first_series_value(margin_path, "operating_margin_forecast")
+    net_margin_forecast = _first_series_value(margin_path, "net_margin_forecast")
+    assert gross_margin_actual == pytest.approx(0.45, abs=1e-6)
+    assert gross_margin_forecast == pytest.approx(bundle.projected_gross_margin or 0.0, abs=1e-6)
+    assert operating_margin_forecast == pytest.approx(bundle.scenarios["base"].operating_income.values[0] / bundle.scenarios["base"].revenue.values[0], abs=1e-4)
+    assert net_margin_forecast == pytest.approx(bundle.scenarios["base"].net_income.values[0] / bundle.scenarios["base"].revenue.values[0], abs=1e-4)
+
+    fcf_outlook = response.cards.fcf_outlook
+    forecast_net_income = _first_series_value(fcf_outlook, "fcf_net_income_forecast")
+    forecast_depreciation = _first_series_value(fcf_outlook, "fcf_depreciation_forecast")
+    forecast_sbc = _first_series_value(fcf_outlook, "fcf_sbc_forecast")
+    forecast_delta_wc = _first_series_value(fcf_outlook, "fcf_delta_wc_forecast")
+    forecast_ocf = _first_series_value(fcf_outlook, "fcf_ocf_forecast")
+    forecast_capex = _first_series_value(fcf_outlook, "fcf_capex_forecast")
+    forecast_fcf = _first_series_value(fcf_outlook, "fcf_fcf_forecast")
+    assert forecast_ocf == pytest.approx(forecast_net_income + forecast_depreciation + forecast_sbc - forecast_delta_wc, abs=0.25)
+    assert forecast_fcf == pytest.approx(forecast_ocf - forecast_capex, abs=0.25)
+
+
+def test_company_charts_dashboard_response_round_trips_new_cards_through_snapshot_payload(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    round_trip = charts_service.CompanyChartsDashboardResponse.model_validate(response.model_dump(mode="json"))
+
+    assert round_trip.cards.revenue_outlook_bridge is not None
+    assert round_trip.cards.margin_path is not None
+    assert round_trip.cards.fcf_outlook is not None
+    assert _first_series_value(round_trip.cards.revenue_outlook_bridge, "revenue_bridge_end") == pytest.approx(
+        _first_series_value(response.cards.revenue_outlook_bridge, "revenue_bridge_end"),
+        abs=1e-6,
+    )
+    assert _first_series_value(round_trip.cards.margin_path, "gross_margin_forecast") == pytest.approx(
+        _first_series_value(response.cards.margin_path, "gross_margin_forecast"),
+        abs=1e-6,
+    )
+    assert _first_series_value(round_trip.cards.fcf_outlook, "fcf_fcf_forecast") == pytest.approx(
+        _first_series_value(response.cards.fcf_outlook, "fcf_fcf_forecast"),
+        abs=1e-6,
+    )
 
 
 def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, statements: list[SimpleNamespace]) -> tuple[driver_model.DriverForecastScenario, driver_model._ForecastBridgePoint]:
@@ -2385,6 +2510,9 @@ def test_build_company_charts_dashboard_response_falls_back_when_driver_inputs_a
     assert response.forecast_methodology.heuristic is True
     assert response.cards.forecast_calculations is None
     assert response.cards.revenue.series[1].label == "Forecast"
+    assert response.cards.revenue_outlook_bridge is None
+    assert response.cards.margin_path is not None
+    assert response.cards.fcf_outlook is not None
 
 
 def test_forecast_revenue_handles_steady_compounder():

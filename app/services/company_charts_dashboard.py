@@ -158,6 +158,9 @@ def build_company_charts_dashboard_response(
     profit_series = forecast_state["profit_series"]
     cash_series = forecast_state["cash_series"]
     eps_actual = forecast_state["eps_actual"]
+    revenue_outlook_bridge_card = _build_revenue_outlook_bridge_card(revenue_actual, driver_bundle)
+    margin_path_card = _build_margin_path_card(annuals, forecast_state["revenue_card"], profit_series, driver_bundle)
+    fcf_outlook_card = _build_fcf_outlook_card(annuals, profit_series, cash_series, driver_bundle)
 
     quality_score = _score(
         _blend(
@@ -280,6 +283,9 @@ def build_company_charts_dashboard_response(
             growth_summary=forecast_state["growth_summary_card"],
             forecast_assumptions=forecast_state["assumptions_card"],
             forecast_calculations=forecast_state["calculations_card"],
+            revenue_outlook_bridge=revenue_outlook_bridge_card,
+            margin_path=margin_path_card,
+            fcf_outlook=fcf_outlook_card,
         ),
         forecast_methodology=CompanyChartsMethodologyPayload(
             version=CHARTS_DASHBOARD_SCHEMA_VERSION,
@@ -688,6 +694,420 @@ def _rows_to_assumption_items(rows: list[dict[str, str]]) -> list[CompanyChartsA
         )
         for row in rows
     ]
+
+
+def _build_revenue_outlook_bridge_card(
+    revenue_actual: list[CompanyChartsSeriesPointPayload],
+    driver_bundle: Any | None,
+) -> CompanyChartsCardPayload | None:
+    if driver_bundle is None:
+        return None
+
+    bridge_rows = list(getattr(driver_bundle, "revenue_bridge_rows", []) or [])
+    if not bridge_rows:
+        return None
+
+    visible_revenue = _visible_series_points(revenue_actual)
+    if not visible_revenue:
+        return None
+
+    prior_point, prior_revenue = visible_revenue[-1]
+    base_scenario = getattr(driver_bundle, "scenarios", {}).get("base") if isinstance(getattr(driver_bundle, "scenarios", None), dict) else None
+    next_year = getattr(base_scenario.revenue, "years", [None])[0] if base_scenario is not None else None
+    next_value = getattr(base_scenario.revenue, "values", [None])[0] if base_scenario is not None else None
+    if next_year is None or next_value is None:
+        return None
+
+    forecast_label = f"FY{next_year}E"
+    series = [
+        _series(
+            "revenue_bridge_start",
+            "Starting Revenue",
+            "usd",
+            "bar",
+            "actual",
+            "solid",
+            [
+                CompanyChartsSeriesPointPayload(
+                    period_label=prior_point.period_label,
+                    fiscal_year=prior_point.fiscal_year,
+                    period_end=prior_point.period_end,
+                    value=_round(prior_revenue, 2),
+                    series_kind="actual",
+                    annotation=f"Last reported revenue carried into the {forecast_label} bridge.",
+                )
+            ],
+        )
+    ]
+
+    for row in bridge_rows:
+        amount = row.get("revenue_impact")
+        if not isinstance(amount, (int, float)):
+            continue
+        series.append(
+            _series(
+                str(row.get("key") or "revenue_bridge_component"),
+                str(row.get("label") or "Bridge Component"),
+                "usd",
+                "bar",
+                "forecast",
+                "muted",
+                [
+                    CompanyChartsSeriesPointPayload(
+                        period_label=forecast_label,
+                        fiscal_year=next_year,
+                        period_end=None,
+                        value=_round(float(amount), 2),
+                        series_kind="forecast",
+                        annotation=str(row.get("detail")) if row.get("detail") is not None else None,
+                    )
+                ],
+            )
+        )
+
+    series.append(
+        _series(
+            "revenue_bridge_end",
+            "Base Revenue Forecast",
+            "usd",
+            "bar",
+            "forecast",
+            "dashed",
+            [
+                CompanyChartsSeriesPointPayload(
+                    period_label=forecast_label,
+                    fiscal_year=next_year,
+                    period_end=None,
+                    value=_round(float(next_value), 2),
+                    series_kind="forecast",
+                    annotation=f"Base-case revenue implied for {forecast_label}.",
+                )
+            ],
+        )
+    )
+
+    component_labels = [str(row.get("label") or "Component") for row in bridge_rows]
+    highlights = [
+        f"{prior_point.period_label} reported revenue bridges into {forecast_label} base revenue through {_join_series_labels(component_labels)}.",
+        "Forecast bridge values remain internal projections rather than reported results.",
+    ]
+
+    return CompanyChartsCardPayload(
+        key="revenue_outlook_bridge",
+        title="Revenue Outlook Bridge",
+        subtitle="Year-one bridge from the last reported period into the base forecast",
+        metric_label="Revenue Bridge",
+        unit_label="USD",
+        series=series,
+        highlights=highlights,
+    )
+
+
+def _build_margin_path_card(
+    statements: list[Any],
+    revenue_card: CompanyChartsCardPayload,
+    profit_series: list[CompanyChartsSeriesPayload],
+    driver_bundle: Any | None,
+) -> CompanyChartsCardPayload | None:
+    forecast_revenue_points = _select_revenue_forecast_points(revenue_card)
+    actual_gross_margin = _margin_points_from_statements(statements, "gross_profit", kind="actual")
+    actual_operating_margin = _margin_points_from_statements(statements, "operating_income", kind="actual")
+    actual_net_margin = _margin_points_from_statements(statements, "net_income", kind="actual")
+
+    series: list[CompanyChartsSeriesPayload] = []
+    if actual_gross_margin:
+        series.append(_series("gross_margin_actual", "Gross Margin Reported", "percent", "line", "actual", "solid", actual_gross_margin))
+    if actual_operating_margin:
+        series.append(_series("operating_margin_actual", "Operating Margin Reported", "percent", "line", "actual", "solid", actual_operating_margin))
+    if actual_net_margin:
+        series.append(_series("net_margin_actual", "Net Margin Reported", "percent", "line", "actual", "solid", actual_net_margin))
+
+    if forecast_revenue_points:
+        projected_gross_margin = getattr(driver_bundle, "projected_gross_margin", None) if driver_bundle is not None else None
+        if projected_gross_margin is None:
+            projected_gross_margin = _stable_margin_ratio(actual_gross_margin)
+        gross_forecast = _flat_ratio_points(forecast_revenue_points, projected_gross_margin)
+        operating_forecast = _ratio_points_from_series(
+            _series_points_by_key(profit_series, "operating_income_forecast") or _series_points_by_key(profit_series, "operating_income_base"),
+            forecast_revenue_points,
+        )
+        net_forecast = _ratio_points_from_series(
+            _series_points_by_key(profit_series, "net_income_forecast") or _series_points_by_key(profit_series, "net_income_base"),
+            forecast_revenue_points,
+        )
+
+        if gross_forecast:
+            annotation = (
+                "Projected gross margin holds the driver cost-of-revenue ratio."
+                if driver_bundle is not None and getattr(driver_bundle, "projected_gross_margin", None) is not None
+                else "Projected gross margin holds a normalized reported ratio because heuristic mode lacks an explicit cost-of-revenue schedule."
+            )
+            for point in gross_forecast:
+                point.annotation = annotation
+            series.append(_series("gross_margin_forecast", "Gross Margin Forecast", "percent", "line", "forecast", "dashed", gross_forecast))
+        if operating_forecast:
+            series.append(_series("operating_margin_forecast", "Operating Margin Forecast", "percent", "line", "forecast", "dashed", operating_forecast))
+        if net_forecast:
+            series.append(_series("net_margin_forecast", "Net Margin Forecast", "percent", "line", "forecast", "dashed", net_forecast))
+
+    if not series:
+        return None
+
+    highlights = [
+        "Reported and projected margin paths remain separated so forecast ratios never read as filed results.",
+    ]
+    if driver_bundle is None:
+        highlights.append("Heuristic mode uses reported gross-margin history as the gross-margin anchor when no explicit projected cost-of-revenue schedule is available.")
+
+    return CompanyChartsCardPayload(
+        key="margin_path",
+        title="Margin Path",
+        subtitle="Gross, operating, and net margin across reported and projected periods",
+        metric_label="Margin",
+        unit_label="Percent",
+        series=series,
+        highlights=highlights,
+    )
+
+
+def _build_fcf_outlook_card(
+    statements: list[Any],
+    profit_series: list[CompanyChartsSeriesPayload],
+    cash_series: list[CompanyChartsSeriesPayload],
+    driver_bundle: Any | None,
+) -> CompanyChartsCardPayload | None:
+    series: list[CompanyChartsSeriesPayload] = []
+
+    actual_net_income = _actual_series(statements, "net_income")
+    actual_depreciation = _actual_series(statements, "depreciation_and_amortization")
+    actual_sbc = _actual_series(statements, "stock_based_compensation")
+    actual_delta_working_capital = _actual_delta_operating_working_capital_points(statements)
+    actual_operating_cash_flow = _actual_series(statements, "operating_cash_flow")
+    actual_capex = _actual_series(statements, "capex")
+    actual_free_cash_flow = _actual_series(statements, "free_cash_flow")
+
+    if actual_net_income:
+        series.append(_series("fcf_net_income_actual", "Net Income Reported", "usd", "line", "actual", "solid", actual_net_income))
+    if actual_depreciation:
+        series.append(_series("fcf_depreciation_actual", "D&A Reported", "usd", "line", "actual", "solid", actual_depreciation))
+    if actual_sbc:
+        series.append(_series("fcf_sbc_actual", "SBC Reported", "usd", "line", "actual", "solid", actual_sbc))
+    if actual_delta_working_capital:
+        series.append(_series("fcf_delta_wc_actual", "Delta Operating WC Reported", "usd", "line", "actual", "solid", actual_delta_working_capital))
+    if actual_operating_cash_flow:
+        series.append(_series("fcf_ocf_actual", "Operating CF Reported", "usd", "line", "actual", "solid", actual_operating_cash_flow))
+    if actual_capex:
+        series.append(_series("fcf_capex_actual", "Capex Reported", "usd", "line", "actual", "solid", actual_capex))
+    if actual_free_cash_flow:
+        series.append(_series("fcf_fcf_actual", "Free CF Reported", "usd", "line", "actual", "solid", actual_free_cash_flow))
+
+    highlights = [
+        "Reported and forecast cash-flow bridge items remain labeled separately so the FCF path stays audit-friendly.",
+    ]
+
+    if driver_bundle is not None:
+        base_scenario = getattr(driver_bundle, "scenarios", {}).get("base") if isinstance(getattr(driver_bundle, "scenarios", None), dict) else None
+        bridge_points = list(getattr(base_scenario, "bridge", []) or []) if base_scenario is not None else []
+        if bridge_points:
+            series.extend(
+                [
+                    _series("fcf_net_income_forecast", "Net Income Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "net_income")),
+                    _series("fcf_depreciation_forecast", "D&A Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "depreciation")),
+                    _series("fcf_sbc_forecast", "SBC Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "stock_based_compensation")),
+                    _series("fcf_delta_wc_forecast", "Delta Operating WC Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "delta_working_capital")),
+                    _series("fcf_ocf_forecast", "Operating CF Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "operating_cash_flow")),
+                    _series("fcf_capex_forecast", "Capex Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "capex")),
+                    _series("fcf_fcf_forecast", "Free CF Base", "usd", "line", "forecast", "dashed", _bridge_points_to_series_points(bridge_points, "free_cash_flow")),
+                ]
+            )
+            highlights.append("Base-case FCF bridge keeps net income, D&A, SBC, operating working capital, and capex explicit in forecast mode.")
+    else:
+        forecast_net_income = _series_points_by_key(profit_series, "net_income_forecast")
+        forecast_operating_cash_flow = _series_points_by_key(cash_series, "operating_cash_flow_forecast")
+        forecast_capex = _series_points_by_key(cash_series, "capex_forecast")
+        forecast_free_cash_flow = _series_points_by_key(cash_series, "free_cash_flow_forecast")
+        if forecast_net_income is not None:
+            series.append(_series("fcf_net_income_forecast", "Net Income Forecast", "usd", "line", "forecast", "dashed", forecast_net_income.points))
+        if forecast_operating_cash_flow is not None:
+            series.append(_series("fcf_ocf_forecast", "Operating CF Forecast", "usd", "line", "forecast", "dashed", forecast_operating_cash_flow.points))
+        if forecast_capex is not None:
+            series.append(_series("fcf_capex_forecast", "Capex Forecast", "usd", "line", "forecast", "dashed", forecast_capex.points))
+        if forecast_free_cash_flow is not None:
+            series.append(_series("fcf_fcf_forecast", "Free CF Forecast", "usd", "line", "forecast", "dashed", forecast_free_cash_flow.points))
+        highlights.append("Heuristic mode exposes the earnings-to-cash path through net income, operating cash flow, capex, and free cash flow without a detailed working-capital bridge.")
+
+    if not series:
+        return None
+
+    return CompanyChartsCardPayload(
+        key="fcf_outlook",
+        title="FCF Outlook",
+        subtitle="Path from earnings and cash-flow inputs into free cash flow",
+        metric_label="Free Cash Flow",
+        unit_label="USD",
+        series=series,
+        highlights=highlights,
+    )
+
+
+def _select_revenue_forecast_points(card: CompanyChartsCardPayload) -> list[CompanyChartsSeriesPointPayload]:
+    for key in ("revenue_base", "revenue_forecast"):
+        series = _series_points_by_key(card.series, key)
+        if series is not None:
+            return series.points
+    return []
+
+
+def _margin_points_from_statements(
+    statements: list[Any],
+    metric_key: str,
+    *,
+    kind: str,
+) -> list[CompanyChartsSeriesPointPayload]:
+    points: list[CompanyChartsSeriesPointPayload] = []
+    for statement in statements:
+        revenue = _statement_value(statement, "revenue")
+        if revenue in (None, 0):
+            continue
+        metric_value = _statement_value(statement, metric_key)
+        if metric_value is None and metric_key == "gross_profit":
+            cost_of_revenue = _statement_value(statement, "cost_of_revenue")
+            if cost_of_revenue is not None:
+                metric_value = revenue - cost_of_revenue
+        ratio = _safe_divide(metric_value, revenue)
+        if ratio is None:
+            continue
+        points.append(
+            CompanyChartsSeriesPointPayload(
+                period_label=f"FY{statement.period_end.year}",
+                fiscal_year=statement.period_end.year,
+                period_end=statement.period_end,
+                value=_round(ratio, 4),
+                series_kind=kind,
+            )
+        )
+    return points
+
+
+def _ratio_points_from_series(
+    numerator_series: CompanyChartsSeriesPayload | None,
+    revenue_points: list[CompanyChartsSeriesPointPayload],
+) -> list[CompanyChartsSeriesPointPayload]:
+    if numerator_series is None:
+        return []
+    numerator_by_year = {
+        point.fiscal_year: value
+        for point, value in _visible_series_points(numerator_series.points)
+        if point.fiscal_year is not None
+    }
+    ratio_points: list[CompanyChartsSeriesPointPayload] = []
+    for point, revenue in _visible_series_points(revenue_points):
+        if point.fiscal_year is None:
+            continue
+        numerator = numerator_by_year.get(point.fiscal_year)
+        ratio = _safe_divide(numerator, revenue)
+        if ratio is None:
+            continue
+        ratio_points.append(
+            CompanyChartsSeriesPointPayload(
+                period_label=point.period_label,
+                fiscal_year=point.fiscal_year,
+                period_end=point.period_end,
+                value=_round(ratio, 4),
+                series_kind=point.series_kind,
+            )
+        )
+    return ratio_points
+
+
+def _flat_ratio_points(
+    revenue_points: list[CompanyChartsSeriesPointPayload],
+    ratio: float | None,
+) -> list[CompanyChartsSeriesPointPayload]:
+    if ratio is None:
+        return []
+    points: list[CompanyChartsSeriesPointPayload] = []
+    for point in revenue_points:
+        points.append(
+            CompanyChartsSeriesPointPayload(
+                period_label=point.period_label,
+                fiscal_year=point.fiscal_year,
+                period_end=point.period_end,
+                value=_round(ratio, 4),
+                series_kind="forecast",
+            )
+        )
+    return points
+
+
+def _stable_margin_ratio(points: list[CompanyChartsSeriesPointPayload]) -> float | None:
+    values = [value for _point, value in _visible_series_points(points)]
+    if not values:
+        return None
+    window = values[-3:]
+    return fmean(window)
+
+
+def _actual_delta_operating_working_capital_points(statements: list[Any]) -> list[CompanyChartsSeriesPointPayload]:
+    points: list[CompanyChartsSeriesPointPayload] = []
+    previous_balance: float | None = None
+    for statement in statements:
+        balance = _operating_working_capital_balance(statement)
+        if balance is not None and previous_balance is not None:
+            points.append(
+                CompanyChartsSeriesPointPayload(
+                    period_label=f"FY{statement.period_end.year}",
+                    fiscal_year=statement.period_end.year,
+                    period_end=statement.period_end,
+                    value=_round(balance - previous_balance, 2),
+                    series_kind="actual",
+                )
+            )
+        previous_balance = balance
+    return points
+
+
+def _operating_working_capital_balance(statement: Any) -> float | None:
+    accounts_receivable = _statement_value(statement, "accounts_receivable")
+    inventory = _statement_value(statement, "inventory")
+    accounts_payable = _statement_value(statement, "accounts_payable")
+    deferred_revenue = _statement_value(statement, "deferred_revenue")
+    accrued_operating_liabilities = _statement_value(statement, "accrued_operating_liabilities")
+    if all(value is None for value in (accounts_receivable, inventory, accounts_payable, deferred_revenue, accrued_operating_liabilities)):
+        return None
+    return float(accounts_receivable or 0.0) + float(inventory or 0.0) - float(accounts_payable or 0.0) - float(deferred_revenue or 0.0) - float(accrued_operating_liabilities or 0.0)
+
+
+def _bridge_points_to_series_points(
+    bridge_points: list[Any],
+    attribute: str,
+) -> list[CompanyChartsSeriesPointPayload]:
+    points: list[CompanyChartsSeriesPointPayload] = []
+    for bridge_point in bridge_points:
+        value = getattr(bridge_point, attribute, None)
+        if not isinstance(value, (int, float)):
+            continue
+        points.append(
+            CompanyChartsSeriesPointPayload(
+                period_label=f"FY{bridge_point.year}E",
+                fiscal_year=bridge_point.year,
+                period_end=None,
+                value=_round(float(value), 2),
+                series_kind="forecast",
+            )
+        )
+    return points
+
+
+def _join_series_labels(labels: list[str]) -> str:
+    cleaned = [label for label in labels if label]
+    if not cleaned:
+        return "forecast effects"
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
 
 
 def _statement_value(statement: Any, key: str) -> float | None:

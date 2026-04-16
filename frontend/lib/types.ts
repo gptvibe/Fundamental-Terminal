@@ -2683,6 +2683,9 @@ export interface CompanyChartsCardsPayload {
   growth_summary: CompanyChartsComparisonCardPayload;
   forecast_assumptions: CompanyChartsAssumptionsCardPayload | null;
   forecast_calculations?: CompanyChartsAssumptionsCardPayload | null;
+  revenue_outlook_bridge?: CompanyChartsCardPayload | null;
+  margin_path?: CompanyChartsCardPayload | null;
+  fcf_outlook?: CompanyChartsCardPayload | null;
 }
 
 export interface CompanyChartsMethodologyPayload {

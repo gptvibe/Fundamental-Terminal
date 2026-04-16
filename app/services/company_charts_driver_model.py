@@ -124,6 +124,8 @@ class DriverForecastBundle:
     bear_three_year_cagr: float | None
     guidance_anchor: float | None = None
     sensitivity_rows: list[dict[str, str]] = field(default_factory=list)
+    revenue_bridge_rows: list[dict[str, Any]] = field(default_factory=list)
+    projected_gross_margin: float | None = None
 
 
 @dataclass(slots=True)
@@ -351,6 +353,16 @@ def build_driver_forecast_bundle(
     )
     highlights = _build_highlights(revenue_drivers, scenarios["base"], scenarios["bull"], scenarios["bear"])
     sensitivity_rows = _build_sensitivity_rows(scenarios)
+    revenue_bridge_rows = _build_revenue_bridge_rows(
+        revenue_drivers,
+        latest_revenue,
+        scenarios["base"],
+    )
+    projected_gross_margin = _clip(
+        1.0 - reinvestment_schedule.operating_working_capital.cost_of_revenue_ratio,
+        0.0,
+        0.95,
+    )
 
     return DriverForecastBundle(
         engine_mode="driver",
@@ -368,6 +380,8 @@ def build_driver_forecast_bundle(
         bear_three_year_cagr=_line_cagr(scenarios["bear"].revenue.values),
         guidance_anchor=revenue_drivers.guidance_anchor,
         sensitivity_rows=sensitivity_rows,
+        revenue_bridge_rows=revenue_bridge_rows,
+        projected_gross_margin=projected_gross_margin,
     )
 
 
@@ -1687,6 +1701,71 @@ def _build_sensitivity_rows(scenarios: dict[str, DriverForecastScenario]) -> lis
             "detail": "SBC, buyback, acquisition, and convert assumptions drive share-count sensitivity into EPS.",
         },
     ]
+
+
+def _build_revenue_bridge_rows(
+    revenue_drivers: _RevenueDrivers,
+    previous_revenue: float,
+    base_scenario: DriverForecastScenario,
+) -> list[dict[str, Any]]:
+    if previous_revenue <= 0 or not base_scenario.revenue.years:
+        return []
+
+    next_year = base_scenario.revenue.years[0]
+    components = _year_one_revenue_components(revenue_drivers)
+    rows: list[dict[str, Any]] = []
+
+    def append_row(key: str, label: str, growth_effect: float, *, detail: str | None = None) -> None:
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "year": next_year,
+                "growth_effect": growth_effect,
+                "revenue_impact": previous_revenue * growth_effect,
+                "detail": detail,
+            }
+        )
+
+    append_row("residual_demand", "Residual Demand Effect", components["demand_effect"])
+    append_row("share_mix", "Share / Mix Effect", components["share_effect"])
+    append_row("price_proxy", "Price Proxy Effect", components["price_effect"])
+    append_row("price_volume_cross", "Price-Volume Cross Term", components["cross_term"])
+
+    growth = components["raw_growth"]
+
+    if revenue_drivers.guidance_anchor is not None:
+        guided_growth = _growth_rate(revenue_drivers.guidance_anchor, previous_revenue)
+        if guided_growth is not None and 0.5 <= (revenue_drivers.guidance_anchor / previous_revenue) <= 1.6:
+            blended_growth = (growth * 0.35) + (guided_growth * 0.65)
+            append_row(
+                "guidance_overlay",
+                "Guidance Overlay",
+                blended_growth - growth,
+                detail=f"Anchored toward {_money(revenue_drivers.guidance_anchor)} guidance midpoint.",
+            )
+            growth = blended_growth
+
+    if revenue_drivers.backlog_floor_growth is not None:
+        floored_growth = max(growth, revenue_drivers.backlog_floor_growth)
+        delta = floored_growth - growth
+        if abs(delta) > 1e-12:
+            append_row("backlog_floor", "Backlog Floor", delta)
+        growth = floored_growth
+
+    if revenue_drivers.capacity_growth_cap is not None:
+        capped_growth = min(growth, revenue_drivers.capacity_growth_cap)
+        delta = capped_growth - growth
+        if abs(delta) > 1e-12:
+            append_row("capacity_cap", "Capacity Cap", delta)
+        growth = capped_growth
+
+    clipped_growth = _clip(growth, REVENUE_GROWTH_FLOOR, REVENUE_GROWTH_CAP)
+    clip_delta = clipped_growth - growth
+    if abs(clip_delta) > 1e-12:
+        append_row("growth_guardrail", "Growth Guardrail Clip", clip_delta)
+
+    return rows
 
 
 def _latest_guidance_revenue(releases: list[Any]) -> float | None:

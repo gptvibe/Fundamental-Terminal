@@ -2808,8 +2808,6 @@ def _build_company_charts_response(
 
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        resolved_snapshot = _attempt_inline_company_snapshot_refresh_for_charts(session, normalized_ticker)
-    if resolved_snapshot is None:
         refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
         return _build_company_charts_bootstrap_for_missing_ticker(
             normalized_ticker,
