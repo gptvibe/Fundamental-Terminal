@@ -18,14 +18,21 @@ from app.contracts.company_charts import (
     CompanyChartsComparisonCardPayload,
     CompanyChartsComparisonItemPayload,
     CompanyChartsDashboardResponse,
+    CompanyChartsDriverCardPayload,
     CompanyChartsFactorValuePayload,
     CompanyChartsFactorsPayload,
     CompanyChartsForecastDiagnosticsPayload,
+    CompanyChartsFormulaInputPayload,
+    CompanyChartsFormulaTracePayload,
     CompanyChartsLegendItemPayload,
     CompanyChartsLegendPayload,
     CompanyChartsMethodologyPayload,
+    CompanyChartsProjectedRowPayload,
+    CompanyChartsProjectionStudioPayload,
+    CompanyChartsScheduleSectionPayload,
     CompanyChartsScoreComponentPayload,
     CompanyChartsScoreBadgePayload,
+    CompanyChartsSensitivityCellPayload,
     CompanyChartsSeriesPayload,
     CompanyChartsSeriesPointPayload,
     CompanyChartsSummaryPayload,
@@ -107,6 +114,8 @@ MARGIN_FORECAST_PROFILES = {
 DILUTED_SHARE_FORECAST_CHANGE_FLOOR = -0.05
 DILUTED_SHARE_FORECAST_CHANGE_CAP = 0.06
 DILUTED_SHARE_FORECAST_REVERSION_SPEED = 0.5
+PROJECTION_STUDIO_REPORTED_PERIODS = 3
+PROJECTION_STUDIO_SENSITIVITY_DELTAS = (-0.04, -0.02, 0.0, 0.02, 0.04)
 
 
 def get_company_charts_dashboard_snapshot(session: Session, company_id: int, *, as_of: datetime | None = None, schema_version: str = CHARTS_DASHBOARD_SCHEMA_VERSION) -> CompanyChartsDashboardSnapshot | None:
@@ -247,6 +256,18 @@ def build_company_charts_dashboard_response(
         for item in factors.supporting
     ]
     stability_label = f"Forecast stability: {_stability_label(confidence_score)}"
+    forecast_methodology = CompanyChartsMethodologyPayload(
+        version=CHARTS_DASHBOARD_SCHEMA_VERSION,
+        label=str(forecast_state["methodology_label"]),
+        summary=str(forecast_state["methodology_summary"]),
+        disclaimer=str(forecast_state["methodology_disclaimer"]),
+        score_name=forecast_stability.score_name,
+        heuristic=bool(forecast_state["methodology_heuristic"]),
+        score_components=[component.label for component in forecast_stability.components],
+        stability_label=stability_label,
+        confidence_label=stability_label,
+    )
+    projection_studio = _build_projection_studio_payload(annuals, driver_bundle, forecast_methodology)
 
     return CompanyChartsDashboardResponse(
         company=company_payload,
@@ -287,18 +308,9 @@ def build_company_charts_dashboard_response(
             margin_path=margin_path_card,
             fcf_outlook=fcf_outlook_card,
         ),
-        forecast_methodology=CompanyChartsMethodologyPayload(
-            version=CHARTS_DASHBOARD_SCHEMA_VERSION,
-            label=str(forecast_state["methodology_label"]),
-            summary=str(forecast_state["methodology_summary"]),
-            disclaimer=str(forecast_state["methodology_disclaimer"]),
-            score_name=forecast_stability.score_name,
-            heuristic=bool(forecast_state["methodology_heuristic"]),
-            score_components=[component.label for component in forecast_stability.components],
-            stability_label=stability_label,
-            confidence_label=stability_label,
-        ),
+        forecast_methodology=forecast_methodology,
         forecast_diagnostics=forecast_stability,
+        projection_studio=projection_studio,
         payload_version=payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,
         refresh=RefreshState(triggered=False, reason="fresh", ticker=company.ticker, job_id=None),
         diagnostics=diagnostics,
@@ -312,7 +324,7 @@ def build_company_charts_dashboard_response(
 
 def recompute_and_persist_company_charts_dashboard(session: Session, company_id: int, *, checked_at: datetime | None = None, as_of: datetime | None = None, payload_version_hash: str | None = None) -> CompanyChartsDashboardResponse | None:
     timestamp = checked_at or datetime.now(timezone.utc)
-    payload = build_company_charts_dashboard_response(session, company_id, as_of=as_of, generated_at=timestamp, payload_version=payload_version_hash)
+    payload = build_company_charts_dashboard_response(session, company_id, as_of=as_of, generated_at=timestamp)
     if payload is None:
         mark_dataset_checked(session, company_id, "charts_dashboard", checked_at=timestamp, success=True, payload_version_hash=payload_version_hash or CHARTS_DASHBOARD_SCHEMA_VERSION, invalidate_hot_cache=True)
         return None
@@ -694,6 +706,418 @@ def _rows_to_assumption_items(rows: list[dict[str, str]]) -> list[CompanyChartsA
         )
         for row in rows
     ]
+
+
+def _build_projection_studio_payload(
+    annuals: list[Any],
+    driver_bundle: Any | None,
+    methodology: CompanyChartsMethodologyPayload,
+) -> CompanyChartsProjectionStudioPayload | None:
+    if driver_bundle is None:
+        return None
+
+    scenarios = getattr(driver_bundle, "scenarios", None)
+    line_traces = getattr(driver_bundle, "line_traces", None)
+    if not isinstance(scenarios, dict) or not isinstance(line_traces, dict) or not line_traces:
+        return None
+
+    base_scenario = scenarios.get("base")
+    if base_scenario is None or not getattr(getattr(base_scenario, "revenue", None), "years", []):
+        return None
+
+    schedule_sections = _build_projection_studio_schedule_sections(annuals, line_traces)
+    drivers_used = _build_projection_studio_driver_cards(annuals, driver_bundle, line_traces)
+    scenarios_comparison = _build_projection_studio_scenarios_comparison(driver_bundle)
+    sensitivity_matrix = _build_projection_studio_sensitivity_matrix(annuals, driver_bundle, line_traces)
+    if not schedule_sections or len(sensitivity_matrix) != 25:
+        return None
+
+    return CompanyChartsProjectionStudioPayload(
+        methodology=methodology,
+        schedule_sections=schedule_sections,
+        drivers_used=drivers_used,
+        scenarios_comparison=scenarios_comparison,
+        sensitivity_matrix=sensitivity_matrix,
+    )
+
+
+def _build_projection_studio_schedule_sections(
+    annuals: list[Any],
+    line_traces: dict[str, dict[int, Any]],
+) -> list[CompanyChartsScheduleSectionPayload]:
+    section_specs = (
+        (
+            "income_statement",
+            "Income Statement",
+            (
+                ("revenue", "Revenue", "usd"),
+                ("cost_of_revenue", "Cost of Revenue", "usd"),
+                ("gross_profit", "Gross Profit", "usd"),
+                ("operating_income", "Operating Income", "usd"),
+                ("pretax_income", "Pretax Income", "usd"),
+                ("income_tax", "Income Tax", "usd"),
+                ("net_income", "Net Income", "usd"),
+                ("eps", "Diluted EPS", "usd_per_share"),
+            ),
+        ),
+        (
+            "balance_sheet",
+            "Balance Sheet",
+            (
+                ("accounts_receivable", "Accounts Receivable", "usd"),
+                ("inventory", "Inventory", "usd"),
+                ("accounts_payable", "Accounts Payable", "usd"),
+                ("deferred_revenue", "Deferred Revenue", "usd"),
+                ("accrued_operating_liabilities", "Accrued Operating Liabilities", "usd"),
+            ),
+        ),
+        (
+            "cash_flow_statement",
+            "Cash Flow Statement",
+            (
+                ("depreciation_amortization", "Depreciation and Amortization", "usd"),
+                ("sbc_expense", "SBC Expense", "usd"),
+                ("capex", "Capex", "usd"),
+                ("operating_cash_flow", "Operating Cash Flow", "usd"),
+                ("free_cash_flow", "Free Cash Flow", "usd"),
+            ),
+        ),
+    )
+
+    sections: list[CompanyChartsScheduleSectionPayload] = []
+    for key, title, row_specs in section_specs:
+        rows = [
+            row
+            for row in (
+                _build_projection_studio_row(annuals, line_key, label, unit, line_traces)
+                for line_key, label, unit in row_specs
+            )
+            if row is not None
+        ]
+        if rows:
+            sections.append(CompanyChartsScheduleSectionPayload(key=key, title=title, rows=rows))
+    return sections
+
+
+def _build_projection_studio_row(
+    annuals: list[Any],
+    line_key: str,
+    label: str,
+    unit: str,
+    line_traces: dict[str, dict[int, Any]],
+) -> CompanyChartsProjectedRowPayload | None:
+    reported_values: dict[int, float | None] = {}
+    for statement in annuals[-PROJECTION_STUDIO_REPORTED_PERIODS:]:
+        year = getattr(getattr(statement, "period_end", None), "year", None)
+        if year is None:
+            continue
+        value = _projection_studio_reported_value(statement, line_key)
+        if value is None:
+            continue
+        reported_values[int(year)] = _projection_studio_round_value(value, unit)
+
+    trace_map = line_traces.get(line_key) or {}
+    projected_values: dict[int, float | None] = {}
+    formula_traces: dict[int, CompanyChartsFormulaTracePayload] = {}
+    for year, trace in sorted(trace_map.items()):
+        if getattr(trace, "result_value", None) is not None:
+            projected_values[int(year)] = _projection_studio_round_value(float(trace.result_value), unit)
+        formula_traces[int(year)] = _serialize_projection_studio_formula_trace(trace)
+
+    if not reported_values and not projected_values:
+        return None
+
+    return CompanyChartsProjectedRowPayload(
+        key=line_key,
+        label=label,
+        unit=unit,
+        reported_values=reported_values,
+        projected_values=projected_values,
+        formula_traces=formula_traces,
+    )
+
+
+def _projection_studio_reported_value(statement: Any, line_key: str) -> float | None:
+    if line_key == "income_tax":
+        return _statement_value(statement, "income_tax_expense")
+    if line_key == "depreciation_amortization":
+        return _statement_value(statement, "depreciation_and_amortization")
+    if line_key == "sbc_expense":
+        return _statement_value(statement, "stock_based_compensation")
+    if line_key == "cost_of_revenue":
+        cost_of_revenue = _statement_value(statement, "cost_of_revenue")
+        if cost_of_revenue is not None:
+            return cost_of_revenue
+        revenue = _statement_value(statement, "revenue")
+        gross_profit = _statement_value(statement, "gross_profit")
+        return (revenue - gross_profit) if revenue is not None and gross_profit is not None else None
+    if line_key == "eps":
+        eps = _statement_value(statement, "eps")
+        if eps is not None:
+            return eps
+        net_income = _statement_value(statement, "net_income")
+        diluted_shares = _statement_value(statement, "weighted_average_shares_diluted")
+        return _safe_divide(net_income, diluted_shares)
+    if line_key == "gross_profit":
+        gross_profit = _statement_value(statement, "gross_profit")
+        if gross_profit is not None:
+            return gross_profit
+        revenue = _statement_value(statement, "revenue")
+        cost_of_revenue = _statement_value(statement, "cost_of_revenue")
+        return (revenue - cost_of_revenue) if revenue is not None and cost_of_revenue is not None else None
+    if line_key == "free_cash_flow":
+        return _metric_projection_value(statement, "free_cash_flow")
+    return _statement_value(statement, line_key)
+
+
+def _serialize_projection_studio_formula_trace(trace: Any) -> CompanyChartsFormulaTracePayload:
+    return CompanyChartsFormulaTracePayload(
+        line_item=str(getattr(trace, "line_item", "")),
+        year=int(getattr(trace, "year", 0)),
+        formula_label=str(getattr(trace, "formula_label", "")),
+        formula_template=str(getattr(trace, "formula_template", "")),
+        formula_computation=str(getattr(trace, "formula_computation", "")),
+        result_value=getattr(trace, "result_value", None),
+        inputs=[
+            CompanyChartsFormulaInputPayload(
+                key=str(getattr(input_item, "key", "")),
+                label=str(getattr(input_item, "label", "")),
+                value=getattr(input_item, "value", None),
+                formatted_value=str(getattr(input_item, "formatted_value", "")),
+                source_detail=str(getattr(input_item, "source_detail", "")),
+                source_kind=str(getattr(input_item, "source_kind", "sec")),
+            )
+            for input_item in getattr(trace, "inputs", [])
+        ],
+        confidence=str(getattr(trace, "confidence", "high")),
+    )
+
+
+def _build_projection_studio_driver_cards(
+    annuals: list[Any],
+    driver_bundle: Any,
+    line_traces: dict[str, dict[int, Any]],
+) -> list[CompanyChartsDriverCardPayload]:
+    assumption_rows = {
+        str(row.get("key")): row
+        for row in getattr(driver_bundle, "assumption_rows", [])
+        if row.get("key") is not None
+    }
+    source_periods = [f"FY{statement.period_end.year}" for statement in annuals[-PROJECTION_STUDIO_REPORTED_PERIODS:] if getattr(statement, "period_end", None) is not None]
+    card_specs = (
+        ("revenue_method", "Revenue Drivers", ("revenue",)),
+        ("cost_schedule", "Cost Structure", ("cost_of_revenue", "gross_profit", "operating_income")),
+        (
+            "operating_working_capital",
+            "Operating Working Capital",
+            ("accounts_receivable", "inventory", "accounts_payable", "deferred_revenue", "accrued_operating_liabilities"),
+        ),
+        ("reinvestment", "Reinvestment + Capex", ("depreciation_amortization", "capex", "free_cash_flow")),
+        ("below_line_bridge", "Below-The-Line Bridge", ("pretax_income", "income_tax", "net_income")),
+        ("dilution", "Dilution Bridge", ("diluted_shares", "eps")),
+    )
+
+    cards: list[CompanyChartsDriverCardPayload] = []
+    for assumption_key, title, trace_keys in card_specs:
+        row = assumption_rows.get(assumption_key, {})
+        default_markers, fallback_markers = _projection_studio_trace_markers(line_traces, trace_keys)
+        if not row and not default_markers and not fallback_markers:
+            continue
+        cards.append(
+            CompanyChartsDriverCardPayload(
+                key=assumption_key,
+                title=title,
+                value=str(row.get("value") or "Trace-derived"),
+                detail=str(row.get("detail")) if row.get("detail") is not None else None,
+                source_periods=source_periods,
+                default_markers=default_markers,
+                fallback_markers=fallback_markers,
+            )
+        )
+    return cards
+
+
+def _projection_studio_trace_markers(
+    line_traces: dict[str, dict[int, Any]],
+    trace_keys: tuple[str, ...],
+) -> tuple[list[str], list[str]]:
+    default_markers: list[str] = []
+    fallback_markers: list[str] = []
+    for trace_key in trace_keys:
+        trace_map = line_traces.get(trace_key) or {}
+        if not trace_map:
+            continue
+        first_year = min(trace_map)
+        trace = trace_map[first_year]
+        for input_item in getattr(trace, "inputs", []):
+            source_kind = str(getattr(input_item, "source_kind", "sec"))
+            source_detail = str(getattr(input_item, "source_detail", ""))
+            if source_kind == "default" and source_detail and source_detail not in default_markers:
+                default_markers.append(source_detail)
+            if source_kind == "fallback" and source_detail and source_detail not in fallback_markers:
+                fallback_markers.append(source_detail)
+    return default_markers, fallback_markers
+
+
+def _build_projection_studio_scenarios_comparison(driver_bundle: Any) -> list[CompanyChartsProjectedRowPayload]:
+    scenarios = getattr(driver_bundle, "scenarios", None)
+    if not isinstance(scenarios, dict):
+        return []
+    base = scenarios.get("base")
+    bull = scenarios.get("bull")
+    bear = scenarios.get("bear")
+    if base is None or bull is None or bear is None:
+        return []
+
+    return [
+        CompanyChartsProjectedRowPayload(
+            key="scenario_next_year_growth",
+            label="Next-Year Revenue Growth",
+            unit="percent",
+            scenario_values={
+                "base": _projection_studio_round_value(getattr(driver_bundle, "base_next_year_growth", None), "percent"),
+                "bull": _projection_studio_round_value(getattr(driver_bundle, "bull_next_year_growth", None), "percent"),
+                "bear": _projection_studio_round_value(getattr(driver_bundle, "bear_next_year_growth", None), "percent"),
+            },
+        ),
+        CompanyChartsProjectedRowPayload(
+            key="scenario_next_year_revenue",
+            label="Next-Year Revenue",
+            unit="usd",
+            scenario_values={
+                "base": _projection_studio_first_year_value(base.revenue.values, "usd"),
+                "bull": _projection_studio_first_year_value(bull.revenue.values, "usd"),
+                "bear": _projection_studio_first_year_value(bear.revenue.values, "usd"),
+            },
+        ),
+        CompanyChartsProjectedRowPayload(
+            key="scenario_next_year_operating_income",
+            label="Next-Year Operating Income",
+            unit="usd",
+            scenario_values={
+                "base": _projection_studio_first_year_value(base.operating_income.values, "usd"),
+                "bull": _projection_studio_first_year_value(bull.operating_income.values, "usd"),
+                "bear": _projection_studio_first_year_value(bear.operating_income.values, "usd"),
+            },
+        ),
+        CompanyChartsProjectedRowPayload(
+            key="scenario_next_year_free_cash_flow",
+            label="Next-Year Free Cash Flow",
+            unit="usd",
+            scenario_values={
+                "base": _projection_studio_first_year_value(base.free_cash_flow.values, "usd"),
+                "bull": _projection_studio_first_year_value(bull.free_cash_flow.values, "usd"),
+                "bear": _projection_studio_first_year_value(bear.free_cash_flow.values, "usd"),
+            },
+        ),
+        CompanyChartsProjectedRowPayload(
+            key="scenario_next_year_eps",
+            label="Next-Year Diluted EPS",
+            unit="usd_per_share",
+            scenario_values={
+                "base": _projection_studio_first_year_value(base.eps.values, "usd_per_share"),
+                "bull": _projection_studio_first_year_value(bull.eps.values, "usd_per_share"),
+                "bear": _projection_studio_first_year_value(bear.eps.values, "usd_per_share"),
+            },
+        ),
+    ]
+
+
+def _build_projection_studio_sensitivity_matrix(
+    annuals: list[Any],
+    driver_bundle: Any,
+    line_traces: dict[str, dict[int, Any]],
+) -> list[CompanyChartsSensitivityCellPayload]:
+    scenarios = getattr(driver_bundle, "scenarios", None)
+    if not isinstance(scenarios, dict) or not annuals:
+        return []
+
+    base = scenarios.get("base")
+    if base is None or not getattr(base, "bridge", None):
+        return []
+
+    latest_revenue = _statement_value(annuals[-1], "revenue")
+    base_revenue = _first_numeric(getattr(base.revenue, "values", []))
+    base_operating_income = _first_numeric(getattr(base.operating_income, "values", []))
+    base_eps = _first_numeric(getattr(base.eps, "values", []))
+    base_diluted_shares = _first_numeric(getattr(base.diluted_shares, "values", []))
+    base_bridge = base.bridge[0] if getattr(base, "bridge", None) else None
+    if latest_revenue in (None, 0) or base_revenue is None or base_operating_income is None or base_eps is None or base_diluted_shares in (None, 0) or base_bridge is None:
+        return []
+
+    base_growth = getattr(driver_bundle, "base_next_year_growth", None)
+    if base_growth is None:
+        base_growth = _growth_rate(base_revenue, latest_revenue)
+    base_margin = _safe_divide(base_operating_income, base_revenue)
+    tax_trace = (line_traces.get("income_tax") or {}).get(int(base_bridge.year))
+    tax_rate = _projection_trace_input_value(tax_trace, "effective_tax_rate") if tax_trace is not None else _safe_divide(base_bridge.taxes, base_bridge.pretax_income)
+    if base_growth is None or base_margin is None or tax_rate is None:
+        return []
+
+    pretax_offset = float(base_bridge.pretax_income) - float(base_bridge.ebit)
+    margin_profile = _metric_margin_profile("operating_income")
+    cells: list[CompanyChartsSensitivityCellPayload] = []
+    for row_index, margin_delta in enumerate(PROJECTION_STUDIO_SENSITIVITY_DELTAS):
+        margin = _clip(float(base_margin) + margin_delta, float(margin_profile["floor"]), float(margin_profile["cap"]))
+        for column_index, growth_delta in enumerate(PROJECTION_STUDIO_SENSITIVITY_DELTAS):
+            growth = _clip(float(base_growth) + growth_delta, REVENUE_FORECAST_GROWTH_FLOOR, REVENUE_FORECAST_GROWTH_CAP)
+            is_base = row_index == 2 and column_index == 2
+            if is_base:
+                eps_value = float(base_eps)
+            else:
+                revenue = float(latest_revenue) * (1.0 + growth)
+                operating_income = revenue * margin
+                pretax_income = operating_income + pretax_offset
+                taxes = pretax_income * (tax_rate if pretax_income >= 0 else min(tax_rate, 0.15))
+                net_income = pretax_income - taxes
+                eps_value = _safe_divide(net_income, base_diluted_shares)
+            cells.append(
+                CompanyChartsSensitivityCellPayload(
+                    row_index=row_index,
+                    column_index=column_index,
+                    revenue_growth=_projection_studio_round_value(growth, "percent"),
+                    operating_margin=_projection_studio_round_value(margin, "percent"),
+                    eps=_projection_studio_round_value(eps_value, "usd_per_share"),
+                    is_base=is_base,
+                )
+            )
+    return cells
+
+
+def _projection_trace_input_value(trace: Any, key: str) -> float | None:
+    if trace is None:
+        return None
+    for input_item in getattr(trace, "inputs", []):
+        if getattr(input_item, "key", None) == key and isinstance(getattr(input_item, "value", None), (int, float)):
+            return float(input_item.value)
+    return None
+
+
+def _projection_studio_first_year_value(values: list[float], unit: str) -> float | None:
+    if not values:
+        return None
+    return _projection_studio_round_value(values[0], unit)
+
+
+
+def _first_numeric(values: list[Any]) -> float | None:
+    for value in values:
+        if isinstance(value, (int, float)) and isfinite(float(value)):
+            return float(value)
+    return None
+
+
+def _projection_studio_round_value(value: float | None, unit: str) -> float | None:
+    if value is None or not isfinite(float(value)):
+        return None
+    digits = 2
+    if unit in {"percent", "ratio"}:
+        digits = 4
+    elif unit == "usd_per_share":
+        digits = 3
+    elif unit == "shares":
+        digits = 2
+    return _round(float(value), digits)
 
 
 def _build_revenue_outlook_bridge_card(

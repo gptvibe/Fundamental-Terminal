@@ -3078,13 +3078,26 @@ def _load_company_charts_snapshot_record(
         return None, None
 
     try:
-        return stored, CompanyChartsDashboardResponse.model_validate(stored.payload)
+        payload = CompanyChartsDashboardResponse.model_validate(stored.payload)
     except Exception:
         logging.getLogger(__name__).exception(
             "Unable to validate company charts dashboard snapshot for company_id=%s",
             company_id,
         )
         return stored, None
+
+    # Older snapshots persisted an input fingerprint hash into payload_version.
+    # Treat those as stale so the current route can rebuild a contract-versioned payload
+    # that includes the additive Projection Studio fields when available.
+    if payload.payload_version != CHARTS_DASHBOARD_SCHEMA_VERSION:
+        logging.getLogger(__name__).info(
+            "Ignoring stale company charts snapshot for company_id=%s with payload_version=%s",
+            company_id,
+            payload.payload_version,
+        )
+        return stored, None
+
+    return stored, payload
 
 
 def _refresh_for_company_charts(

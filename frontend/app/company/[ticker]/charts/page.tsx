@@ -1,18 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 
 import { CompanyChartsDashboard } from "@/components/company/charts-dashboard";
+import { ProjectionStudio } from "@/components/company/projection-studio";
 import { getCompanyCharts } from "@/lib/api";
 import type { CompanyChartsDashboardResponse } from "@/lib/types";
 
+type DashboardMode = "outlook" | "studio";
+
+function resolveDashboardMode(rawMode: string | null, hasProjectionStudio: boolean): DashboardMode {
+  if (rawMode === "studio" && hasProjectionStudio) {
+    return "studio";
+  }
+  return "outlook";
+}
+
 export default function CompanyChartsPage() {
   const params = useParams<{ ticker: string }>();
+  const searchParams = useSearchParams();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const [data, setData] = useState<CompanyChartsDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Determine requested mode from URL; default to outlook
+  const requestedMode = searchParams?.get("mode") ?? null;
+  const mode = resolveDashboardMode(requestedMode, Boolean(data?.projection_studio));
 
   useEffect(() => {
     let cancelled = false;
@@ -77,5 +92,13 @@ export default function CompanyChartsPage() {
     return null;
   }
 
-  return <CompanyChartsDashboard payload={data} />;
+  return (
+    <>
+      {mode === "studio" && data.projection_studio ? (
+        <ProjectionStudio payload={data} studio={data.projection_studio} />
+      ) : (
+        <CompanyChartsDashboard payload={data} activeMode={mode} studioEnabled={Boolean(data.projection_studio)} />
+      )}
+    </>
+  );
 }

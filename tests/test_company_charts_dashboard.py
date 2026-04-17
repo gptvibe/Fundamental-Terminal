@@ -737,6 +737,170 @@ def test_build_fcf_outlook_card_falls_back_to_base_cash_series_when_driver_bridg
     assert any("detailed bridge payload was unavailable" in highlight for highlight in card.highlights)
 
 
+def _projection_section(
+    studio: charts_service.CompanyChartsProjectionStudioPayload,
+    key: str,
+) -> charts_service.CompanyChartsScheduleSectionPayload:
+    return next(section for section in studio.schedule_sections if section.key == key)
+
+
+
+def _projection_row(
+    studio: charts_service.CompanyChartsProjectionStudioPayload,
+    section_key: str,
+    row_key: str,
+) -> charts_service.CompanyChartsProjectedRowPayload:
+    section = _projection_section(studio, section_key)
+    return next(row for row in section.rows if row.key == row_key)
+
+
+
+def test_build_company_charts_dashboard_response_populates_projection_studio_from_driver_traces(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.projection_studio is not None
+    assert [section.title for section in response.projection_studio.schedule_sections] == [
+        "Income Statement",
+        "Balance Sheet",
+        "Cash Flow Statement",
+    ]
+    assert response.projection_studio.drivers_used
+    assert len(response.projection_studio.scenarios_comparison) == 5
+    assert len(response.projection_studio.sensitivity_matrix) == 25
+    base_cell = next(cell for cell in response.projection_studio.sensitivity_matrix if cell.is_base)
+    assert base_cell.eps == pytest.approx(response.cards.eps.series[1].points[0].value or 0.0, abs=1e-6)
+
+
+
+def test_build_company_charts_dashboard_response_sets_projection_studio_none_when_driver_detail_is_unavailable(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(charts_service, "build_driver_forecast_bundle", lambda *_args, **_kwargs: None)
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.projection_studio is None
+
+
+
+def test_projection_studio_schedule_rows_map_to_actual_and_forecast_values(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [release])
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.projection_studio is not None
+    assert bundle is not None
+
+    revenue_row = _projection_row(response.projection_studio, "income_statement", "revenue")
+    ar_row = _projection_row(response.projection_studio, "balance_sheet", "accounts_receivable")
+    capex_row = _projection_row(response.projection_studio, "cash_flow_statement", "capex")
+    first_year = bundle.scenarios["base"].revenue.years[0]
+
+    assert revenue_row.reported_values[2025] == pytest.approx(1100.0, abs=1e-6)
+    assert revenue_row.projected_values[first_year] == pytest.approx(charts_service._round(bundle.scenarios["base"].revenue.values[0], 2) or 0.0, abs=1e-6)
+    assert ar_row.projected_values[first_year] == pytest.approx(charts_service._round(bundle.line_traces["accounts_receivable"][first_year].result_value, 2) or 0.0, abs=1e-6)
+    assert capex_row.projected_values[first_year] == pytest.approx(charts_service._round(bundle.scenarios["base"].capex.values[0], 2) or 0.0, abs=1e-6)
+
+
+
+def test_projection_studio_formula_trace_payloads_match_source_traces(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [release])
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.projection_studio is not None
+    assert bundle is not None
+
+    first_year = bundle.scenarios["base"].revenue.years[0]
+    source_trace = bundle.line_traces["revenue"][first_year]
+    payload_trace = _projection_row(response.projection_studio, "income_statement", "revenue").formula_traces[first_year]
+
+    assert payload_trace.formula_template == source_trace.formula_template
+    assert payload_trace.formula_computation == source_trace.formula_computation
+    assert payload_trace.confidence == source_trace.confidence
+    assert payload_trace.inputs[0].source_detail == source_trace.inputs[0].source_detail
+    assert payload_trace.result_value == pytest.approx(source_trace.result_value or 0.0, abs=1e-6)
+
+
+
 def test_company_charts_dashboard_response_round_trips_new_cards_through_snapshot_payload(monkeypatch):
     company = SimpleNamespace(
         id=1,
@@ -766,6 +930,7 @@ def test_company_charts_dashboard_response_round_trips_new_cards_through_snapsho
     assert round_trip.cards.revenue_outlook_bridge is not None
     assert round_trip.cards.margin_path is not None
     assert round_trip.cards.fcf_outlook is not None
+    assert round_trip.projection_studio is not None
     assert _first_series_value(round_trip.cards.revenue_outlook_bridge, "revenue_bridge_end") == pytest.approx(
         _first_series_value(response.cards.revenue_outlook_bridge, "revenue_bridge_end"),
         abs=1e-6,
@@ -778,6 +943,12 @@ def test_company_charts_dashboard_response_round_trips_new_cards_through_snapsho
         _first_series_value(response.cards.fcf_outlook, "fcf_fcf_forecast"),
         abs=1e-6,
     )
+    assert len(round_trip.projection_studio.sensitivity_matrix) == 25
+    assert _projection_row(round_trip.projection_studio, "income_statement", "revenue").projected_values == _projection_row(
+        response.projection_studio,
+        "income_statement",
+        "revenue",
+    ).projected_values
 
 
 def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, statements: list[SimpleNamespace]) -> tuple[driver_model.DriverForecastScenario, driver_model._ForecastBridgePoint]:
@@ -837,6 +1008,100 @@ def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, stat
     assert base_scenario.capex.values[0] == pytest.approx(bridge.capex, abs=1e-6)
     assert base_scenario.free_cash_flow.values[0] == pytest.approx(bridge.free_cash_flow, abs=1e-6)
     return base_scenario, bridge
+
+
+def _trace_input_value(trace: driver_model.FormulaTrace, key: str) -> float:
+    value = next(item.value for item in trace.inputs if item.key == key)
+    assert value is not None
+    return float(value)
+
+
+def _assert_trace_math(trace: driver_model.FormulaTrace) -> None:
+    if trace.line_item == "revenue":
+        expected = _trace_input_value(trace, "previous_revenue") * (1.0 + _trace_input_value(trace, "applied_growth"))
+    elif trace.line_item == "cost_of_revenue":
+        expected = max(
+            _trace_input_value(trace, "revenue") * _trace_input_value(trace, "cost_of_revenue_ratio"),
+            _trace_input_value(trace, "variable_cost"),
+        )
+    elif trace.line_item == "gross_profit":
+        expected = _trace_input_value(trace, "revenue") - _trace_input_value(trace, "cost_of_revenue")
+    elif trace.line_item == "operating_income":
+        expected = (
+            _trace_input_value(trace, "revenue")
+            - _trace_input_value(trace, "variable_cost")
+            - _trace_input_value(trace, "semi_variable_cost")
+            - _trace_input_value(trace, "fixed_cost")
+        )
+    elif trace.line_item == "pretax_income":
+        expected = (
+            _trace_input_value(trace, "ebit")
+            - _trace_input_value(trace, "interest_expense")
+            + _trace_input_value(trace, "interest_income")
+            + _trace_input_value(trace, "other_income_expense")
+        )
+    elif trace.line_item == "income_tax":
+        expected = driver_model._project_taxes(
+            _trace_input_value(trace, "pretax_income"),
+            _trace_input_value(trace, "effective_tax_rate"),
+        )
+    elif trace.line_item == "net_income":
+        expected = _trace_input_value(trace, "pretax_income") - _trace_input_value(trace, "taxes")
+    elif trace.line_item == "accounts_receivable":
+        expected = driver_model._days_to_balance(
+            _trace_input_value(trace, "revenue"),
+            _trace_input_value(trace, "accounts_receivable_days"),
+        )
+    elif trace.line_item == "inventory":
+        expected = driver_model._days_to_balance(
+            _trace_input_value(trace, "cost_of_revenue"),
+            _trace_input_value(trace, "inventory_days"),
+        )
+    elif trace.line_item == "accounts_payable":
+        expected = driver_model._days_to_balance(
+            _trace_input_value(trace, "cost_of_revenue"),
+            _trace_input_value(trace, "accounts_payable_days"),
+        )
+    elif trace.line_item == "deferred_revenue":
+        expected = driver_model._days_to_balance(
+            _trace_input_value(trace, "revenue"),
+            _trace_input_value(trace, "deferred_revenue_days"),
+        )
+    elif trace.line_item == "accrued_operating_liabilities":
+        expected = driver_model._days_to_balance(
+            _trace_input_value(trace, "cash_operating_cost"),
+            _trace_input_value(trace, "accrued_operating_liabilities_days"),
+        )
+    elif trace.line_item == "depreciation_amortization":
+        expected = max(
+            0.0,
+            (_trace_input_value(trace, "previous_depreciation") * 0.50)
+            + ((_trace_input_value(trace, "revenue") * _trace_input_value(trace, "depreciation_ratio")) * 0.50),
+        )
+    elif trace.line_item == "sbc_expense":
+        expected = _trace_input_value(trace, "revenue") * _trace_input_value(trace, "sbc_ratio")
+    elif trace.line_item == "capex":
+        expected = max(
+            _trace_input_value(trace, "maintenance_capex"),
+            _trace_input_value(trace, "depreciation_amortization") + _trace_input_value(trace, "growth_reinvestment"),
+        )
+    elif trace.line_item == "operating_cash_flow":
+        expected = (
+            _trace_input_value(trace, "net_income")
+            + _trace_input_value(trace, "depreciation")
+            + _trace_input_value(trace, "stock_based_compensation")
+            - _trace_input_value(trace, "delta_operating_working_capital")
+        )
+    elif trace.line_item == "free_cash_flow":
+        expected = _trace_input_value(trace, "operating_cash_flow") - _trace_input_value(trace, "capex")
+    elif trace.line_item == "diluted_shares":
+        expected = sum(item.value or 0.0 for item in trace.inputs)
+    elif trace.line_item == "eps":
+        expected = _trace_input_value(trace, "net_income") / _trace_input_value(trace, "diluted_shares")
+    else:
+        raise AssertionError(f"Unhandled trace line item: {trace.line_item}")
+
+    assert trace.result_value == pytest.approx(expected, abs=1e-6)
 
 
 def test_top_down_revenue_projection_uses_driver_stack_and_guidance_overlay():
@@ -2605,6 +2870,103 @@ def test_driver_formula_copy_calls_out_explicit_dilution_bridge():
         "Buybacks: Direct repurchased-share disclosure. Acquisition issuance: Direct acquisition share issuance. "
         "Convertibles: Direct dilutive convertible shares. EPS = $109.37 / 105 = $1.04."
     )
+
+
+def test_driver_forecast_bundle_populates_formula_traces_for_core_base_lines():
+    bundle = driver_model.build_driver_forecast_bundle(_standard_driver_regression_statements(), [_guidance_release(1200.0)])
+
+    assert bundle is not None
+    expected_lines = {
+        "revenue",
+        "cost_of_revenue",
+        "gross_profit",
+        "operating_income",
+        "pretax_income",
+        "income_tax",
+        "net_income",
+        "accounts_receivable",
+        "inventory",
+        "accounts_payable",
+        "deferred_revenue",
+        "accrued_operating_liabilities",
+        "depreciation_amortization",
+        "sbc_expense",
+        "capex",
+        "operating_cash_flow",
+        "free_cash_flow",
+        "diluted_shares",
+        "eps",
+    }
+    forecast_years = set(bundle.scenarios["base"].revenue.years)
+
+    assert set(bundle.line_traces) == expected_lines
+    for line_item in expected_lines:
+        assert set(bundle.line_traces[line_item]) == forecast_years
+
+
+def test_driver_formula_traces_use_readable_computation_strings():
+    bundle = driver_model.build_driver_forecast_bundle(_standard_driver_regression_statements(), [_guidance_release(1200.0)])
+
+    assert bundle is not None
+    first_year = bundle.scenarios["base"].revenue.years[0]
+    revenue_trace = bundle.line_traces["revenue"][first_year]
+    accounts_receivable_trace = bundle.line_traces["accounts_receivable"][first_year]
+    ocf_trace = bundle.line_traces["operating_cash_flow"][first_year]
+
+    assert revenue_trace.formula_computation.startswith("$1100.00 x (1 + ")
+    assert "%" in revenue_trace.formula_computation
+    assert "days" in accounts_receivable_trace.formula_computation
+    assert "$" in ocf_trace.formula_computation
+    assert " = " in ocf_trace.formula_computation
+    assert all(input_item.formatted_value for input_item in revenue_trace.inputs)
+
+
+def test_driver_formula_traces_confidence_tracks_sec_default_and_fallback_inputs():
+    high_bundle = driver_model.build_driver_forecast_bundle(_explicit_dilution_driver_statements(), [])
+    medium_statements = [_statement(year, {**statement.data, "accounts_receivable": None}) for year, statement in zip((2023, 2024, 2025), _explicit_dilution_driver_statements(), strict=True)]
+    medium_bundle = driver_model.build_driver_forecast_bundle(medium_statements, [])
+    low_statements = []
+    for year, statement in zip((2023, 2024, 2025), _explicit_dilution_driver_statements(), strict=True):
+        data = {key: value for key, value in statement.data.items() if key != "gross_profit"}
+        low_statements.append(_statement(year, data))
+    low_bundle = driver_model.build_driver_forecast_bundle(low_statements, [])
+
+    assert high_bundle is not None
+    assert medium_bundle is not None
+    assert low_bundle is not None
+
+    first_year = high_bundle.scenarios["base"].revenue.years[0]
+    assert high_bundle.line_traces["diluted_shares"][first_year].confidence == "high"
+    assert medium_bundle.line_traces["accounts_receivable"][first_year].confidence == "medium"
+    assert medium_bundle.line_traces["accounts_receivable"][first_year].inputs[1].source_kind == "default"
+    assert low_bundle.line_traces["cost_of_revenue"][first_year].confidence == "low"
+    assert low_bundle.line_traces["inventory"][first_year].confidence == "low"
+
+
+def test_driver_formula_traces_reproduce_trace_results_within_tolerance():
+    bundle = driver_model.build_driver_forecast_bundle(_standard_driver_regression_statements(), [_guidance_release(1200.0)])
+
+    assert bundle is not None
+    for line_traces in bundle.line_traces.values():
+        for trace in line_traces.values():
+            _assert_trace_math(trace)
+
+
+def test_driver_formula_traces_are_additive_and_do_not_change_existing_forecast_outputs():
+    statements = _standard_driver_regression_statements()
+    bundle = driver_model.build_driver_forecast_bundle(statements, [_guidance_release(1200.0)])
+
+    assert bundle is not None
+    base_scenario, bridge = _assert_base_bridge_formulas(bundle, statements)
+    calculation_rows = {row["key"]: row for row in bundle.calculation_rows}
+    first_year = base_scenario.revenue.years[0]
+
+    assert calculation_rows["formula_ocf"]["value"] == driver_model.FORECAST_FORMULA_OCF
+    assert calculation_rows["formula_fcf"]["value"] == driver_model.FORECAST_FORMULA_FCF
+    assert bundle.line_traces["revenue"][first_year].result_value == pytest.approx(base_scenario.revenue.values[0], abs=1e-6)
+    assert bundle.line_traces["capex"][first_year].result_value == pytest.approx(base_scenario.capex.values[0], abs=1e-6)
+    assert bundle.line_traces["operating_cash_flow"][first_year].result_value == pytest.approx(bridge.operating_cash_flow, abs=1e-6)
+    assert bundle.line_traces["free_cash_flow"][first_year].result_value == pytest.approx(base_scenario.free_cash_flow.values[0], abs=1e-6)
 
 
 def test_build_company_charts_dashboard_response_falls_back_when_driver_inputs_are_too_thin(monkeypatch):

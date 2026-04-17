@@ -2700,6 +2700,70 @@ export interface CompanyChartsMethodologyPayload {
   confidence_label: string | null;
 }
 
+export interface CompanyChartsFormulaInputPayload {
+  key: string;
+  label: string;
+  value: number | null;
+  formatted_value: string;
+  source_detail: string;
+  source_kind: string;
+}
+
+export interface CompanyChartsFormulaTracePayload {
+  line_item: string;
+  year: number;
+  formula_label: string;
+  formula_template: string;
+  formula_computation: string;
+  result_value: number | null;
+  inputs: CompanyChartsFormulaInputPayload[];
+  confidence: string;
+}
+
+export interface CompanyChartsProjectedRowPayload {
+  key: string;
+  label: string;
+  unit: string;
+  reported_values: Record<number, number | null>;
+  projected_values: Record<number, number | null>;
+  formula_traces: Record<number, CompanyChartsFormulaTracePayload>;
+  scenario_values: Record<string, number | null>;
+  detail: string | null;
+}
+
+export interface CompanyChartsScheduleSectionPayload {
+  key: string;
+  title: string;
+  rows: CompanyChartsProjectedRowPayload[];
+}
+
+export interface CompanyChartsDriverCardPayload {
+  key: string;
+  title: string;
+  value: string;
+  detail: string | null;
+  source_periods: string[];
+  default_markers: string[];
+  fallback_markers: string[];
+}
+
+export interface CompanyChartsSensitivityCellPayload {
+  row_index: number;
+  column_index: number;
+  revenue_growth: number | null;
+  operating_margin: number | null;
+  eps: number | null;
+  is_base: boolean;
+}
+
+export interface CompanyChartsProjectionStudioPayload {
+  methodology: CompanyChartsMethodologyPayload | null;
+  schedule_sections: CompanyChartsScheduleSectionPayload[];
+  drivers_used: CompanyChartsDriverCardPayload[];
+  scenarios_comparison: CompanyChartsProjectedRowPayload[];
+  sensitivity_matrix: CompanyChartsSensitivityCellPayload[];
+}
+
 export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   title: string;
@@ -2711,6 +2775,7 @@ export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   cards: CompanyChartsCardsPayload;
   forecast_methodology: CompanyChartsMethodologyPayload;
   forecast_diagnostics?: CompanyChartsForecastDiagnosticsPayload;
+  projection_studio: CompanyChartsProjectionStudioPayload | null;
   payload_version: string;
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;

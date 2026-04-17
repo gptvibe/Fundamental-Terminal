@@ -6,6 +6,12 @@ The charts dashboard now prefers a driver-based integrated forecast engine for `
 The payload contract is unchanged: the endpoint still emits base / bull / bear scenario series plus the same assumptions and calculations cards.
 When statement coverage is too thin, it still falls back to the older guarded heuristic model instead of fabricating driver inputs.
 
+The driver bundle now also carries backend-only `line_traces` for the core base-scenario projected lines: revenue, cost of revenue, gross profit, operating income, pretax income, income tax, net income, accounts receivable, inventory, accounts payable, deferred revenue, accrued operating liabilities, depreciation and amortization, SBC expense, capex, operating cash flow, free cash flow, diluted shares, and EPS.
+Those traces are generated inside the forecast flow from the same schedules and bridge points used to compute the forecast.
+
+The charts dashboard response can now also carry an additive optional `projection_studio` payload built from those existing forecast outputs and trace objects.
+That payload remains backend-generated and JSON-serializable in this phase; it is intended for downstream consumers and snapshot persistence rather than a dedicated frontend Studio UI.
+
 ## Canonical Capex Note
 
 The canonical implementation keeps `Delta operating working capital` in `OCF`, not in `capex`.

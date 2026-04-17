@@ -16,6 +16,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
 import { CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type {
@@ -56,7 +57,15 @@ const CARD_PALETTES: Record<string, string[]> = {
   eps: ["#d6a04a", "#8f6f33"],
 };
 
-export function CompanyChartsDashboard({ payload }: { payload: CompanyChartsDashboardResponse }) {
+export function CompanyChartsDashboard({
+  payload,
+  activeMode = "outlook",
+  studioEnabled = Boolean(payload.projection_studio),
+}: {
+  payload: CompanyChartsDashboardResponse;
+  activeMode?: "outlook" | "studio";
+  studioEnabled?: boolean;
+}) {
   const company = payload.company;
   const revenuePhaseSummary = useMemo(() => buildChartPhaseSummary(buildChartRows(payload.cards.revenue.series)), [payload.cards.revenue.series]);
   const summaryBadges = useMemo(() => payload.summary.secondary_badges.slice(0, 4), [payload.summary.secondary_badges]);
@@ -72,6 +81,7 @@ export function CompanyChartsDashboard({ payload }: { payload: CompanyChartsDash
             <span className="charts-page-chip">Charts</span>
             <span className="charts-page-chip charts-page-chip-subtle">{payload.build_state === "ready" ? "Snapshot ready" : payload.build_status}</span>
           </div>
+          <ChartsModeSwitch activeMode={activeMode} studioEnabled={studioEnabled} />
           <h1 className="charts-page-title">{company?.name ?? company?.ticker ?? "Company Charts"}</h1>
           <div className="charts-page-meta-row">
             <span className="charts-page-meta-pill">{company?.ticker ?? "Ticker pending"}</span>

@@ -216,3 +216,106 @@ def test_company_charts_builds_inline_when_snapshot_missing(monkeypatch):
     assert response.build_state == "ready"
     assert response.summary.primary_score.score == 84
     assert session.commits == 1
+
+
+def test_company_charts_rebuilds_when_persisted_snapshot_uses_legacy_hash_payload_version(monkeypatch):
+    snapshot = SimpleNamespace(
+        company=SimpleNamespace(
+            id=1,
+            ticker="ACME",
+            cik="0000123456",
+            name="Acme Corp",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Software",
+        ),
+        cache_state="fresh",
+        last_checked=datetime(2026, 4, 10, tzinfo=timezone.utc),
+    )
+    refresh = main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None)
+    legacy_payload = main_module.CompanyChartsDashboardResponse(
+        company=main_module._serialize_company(snapshot),
+        title="Growth Outlook",
+        build_state="ready",
+        build_status="Charts dashboard ready.",
+        summary=main_module.CompanyChartsSummaryPayload(
+            headline="Growth Outlook",
+            primary_score=main_module.CompanyChartsScoreBadgePayload(key="growth", label="Growth", score=50, tone="neutral"),
+        ),
+        factors=main_module.CompanyChartsFactorsPayload(),
+        legend=main_module.CompanyChartsLegendPayload(),
+        cards=main_module.CompanyChartsCardsPayload(),
+        forecast_methodology=main_module.CompanyChartsMethodologyPayload(
+            version="company_charts_dashboard_v9",
+            label="Legacy",
+            summary="Legacy",
+            disclaimer="Legacy",
+        ),
+        payload_version="d88d8b0baa706eae51b75c79be97afda",
+        refresh=refresh,
+        diagnostics=main_module._build_data_quality_diagnostics(),
+        **main_module._empty_provenance_contract(),
+    )
+    rebuilt_payload = main_module.CompanyChartsDashboardResponse.model_validate(
+        {
+            **main_module._empty_provenance_contract(),
+            "company": main_module._serialize_company(snapshot).model_dump(mode="json"),
+            "title": "Growth Outlook",
+            "build_state": "ready",
+            "build_status": "Charts dashboard ready.",
+            "summary": {
+                "headline": "Growth Outlook",
+                "primary_score": {"key": "growth", "label": "Growth", "score": 84, "tone": "positive"},
+                "thesis": "Inline compute replaced the legacy payload.",
+            },
+            "factors": {},
+            "legend": {},
+            "cards": {},
+            "forecast_methodology": {
+                "version": "company_charts_dashboard_v9",
+                "label": "Current",
+                "summary": "Current",
+                "disclaimer": "Current",
+            },
+            "projection_studio": {
+                "methodology": None,
+                "schedule_sections": [],
+                "drivers_used": [],
+                "scenarios_comparison": [],
+                "sensitivity_matrix": [],
+            },
+            "payload_version": "company_charts_dashboard_v9",
+            "refresh": refresh.model_dump(mode="json"),
+            "diagnostics": main_module._build_data_quality_diagnostics().model_dump(mode="json"),
+        }
+    )
+
+    class _Session:
+        def __init__(self) -> None:
+            self.commits = 0
+
+        def commit(self) -> None:
+            self.commits += 1
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+    session = _Session()
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda session, ticker: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_charts_dashboard_snapshot",
+        lambda *args, **kwargs: SimpleNamespace(
+            payload=legacy_payload.model_dump(mode="json"),
+            last_checked=datetime(2026, 4, 11, tzinfo=timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(main_module, "recompute_and_persist_company_charts_dashboard", lambda *args, **kwargs: rebuilt_payload)
+
+    response = main_module.company_charts("ACME", BackgroundTasks(), as_of=None, session=session)
+
+    assert response.payload_version == "company_charts_dashboard_v9"
+    assert response.summary.primary_score.score == 84
+    assert response.projection_studio is not None
+    assert session.commits == 1

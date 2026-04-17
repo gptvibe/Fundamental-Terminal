@@ -90,6 +90,28 @@ class DriverForecastLine:
 
 
 @dataclass(slots=True)
+class FormulaInput:
+    key: str
+    label: str
+    value: float | None
+    formatted_value: str
+    source_detail: str
+    source_kind: str
+
+
+@dataclass(slots=True)
+class FormulaTrace:
+    line_item: str
+    year: int
+    formula_label: str
+    formula_template: str
+    formula_computation: str
+    result_value: float | None
+    inputs: list[FormulaInput] = field(default_factory=list)
+    confidence: str = "high"
+
+
+@dataclass(slots=True)
 class DriverForecastScenario:
     key: str
     label: str
@@ -126,6 +148,7 @@ class DriverForecastBundle:
     sensitivity_rows: list[dict[str, str]] = field(default_factory=list)
     revenue_bridge_rows: list[dict[str, Any]] = field(default_factory=list)
     projected_gross_margin: float | None = None
+    line_traces: dict[str, dict[int, FormulaTrace]] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -320,8 +343,9 @@ def build_driver_forecast_bundle(
     scenario_tweaks = _scenario_tweaks()
 
     scenarios: dict[str, DriverForecastScenario] = {}
+    line_traces: dict[str, dict[int, FormulaTrace]] = {}
     for scenario_key in SCENARIO_SEQUENCE:
-        scenarios[scenario_key] = _project_scenario(
+        scenario, scenario_traces = _project_scenario(
             history,
             revenue_drivers,
             cost_schedule,
@@ -332,7 +356,11 @@ def build_driver_forecast_bundle(
             horizon_years=horizon_years,
             latest_year=latest_year,
             tweaks=scenario_tweaks[scenario_key],
+            capture_traces=scenario_key == "base",
         )
+        scenarios[scenario_key] = scenario
+        if scenario_key == "base":
+            line_traces = scenario_traces
 
     assumption_rows = _build_assumption_rows(
         history,
@@ -382,6 +410,7 @@ def build_driver_forecast_bundle(
         sensitivity_rows=sensitivity_rows,
         revenue_bridge_rows=revenue_bridge_rows,
         projected_gross_margin=projected_gross_margin,
+        line_traces=line_traces,
     )
 
 
@@ -860,7 +889,8 @@ def _project_scenario(
     horizon_years: int,
     latest_year: int,
     tweaks: _ScenarioTweaks,
-) -> DriverForecastScenario:
+    capture_traces: bool = False,
+) -> tuple[DriverForecastScenario, dict[str, dict[int, FormulaTrace]]]:
     revenue_projection = (
         _bottom_up_revenue_projection(history, revenue_drivers, tweaks, latest_year, horizon_years)
         if revenue_drivers.segment_profiles
@@ -896,6 +926,7 @@ def _project_scenario(
     eps_values: list[float] = []
     bridge_points: list[_ForecastBridgePoint] = []
     share_bridge_points: list[_ForecastShareBridgePoint] = []
+    line_traces: dict[str, dict[int, FormulaTrace]] = {}
 
     for year, revenue, revenue_growth in revenue_projection:
         years.append(year)
@@ -1021,6 +1052,37 @@ def _project_scenario(
         bridge_points.append(bridge_point)
         share_bridge_points.append(share_bridge_point)
 
+        if capture_traces:
+            year_traces = _build_line_traces_for_year(
+                history=history,
+                revenue_drivers=revenue_drivers,
+                cost_schedule=cost_schedule,
+                reinvestment_schedule=reinvestment_schedule,
+                below_line_schedule=below_line_schedule,
+                dilution_schedule=dilution_schedule,
+                tweaks=tweaks,
+                year=year,
+                projection_index=len(years) - 1,
+                previous_revenue=previous_revenue,
+                previous_depreciation=previous_depreciation,
+                revenue=revenue,
+                cost_of_revenue=cost_of_revenue,
+                cash_operating_cost=cash_operating_cost,
+                operating_income=operating_income,
+                variable_cost=variable_cost,
+                semi_cost=semi_cost,
+                fixed_cost=fixed_cost,
+                working_capital_point=working_capital_point,
+                growth_reinvestment=growth_reinvestment,
+                maintenance_capex=maintenance_capex,
+                bridge_point=bridge_point,
+                share_bridge_point=share_bridge_point,
+                diluted_shares=diluted_shares,
+                eps=eps,
+            )
+            for line_item, trace in year_traces.items():
+                line_traces.setdefault(line_item, {})[year] = trace
+
         previous_revenue = revenue
         previous_working_capital = target_working_capital
         previous_depreciation = depreciation
@@ -1042,7 +1104,819 @@ def _project_scenario(
         eps=DriverForecastLine(years=years, values=eps_values),
         bridge=bridge_points,
         share_bridge=share_bridge_points,
+    ), line_traces
+
+
+def _build_line_traces_for_year(
+    *,
+    history: list[dict[str, Any]],
+    revenue_drivers: _RevenueDrivers,
+    cost_schedule: _CostSchedule,
+    reinvestment_schedule: _ReinvestmentSchedule,
+    below_line_schedule: _BelowLineSchedule,
+    dilution_schedule: _DilutionSchedule,
+    tweaks: _ScenarioTweaks,
+    year: int,
+    projection_index: int,
+    previous_revenue: float,
+    previous_depreciation: float,
+    revenue: float,
+    cost_of_revenue: float,
+    cash_operating_cost: float,
+    operating_income: float,
+    variable_cost: float,
+    semi_cost: float,
+    fixed_cost: float,
+    working_capital_point: dict[str, float],
+    growth_reinvestment: float,
+    maintenance_capex: float,
+    bridge_point: _ForecastBridgePoint,
+    share_bridge_point: _ForecastShareBridgePoint,
+    diluted_shares: float,
+    eps: float | None,
+) -> dict[str, FormulaTrace]:
+    revenue_trace = _build_revenue_line_trace(
+        revenue_drivers=revenue_drivers,
+        tweaks=tweaks,
+        projection_index=projection_index,
+        year=year,
+        previous_revenue=previous_revenue,
+        revenue=revenue,
     )
+    cost_of_revenue_trace = _build_formula_trace(
+        line_item="cost_of_revenue",
+        year=year,
+        formula_label="Cost of Revenue",
+        formula_template="max(revenue x cost-of-revenue ratio, variable costs)",
+        inputs=[
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+            _formula_input(
+                "cost_of_revenue_ratio",
+                "Cost-of-Revenue Ratio",
+                reinvestment_schedule.operating_working_capital.cost_of_revenue_ratio,
+                _pct(reinvestment_schedule.operating_working_capital.cost_of_revenue_ratio),
+                _cost_of_revenue_basis_detail(history),
+                _cost_of_revenue_source_kind(history),
+            ),
+            _formula_input("variable_cost", "Variable Costs", variable_cost, _money(variable_cost), "SEC-derived variable cost ratio", "sec"),
+        ],
+        formula_computation=(
+            f"max({_money(revenue)} x {_pct(reinvestment_schedule.operating_working_capital.cost_of_revenue_ratio)}, {_money(variable_cost)}) = {_money(cost_of_revenue)}"
+        ),
+        result_value=cost_of_revenue,
+    )
+    gross_profit = revenue - cost_of_revenue
+    gross_profit_trace = _build_formula_trace(
+        line_item="gross_profit",
+        year=year,
+        formula_label="Gross Profit",
+        formula_template="Revenue - cost of revenue",
+        inputs=[
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+            _formula_input(
+                "cost_of_revenue",
+                "Cost of Revenue",
+                cost_of_revenue,
+                _money(cost_of_revenue),
+                f"Derived from cost of revenue trace confidence {_trace_source_kind(cost_of_revenue_trace.confidence)}",
+                _trace_source_kind(cost_of_revenue_trace.confidence),
+            ),
+        ],
+        formula_computation=f"{_money(revenue)} - {_money(cost_of_revenue)} = {_money(gross_profit)}",
+        result_value=gross_profit,
+    )
+    depreciation_trace = _build_formula_trace(
+        line_item="depreciation_amortization",
+        year=year,
+        formula_label="Depreciation and Amortization",
+        formula_template="max(0, prior D&A x 50% + revenue x depreciation ratio x 50%)",
+        inputs=[
+            _formula_input(
+                "previous_depreciation",
+                "Prior D&A",
+                previous_depreciation,
+                _money(previous_depreciation),
+                _depreciation_basis_detail(history),
+                _depreciation_source_kind(history),
+            ),
+            _formula_input(
+                "depreciation_ratio",
+                "Depreciation Ratio",
+                reinvestment_schedule.depreciation_ratio,
+                _pct(reinvestment_schedule.depreciation_ratio),
+                _depreciation_basis_detail(history),
+                _depreciation_source_kind(history),
+            ),
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+        ],
+        formula_computation=(
+            f"max($0.00, ({_money(previous_depreciation)} x 50%) + ({_money(revenue)} x {_pct(reinvestment_schedule.depreciation_ratio)} x 50%)) = {_money(bridge_point.depreciation)}"
+        ),
+        result_value=bridge_point.depreciation,
+    )
+    sbc_trace = _build_formula_trace(
+        line_item="sbc_expense",
+        year=year,
+        formula_label="Stock-Based Compensation",
+        formula_template="Revenue x SBC ratio",
+        inputs=[
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+            _formula_input(
+                "sbc_ratio",
+                "SBC Ratio",
+                dilution_schedule.sbc_expense_ratio,
+                _pct(dilution_schedule.sbc_expense_ratio),
+                _sbc_basis_detail(history),
+                _sbc_source_kind(history),
+            ),
+        ],
+        formula_computation=f"{_money(revenue)} x {_pct(dilution_schedule.sbc_expense_ratio)} = {_money(bridge_point.stock_based_compensation)}",
+        result_value=bridge_point.stock_based_compensation,
+    )
+    accounts_receivable_days = _clip(reinvestment_schedule.operating_working_capital.dso + tweaks.working_capital_days_shift, DSO_FLOOR, DSO_CAP)
+    inventory_days = _clip(reinvestment_schedule.operating_working_capital.dio + tweaks.working_capital_days_shift, DIO_FLOOR, DIO_CAP)
+    accounts_payable_days = _clip(reinvestment_schedule.operating_working_capital.dpo - tweaks.working_capital_days_shift, DPO_FLOOR, DPO_CAP)
+    deferred_revenue_days = _clip(
+        reinvestment_schedule.operating_working_capital.deferred_revenue_days - tweaks.working_capital_days_shift,
+        DEFERRED_REVENUE_DAYS_FLOOR,
+        DEFERRED_REVENUE_DAYS_CAP,
+    )
+    accrued_operating_liabilities_days = _clip(
+        reinvestment_schedule.operating_working_capital.accrued_operating_liability_days - tweaks.working_capital_days_shift,
+        ACCRUED_OPERATING_LIABILITY_DAYS_FLOOR,
+        ACCRUED_OPERATING_LIABILITY_DAYS_CAP,
+    )
+    accounts_receivable_trace = _build_formula_trace(
+        line_item="accounts_receivable",
+        year=year,
+        formula_label="Accounts Receivable",
+        formula_template="Revenue x DSO / 365",
+        inputs=[
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+            _working_capital_days_input("accounts_receivable_days", "DSO", accounts_receivable_days, "accounts_receivable", history),
+        ],
+        formula_computation=f"{_money(revenue)} x {_days(accounts_receivable_days)} / 365 = {_money(working_capital_point['accounts_receivable'])}",
+        result_value=working_capital_point["accounts_receivable"],
+    )
+    inventory_trace = _build_formula_trace(
+        line_item="inventory",
+        year=year,
+        formula_label="Inventory",
+        formula_template="Cost of revenue x DIO / 365",
+        inputs=[
+            _formula_input(
+                "cost_of_revenue",
+                "Cost of Revenue",
+                cost_of_revenue,
+                _money(cost_of_revenue),
+                f"Derived from cost of revenue trace confidence {_trace_source_kind(cost_of_revenue_trace.confidence)}",
+                _trace_source_kind(cost_of_revenue_trace.confidence),
+            ),
+            _working_capital_days_input("inventory_days", "DIO", inventory_days, "inventory", history),
+        ],
+        formula_computation=f"{_money(cost_of_revenue)} x {_days(inventory_days)} / 365 = {_money(working_capital_point['inventory'])}",
+        result_value=working_capital_point["inventory"],
+    )
+    accounts_payable_trace = _build_formula_trace(
+        line_item="accounts_payable",
+        year=year,
+        formula_label="Accounts Payable",
+        formula_template="Cost of revenue x DPO / 365",
+        inputs=[
+            _formula_input(
+                "cost_of_revenue",
+                "Cost of Revenue",
+                cost_of_revenue,
+                _money(cost_of_revenue),
+                f"Derived from cost of revenue trace confidence {_trace_source_kind(cost_of_revenue_trace.confidence)}",
+                _trace_source_kind(cost_of_revenue_trace.confidence),
+            ),
+            _working_capital_days_input("accounts_payable_days", "DPO", accounts_payable_days, "accounts_payable", history),
+        ],
+        formula_computation=f"{_money(cost_of_revenue)} x {_days(accounts_payable_days)} / 365 = {_money(working_capital_point['accounts_payable'])}",
+        result_value=working_capital_point["accounts_payable"],
+    )
+    deferred_revenue_trace = _build_formula_trace(
+        line_item="deferred_revenue",
+        year=year,
+        formula_label="Deferred Revenue",
+        formula_template="Revenue x deferred-revenue days / 365",
+        inputs=[
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+            _working_capital_days_input("deferred_revenue_days", "Deferred-Revenue Days", deferred_revenue_days, "deferred_revenue", history),
+        ],
+        formula_computation=f"{_money(revenue)} x {_days(deferred_revenue_days)} / 365 = {_money(working_capital_point['deferred_revenue'])}",
+        result_value=working_capital_point["deferred_revenue"],
+    )
+    accrued_operating_liabilities_trace = _build_formula_trace(
+        line_item="accrued_operating_liabilities",
+        year=year,
+        formula_label="Accrued Operating Liabilities",
+        formula_template="Cash operating cost x accrued-liability days / 365",
+        inputs=[
+            _formula_input(
+                "cash_operating_cost",
+                "Cash Operating Cost",
+                cash_operating_cost,
+                _money(cash_operating_cost),
+                f"Derived from SEC revenue and operating income inputs plus D&A trace confidence {_trace_source_kind(depreciation_trace.confidence)}",
+                _trace_source_kind(depreciation_trace.confidence),
+            ),
+            _working_capital_days_input(
+                "accrued_operating_liabilities_days",
+                "Accrued-Liability Days",
+                accrued_operating_liabilities_days,
+                "accrued_operating_liabilities",
+                history,
+            ),
+        ],
+        formula_computation=(
+            f"{_money(cash_operating_cost)} x {_days(accrued_operating_liabilities_days)} / 365 = {_money(working_capital_point['accrued_operating_liabilities'])}"
+        ),
+        result_value=working_capital_point["accrued_operating_liabilities"],
+    )
+    income_tax_trace = _build_formula_trace(
+        line_item="income_tax",
+        year=year,
+        formula_label="Income Tax",
+        formula_template=FORECAST_FORMULA_TAX,
+        inputs=[
+            _formula_input(
+                "pretax_income",
+                "Pretax Income",
+                bridge_point.pretax_income,
+                _money(bridge_point.pretax_income),
+                "SEC-derived pretax income bridge",
+                "sec",
+            ),
+            _formula_input(
+                "effective_tax_rate",
+                "Effective Tax Rate",
+                below_line_schedule.effective_tax_rate,
+                _pct(below_line_schedule.effective_tax_rate),
+                below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_basis),
+            ),
+        ],
+        formula_computation=_income_tax_computation(bridge_point.pretax_income, below_line_schedule.effective_tax_rate, bridge_point.taxes),
+        result_value=bridge_point.taxes,
+    )
+    capex_trace = _build_formula_trace(
+        line_item="capex",
+        year=year,
+        formula_label="Capex",
+        formula_template=FORECAST_FORMULA_CAPEX,
+        inputs=[
+            _formula_input(
+                "maintenance_capex",
+                "Maintenance Capex",
+                maintenance_capex,
+                _money(maintenance_capex),
+                _capex_basis_detail(history),
+                _capex_source_kind(history),
+            ),
+            _formula_input(
+                "depreciation_amortization",
+                "D&A",
+                bridge_point.depreciation,
+                _money(bridge_point.depreciation),
+                f"Derived from D&A trace confidence {_trace_source_kind(depreciation_trace.confidence)}",
+                _trace_source_kind(depreciation_trace.confidence),
+            ),
+            _formula_input(
+                "growth_reinvestment",
+                "Growth Reinvestment",
+                growth_reinvestment,
+                _money(growth_reinvestment),
+                _growth_reinvestment_basis_detail(history),
+                _growth_reinvestment_source_kind(history),
+            ),
+        ],
+        formula_computation=(
+            f"max({_money(maintenance_capex)}, {_money(bridge_point.depreciation)} + {_money(growth_reinvestment)}) = {_money(bridge_point.capex)}"
+        ),
+        result_value=bridge_point.capex,
+    )
+    operating_income_trace = _build_formula_trace(
+        line_item="operating_income",
+        year=year,
+        formula_label="Operating Income",
+        formula_template=FORECAST_FORMULA_MARGIN,
+        inputs=[
+            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
+            _formula_input("variable_cost", "Variable Costs", variable_cost, _money(variable_cost), "SEC-derived variable cost ratio", "sec"),
+            _formula_input("semi_variable_cost", "Semi-Variable Costs", semi_cost, _money(semi_cost), "SEC-derived semi-variable cost schedule", "sec"),
+            _formula_input("fixed_cost", "Fixed Costs", fixed_cost, _money(fixed_cost), "SEC-derived fixed cost schedule", "sec"),
+        ],
+        formula_computation=(
+            f"{_money(revenue)} - {_money(variable_cost)} - {_money(semi_cost)} - {_money(fixed_cost)} = {_money(operating_income)}"
+        ),
+        result_value=operating_income,
+    )
+    pretax_trace = _build_formula_trace(
+        line_item="pretax_income",
+        year=year,
+        formula_label="Pretax Income",
+        formula_template=FORECAST_FORMULA_PRETAX,
+        inputs=[
+            _formula_input("ebit", "EBIT", bridge_point.ebit, _money(bridge_point.ebit), "SEC-derived operating forecast bridge", "sec"),
+            _formula_input(
+                "interest_expense",
+                "Interest Expense",
+                bridge_point.interest_expense,
+                _money(bridge_point.interest_expense),
+                below_line_schedule.interest_basis,
+                _source_kind_from_basis(below_line_schedule.interest_basis),
+            ),
+            _formula_input(
+                "interest_income",
+                "Interest Income",
+                bridge_point.interest_income,
+                _money(bridge_point.interest_income),
+                below_line_schedule.interest_basis,
+                _source_kind_from_basis(below_line_schedule.interest_basis),
+            ),
+            _formula_input(
+                "other_income_expense",
+                "Other Income or Expense",
+                bridge_point.other_income_expense,
+                _money(bridge_point.other_income_expense),
+                below_line_schedule.other_basis,
+                _source_kind_from_basis(below_line_schedule.other_basis),
+            ),
+        ],
+        formula_computation=(
+            f"{_money(bridge_point.ebit)} - {_money(bridge_point.interest_expense)} + {_money(bridge_point.interest_income)} + "
+            f"{_money(bridge_point.other_income_expense)} = {_money(bridge_point.pretax_income)}"
+        ),
+        result_value=bridge_point.pretax_income,
+    )
+    net_income_trace = _build_formula_trace(
+        line_item="net_income",
+        year=year,
+        formula_label="Net Income",
+        formula_template="Pretax income - taxes",
+        inputs=[
+            _formula_input(
+                "pretax_income",
+                "Pretax Income",
+                bridge_point.pretax_income,
+                _money(bridge_point.pretax_income),
+                f"Derived from pretax income trace confidence {_trace_source_kind(pretax_trace.confidence)}",
+                _trace_source_kind(pretax_trace.confidence),
+            ),
+            _formula_input(
+                "taxes",
+                "Income Tax",
+                bridge_point.taxes,
+                _money(bridge_point.taxes),
+                f"Derived from income tax trace confidence {_trace_source_kind(income_tax_trace.confidence)}",
+                _trace_source_kind(income_tax_trace.confidence),
+            ),
+        ],
+        formula_computation=f"{_money(bridge_point.pretax_income)} - {_money(bridge_point.taxes)} = {_money(bridge_point.net_income)}",
+        result_value=bridge_point.net_income,
+    )
+    operating_cash_flow_trace = _build_formula_trace(
+        line_item="operating_cash_flow",
+        year=year,
+        formula_label="Operating Cash Flow",
+        formula_template=FORECAST_FORMULA_OCF,
+        inputs=[
+            _formula_input(
+                "net_income",
+                "Net Income",
+                bridge_point.net_income,
+                _money(bridge_point.net_income),
+                f"Derived from net income trace confidence {_trace_source_kind(net_income_trace.confidence)}",
+                _trace_source_kind(net_income_trace.confidence),
+            ),
+            _formula_input(
+                "depreciation",
+                "D&A",
+                bridge_point.depreciation,
+                _money(bridge_point.depreciation),
+                f"Derived from D&A trace confidence {_trace_source_kind(depreciation_trace.confidence)}",
+                _trace_source_kind(depreciation_trace.confidence),
+            ),
+            _formula_input(
+                "stock_based_compensation",
+                "SBC",
+                bridge_point.stock_based_compensation,
+                _money(bridge_point.stock_based_compensation),
+                f"Derived from SBC trace confidence {_trace_source_kind(sbc_trace.confidence)}",
+                _trace_source_kind(sbc_trace.confidence),
+            ),
+            _formula_input(
+                "delta_operating_working_capital",
+                "Delta Operating Working Capital",
+                bridge_point.delta_working_capital,
+                _money(bridge_point.delta_working_capital),
+                reinvestment_schedule.operating_working_capital.basis_detail,
+                _source_kind_from_working_capital_basis(reinvestment_schedule.operating_working_capital.basis_detail),
+            ),
+        ],
+        formula_computation=(
+            f"{_money(bridge_point.net_income)} + {_money(bridge_point.depreciation)} + {_money(bridge_point.stock_based_compensation)} - "
+            f"{_money(bridge_point.delta_working_capital)} = {_money(bridge_point.operating_cash_flow)}"
+        ),
+        result_value=bridge_point.operating_cash_flow,
+    )
+    free_cash_flow_trace = _build_formula_trace(
+        line_item="free_cash_flow",
+        year=year,
+        formula_label="Free Cash Flow",
+        formula_template=FORECAST_FORMULA_FCF,
+        inputs=[
+            _formula_input(
+                "operating_cash_flow",
+                "Operating Cash Flow",
+                bridge_point.operating_cash_flow,
+                _money(bridge_point.operating_cash_flow),
+                f"Derived from OCF trace confidence {_trace_source_kind(operating_cash_flow_trace.confidence)}",
+                _trace_source_kind(operating_cash_flow_trace.confidence),
+            ),
+            _formula_input(
+                "capex",
+                "Capex",
+                bridge_point.capex,
+                _money(bridge_point.capex),
+                f"Derived from capex trace confidence {_trace_source_kind(capex_trace.confidence)}",
+                _trace_source_kind(capex_trace.confidence),
+            ),
+        ],
+        formula_computation=f"{_money(bridge_point.operating_cash_flow)} - {_money(bridge_point.capex)} = {_money(bridge_point.free_cash_flow)}",
+        result_value=bridge_point.free_cash_flow,
+    )
+    diluted_shares_trace = _build_diluted_shares_trace(
+        dilution_schedule=dilution_schedule,
+        share_bridge_point=share_bridge_point,
+        diluted_shares=diluted_shares,
+    )
+    eps_trace = _build_formula_trace(
+        line_item="eps",
+        year=year,
+        formula_label="Diluted EPS",
+        formula_template=FORECAST_FORMULA_EPS,
+        inputs=[
+            _formula_input(
+                "net_income",
+                "Net Income",
+                bridge_point.net_income,
+                _money(bridge_point.net_income),
+                f"Derived from net income trace confidence {_trace_source_kind(net_income_trace.confidence)}",
+                _trace_source_kind(net_income_trace.confidence),
+            ),
+            _formula_input(
+                "diluted_shares",
+                "Diluted Shares",
+                diluted_shares,
+                _shares(diluted_shares),
+                f"Derived from diluted shares trace confidence {_trace_source_kind(diluted_shares_trace.confidence)}",
+                _trace_source_kind(diluted_shares_trace.confidence),
+            ),
+        ],
+        formula_computation=f"{_money(bridge_point.net_income)} / {_shares(diluted_shares)} = {_money(eps)}",
+        result_value=eps,
+    )
+    return {
+        "revenue": revenue_trace,
+        "cost_of_revenue": cost_of_revenue_trace,
+        "gross_profit": gross_profit_trace,
+        "operating_income": operating_income_trace,
+        "pretax_income": pretax_trace,
+        "income_tax": income_tax_trace,
+        "net_income": net_income_trace,
+        "accounts_receivable": accounts_receivable_trace,
+        "inventory": inventory_trace,
+        "accounts_payable": accounts_payable_trace,
+        "deferred_revenue": deferred_revenue_trace,
+        "accrued_operating_liabilities": accrued_operating_liabilities_trace,
+        "depreciation_amortization": depreciation_trace,
+        "sbc_expense": sbc_trace,
+        "capex": capex_trace,
+        "operating_cash_flow": operating_cash_flow_trace,
+        "free_cash_flow": free_cash_flow_trace,
+        "diluted_shares": diluted_shares_trace,
+        "eps": eps_trace,
+    }
+
+
+def _build_revenue_line_trace(
+    *,
+    revenue_drivers: _RevenueDrivers,
+    tweaks: _ScenarioTweaks,
+    projection_index: int,
+    year: int,
+    previous_revenue: float,
+    revenue: float,
+) -> FormulaTrace:
+    applied_growth = _growth_rate(revenue, previous_revenue) or 0.0
+    inputs = [
+        _formula_input("previous_revenue", "Prior Revenue", previous_revenue, _money(previous_revenue), "SEC-reported revenue base", "sec"),
+        _formula_input("applied_growth", "Applied Growth", applied_growth, _pct(applied_growth), _revenue_growth_basis_detail(revenue_drivers, projection_index), "sec"),
+    ]
+    computation = f"{_money(previous_revenue)} x (1 + {_pct(applied_growth)}) = {_money(revenue)}"
+    if projection_index == 0:
+        components = _revenue_components_for_trace(revenue_drivers, tweaks, projection_index)
+        detail_parts = [
+            f"Driver stack: residual demand {_pct(components['demand_effect'])}, share/mix {_pct(components['share_effect'])}, price proxy {_pct(components['price_effect'])}, cross term {_pct(components['cross_term'])}."
+        ]
+        if components["overlay_details"]:
+            detail_parts.extend(components["overlay_details"])
+        computation = f"{computation}. {' '.join(detail_parts)}"
+    return _build_formula_trace(
+        line_item="revenue",
+        year=year,
+        formula_label="Revenue",
+        formula_template=FORECAST_FORMULA_REVENUE,
+        inputs=inputs,
+        formula_computation=computation,
+        result_value=revenue,
+    )
+
+
+def _build_diluted_shares_trace(
+    *,
+    dilution_schedule: _DilutionSchedule,
+    share_bridge_point: _ForecastShareBridgePoint,
+    diluted_shares: float,
+) -> FormulaTrace:
+    if share_bridge_point.uses_proxy_fallback:
+        return _build_formula_trace(
+            line_item="diluted_shares",
+            year=share_bridge_point.year,
+            formula_label="Diluted Shares",
+            formula_template="Basic shares + latent dilution overlay after proxy net dilution fallback",
+            inputs=[
+                _formula_input(
+                    "basic_shares",
+                    "Ending Basic Shares",
+                    share_bridge_point.basic_shares,
+                    _shares(share_bridge_point.basic_shares),
+                    dilution_schedule.fallback_basis,
+                    "fallback",
+                ),
+                _formula_input(
+                    "latent_dilution",
+                    "Latent Dilution Overlay",
+                    share_bridge_point.latent_dilution_shares,
+                    _shares(share_bridge_point.latent_dilution_shares),
+                    dilution_schedule.fallback_basis,
+                    "fallback",
+                ),
+            ],
+            formula_computation=(
+                f"{_shares(share_bridge_point.basic_shares)} + {_shares(share_bridge_point.latent_dilution_shares)} = {_shares(diluted_shares)}. "
+                f"Proxy basis: {dilution_schedule.fallback_basis}."
+            ),
+            result_value=diluted_shares,
+        )
+
+    return _build_formula_trace(
+        line_item="diluted_shares",
+        year=share_bridge_point.year,
+        formula_label="Diluted Shares",
+        formula_template="Basic shares + options or warrants + convertibles",
+        inputs=[
+            _formula_input(
+                "basic_shares",
+                "Ending Basic Shares",
+                share_bridge_point.basic_shares,
+                _shares(share_bridge_point.basic_shares),
+                dilution_schedule.starting_basis,
+                _source_kind_from_basis(dilution_schedule.starting_basis),
+            ),
+            _formula_input(
+                "option_warrant_dilution",
+                "Options or Warrants",
+                share_bridge_point.option_warrant_dilution_shares,
+                _shares(share_bridge_point.option_warrant_dilution_shares),
+                dilution_schedule.option_basis,
+                _source_kind_from_basis(dilution_schedule.option_basis),
+            ),
+            _formula_input(
+                "convertible_dilution",
+                "Convertibles",
+                share_bridge_point.convertible_dilution_shares,
+                _shares(share_bridge_point.convertible_dilution_shares),
+                dilution_schedule.convert_basis,
+                _source_kind_from_basis(dilution_schedule.convert_basis),
+            ),
+        ],
+        formula_computation=(
+            f"{_shares(share_bridge_point.basic_shares)} + {_shares(share_bridge_point.option_warrant_dilution_shares)} + "
+            f"{_shares(share_bridge_point.convertible_dilution_shares)} = {_shares(diluted_shares)}"
+        ),
+        result_value=diluted_shares,
+    )
+
+
+def _formula_input(
+    key: str,
+    label: str,
+    value: float | None,
+    formatted_value: str,
+    source_detail: str,
+    source_kind: str,
+) -> FormulaInput:
+    return FormulaInput(
+        key=key,
+        label=label,
+        value=value,
+        formatted_value=formatted_value,
+        source_detail=source_detail,
+        source_kind=source_kind,
+    )
+
+
+def _build_formula_trace(
+    *,
+    line_item: str,
+    year: int,
+    formula_label: str,
+    formula_template: str,
+    inputs: list[FormulaInput],
+    formula_computation: str,
+    result_value: float | None,
+) -> FormulaTrace:
+    return FormulaTrace(
+        line_item=line_item,
+        year=year,
+        formula_label=formula_label,
+        formula_template=formula_template,
+        formula_computation=formula_computation,
+        result_value=result_value,
+        inputs=inputs,
+        confidence=_trace_confidence(inputs),
+    )
+
+
+def _trace_confidence(inputs: list[FormulaInput]) -> str:
+    if any(input_item.source_kind == "fallback" for input_item in inputs):
+        return "low"
+    if any(input_item.source_kind == "default" for input_item in inputs):
+        return "medium"
+    return "high"
+
+
+def _trace_source_kind(confidence: str) -> str:
+    return {"high": "sec", "medium": "default", "low": "fallback"}.get(confidence, "sec")
+
+
+def _source_kind_from_basis(basis: str | None) -> str:
+    text = (basis or "").lower()
+    if not text:
+        return "sec"
+    if "default" in text:
+        return "default"
+    if "proxy fallback" in text or "residual bridge fallback" in text or "zero other income fallback" in text or "fallback basis" in text:
+        return "fallback"
+    if "fallback" in text:
+        return "default"
+    return "sec"
+
+
+def _source_kind_from_working_capital_basis(basis_detail: str) -> str:
+    return "default" if "fallback" in basis_detail.lower() else "sec"
+
+
+def _capex_source_kind(history: list[dict[str, Any]]) -> str:
+    if _median_abs_ratio(history, "capex", "revenue") is None:
+        return "default"
+    if _sales_to_capital(history) is None:
+        return "default"
+    return "sec"
+
+
+def _capex_basis_detail(history: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    if _median_abs_ratio(history, "capex", "revenue") is None:
+        parts.append("Default capex intensity")
+    else:
+        parts.append("Disclosed capex intensity")
+    if _sales_to_capital(history) is None:
+        parts.append("default sales-to-capital")
+    else:
+        parts.append("disclosed sales-to-capital")
+    return "; ".join(parts)
+
+
+def _revenue_growth_basis_detail(revenue_drivers: _RevenueDrivers, projection_index: int) -> str:
+    if projection_index == 0:
+        overlays = _revenue_overlay_labels(revenue_drivers)
+        if overlays:
+            return f"SEC-derived driver stack with {' / '.join(overlays)}"
+    return "SEC-derived driver stack"
+
+
+def _contains_non_null(history: list[dict[str, Any]], key: str) -> bool:
+    return any(row.get(key) is not None for row in history)
+
+
+def _cost_of_revenue_source_kind(history: list[dict[str, Any]]) -> str:
+    if any(
+        row["revenue"] not in (None, 0)
+        and (row.get("cost_of_revenue") is not None or row.get("gross_profit") is not None)
+        for row in history
+    ):
+        return "sec"
+    return "fallback"
+
+
+def _cost_of_revenue_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _cost_of_revenue_source_kind(history) == "sec":
+        return "SEC-derived cost-of-revenue ratio"
+    return "Fallback cost-of-revenue proxy from variable-cost schedule"
+
+
+def _depreciation_source_kind(history: list[dict[str, Any]]) -> str:
+    return "sec" if _median_abs_ratio(history, "depreciation", "revenue") is not None else "default"
+
+
+def _depreciation_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _depreciation_source_kind(history) == "sec":
+        return "SEC-derived depreciation ratio"
+    return "Default depreciation ratio from capex intensity"
+
+
+def _sbc_source_kind(history: list[dict[str, Any]]) -> str:
+    return "sec" if _median_abs_ratio(history, "stock_based_compensation", "revenue") is not None else "default"
+
+
+def _sbc_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _sbc_source_kind(history) == "sec":
+        return "SEC-derived SBC ratio"
+    return "Default SBC ratio"
+
+
+def _growth_reinvestment_source_kind(history: list[dict[str, Any]]) -> str:
+    return "sec" if _sales_to_capital(history) is not None else "default"
+
+
+def _growth_reinvestment_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _growth_reinvestment_source_kind(history) == "sec":
+        return "SEC-derived sales-to-capital"
+    return "Default sales-to-capital"
+
+
+def _working_capital_days_source(key: str, history: list[dict[str, Any]]) -> tuple[str, str]:
+    mapping = {
+        "accounts_receivable": ("accounts_receivable", "DSO", DEFAULT_DSO),
+        "inventory": ("inventory", "DIO", DEFAULT_DIO),
+        "accounts_payable": ("accounts_payable", "DPO", DEFAULT_DPO),
+        "deferred_revenue": ("deferred_revenue", "Deferred-revenue days", DEFAULT_DEFERRED_REVENUE_DAYS),
+        "accrued_operating_liabilities": ("accrued_operating_liabilities", "Accrued-liability days", DEFAULT_ACCRUED_OPERATING_LIABILITY_DAYS),
+    }
+    row_key, label, default_days = mapping[key]
+    if _contains_non_null(history, row_key):
+        return f"SEC-derived {label.lower()} input", "sec"
+    if default_days == 0:
+        return f"Default {label.lower()} of 0 days", "default"
+    return f"Default {label.lower()} of {default_days:.0f} days", "default"
+
+
+def _working_capital_days_input(
+    key: str,
+    label: str,
+    days_value: float,
+    history_key: str,
+    history: list[dict[str, Any]],
+) -> FormulaInput:
+    source_detail, source_kind = _working_capital_days_source(history_key, history)
+    return _formula_input(key, label, days_value, _days(days_value), source_detail, source_kind)
+
+
+def _income_tax_computation(pretax_income: float, effective_tax_rate: float, taxes: float) -> str:
+    if pretax_income >= 0:
+        return f"{_money(pretax_income)} x {_pct(effective_tax_rate)} = {_money(taxes)}"
+    capped_rate = min(effective_tax_rate, LOSS_TAX_BENEFIT_CAP)
+    return f"{_money(pretax_income)} x min({_pct(effective_tax_rate)}, {_pct(LOSS_TAX_BENEFIT_CAP)}) = {_money(taxes)}"
+
+
+def _revenue_components_for_trace(
+    revenue_drivers: _RevenueDrivers,
+    tweaks: _ScenarioTweaks,
+    projection_index: int,
+) -> dict[str, Any]:
+    if projection_index != 0:
+        return {
+            "demand_effect": 0.0,
+            "share_effect": 0.0,
+            "price_effect": 0.0,
+            "cross_term": 0.0,
+            "overlay_details": [],
+        }
+    components = _year_one_revenue_components(revenue_drivers)
+    adjusted_components = {
+        "demand_effect": components["demand_effect"] + tweaks.demand_shift,
+        "share_effect": components["share_effect"] + tweaks.share_shift,
+        "price_effect": components["price_effect"] + tweaks.price_shift,
+        "cross_term": components["cross_term"],
+    }
+    _, overlay_details = _apply_year_one_revenue_overlays(1.0, components["raw_growth"], revenue_drivers)
+    adjusted_components["overlay_details"] = overlay_details
+    return adjusted_components
 
 
 def _project_below_line_bridge(
@@ -2575,6 +3449,14 @@ def _shares(value: float | None) -> str:
     if abs(value) >= 1_000:
         return f"{value / 1_000:.1f}K"
     return f"{value:.0f}"
+
+
+def _days(value: float | None) -> str:
+    if value is None or not isfinite(value):
+        return "n/a"
+    if abs(value) >= 10:
+        return f"{value:,.0f} days"
+    return f"{value:,.1f} days"
 
 
 def _pct(value: float | None) -> str:

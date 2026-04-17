@@ -153,6 +153,62 @@ class CompanyChartsAssumptionsCardPayload(BaseModel):
     empty_state: str | None = None
 
 
+class CompanyChartsFormulaInputPayload(BaseModel):
+    key: str
+    label: str
+    value: Number = None
+    formatted_value: str
+    source_detail: str
+    source_kind: str
+
+
+class CompanyChartsFormulaTracePayload(BaseModel):
+    line_item: str
+    year: int
+    formula_label: str
+    formula_template: str
+    formula_computation: str
+    result_value: Number = None
+    inputs: list[CompanyChartsFormulaInputPayload] = Field(default_factory=list)
+    confidence: str = "high"
+
+
+class CompanyChartsProjectedRowPayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    reported_values: dict[int, Number] = Field(default_factory=dict)
+    projected_values: dict[int, Number] = Field(default_factory=dict)
+    formula_traces: dict[int, CompanyChartsFormulaTracePayload] = Field(default_factory=dict)
+    scenario_values: dict[str, Number] = Field(default_factory=dict)
+    detail: str | None = None
+
+
+class CompanyChartsScheduleSectionPayload(BaseModel):
+    key: str
+    title: str
+    rows: list[CompanyChartsProjectedRowPayload] = Field(default_factory=list)
+
+
+class CompanyChartsDriverCardPayload(BaseModel):
+    key: str
+    title: str
+    value: str
+    detail: str | None = None
+    source_periods: list[str] = Field(default_factory=list)
+    default_markers: list[str] = Field(default_factory=list)
+    fallback_markers: list[str] = Field(default_factory=list)
+
+
+class CompanyChartsSensitivityCellPayload(BaseModel):
+    row_index: int
+    column_index: int
+    revenue_growth: Number = None
+    operating_margin: Number = None
+    eps: Number = None
+    is_base: bool = False
+
+
 class CompanyChartsCardsPayload(BaseModel):
     revenue: CompanyChartsCardPayload = Field(default_factory=lambda: CompanyChartsCardPayload(key="revenue", title="Revenue"))
     revenue_growth: CompanyChartsCardPayload = Field(default_factory=lambda: CompanyChartsCardPayload(key="revenue_growth", title="Revenue Growth"))
@@ -188,6 +244,14 @@ class CompanyChartsMethodologyPayload(BaseModel):
         return self
 
 
+class CompanyChartsProjectionStudioPayload(BaseModel):
+    methodology: CompanyChartsMethodologyPayload | None = None
+    schedule_sections: list[CompanyChartsScheduleSectionPayload] = Field(default_factory=list)
+    drivers_used: list[CompanyChartsDriverCardPayload] = Field(default_factory=list)
+    scenarios_comparison: list[CompanyChartsProjectedRowPayload] = Field(default_factory=list)
+    sensitivity_matrix: list[CompanyChartsSensitivityCellPayload] = Field(default_factory=list)
+
+
 class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     title: str = "Growth Outlook"
@@ -206,6 +270,7 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
         )
     )
     forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)
+    projection_studio: CompanyChartsProjectionStudioPayload | None = None
     payload_version: str = "company_charts_dashboard_v9"
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
