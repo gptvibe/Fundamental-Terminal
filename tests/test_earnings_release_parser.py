@@ -185,3 +185,70 @@ def test_collect_earnings_releases_sanitizes_highlights_control_characters():
     release = releases[0]
     assert release.highlights
     assert all("\x00" not in highlight for highlight in release.highlights)
+
+
+def test_collect_earnings_releases_includes_foreign_issuer_quarterly_6k():
+    filing_index = {
+        "0006": FilingMetadata(
+            accession_number="0006",
+            form="6-K",
+            filing_date=date(2026, 4, 15),
+            report_date=date(2026, 3, 29),
+            primary_document="form6-kquarterlyfilings.htm",
+            primary_doc_description="6-K",
+            items="",
+        )
+    }
+    client = _FakeEarningsClient(
+        payload_by_name={
+            "form6-kquarterlyfilings.htm": """
+                <html>
+                  <body>
+                    <p>ASML reports Q1 2026 results.</p>
+                    <p>The first quarter 2026 ended March 29, 2026.</p>
+                  </body>
+                </html>
+            """,
+        },
+        directory_items=[],
+    )
+
+    releases = collect_earnings_releases("0000000006", filing_index, client=client)
+
+    assert len(releases) == 1
+    release = releases[0]
+    assert release.form == "6-K"
+    assert release.parse_state == "metadata_only"
+    assert release.reported_period_label == "first quarter 2026"
+    assert release.reported_period_end == date(2026, 3, 29)
+
+
+def test_collect_earnings_releases_skips_non_earnings_6k_updates():
+    filing_index = {
+        "0007": FilingMetadata(
+            accession_number="0007",
+            form="6-K",
+            filing_date=date(2026, 4, 25),
+            report_date=date(2026, 4, 25),
+            primary_document="tsm-monthend6kx20260425.htm",
+            primary_doc_description="6-K",
+            items="",
+        )
+    }
+    client = _FakeEarningsClient(
+        payload_by_name={
+            "tsm-monthend6kx20260425.htm": """
+                <html>
+                  <body>
+                    <p>Monthly sales for April 2026 were released today.</p>
+                    <p>This report does not contain quarterly earnings results.</p>
+                  </body>
+                </html>
+            """,
+        },
+        directory_items=[],
+    )
+
+    releases = collect_earnings_releases("0000000007", filing_index, client=client)
+
+    assert releases == []

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { CompanyLayoutProvider } from "@/components/layout/company-layout-context";
 import { CompanySubnav } from "@/components/layout/company-subnav";
 
 export default function CompanyTickerLayout({
@@ -12,9 +13,11 @@ export default function CompanyTickerLayout({
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
 
   return (
-    <div className="company-workspace-stack">
-      <CompanySubnav ticker={ticker} />
-      {children}
-    </div>
+    <CompanyLayoutProvider>
+      <div className="company-workspace-stack">
+        <CompanySubnav ticker={ticker} />
+        {children}
+      </div>
+    </CompanyLayoutProvider>
   );
 }

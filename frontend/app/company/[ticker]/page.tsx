@@ -794,7 +794,13 @@ export default function CompanyResearchBriefPage() {
           copy="Only the highest-signal filing changes surface here by default; the filings drill-down keeps the broader metric and evidence detail."
           className="is-wide"
         >
-          <ChangesSinceLastFilingCard ticker={ticker} reloadKey={reloadKey} initialPayload={briefData.changes.data} detailMode="brief" />
+          <ChangesSinceLastFilingCard
+            ticker={ticker}
+            reloadKey={reloadKey}
+            initialPayload={briefData.changes.data}
+            detailMode="brief"
+            deferFetch={briefData.loading}
+          />
         </EvidenceCard>
 
         <EvidenceCard

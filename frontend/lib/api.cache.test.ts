@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,6 +7,7 @@ import {
   getCompanyChangesSinceLastFiling,
   getCompanyFinancials,
   getCompanyOverview,
+  getCompanyResearchBrief,
   invalidateApiReadCacheForTicker,
   refreshCompany,
 } from "@/lib/api";
@@ -306,5 +309,49 @@ describe("api read cache", () => {
       "/backend/api/companies/AAPL/refresh?force=true",
       expect.objectContaining({ method: "POST", cache: "no-store" })
     );
+  });
+
+  it("ignores malformed persisted brief cache entries and refetches from the network", async () => {
+    window.localStorage.setItem(
+      "ft:api-cache:v3:/companies/AAPL/brief",
+      JSON.stringify({
+        data: {
+          company: null,
+          generated_at: "2026-04-16T00:00:00Z",
+        },
+        updatedAt: Date.now(),
+      })
+    );
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        company: null,
+        schema_version: "company_research_brief_v1",
+        generated_at: "2026-04-16T00:00:00Z",
+        as_of: null,
+        refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null },
+        build_state: "ready",
+        build_status: "Research brief ready.",
+        available_sections: [],
+        section_statuses: [],
+        filing_timeline: [],
+        stale_summary_cards: [],
+        snapshot: { summary: {}, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        what_changed: { activity_overview: { company: null, entries: [], alerts: [], summary: { total: 0, high: 0, medium: 0, low: 0 }, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, error: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] }, changes: { company: null, current_filing: null, previous_filing: null, summary: {}, metric_deltas: [], new_risk_indicators: [], segment_shifts: [], share_count_changes: [], capital_structure_changes: [], amended_prior_values: [], high_signal_changes: [], comment_letter_history: { total_letters: 0, recent_letters: [] }, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] }, earnings_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, error: null }, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        business_quality: { summary: {}, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        capital_and_risk: { capital_structure: { company: null, latest: null, history: [], last_capital_structure_check: null, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] }, capital_markets_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, error: null }, governance_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, error: null }, ownership_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, error: null }, equity_claim_risk_summary: {}, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        valuation: { models: { company: null, requested_models: [], models: [], refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, diagnostics: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] }, peers: { company: null, peer_basis: "Cached peer universe", available_companies: [], selected_tickers: [], peers: [], notes: {}, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] }, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        monitor: { activity_overview: { company: null, entries: [], alerts: [], summary: { total: 0, high: 0, medium: 0, low: 0 }, refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null }, error: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] }, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+      }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const brief = await getCompanyResearchBrief("AAPL");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(brief.schema_version).toBe("company_research_brief_v1");
+    expect(window.localStorage.getItem("ft:api-cache:v3:/companies/AAPL/brief")).toContain("schema_version");
   });
 });

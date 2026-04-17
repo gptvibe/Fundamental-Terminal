@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChangesSinceLastFilingCard } from "@/components/company/changes-since-last-filing-card";
 import { getCompanyChangesSinceLastFiling } from "@/lib/api";
@@ -12,6 +12,10 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("ChangesSinceLastFilingCard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders curated filing signals in brief mode and full detail in full mode", async () => {
     vi.mocked(getCompanyChangesSinceLastFiling).mockResolvedValue({
       company: null,
@@ -218,5 +222,93 @@ describe("ChangesSinceLastFilingCard", () => {
     expect(screen.getByText("Shares Outstanding")).toBeTruthy();
     expect(screen.getByText("Long-Term Debt")).toBeTruthy();
     expect(screen.getAllByText("10-Q/A").length).toBeGreaterThan(0);
+  });
+
+  it("reuses the initial payload without issuing a duplicate read", async () => {
+    const initialPayload = {
+      company: null,
+      current_filing: {
+        accession_number: "0000123456-26-000777",
+        filing_type: "10-Q",
+        statement_type: "canonical_xbrl",
+        period_start: "2025-10-01",
+        period_end: "2025-12-31",
+        source: "https://www.sec.gov/Archives/edgar/data/123456/000012345626000777/form10q.htm",
+        last_updated: "2026-03-27T18:00:00Z",
+        last_checked: "2026-03-27T18:00:00Z",
+        filing_acceptance_at: "2026-02-01T20:00:00Z",
+        fetch_timestamp: "2026-03-27T18:00:00Z",
+      },
+      previous_filing: null,
+      summary: {
+        filing_type: "10-Q",
+        current_period_start: "2025-10-01",
+        current_period_end: "2025-12-31",
+        previous_period_start: null,
+        previous_period_end: null,
+        metric_delta_count: 0,
+        new_risk_indicator_count: 0,
+        segment_shift_count: 0,
+        share_count_change_count: 0,
+        capital_structure_change_count: 0,
+        amended_prior_value_count: 0,
+        high_signal_change_count: 1,
+        comment_letter_count: 0,
+      },
+      metric_deltas: [],
+      new_risk_indicators: [],
+      segment_shifts: [],
+      share_count_changes: [],
+      capital_structure_changes: [],
+      amended_prior_values: [],
+      high_signal_changes: [
+        {
+          change_key: "guidance-2025-12-31",
+          category: "guidance",
+          importance: "high",
+          title: "Management tightened guidance",
+          summary: "Management narrowed the current-year outlook range.",
+          why_it_matters: "Guidance narrowing usually signals improved operating visibility.",
+          signal_tags: ["guidance"],
+          current_period_end: "2025-12-31",
+          previous_period_end: null,
+          evidence: [],
+        },
+      ],
+      comment_letter_history: {
+        total_letters: 0,
+        letters_since_previous_filing: 0,
+        latest_filing_date: null,
+        recent_letters: [],
+      },
+      provenance: [],
+      as_of: "2026-02-01T20:00:00Z",
+      last_refreshed_at: "2026-03-27T18:00:00Z",
+      source_mix: {
+        source_ids: [],
+        source_tiers: [],
+        primary_source_ids: [],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null },
+      diagnostics: {
+        coverage_ratio: 1,
+        fallback_ratio: null,
+        stale_flags: [],
+        parser_confidence: null,
+        missing_field_flags: [],
+        reconciliation_penalty: null,
+        reconciliation_disagreement_count: 0,
+      },
+    } as const;
+
+    render(React.createElement(ChangesSinceLastFilingCard, { ticker: "AAPL", initialPayload }));
+
+    expect(screen.getByText("Management tightened guidance")).toBeTruthy();
+    await waitFor(() => {
+      expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
+    });
   });
 });

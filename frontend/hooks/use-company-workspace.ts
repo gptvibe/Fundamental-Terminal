@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import {
   getCompanyFinancials,
+  getCompanyEarningsSummary,
   getCompanyOverview,
   getCompanyInsiderTrades,
   getCompanyInstitutionalHoldings,
@@ -16,6 +18,7 @@ import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import { recordRecentCompany } from "@/lib/recent-companies";
 import type {
   CompanyFinancialsResponse,
+  CompanyEarningsSummaryResponse,
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyResearchBriefResponse,
@@ -29,6 +32,7 @@ interface UseCompanyWorkspaceOptions {
   includeInsiders?: boolean;
   includeInstitutional?: boolean;
   includeOverviewBrief?: boolean;
+  includeEarningsSummary?: boolean;
   includeChartConsole?: boolean;
   auditPageRoute?: string;
   auditScenario?: string;
@@ -37,6 +41,7 @@ interface UseCompanyWorkspaceOptions {
 interface LoadCompanyWorkspaceDataResult {
   financialData: CompanyFinancialsResponse;
   briefData: CompanyResearchBriefResponse | null;
+  earningsSummaryData: CompanyEarningsSummaryResponse | null;
   insiderData: CompanyInsiderTradesResponse | null;
   institutionalData: CompanyInstitutionalHoldingsResponse | null;
   insiderError: string | null;
@@ -50,6 +55,7 @@ export function useCompanyWorkspace(
     includeInsiders = false,
     includeInstitutional = false,
     includeOverviewBrief = false,
+    includeEarningsSummary = false,
     includeChartConsole = false,
     auditPageRoute,
     auditScenario,
@@ -57,6 +63,7 @@ export function useCompanyWorkspace(
 ) {
   const [data, setData] = useState<CompanyFinancialsResponse | null>(null);
   const [briefData, setBriefData] = useState<CompanyResearchBriefResponse | null>(null);
+  const [earningsSummaryData, setEarningsSummaryData] = useState<CompanyEarningsSummaryResponse | null>(null);
   const [insiderData, setInsiderData] = useState<CompanyInsiderTradesResponse | null>(null);
   const [institutionalData, setInstitutionalData] = useState<CompanyInstitutionalHoldingsResponse | null>(null);
   const [insiderError, setInsiderError] = useState<string | null>(null);
@@ -69,6 +76,7 @@ export function useCompanyWorkspace(
   const [lastChartKey, setLastChartKey] = useState<string | null>(null);
   const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
+  const companyLayout = useCompanyLayoutContext();
 
   const financials = useMemo(() => data?.financials ?? [], [data?.financials]);
   const priceHistory = useMemo(() => data?.price_history ?? [], [data?.price_history]);
@@ -116,6 +124,7 @@ export function useCompanyWorkspace(
         setLoading(true);
         setError(null);
         setBriefData(null);
+        setEarningsSummaryData(null);
         setInsiderError(null);
         setInstitutionalError(null);
         setInsiderData(null);
@@ -127,7 +136,12 @@ export function useCompanyWorkspace(
         setRefreshTick(0);
 
         const result = await runWithAudit("company-workspace:initial-load", () =>
-          loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional, includeOverviewBrief })
+          loadCompanyWorkspaceData(ticker, {
+            includeInsiders,
+            includeInstitutional,
+            includeOverviewBrief,
+            includeEarningsSummary,
+          })
         );
         if (cancelled) {
           return;
@@ -135,6 +149,7 @@ export function useCompanyWorkspace(
 
         setData(result.financialData);
         setBriefData(result.briefData);
+        setEarningsSummaryData(result.earningsSummaryData);
         setInsiderData(result.insiderData);
         setInstitutionalData(result.institutionalData);
         setInsiderError(result.insiderError);
@@ -155,7 +170,7 @@ export function useCompanyWorkspace(
     return () => {
       cancelled = true;
     };
-  }, [includeInsiders, includeInstitutional, includeOverviewBrief, ticker]);
+  }, [includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, ticker]);
 
   useEffect(() => {
     if (!activeJobId || !lastEvent) {
@@ -173,7 +188,12 @@ export function useCompanyWorkspace(
     invalidateApiReadCacheForTicker(ticker);
 
     void runWithAudit("company-workspace:reload-after-refresh", () =>
-      loadCompanyWorkspaceData(ticker, { includeInsiders, includeInstitutional, includeOverviewBrief })
+      loadCompanyWorkspaceData(ticker, {
+        includeInsiders,
+        includeInstitutional,
+        includeOverviewBrief,
+        includeEarningsSummary,
+      })
     )
       .then((result) => {
         if (cancelled) {
@@ -183,6 +203,7 @@ export function useCompanyWorkspace(
         setError(null);
         setData(result.financialData);
         setBriefData(result.briefData);
+        setEarningsSummaryData(result.earningsSummaryData);
         setInsiderData(result.insiderData);
         setInstitutionalData(result.institutionalData);
         setInsiderError(result.insiderError);
@@ -198,7 +219,7 @@ export function useCompanyWorkspace(
     return () => {
       cancelled = true;
     };
-  }, [activeJobId, includeInsiders, includeInstitutional, includeOverviewBrief, lastEvent, settledJobIds, ticker]);
+  }, [activeJobId, includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, lastEvent, settledJobIds, ticker]);
 
   useEffect(() => {
     if (!includeChartConsole) {
@@ -236,7 +257,7 @@ export function useCompanyWorkspace(
     rememberActiveJob(trackedJobId, ticker);
   }, [ticker, trackedJobId]);
 
-  async function queueRefresh(force = false) {
+  async function queueRefresh(force = true) {
     try {
       setRefreshing(true);
       invalidateApiReadCacheForTicker(ticker);
@@ -273,6 +294,22 @@ export function useCompanyWorkspace(
   }, [briefData?.company, data?.company, insiderData?.company, institutionalData?.company]);
 
   useEffect(() => {
+    if (!companyLayout) {
+      return;
+    }
+
+    return companyLayout.registerPublisher();
+  }, [companyLayout]);
+
+  useEffect(() => {
+    companyLayout?.setCompany(null);
+  }, [companyLayout, ticker]);
+
+  useEffect(() => {
+    companyLayout?.setCompany(mergedCompany);
+  }, [companyLayout, mergedCompany]);
+
+  useEffect(() => {
     if (!mergedCompany?.ticker) {
       return;
     }
@@ -287,6 +324,7 @@ export function useCompanyWorkspace(
   return {
     data,
     briefData,
+    earningsSummaryData,
     company: mergedCompany,
     financials,
     priceHistory,
@@ -313,10 +351,11 @@ export function useCompanyWorkspace(
 
 async function loadCompanyWorkspaceData(
   ticker: string,
-  options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief">
+  options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary">
 ): Promise<LoadCompanyWorkspaceDataResult> {
   let financialData: CompanyFinancialsResponse;
   let briefData: CompanyResearchBriefResponse | null = null;
+  let earningsSummaryData: CompanyEarningsSummaryResponse | null = null;
   if (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional) {
     try {
       const overviewData = await getCompanyOverview(ticker);
@@ -334,9 +373,10 @@ async function loadCompanyWorkspaceData(
   let insiderError: string | null = null;
   let institutionalError: string | null = null;
 
-  const [institutionalResult, insiderResult] = await Promise.allSettled([
+  const [institutionalResult, insiderResult, earningsSummaryResult] = await Promise.allSettled([
     options.includeInstitutional ? getCompanyInstitutionalHoldings(ticker) : Promise.resolve(null),
     options.includeInsiders ? getCompanyInsiderTrades(ticker) : Promise.resolve(null),
+    options.includeEarningsSummary ? getCompanyEarningsSummary(ticker) : Promise.resolve(null),
   ]);
 
   if (institutionalResult.status === "fulfilled") {
@@ -353,9 +393,15 @@ async function loadCompanyWorkspaceData(
     insiderError = asErrorMessage(insiderResult.reason, "Unable to load insider trades");
   }
 
+  if (earningsSummaryResult.status === "fulfilled") {
+    earningsSummaryData = earningsSummaryResult.value;
+    activeJobId = activeJobId ?? earningsSummaryData?.refresh.job_id ?? null;
+  }
+
   return {
     financialData,
     briefData,
+    earningsSummaryData,
     insiderData,
     institutionalData,
     insiderError,

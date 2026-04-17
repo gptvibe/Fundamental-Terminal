@@ -21,6 +21,7 @@ interface ChangesSinceLastFilingCardProps {
   reloadKey?: string | number;
   initialPayload?: CompanyChangesSinceLastFilingResponse | null;
   detailMode?: "brief" | "full";
+  deferFetch?: boolean;
 }
 
 export function ChangesSinceLastFilingCard({
@@ -28,6 +29,7 @@ export function ChangesSinceLastFilingCard({
   reloadKey,
   initialPayload = null,
   detailMode = "brief",
+  deferFetch = false,
 }: ChangesSinceLastFilingCardProps) {
   const [payload, setPayload] = useState<CompanyChangesSinceLastFilingResponse | null>(initialPayload);
   const [loading, setLoading] = useState(initialPayload === null);
@@ -43,6 +45,10 @@ export function ChangesSinceLastFilingCard({
   }, [initialPayload]);
 
   useEffect(() => {
+    if (initialPayload !== null || deferFetch) {
+      return;
+    }
+
     let cancelled = false;
 
     async function load() {
@@ -70,7 +76,7 @@ export function ChangesSinceLastFilingCard({
     return () => {
       cancelled = true;
     };
-  }, [initialPayload, reloadKey, ticker]);
+  }, [deferFetch, initialPayload, reloadKey, ticker]);
 
   const topMetricDeltas = useMemo(() => (payload?.metric_deltas ?? []).slice(0, 4), [payload?.metric_deltas]);
   const topRiskIndicators = useMemo(() => (payload?.new_risk_indicators ?? []).slice(0, 4), [payload?.new_risk_indicators]);

@@ -96,6 +96,7 @@ export default function CompanyFinancialsTabPage() {
   const {
     data,
     company,
+    earningsSummaryData,
     financials,
     annualStatements,
     priceHistory,
@@ -108,12 +109,31 @@ export default function CompanyFinancialsTabPage() {
     connectionState,
     queueRefresh,
     reloadKey
-  } = useCompanyWorkspace(ticker, { auditPageRoute: "/company/[ticker]/financials", auditScenario: "financials_page" });
+  } = useCompanyWorkspace(ticker, {
+    includeEarningsSummary: true,
+    auditPageRoute: "/company/[ticker]/financials",
+    auditScenario: "financials_page",
+  });
   const bankMode = Boolean(company?.regulated_entity && financials.some((statement) => statement.regulated_bank));
   const periodSelection = usePeriodSelection(financials);
   const pageFinancials = periodSelection.visibleFinancials;
   const activeFinancial = periodSelection.selectedFinancial ?? latestFinancial;
   const comparisonFinancial = periodSelection.comparisonFinancial;
+  const latestStatementPeriodEnd = latestFinancial?.period_end ?? data?.as_of ?? null;
+  const latestReportedPeriodEnd = earningsSummaryData?.summary.latest_reported_period_end ?? null;
+  const hasNewerReportedEarnings = isLaterPeriod(latestReportedPeriodEnd, latestStatementPeriodEnd);
+  const headerFacts = [
+    { label: "Ticker", value: ticker },
+    { label: "Statements", value: `${pageFinancials.length.toLocaleString()} visible` },
+    { label: "Annual Filings", value: annualStatements.length.toLocaleString() },
+    {
+      label: hasNewerReportedEarnings ? "Latest Statement" : "Latest Period",
+      value: latestStatementPeriodEnd ? formatDate(latestStatementPeriodEnd) : null,
+    },
+    ...(hasNewerReportedEarnings
+      ? [{ label: "Latest Reported Earnings", value: formatDate(latestReportedPeriodEnd) }]
+      : []),
+  ];
   const sharedChartState = useMemo<SharedFinancialChartState>(
     () => ({
       cadence: periodSelection.cadence,
@@ -222,17 +242,15 @@ export default function CompanyFinancialsTabPage() {
             `Statements visible: ${pageFinancials.length.toLocaleString()} of ${financials.length.toLocaleString()}`,
             `Annual filings available: ${annualStatements.length.toLocaleString()}`,
             `Price history points available: ${priceHistory.length.toLocaleString()}`,
+            hasNewerReportedEarnings && latestReportedPeriodEnd
+              ? `Latest reported earnings period: ${formatDate(latestReportedPeriodEnd)}`
+              : null,
           ],
         }}
         freshnessPlacement="subtitle"
         factsLoading={loading && !company && !financials.length && !priceHistory.length}
         summariesLoading={loading && !company && !financials.length && !priceHistory.length}
-        facts={[
-          { label: "Ticker", value: ticker },
-          { label: "Statements", value: `${pageFinancials.length.toLocaleString()} visible` },
-          { label: "Annual Filings", value: annualStatements.length.toLocaleString() },
-          { label: "Last Checked", value: company?.last_checked ? formatDate(company.last_checked) : null }
-        ]}
+        facts={headerFacts}
         ribbonItems={ribbonItems}
         summaries={summaryItems}
       >
@@ -339,6 +357,7 @@ export default function CompanyFinancialsTabPage() {
                 cadence={periodSelection.cadence}
                 showCadenceSelector={false}
                 maxPoints={periodSelection.metricsMaxPoints}
+                latestReportedPeriodEnd={hasNewerReportedEarnings ? latestReportedPeriodEnd : null}
               />
             </Panel>
           </div>
@@ -472,6 +491,7 @@ export default function CompanyFinancialsTabPage() {
                 cadence={periodSelection.cadence}
                 showCadenceSelector={false}
                 maxPoints={periodSelection.metricsMaxPoints}
+                latestReportedPeriodEnd={hasNewerReportedEarnings ? latestReportedPeriodEnd : null}
               />
             </Panel>
 
@@ -495,5 +515,22 @@ export default function CompanyFinancialsTabPage() {
       )}
     </CompanyWorkspaceShell>
   );
+}
+
+function isLaterPeriod(candidate: string | null, baseline: string | null): boolean {
+  const candidateTimestamp = parsePeriodDate(candidate);
+  const baselineTimestamp = parsePeriodDate(baseline);
+  if (candidateTimestamp == null || baselineTimestamp == null) {
+    return false;
+  }
+  return candidateTimestamp > baselineTimestamp;
+}
+
+function parsePeriodDate(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
 }
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
 
+import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
 import { getCompanyFinancials, getCompanyOverview } from "@/lib/api";
 import { companySupportsOilWorkspace } from "@/lib/oil-workspace";
 
@@ -60,12 +61,15 @@ const oilTab: CompanySubnavTab = { key: "oil", label: "Oil", suffix: "/oil", sec
 
 export function CompanySubnav({ ticker }: CompanySubnavProps) {
   const pathname = usePathname();
+  const companyLayout = useCompanyLayoutContext();
   const moreRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [showOilTab, setShowOilTab] = useState(false);
   const baseHref = `/company/${encodeURIComponent(ticker)}`;
+  const sharedCompany = companyLayout?.company?.ticker === ticker ? companyLayout.company : null;
+  const sharedPublisherCount = companyLayout?.publisherCount ?? 0;
   const tabs = showOilTab ? [...baseTabs.slice(0, 3), oilTab, ...baseTabs.slice(3)] : baseTabs;
   const tabLinks = tabs.map((tab) => ({
     ...tab,
@@ -80,6 +84,16 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
   }, [pathname]);
 
   useEffect(() => {
+    if (sharedCompany) {
+      setShowOilTab(companySupportsOilWorkspace(sharedCompany));
+      return;
+    }
+
+    if (sharedPublisherCount > 0 || shouldAwaitWorkspaceCompany(pathname, baseHref)) {
+      setShowOilTab(false);
+      return;
+    }
+
     let cancelled = false;
 
     async function loadOilTabVisibility() {
@@ -101,7 +115,7 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     return () => {
       cancelled = true;
     };
-  }, [baseHref, pathname, ticker]);
+  }, [baseHref, pathname, sharedCompany, sharedPublisherCount, ticker]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -307,6 +321,30 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
 
 function isOverviewRoute(pathname: string | null, baseHref: string): boolean {
   return pathname === baseHref || pathname === `${baseHref}/overview`;
+}
+
+function shouldAwaitWorkspaceCompany(pathname: string | null, baseHref: string): boolean {
+  if (!pathname) {
+    return false;
+  }
+
+  return [
+    "",
+    "/overview",
+    "/financials",
+    "/capital-markets",
+    "/earnings",
+    "/events",
+    "/filings",
+    "/governance",
+    "/insiders",
+    "/oil",
+    "/ownership",
+    "/ownership-changes",
+    "/peers",
+    "/sec-feed",
+    "/stakes",
+  ].some((suffix) => pathname === `${baseHref}${suffix}`);
 }
 
 function isTabActive(pathname: string | null, baseHref: string, tab: CompanySubnavTab): boolean {

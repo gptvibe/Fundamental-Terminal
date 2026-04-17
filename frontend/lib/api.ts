@@ -88,6 +88,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/charts(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/brief(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
+  { pattern: /^\/companies\/[^/]+\/earnings\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/oil-scenario(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/oil-scenario-overlay(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -101,7 +102,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/watchlist\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
 ];
 
-const CACHE_STORAGE_PREFIX = "ft:api-cache:v2:";
+const CACHE_STORAGE_PREFIX = "ft:api-cache:v3:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
 const AUDIT_RECORDED_ERROR = Symbol("auditRecordedError");
 
@@ -147,10 +148,12 @@ function tryReadPersistentCache(cacheKey: string): CacheEntry | null {
     }
     const parsed = JSON.parse(raw) as CacheEntry;
     if (!parsed || typeof parsed.updatedAt !== "number") {
+      removePersistentCache(cacheKey);
       return null;
     }
     return parsed;
   } catch {
+    removePersistentCache(cacheKey);
     return null;
   }
 }
@@ -246,6 +249,12 @@ function readCachedValue<T>(cacheKey: string, path: string): { data: T; stale: b
     readCache.set(cacheKey, entry);
   }
 
+  if (!isCompatibleCachedPayload(path, entry.data)) {
+    readCache.delete(cacheKey);
+    removePersistentCache(cacheKey);
+    return null;
+  }
+
   if (now - entry.updatedAt > policy.staleMs) {
     readCache.delete(cacheKey);
     removePersistentCache(cacheKey);
@@ -269,6 +278,54 @@ function cacheValue(cacheKey: string, data: unknown): void {
 
 function shareReadCacheValue(cacheKey: string, sourceData: unknown): void {
   cacheValue(cacheKey, sourceData);
+}
+
+function isCompatibleCachedPayload(path: string, data: unknown): boolean {
+  if (/^\/companies\/[^/]+\/brief(?:\?|$)/.test(path)) {
+    return isResearchBriefResponseLike(data);
+  }
+
+  if (/^\/companies\/[^/]+\/overview(?:\?|$)/.test(path)) {
+    return isOverviewResponseLike(data);
+  }
+
+  return true;
+}
+
+function isOverviewResponseLike(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return isRecord(value.financials) && isResearchBriefResponseLike(value.brief);
+}
+
+function isResearchBriefResponseLike(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.schema_version === "string" &&
+    typeof value.generated_at === "string" &&
+    isRecord(value.refresh) &&
+    typeof value.build_state === "string" &&
+    typeof value.build_status === "string" &&
+    Array.isArray(value.available_sections) &&
+    Array.isArray(value.section_statuses) &&
+    Array.isArray(value.filing_timeline) &&
+    Array.isArray(value.stale_summary_cards) &&
+    isRecord(value.snapshot) &&
+    isRecord(value.what_changed) &&
+    isRecord(value.business_quality) &&
+    isRecord(value.capital_and_risk) &&
+    isRecord(value.valuation) &&
+    isRecord(value.monitor)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 function withApiPrefix(path: string): string {

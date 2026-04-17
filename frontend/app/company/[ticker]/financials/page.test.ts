@@ -97,6 +97,7 @@ function makeWorkspaceFixture() {
       last_checked_prices: "2026-03-21T00:00:00Z",
       regulated_entity: null,
     },
+    earningsSummaryData: null,
     financials: [],
     annualStatements: [],
     priceHistory: [],
@@ -368,6 +369,36 @@ describe("CompanyFinancialsTabPage", () => {
     expect(screen.getAllByText("Yahoo Finance").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/commercial fallback present/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/Price history and market profile data on this surface includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
+  });
+
+  it("shows a newer earnings-reported period when filings lag the latest release", () => {
+    workspaceFixture.current.earningsSummaryData = {
+      company: workspaceFixture.current.company,
+      summary: {
+        total_releases: 8,
+        parsed_releases: 6,
+        metadata_only_releases: 2,
+        releases_with_guidance: 1,
+        releases_with_buybacks: 0,
+        releases_with_dividends: 0,
+        latest_filing_date: "2026-04-15",
+        latest_report_date: "2026-04-15",
+        latest_reported_period_end: "2026-03-29",
+        latest_revenue: null,
+        latest_operating_income: null,
+        latest_net_income: null,
+        latest_diluted_eps: null,
+      },
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: workspaceFixture.current.data.diagnostics,
+      error: null,
+    };
+
+    render(React.createElement(CompanyFinancialsTabPage));
+
+    expect(screen.getByText("Latest Statement")).toBeTruthy();
+    expect(screen.getByText("Latest Reported Earnings")).toBeTruthy();
+    expect(screen.getByText("Mar 29, 2026")).toBeTruthy();
   });
 
   it("switches to the regulated bank workspace for bank issuers", () => {

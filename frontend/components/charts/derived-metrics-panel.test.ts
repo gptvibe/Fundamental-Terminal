@@ -153,6 +153,99 @@ describe("DerivedMetricsPanel", () => {
     expect(screen.getAllByText("Fundamental Terminal Derived Metrics Engine").length).toBeGreaterThan(0);
   });
 
+  it("distinguishes latest statement period from a newer earnings-reported quarter", async () => {
+    vi.mocked(getCompanyMetricsTimeseries).mockResolvedValue({
+      company: {
+        ticker: "ASML",
+        cik: "0000937966",
+        name: "ASML Holding N.V.",
+        sector: "Technology",
+        market_sector: "Technology",
+        market_industry: "Semiconductor Equipment",
+        strict_official_mode: false,
+        last_checked: "2026-04-16T00:00:00Z",
+        last_checked_financials: "2026-04-16T00:00:00Z",
+        last_checked_prices: "2026-04-16T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        earnings_last_checked: "2026-04-16T00:00:00Z",
+        cache_state: "fresh",
+      },
+      series: [
+        {
+          cadence: "quarterly",
+          period_start: "2025-10-01",
+          period_end: "2025-12-31",
+          filing_type: "20-F",
+          metrics: {
+            revenue_growth: 0.11,
+            gross_margin: 0.51,
+            operating_margin: 0.31,
+            fcf_margin: 0.25,
+            roic_proxy: 0.2,
+            leverage_ratio: 0.12,
+            current_ratio: 1.8,
+            share_dilution: -0.002,
+            sbc_burden: 0.01,
+            buyback_yield: 0.01,
+            dividend_yield: 0.005,
+            working_capital_days: 61,
+            accrual_ratio: 0.01,
+            cash_conversion: 1.1,
+            segment_concentration: 0.72,
+          },
+          provenance: {
+            statement_type: "canonical_xbrl",
+            statement_source: "https://data.sec.gov/example",
+            price_source: "yahoo_finance",
+            formula_version: "sec_metrics_v1",
+          },
+          quality: {
+            available_metrics: 15,
+            missing_metrics: [],
+            coverage_ratio: 1,
+            flags: [],
+          },
+        },
+      ],
+      last_financials_check: "2026-04-16T00:00:00Z",
+      last_price_check: "2026-04-16T00:00:00Z",
+      staleness_reason: "fresh",
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-04-16T00:00:00Z",
+      source_mix: {
+        source_ids: ["ft_derived_metrics_engine", "sec_edgar", "yahoo_finance"],
+        source_tiers: ["commercial_fallback", "derived_from_official", "official_regulator"],
+        primary_source_ids: ["sec_edgar"],
+        fallback_source_ids: ["yahoo_finance"],
+        official_only: false,
+      },
+      confidence_flags: [],
+      refresh: {
+        triggered: false,
+        reason: "fresh",
+        ticker: "ASML",
+        job_id: null,
+      },
+    });
+
+    render(React.createElement(DerivedMetricsPanel, {
+      ticker: "ASML",
+      reloadKey: "earnings-ahead",
+      latestReportedPeriodEnd: "2026-03-29",
+    }));
+
+    await waitFor(() => {
+      expect(getCompanyMetricsTimeseries).toHaveBeenCalledWith("ASML", { cadence: "ttm", maxPoints: 24 });
+    });
+
+    expect(screen.getByText("Latest Statement Period")).toBeTruthy();
+    expect(screen.getByText("Latest Reported Earnings")).toBeTruthy();
+    expect(screen.getByText("Mar 29, 2026")).toBeTruthy();
+  });
+
   it("disables price-derived yield selectors in strict official mode", async () => {
     vi.mocked(getCompanyMetricsTimeseries).mockResolvedValue({
       company: {

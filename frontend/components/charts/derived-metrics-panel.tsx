@@ -71,6 +71,7 @@ interface DerivedMetricsPanelProps {
   cadence?: Cadence;
   showCadenceSelector?: boolean;
   maxPoints?: number;
+  latestReportedPeriodEnd?: string | null;
 }
 
 export function DerivedMetricsPanel({
@@ -79,6 +80,7 @@ export function DerivedMetricsPanel({
   cadence: controlledCadence,
   showCadenceSelector = true,
   maxPoints = MAX_POINTS,
+  latestReportedPeriodEnd = null,
 }: DerivedMetricsPanelProps) {
   const [payload, setPayload] = useState<CompanyMetricsTimeseriesResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -198,6 +200,8 @@ export function DerivedMetricsPanel({
   );
 
   const latest = series.at(-1) ?? null;
+  const hasNewerReportedPeriod = isLaterPeriod(latestReportedPeriodEnd, latest?.period_end ?? null);
+  const latestPeriodLabel = hasNewerReportedPeriod ? "Latest Statement Period" : "Latest Period";
 
   if (error) {
     return <div className="text-muted">{error}</div>;
@@ -267,7 +271,8 @@ export function DerivedMetricsPanel({
 
       {latest ? (
         <div className="metric-grid">
-          <MetricCard label="Latest Period" value={formatDate(latest.period_end)} />
+          <MetricCard label={latestPeriodLabel} value={formatDate(latest.period_end)} />
+          {hasNewerReportedPeriod ? <MetricCard label="Latest Reported Earnings" value={formatDate(latestReportedPeriodEnd)} /> : null}
           <MetricCard label={selectedOption.label} metricKey={selectedOption.key} value={formatMetric(latest.metrics[metric], selectedOption.isPercent)} />
           <MetricCard label="Coverage" value={`${Math.round(latest.quality.coverage_ratio * 100)}%`} />
           <MetricCard label="Financials Check" value={payload.last_financials_check ? formatDate(payload.last_financials_check) : "?"} />
@@ -341,4 +346,21 @@ function MetricCard({ label, metricKey, value }: { label: string; metricKey?: st
       <div className="metric-value">{value}</div>
     </div>
   );
+}
+
+function isLaterPeriod(candidate: string | null, baseline: string | null): boolean {
+  const candidateTimestamp = parsePeriodDate(candidate);
+  const baselineTimestamp = parsePeriodDate(baseline);
+  if (candidateTimestamp == null || baselineTimestamp == null) {
+    return false;
+  }
+  return candidateTimestamp > baselineTimestamp;
+}
+
+function parsePeriodDate(value: string | null): number | null {
+  if (!value) {
+    return null;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : timestamp;
 }

@@ -1855,7 +1855,11 @@ class EdgarIngestionService:
         *,
         force: bool = False,
     ) -> int:
-        from app.services.earnings_release import collect_earnings_releases, upsert_earnings_releases
+        from app.services.earnings_release import (
+            collect_earnings_releases,
+            is_earnings_release_filing_candidate,
+            upsert_earnings_releases,
+        )
 
         if force:
             session.execute(delete(EarningsRelease).where(EarningsRelease.company_id == company.id))
@@ -1867,7 +1871,7 @@ class EdgarIngestionService:
         earnings_filings = [
             metadata
             for metadata in filing_index.values()
-            if _base_form(metadata.form) == "8-K" and "2.02" in _item_tokens(metadata.items)
+            if is_earnings_release_filing_candidate(metadata)
         ]
         earnings_filings.sort(
             key=lambda metadata: (

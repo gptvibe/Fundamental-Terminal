@@ -54,16 +54,18 @@ services:
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      HOT_RESPONSE_CACHE_TTL_SECONDS: ${HOT_RESPONSE_CACHE_TTL_SECONDS:-120}
+      HOT_RESPONSE_CACHE_STALE_TTL_SECONDS: ${HOT_RESPONSE_CACHE_STALE_TTL_SECONDS:-900}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz').read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
       interval: 15s
-      timeout: 5s
-      retries: 5
+      timeout: 10s
+      retries: 6
       start_period: 30s
     ports:
       - "${BACKEND_PORT:-8000}:8000"

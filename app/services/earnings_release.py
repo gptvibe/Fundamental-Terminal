@@ -76,6 +76,34 @@ _DIVIDEND_PATTERNS = (
     ),
 )
 
+_SIX_K_METADATA_INCLUDE_TOKENS = (
+    "quarterlyfilings",
+    "quarterly",
+    "quarter",
+    "annualreportbasedon",
+    "annualreport",
+    "annualresults",
+    "annualresult",
+    "earnings",
+    "results",
+)
+_SIX_K_METADATA_EXCLUDE_TOKENS = (
+    "monthend",
+    "monthly",
+    "revenue",
+    "sales",
+    "agm",
+    "annualgeneralmeeting",
+    "investorday",
+    "investor-day",
+    "presentation",
+    "board",
+    "director",
+    "officer",
+    "dividend",
+    "clarification",
+)
+
 
 @dataclass(slots=True)
 class NormalizedEarningsRelease:
@@ -111,14 +139,21 @@ def collect_earnings_releases(
 ) -> list[NormalizedEarningsRelease]:
     rows: list[NormalizedEarningsRelease] = []
     for filing in filing_index.values():
-        if (filing.form or "").upper() != "8-K":
+        if not is_earnings_release_filing_candidate(filing):
             continue
-        if not (_item_tokens(filing.items) & _EARNINGS_ITEM_CODES):
-            continue
-        rows.append(_build_release(cik, filing, client=client))
+        release = _build_release(cik, filing, client=client)
+        if _should_keep_release(filing, release):
+            rows.append(release)
 
     rows.sort(key=lambda row: (row.filing_date or date.min, row.reported_period_end or date.min, row.accession_number), reverse=True)
     return rows
+
+
+def is_earnings_release_filing_candidate(filing: FilingMetadata) -> bool:
+    base_form = _base_form_text(filing.form)
+    if base_form == "8-K":
+        return bool(_item_tokens(filing.items) & _EARNINGS_ITEM_CODES)
+    return base_form == "6-K"
 
 
 def upsert_earnings_releases(
@@ -251,6 +286,28 @@ def _build_release(cik: str, filing: FilingMetadata, *, client: Any | None) -> N
     )
 
 
+def _should_keep_release(filing: FilingMetadata, release: NormalizedEarningsRelease) -> bool:
+    base_form = _base_form_text(filing.form)
+    if base_form == "8-K":
+        return bool(_item_tokens(filing.items) & _EARNINGS_ITEM_CODES)
+    if base_form != "6-K":
+        return False
+    if release.parse_state == "parsed" or release.reported_period_label is not None:
+        return True
+    metadata_text = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            filing.primary_document,
+            filing.primary_doc_description,
+            release.exhibit_document,
+            release.exhibit_type,
+        )
+    )
+    has_positive_signal = any(token in metadata_text for token in _SIX_K_METADATA_INCLUDE_TOKENS)
+    has_negative_signal = any(token in metadata_text for token in _SIX_K_METADATA_EXCLUDE_TOKENS)
+    return has_positive_signal and not has_negative_signal
+
+
 def _candidate_documents(client: Any | None, cik: str, filing: FilingMetadata) -> list[dict[str, str | None]]:
     candidates: list[dict[str, str | None]] = []
     if client is not None:
@@ -288,6 +345,15 @@ def _candidate_documents(client: Any | None, cik: str, filing: FilingMetadata) -
         seen.add(document_name)
         deduped.append(candidate)
     return deduped
+
+
+def _base_form_text(value: str | None) -> str:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return ""
+    if normalized.endswith("/A") or normalized.endswith("-A"):
+        normalized = normalized[:-2]
+    return normalized.split("/")[0]
 
 
 def _documents_from_directory(items: list[Any]) -> list[dict[str, str | None]]:
