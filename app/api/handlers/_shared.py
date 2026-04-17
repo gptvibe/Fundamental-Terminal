@@ -458,12 +458,8 @@ async def search_companies(
             )
             return payload
 
-        payload = await _fill_hot_cached_payload(
-            hot_key,
-            model_type=CompanySearchResponse,
-            tags=hot_tags,
-            fill=lambda: _run_with_session_binding(session, build_search_payload),
-        )
+        payload = await _run_with_session_binding(session, build_search_payload)
+        await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
         not_modified = _apply_conditional_headers(
             request,
             http_response,

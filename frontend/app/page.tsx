@@ -36,6 +36,7 @@ import type {
 
 const MACRO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_WATCHLIST_SUMMARY_TICKERS = 8;
+const HOME_SEARCH_DEBOUNCE_MS = 150;
 const HOME_SEARCH_AUDIT_SOURCES = {
   autocomplete: "home:autocomplete-search",
   submit: "home:submit-search",
@@ -297,7 +298,7 @@ export default function HomePage() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void loadSearch(trimmedSearchText, controller.signal, "autocomplete");
-    }, 250);
+    }, HOME_SEARCH_DEBOUNCE_MS);
 
     return () => {
       controller.abort();

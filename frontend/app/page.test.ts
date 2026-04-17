@@ -7,6 +7,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import HomePage from "@/app/page";
 import { RECENT_COMPANIES_STORAGE_KEY } from "@/lib/recent-companies";
 
+const HOME_SEARCH_DEBOUNCE_MS = 150;
+
 const push = vi.fn();
 const mockUseLocalUserData = vi.fn();
 const mockUseJobStream = vi.fn();
@@ -324,7 +326,7 @@ describe("HomePage", () => {
     });
 
     await act(async () => {
-      vi.advanceTimersByTime(250);
+      vi.advanceTimersByTime(HOME_SEARCH_DEBOUNCE_MS);
       await Promise.resolve();
     });
 
@@ -342,7 +344,7 @@ describe("HomePage", () => {
     expect(firstRequest?.signal?.aborted).toBe(true);
 
     await act(async () => {
-      vi.advanceTimersByTime(250);
+      vi.advanceTimersByTime(HOME_SEARCH_DEBOUNCE_MS);
       await Promise.resolve();
     });
 
