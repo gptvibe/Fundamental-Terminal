@@ -311,6 +311,7 @@ def test_company_charts_rebuilds_when_persisted_snapshot_uses_legacy_hash_payloa
             last_checked=datetime(2026, 4, 11, tzinfo=timezone.utc),
         ),
     )
+    monkeypatch.setattr(main_module, "_trigger_refresh", lambda *_args, **_kwargs: refresh)
     monkeypatch.setattr(main_module, "recompute_and_persist_company_charts_dashboard", lambda *args, **kwargs: rebuilt_payload)
 
     response = main_module.company_charts("ACME", BackgroundTasks(), as_of=None, session=session)

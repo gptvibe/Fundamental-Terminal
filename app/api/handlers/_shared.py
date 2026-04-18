@@ -36,6 +36,7 @@ from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensatio
 from app.models.dataset_refresh_state import DatasetRefreshState
 from app.performance_audit import reset as reset_performance_audit_store
 from app.performance_audit import snapshot as snapshot_performance_audit_store
+from app.query_params import DuplicateSingletonQueryParamError, read_singleton_query_param
 from app.source_registry import SOURCE_REGISTRY, SourceTier, SourceUsage, build_provenance_entries, build_source_mix, get_source_definition, infer_source_id
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
@@ -561,11 +562,13 @@ def official_screener_search(
 def company_compare(
     tickers: str = Query(..., description="Comma-separated tickers to compare"),
     background_tasks: BackgroundTasks = None,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyCompareResponse:
+    tickers = _read_singleton_query_param_or_400(request, "tickers", fallback=tickers) or ""
     normalized_tickers = _normalize_compare_tickers(tickers)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
     companies = [
@@ -591,7 +594,7 @@ async def company_financials(
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyFinancialsResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = f"financials:{normalized_ticker}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
@@ -659,11 +662,12 @@ async def company_financials(
 def company_overview(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyOverviewResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
     financials = _build_company_financials_response(
@@ -693,13 +697,14 @@ def company_overview(
 def company_segment_history(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     years: int = Query(default=5, ge=1, le=20),
     kind: Literal["business", "geographic"] = Query(default="business"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanySegmentHistoryResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
 
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
@@ -760,7 +765,7 @@ async def company_capital_structure(
     max_periods: int = Query(default=8, ge=1, le=40),
 ) -> CompanyCapitalStructureResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = f"capital_structure:{normalized_ticker}:periods={max_periods}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
@@ -860,11 +865,12 @@ async def company_capital_structure(
 def company_equity_claim_risk(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyEquityClaimRiskResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
@@ -918,11 +924,12 @@ def company_filing_insights(
 def company_changes_since_last_filing(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyChangesSinceLastFilingResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
@@ -1067,13 +1074,14 @@ def company_changes_since_last_filing(
 def company_metrics_timeseries(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     cadence: Literal["quarterly", "annual", "ttm"] | None = Query(default=None),
     max_points: int = Query(default=24, ge=1, le=200),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyMetricsTimeseriesResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
@@ -1130,13 +1138,14 @@ def company_metrics_timeseries(
 def company_derived_metrics(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
     max_periods: int = Query(default=24, ge=1, le=200),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyDerivedMetricsResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
@@ -1261,12 +1270,13 @@ def company_derived_metrics(
 def company_derived_metrics_summary(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyDerivedMetricsSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
@@ -1745,12 +1755,15 @@ async def company_models(
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyModelsResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
-    parsed_as_of = _validated_as_of(requested_as_of)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    requested_expand = _read_singleton_query_param_or_400(request, "expand", fallback=expand)
+    requested_dupont_mode = _read_singleton_query_param_or_400(request, "dupont_mode", fallback=dupont_mode)
+    parsed_as_of, requested_expansions, normalized_mode, normalized_as_of = _normalize_company_models_query_controls(
+        requested_as_of=requested_as_of,
+        expand=requested_expand,
+        dupont_mode=requested_dupont_mode,
+    )
     requested_models = _parse_requested_models(model)
-    requested_expansions = {item.strip().lower() for item in (expand or "").split(",") if item.strip()}
-    if requested_expansions - {"input_periods"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expand must be one of: input_periods")
     include_input_periods = "input_periods" in requested_expansions
     if not settings.valuation_workbench_enabled:
         requested_models = [
@@ -1758,14 +1771,10 @@ async def company_models(
             for item in requested_models
             if item not in {"reverse_dcf", "roic", "capital_allocation"}
         ]
-    normalized_mode = (dupont_mode or "").lower() or None
-    if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     normalized_expansions = ",".join(sorted(requested_expansions)) or "default"
     hot_key = (
         f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
-        f":expand={normalized_expansions}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+        f":expand={normalized_expansions}:asof={normalized_as_of}"
     )
     hot_tags = _build_hot_cache_tags(
         ticker=normalized_ticker,
@@ -2772,11 +2781,12 @@ def company_sector_context(
 def company_charts(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyChartsDashboardResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     return _build_company_charts_response(
         session,
@@ -2912,11 +2922,12 @@ def _attempt_inline_company_snapshot_refresh_for_charts(
 def company_brief(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyResearchBriefResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     return _build_company_research_brief_response(
         session,
@@ -3839,7 +3850,7 @@ async def company_peers(
 ) -> CompanyPeersResponse:
     normalized_ticker = _normalize_ticker(ticker)
     selected_tickers = _parse_csv_values(peers)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     hot_key = f"peers:{normalized_ticker}:selected={','.join(selected_tickers)}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
@@ -4552,11 +4563,12 @@ def search_filings(
 def company_financial_restatements(
     ticker: str,
     background_tasks: BackgroundTasks,
+    request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyFinancialRestatementsResponse:
     normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = (as_of or "").strip() or None
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     parsed_as_of = _validated_as_of(requested_as_of)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
@@ -5454,6 +5466,40 @@ def _validated_as_of(value: str | None) -> datetime | None:
     if parsed is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="as_of must be an ISO-8601 date or timestamp")
     return parsed
+
+
+def _read_singleton_query_param_or_400(
+    request: Request | None,
+    name: str,
+    *,
+    fallback: str | None = None,
+) -> str | None:
+    try:
+        if request is not None:
+            return read_singleton_query_param(request, name)
+        normalized = (fallback or "").strip()
+        return normalized or None
+    except DuplicateSingletonQueryParamError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+def _normalize_company_models_query_controls(
+    *,
+    requested_as_of: str | None,
+    expand: str | None,
+    dupont_mode: str | None,
+) -> tuple[datetime | None, set[str], str | None, str]:
+    parsed_as_of = _validated_as_of(requested_as_of)
+    requested_expansions = {item.strip().lower() for item in (expand or "").split(",") if item.strip()}
+    if requested_expansions - {"input_periods"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expand must be one of: input_periods")
+
+    normalized_mode = (dupont_mode or "").lower() or None
+    if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
+
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    return parsed_as_of, requested_expansions, normalized_mode, normalized_as_of
 
 
 def _apply_requested_as_of(payload: BaseModel, as_of: str | None) -> Any:

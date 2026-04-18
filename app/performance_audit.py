@@ -8,6 +8,7 @@ from statistics import median
 from threading import Lock
 from time import perf_counter
 from typing import Any
+from urllib.parse import urlencode
 from uuid import uuid4
 
 from fastapi import Request
@@ -30,6 +31,18 @@ _SKIPPED_PATH_PREFIXES = (
     "/api/internal/performance-audit",
     "/health",
 )
+_QUERY_PARAM_VALUE_ALLOWLIST = frozenset(
+    {
+        "cadence",
+        "dupont_mode",
+        "expand",
+        "max_periods",
+        "max_points",
+        "model",
+        "refresh",
+    }
+)
+_REDACTED_QUERY_VALUE = "REDACTED"
 
 _REQUEST_RECORDS_LOCK = Lock()
 _REQUEST_RECORDS: list[dict[str, Any]] = []
@@ -89,13 +102,14 @@ def should_skip_path(path: str) -> bool:
 
 
 def begin_request(request: Request) -> tuple[RequestMetrics, object]:
+    raw_query_string = request.url.query
     metrics = RequestMetrics(
         request_id=str(uuid4()),
         method=request.method.upper(),
         path=request.url.path,
-        query_string=request.url.query,
+        query_string=_sanitize_query_string(request),
         started_at=perf_counter(),
-        request_kind=_classify_request_kind(request.method, request.url.path, request.url.query),
+        request_kind=_classify_request_kind(request.method, request.url.path, raw_query_string),
     )
     token = _CURRENT_REQUEST_METRICS.set(metrics)
     return metrics, token
@@ -196,6 +210,19 @@ def _record_sql_timing(started_at: float | None) -> None:
         return
     metrics.sql_query_count += 1
     metrics.sql_elapsed_ms += (perf_counter() - started_at) * 1000.0
+
+
+def _sanitize_query_string(request: Request) -> str:
+    sanitized_items: list[tuple[str, str]] = []
+    for key, value in request.query_params.multi_items():
+        if key.lower() in _QUERY_PARAM_VALUE_ALLOWLIST:
+            sanitized_value = value
+        else:
+            sanitized_value = _REDACTED_QUERY_VALUE
+        sanitized_items.append((key, sanitized_value))
+
+    sanitized_items.sort(key=lambda item: (item[0], item[1]))
+    return urlencode(sanitized_items, doseq=True)
 
 
 def _classify_request_kind(method: str, path: str, query_string: str) -> str:

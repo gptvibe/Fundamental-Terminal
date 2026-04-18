@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 import app.main as main_module
 from app.main import RefreshState, app
@@ -32,6 +33,55 @@ def _assert_304_on_second_request(client: TestClient, url: str) -> None:
 
     second = client.get(url, headers={"If-None-Match": etag})
     assert second.status_code == 304
+
+
+def _request_with_query_string(query_string: str, *, path: str = "/api/companies/AAPL/models") -> Request:
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "query_string": query_string.encode("utf-8"),
+        "headers": [],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+    return Request(scope)
+
+
+def _stub_financials_route(monkeypatch, *, ticker: str = "AAPL"):
+    snapshot = _snapshot(ticker=ticker)
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker=ticker, job_id=None),
+    )
+    return snapshot
+
+
+def _stub_models_route(monkeypatch, *, ticker: str = "AAPL"):
+    snapshot = _snapshot(ticker=ticker)
+    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker=ticker, job_id=None),
+    )
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
+    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module.ModelEngine, "compute_models", lambda *_args, **_kwargs: [SimpleNamespace(cached=True)])
+    return snapshot
 
 
 def test_search_route_supports_conditional_get(monkeypatch):
@@ -321,23 +371,12 @@ def test_search_route_does_not_trigger_refresh_when_refresh_disabled_on_stale_ho
 
 
 def test_financials_route_supports_conditional_get(monkeypatch):
-    snapshot = _snapshot()
+    _stub_financials_route(monkeypatch)
     financials_calls: list[str] = []
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(
         main_module,
         "_visible_financials_for_company",
         lambda *_args, **_kwargs: financials_calls.append("called") or [],
-    )
-    monkeypatch.setattr(
-        main_module,
-        "_refresh_for_financial_page",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
 
     client = TestClient(app)
@@ -352,6 +391,33 @@ def test_financials_route_supports_conditional_get(monkeypatch):
     assert second.content == b""
     assert second.headers.get("cache-control") == "public, max-age=20, stale-while-revalidate=300"
     assert financials_calls == ["called"]
+
+
+def test_financials_route_rejects_duplicate_as_of_regardless_of_order(monkeypatch):
+    _stub_financials_route(monkeypatch)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/financials?as_of=not-a-date&as_of=2024-01-01")
+    second = client.get("/api/companies/AAPL/financials?as_of=2024-01-01&as_of=not-a-date")
+
+    assert first.status_code == 400
+    assert second.status_code == 400
+    assert first.json()["detail"] == "as_of may only be provided once"
+    assert second.json()["detail"] == "as_of may only be provided once"
+
+
+def test_financials_route_clean_as_of_keeps_200_and_duplicate_as_of_does_not_share_etag(monkeypatch):
+    _stub_financials_route(monkeypatch)
+
+    client = TestClient(app)
+    clean = client.get("/api/companies/AAPL/financials?as_of=2024-01-01")
+    duplicate_invalid = client.get("/api/companies/AAPL/financials?as_of=not-a-date&as_of=2024-01-01")
+
+    assert clean.status_code == 200
+    assert clean.headers.get("etag")
+    assert duplicate_invalid.status_code == 400
+    assert duplicate_invalid.headers.get("etag") is None
+    assert duplicate_invalid.headers.get("etag") != clean.headers.get("etag")
 
 
 def test_financials_route_uses_hot_cache_metadata_for_304_without_opening_session(monkeypatch):
@@ -377,20 +443,222 @@ def test_financials_route_uses_hot_cache_metadata_for_304_without_opening_sessio
 
 
 def test_models_route_supports_conditional_get(monkeypatch):
-    snapshot = _snapshot()
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(
-        main_module,
-        "_refresh_for_snapshot",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
-    )
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
+    _stub_models_route(monkeypatch)
 
     client = TestClient(app)
     _assert_304_on_second_request(client, "/api/companies/AAPL/models")
+
+
+def test_company_route_etag_is_stable_for_reordered_query_params():
+    last_refreshed_at = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    first_request = _request_with_query_string("expand=input_periods&model=dcf")
+    second_request = _request_with_query_string("model=dcf&expand=input_periods")
+
+    first_etag = main_module._build_company_cache_etag(
+        first_request,
+        scope_key="ticker:AAPL",
+        last_refreshed_at=last_refreshed_at,
+    )
+    second_etag = main_module._build_company_cache_etag(
+        second_request,
+        scope_key="ticker:AAPL",
+        last_refreshed_at=last_refreshed_at,
+    )
+
+    assert first_etag == second_etag
+
+
+def test_company_route_etag_canonicalizes_repeated_non_singleton_query_params_deterministically():
+    last_refreshed_at = datetime(2026, 4, 17, 12, 0, tzinfo=timezone.utc)
+    first_request = _request_with_query_string("foo=summary&model=dcf&foo=input_periods")
+    second_request = _request_with_query_string("model=dcf&foo=input_periods&foo=summary")
+
+    first_etag = main_module._build_company_cache_etag(
+        first_request,
+        scope_key="ticker:AAPL",
+        last_refreshed_at=last_refreshed_at,
+    )
+    second_etag = main_module._build_company_cache_etag(
+        second_request,
+        scope_key="ticker:AAPL",
+        last_refreshed_at=last_refreshed_at,
+    )
+
+    assert first_etag == second_etag
+    assert main_module._canonicalize_company_query_string(first_request) == "foo=input_periods&foo=summary&model=dcf"
+
+
+def test_company_route_hot_cache_keys_use_latest_when_as_of_absent():
+    request = _request_with_query_string("", path="/api/companies/AAPL/financials")
+
+    assert main_module._company_route_hot_cache_keys(request) == ["financials:AAPL:asof=latest"]
+
+
+def test_company_route_hot_cache_keys_bypass_invalid_as_of():
+    latest_request = _request_with_query_string("", path="/api/companies/AAPL/financials")
+    invalid_request = _request_with_query_string("as_of=not-a-date", path="/api/companies/AAPL/financials")
+
+    assert main_module._company_route_hot_cache_keys(latest_request) == ["financials:AAPL:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(invalid_request) == []
+
+
+def test_models_route_hot_cache_keys_reject_duplicate_singletons():
+    clean_request = _request_with_query_string(
+        "model=dcf&expand=input_periods&dupont_mode=annual",
+        path="/api/companies/AAPL/models",
+    )
+    duplicate_expand_request = _request_with_query_string(
+        "model=dcf&expand=bogus&expand=input_periods",
+        path="/api/companies/AAPL/models",
+    )
+    duplicate_dupont_request = _request_with_query_string(
+        "model=dcf&dupont_mode=bogus&dupont_mode=annual",
+        path="/api/companies/AAPL/models",
+    )
+
+    assert main_module._company_route_hot_cache_keys(clean_request) == [
+        "models:AAPL:models=dcf:dupont=annual:expand=input_periods:asof=latest"
+    ]
+    assert main_module._company_route_hot_cache_keys(duplicate_expand_request) == []
+    assert main_module._company_route_hot_cache_keys(duplicate_dupont_request) == []
+
+
+def test_models_route_conditional_get_matches_canonicalized_etag(monkeypatch):
+    _stub_models_route(monkeypatch)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/models?expand=input_periods&model=dcf")
+    assert first.status_code == 200
+    etag = first.headers.get("etag")
+    assert etag
+
+    second = client.get(
+        "/api/companies/AAPL/models?model=dcf&expand=input_periods",
+        headers={"If-None-Match": etag},
+    )
+
+    assert second.status_code == 304
+    assert second.content == b""
+
+
+def test_models_route_rejects_duplicate_expand_regardless_of_order(monkeypatch):
+    _stub_models_route(monkeypatch)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/models?expand=bogus&expand=input_periods")
+    second = client.get("/api/companies/AAPL/models?expand=input_periods&expand=bogus")
+
+    assert first.status_code == 400
+    assert second.status_code == 400
+    assert first.json()["detail"] == "expand may only be provided once"
+    assert second.json()["detail"] == "expand may only be provided once"
+
+
+def test_models_route_rejects_duplicate_dupont_mode_regardless_of_order(monkeypatch):
+    _stub_models_route(monkeypatch)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/models?dupont_mode=bogus&dupont_mode=annual")
+    second = client.get("/api/companies/AAPL/models?dupont_mode=annual&dupont_mode=bogus")
+
+    assert first.status_code == 400
+    assert second.status_code == 400
+    assert first.json()["detail"] == "dupont_mode may only be provided once"
+    assert second.json()["detail"] == "dupont_mode may only be provided once"
+
+
+def test_models_route_clean_valid_query_keeps_200(monkeypatch):
+    _stub_models_route(monkeypatch)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/models?model=dcf&expand=input_periods&dupont_mode=annual")
+
+    assert response.status_code == 200
+    assert response.headers.get("etag")
+
+
+def test_models_route_duplicate_invalid_query_does_not_match_clean_etag(monkeypatch):
+    _stub_models_route(monkeypatch)
+
+    client = TestClient(app)
+    clean = client.get("/api/companies/AAPL/models?model=dcf&expand=input_periods&dupont_mode=annual")
+    assert clean.status_code == 200
+    clean_etag = clean.headers.get("etag")
+    assert clean_etag
+
+    duplicate_expand = client.get(
+        "/api/companies/AAPL/models?model=dcf&expand=bogus&expand=input_periods&dupont_mode=annual",
+        headers={"If-None-Match": clean_etag},
+    )
+    duplicate_dupont = client.get(
+        "/api/companies/AAPL/models?model=dcf&expand=input_periods&dupont_mode=bogus&dupont_mode=annual",
+        headers={"If-None-Match": clean_etag},
+    )
+
+    assert duplicate_expand.status_code == 400
+    assert duplicate_dupont.status_code == 400
+    assert duplicate_expand.headers.get("etag") is None
+    assert duplicate_dupont.headers.get("etag") is None
+
+
+def test_models_route_duplicate_invalid_query_skips_hot_cache_lookup(monkeypatch):
+    hot_cache_keys: list[str] = []
+
+    async def _get_cached(cache_key, *_args, **_kwargs):
+        hot_cache_keys.append(cache_key)
+        return HotCacheLookup(
+            content=b'{"company":{"ticker":"AAPL"}}',
+            etag='W/"models-hot"',
+            last_modified="Sun, 13 Apr 2026 00:00:00 GMT",
+            is_fresh=True,
+        )
+
+    def _unexpected_session_scope():
+        raise AssertionError("duplicate singleton params should be rejected before cache metadata opens a DB session")
+
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
+    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/companies/AAPL/models?model=dcf&expand=bogus&expand=input_periods",
+        headers={"If-None-Match": 'W/"models-hot"'},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "expand may only be provided once"
+    assert hot_cache_keys == []
+    assert response.headers.get("etag") is None
+
+
+def test_financials_route_invalid_as_of_does_not_match_latest_hot_cache_etag(monkeypatch):
+    hot_cache_keys: list[str] = []
+
+    async def _get_cached(cache_key, *_args, **_kwargs):
+        hot_cache_keys.append(cache_key)
+        return HotCacheLookup(
+            content=b'{"company":{"ticker":"AAPL"}}',
+            etag='W/"financials-hot"',
+            last_modified="Sun, 13 Apr 2026 00:00:00 GMT",
+            is_fresh=True,
+        )
+
+    def _unexpected_session_scope():
+        raise AssertionError("invalid as_of should be rejected before cache metadata opens a DB session")
+
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
+    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/companies/AAPL/financials?as_of=not-a-date",
+        headers={"If-None-Match": 'W/"financials-hot"'},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "as_of must be an ISO-8601 date or timestamp"
+    assert hot_cache_keys == []
+    assert response.headers.get("etag") is None
 
 
 def test_model_evaluation_route_supports_conditional_get(monkeypatch):

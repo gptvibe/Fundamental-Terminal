@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 from email.utils import formatdate
 from types import FunctionType
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request, Response, status
 
@@ -14,6 +15,7 @@ from app.api.handlers import _shared as _legacy_api
 from app.config import settings
 from app.db import async_session_maker, get_async_engine
 from app.performance_audit import PerformanceAuditJSONResponse, begin_request, complete_request, end_request, is_enabled, should_skip_path
+from app.query_params import DuplicateSingletonQueryParamError, read_singleton_query_param
 from app.services.cache_queries import get_company_snapshot, get_company_snapshots_by_ticker
 
 
@@ -38,10 +40,58 @@ def _format_company_cache_last_modified(value: datetime | None) -> str | None:
     return formatdate(normalized.timestamp(), usegmt=True)
 
 
+def _canonicalize_company_query_string(request: Request) -> str:
+    singleton_values: dict[str, str | None] = {}
+    singleton_names = {"as_of"}
+    if request.url.path == "/api/companies/compare":
+        singleton_names.add("tickers")
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/models"):
+        singleton_names.update({"expand", "dupont_mode"})
+
+    for name in singleton_names:
+        try:
+            singleton_values[name] = read_singleton_query_param(request, name)
+        except DuplicateSingletonQueryParamError as exc:
+            raise ValueError(str(exc)) from exc
+
+    requested_as_of = singleton_values.get("as_of")
+    if requested_as_of is not None:
+        validated_as_of = globals().get("_validated_as_of")
+        if callable(validated_as_of):
+            validated_as_of(requested_as_of)
+
+    if request.url.path.startswith("/api/companies/") and request.url.path.endswith("/models"):
+        normalize_models_controls = globals().get("_normalize_company_models_query_controls")
+        if callable(normalize_models_controls):
+            _parsed_as_of, requested_expansions, normalized_mode, normalized_as_of = normalize_models_controls(
+                requested_as_of=singleton_values.get("as_of"),
+                expand=singleton_values.get("expand"),
+                dupont_mode=singleton_values.get("dupont_mode"),
+            )
+            singleton_values["as_of"] = None if normalized_as_of == "latest" else normalized_as_of
+            singleton_values["expand"] = ",".join(sorted(requested_expansions)) or None
+            singleton_values["dupont_mode"] = normalized_mode
+
+    query_items = sorted(
+        [
+            (name, value)
+            for name, value in request.query_params.multi_items()
+            if name not in singleton_names
+        ]
+        + [
+            (name, value)
+            for name, value in singleton_values.items()
+            if value is not None
+        ],
+        key=lambda item: (item[0], item[1]),
+    )
+    return urlencode(query_items, doseq=True)
+
+
 def _build_company_cache_etag(request: Request, *, scope_key: str, last_refreshed_at: datetime) -> str:
     normalized = _normalize_company_cache_datetime(last_refreshed_at)
     assert normalized is not None
-    canonical_query = request.url.query or ""
+    canonical_query = _canonicalize_company_query_string(request)
     canonical = f"{scope_key}|{request.url.path}|{canonical_query}|{normalized.isoformat()}".encode("utf-8")
     return f'W/"company-{hashlib.sha256(canonical).hexdigest()[:16]}"'
 
@@ -66,16 +116,53 @@ def _load_company_snapshot_for_cache(sync_session, ticker: str):
     return get_company_snapshot(sync_session, ticker)
 
 
-def _normalized_company_as_of(request: Request) -> str:
-    requested_as_of = (request.query_params.get("as_of") or "").strip() or None
+def _resolved_company_as_of(request: Request) -> tuple[str | None, bool]:
+    try:
+        requested_as_of = read_singleton_query_param(request, "as_of")
+    except DuplicateSingletonQueryParamError:
+        return None, False
+    if requested_as_of is None:
+        return "latest", True
+
     validated_as_of = globals().get("_validated_as_of")
     normalize_as_of = globals().get("_normalize_as_of")
     try:
         parsed_as_of = validated_as_of(requested_as_of) if callable(validated_as_of) else None
         normalized = normalize_as_of(parsed_as_of) if callable(normalize_as_of) else None
     except Exception:
-        return "latest"
-    return normalized or "latest"
+        return None, False
+
+    if parsed_as_of is None:
+        return None, False
+    return normalized or requested_as_of, True
+
+
+def _resolved_company_models_controls(request: Request) -> tuple[dict[str, str | None] | None, bool]:
+    try:
+        requested_as_of = read_singleton_query_param(request, "as_of")
+        requested_expand = read_singleton_query_param(request, "expand")
+        requested_dupont_mode = read_singleton_query_param(request, "dupont_mode")
+    except DuplicateSingletonQueryParamError:
+        return None, False
+
+    normalize_models_controls = globals().get("_normalize_company_models_query_controls")
+    if not callable(normalize_models_controls):
+        return None, False
+
+    try:
+        _parsed_as_of, requested_expansions, normalized_mode, normalized_as_of = normalize_models_controls(
+            requested_as_of=requested_as_of,
+            expand=requested_expand,
+            dupont_mode=requested_dupont_mode,
+        )
+    except Exception:
+        return None, False
+
+    return {
+        "as_of": normalized_as_of,
+        "expand": ",".join(sorted(requested_expansions)) or "default",
+        "dupont_mode": normalized_mode,
+    }, True
 
 
 def _company_route_hot_cache_keys(request: Request) -> list[str]:
@@ -89,7 +176,10 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
         return []
 
     normalized_ticker = ticker.strip().upper()
-    normalized_as_of = _normalized_company_as_of(request)
+    normalized_as_of, as_of_is_valid = _resolved_company_as_of(request)
+    if not as_of_is_valid or normalized_as_of is None:
+        return []
+
     route_name = rest.strip()
     if not route_name:
         return []
@@ -111,6 +201,9 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
         return [f"capital_structure:{normalized_ticker}:periods={max_periods}:asof={normalized_as_of}"]
 
     if route_name == "models":
+        model_controls, controls_are_valid = _resolved_company_models_controls(request)
+        if not controls_are_valid or model_controls is None:
+            return []
         parse_requested_models = globals().get("_parse_requested_models")
         requested_models = parse_requested_models(request.query_params.get("model")) if callable(parse_requested_models) else []
         if not settings.valuation_workbench_enabled:
@@ -119,17 +212,10 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
                 for item in requested_models
                 if item not in {"reverse_dcf", "roic", "capital_allocation"}
             ]
-        requested_expansions = {
-            item.strip().lower()
-            for item in (request.query_params.get("expand") or "").split(",")
-            if item.strip()
-        }
-        normalized_expansions = ",".join(sorted(requested_expansions)) or "default"
-        normalized_mode = (request.query_params.get("dupont_mode") or "").strip().lower() or None
         return [
             (
-                f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
-                f":expand={normalized_expansions}:asof={normalized_as_of}"
+                f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={model_controls['dupont_mode'] or 'default'}"
+                f":expand={model_controls['expand']}:asof={model_controls['as_of']}"
             )
         ]
 
@@ -190,13 +276,20 @@ async def _resolve_company_route_cache_metadata(request: Request) -> tuple[str, 
     if not path.startswith("/api/companies/"):
         return None
 
+    _normalized_as_of, as_of_is_valid = _resolved_company_as_of(request)
+    if not as_of_is_valid:
+        return None
+
     try:
         hot_cache_metadata = await _resolve_company_route_hot_cache_metadata(request)
         if hot_cache_metadata is not None:
             return hot_cache_metadata
 
         if path == "/api/companies/compare":
-            raw_tickers = request.query_params.get("tickers", "")
+            try:
+                raw_tickers = read_singleton_query_param(request, "tickers") or ""
+            except DuplicateSingletonQueryParamError:
+                return None
             tickers = [ticker.strip().upper() for ticker in raw_tickers.split(",") if ticker.strip()]
             if not tickers:
                 return None
