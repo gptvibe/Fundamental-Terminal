@@ -74,6 +74,7 @@ def test_residual_income_ok_status(monkeypatch):
     assert result["intrinsic_value"]["intrinsic_value_per_share"] > 0
     assert result["inputs"]["book_equity"] == pytest.approx(200_000.0)
     assert result["inputs"]["roe"] == pytest.approx(0.10, abs=0.001)
+    assert result["intrinsic_value"]["terminal_value_per_share"] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_residual_income_includes_cost_of_equity(monkeypatch):
@@ -154,6 +155,23 @@ def test_residual_income_upside_vs_price(monkeypatch):
     result = ri_model.compute(_dataset(pts, price=100.0))
     if result["status"] != "insufficient_data":
         assert result["intrinsic_value"]["upside_vs_price"] is not None
+
+
+def test_residual_income_terminal_value_zero_when_roe_fades_to_cost_of_equity(monkeypatch):
+    monkeypatch.setattr(ri_model, "get_latest_risk_free_rate", _mock_risk_free)
+    pts = [
+        _point(2025, {"total_assets": 600_000, "total_liabilities": 500_000, "net_income": 15_000, "shares_outstanding": 1_000}),
+        _point(2024, {"total_assets": 575_000, "total_liabilities": 485_000, "net_income": 13_500, "shares_outstanding": 1_000}),
+        _point(2023, {"total_assets": 550_000, "total_liabilities": 470_000, "net_income": 12_000, "shares_outstanding": 1_000}),
+    ]
+
+    result = ri_model.compute(_dataset(pts))
+    final_projection = result["projections"][-1]
+    cost_of_equity = result["inputs"]["cost_of_equity"]
+
+    assert final_projection["roe"] == pytest.approx(cost_of_equity, abs=1e-9)
+    assert final_projection["residual_income"] == pytest.approx(0.0, abs=1e-9)
+    assert result["intrinsic_value"]["terminal_value_per_share"] == pytest.approx(0.0, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------

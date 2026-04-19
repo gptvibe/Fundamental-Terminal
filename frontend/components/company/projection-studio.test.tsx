@@ -422,6 +422,29 @@ describe("ProjectionStudio", () => {
     expect(screen.getByRole("button", { name: "Hide What-If Sidebar" })).toBeTruthy();
   });
 
+  it("does not recycle payload as_of into what-if requests without an explicit page filter", async () => {
+    vi.mocked(getCompanyChartsWhatIf).mockResolvedValueOnce(buildPayload({ includeWhatIf: true }).payload as never);
+    const { payload, studio } = buildPayload({ includeWhatIf: false });
+    (payload as { as_of: string | null }).as_of = "2025-12-27";
+
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(getCompanyChartsWhatIf).mock.calls[0][2]).toMatchObject({ asOf: null });
+    expect(mockUseForecastAccuracy).toHaveBeenCalledWith("ACME", expect.objectContaining({ asOf: null, enabled: true }));
+  });
+
+  it("forwards an explicit page as_of to what-if and forecast accuracy calls", async () => {
+    vi.mocked(getCompanyChartsWhatIf).mockResolvedValueOnce(buildPayload({ includeWhatIf: true }).payload as never);
+    const { payload, studio } = buildPayload({ includeWhatIf: false });
+
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never, requestedAsOf: "2025-12-27" }));
+
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(getCompanyChartsWhatIf).mock.calls[0][2]).toMatchObject({ asOf: "2025-12-27" });
+    expect(mockUseForecastAccuracy).toHaveBeenCalledWith("ACME", expect.objectContaining({ asOf: "2025-12-27", enabled: true }));
+  });
+
   it("debounces recomputation, updates the impact strip, and renders delta indicators", async () => {
     vi.mocked(getCompanyChartsWhatIf)
       .mockResolvedValueOnce(

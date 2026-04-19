@@ -326,14 +326,23 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
                 }
             )
 
-    if model_name == "reverse_dcf" and normalize_model_status(result.get("model_status") or result.get("status")) == MODEL_STATUS_PROXY:
-        items.append(
-            {
-                "target": "free_cash_flow_margin",
-                "proxy_fields": ["operating_cash_flow", "revenue"],
-                "reason": "Free-cash-flow margin was approximated from operating cash flow when direct free cash flow was unavailable.",
-            }
-        )
+    if model_name == "reverse_dcf" and isinstance(input_quality, dict):
+        if input_quality.get("starting_fcf_margin_proxied"):
+            items.append(
+                {
+                    "target": "free_cash_flow_margin",
+                    "proxy_fields": ["operating_cash_flow", "capex", "revenue"],
+                    "reason": "Free-cash-flow margin was approximated from operating cash flow less capex when direct free cash flow was unavailable.",
+                }
+            )
+        if input_quality.get("capital_structure_proxied"):
+            items.append(
+                {
+                    "target": "enterprise_value",
+                    "proxy_fields": ["latest_price", "shares_outstanding", "weighted_average_diluted_shares"],
+                    "reason": "Reverse DCF fell back to an equity-value target because debt or cash inputs were incomplete.",
+                }
+            )
 
     data_quality = result.get("data_quality")
     if model_name == "residual_income" and isinstance(data_quality, dict) and data_quality.get("used_proxy_book_equity"):
@@ -345,12 +354,13 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
-    if model_name == "capital_allocation" and result.get("shareholder_yield") is not None:
+    shareholder_yield_basis = result.get("shareholder_yield_basis")
+    if model_name == "capital_allocation" and isinstance(shareholder_yield_basis, dict) and shareholder_yield_basis.get("method") == "average_market_cap":
         items.append(
             {
                 "target": "market_cap_proxy",
-                "proxy_fields": ["weighted_average_diluted_shares", "shares_outstanding", "eps"],
-                "reason": "Shareholder yield uses a proxy market capitalization derived from shares outstanding and earnings per share.",
+                "proxy_fields": ["latest_price", "weighted_average_diluted_shares", "shares_outstanding"],
+                "reason": "Shareholder yield used an average market-cap denominator built from latest price and available share counts.",
             }
         )
 

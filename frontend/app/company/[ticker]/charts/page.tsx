@@ -21,6 +21,7 @@ export default function CompanyChartsPage() {
   const params = useParams<{ ticker: string }>();
   const searchParams = useSearchParams();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
+  const requestedAsOf = searchParams?.get("as_of") ?? null;
   const [data, setData] = useState<CompanyChartsDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +37,7 @@ export default function CompanyChartsPage() {
       try {
         setLoading(true);
         setError(null);
-        const payload = await getCompanyCharts(ticker);
+        const payload = await getCompanyCharts(ticker, requestedAsOf ? { asOf: requestedAsOf } : undefined);
         if (!cancelled) {
           setData(payload);
         }
@@ -55,7 +56,7 @@ export default function CompanyChartsPage() {
     return () => {
       cancelled = true;
     };
-  }, [ticker]);
+  }, [requestedAsOf, ticker]);
 
   if (loading && !data) {
     return (
@@ -95,9 +96,9 @@ export default function CompanyChartsPage() {
   return (
     <>
       {mode === "studio" && data.projection_studio ? (
-        <ProjectionStudio payload={data} studio={data.projection_studio} />
+        <ProjectionStudio payload={data} studio={data.projection_studio} requestedAsOf={requestedAsOf} />
       ) : (
-        <CompanyChartsDashboard payload={data} activeMode={mode} studioEnabled={Boolean(data.projection_studio)} />
+        <CompanyChartsDashboard payload={data} activeMode={mode} studioEnabled={Boolean(data.projection_studio)} requestedAsOf={requestedAsOf} />
       )}
     </>
   );

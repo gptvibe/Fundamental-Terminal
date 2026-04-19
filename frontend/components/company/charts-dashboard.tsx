@@ -64,15 +64,17 @@ export function CompanyChartsDashboard({
   payload,
   activeMode = "outlook",
   studioEnabled = Boolean(payload.projection_studio),
+  requestedAsOf = null,
 }: {
   payload: CompanyChartsDashboardResponse;
   activeMode?: "outlook" | "studio";
   studioEnabled?: boolean;
+  requestedAsOf?: string | null;
 }) {
   const company = payload.company;
   const sourceState = useMemo(() => resolveChartsForecastSourceState(payload), [payload]);
   const forecastAccuracy = useForecastAccuracy(company?.ticker ?? "", {
-    asOf: payload.as_of,
+    asOf: requestedAsOf,
     enabled: Boolean(company?.ticker),
   });
   const revenuePhaseSummary = useMemo(() => buildChartPhaseSummary(buildChartRows(payload.cards.revenue.series)), [payload.cards.revenue.series]);

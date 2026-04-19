@@ -145,7 +145,7 @@ describe("CompanyChartsPage", () => {
     render(React.createElement(CompanyChartsPage));
 
     await waitFor(() => {
-      expect(getCompanyCharts).toHaveBeenCalledWith("ACME");
+      expect(getCompanyCharts).toHaveBeenCalledWith("ACME", undefined);
     });
     expect(screen.getByTestId("charts-dashboard").textContent).toBe("dashboard:outlook:disabled");
   });

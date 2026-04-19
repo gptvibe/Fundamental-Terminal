@@ -34,6 +34,7 @@ import { FormulaTracePopover } from "./formula-trace-popover";
 interface ProjectionStudioProps {
   payload: CompanyChartsDashboardResponse;
   studio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>;
+  requestedAsOf?: string | null;
 }
 
 interface DriverGroup {
@@ -1306,10 +1307,10 @@ function WhatIfSidebar({
   );
 }
 
-export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
+export function ProjectionStudio({ payload, studio, requestedAsOf = null }: ProjectionStudioProps) {
   const ticker = payload.company?.ticker ?? "company";
   const forecastAccuracy = useForecastAccuracy(ticker, {
-    asOf: payload.as_of,
+    asOf: requestedAsOf,
     enabled: Boolean(payload.company?.ticker),
   });
   const [selectedTrace, setSelectedTrace] = useState<CompanyChartsFormulaTracePayload | null>(null);
@@ -1406,7 +1407,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     const controller = new AbortController();
     setControlsLoading(true);
 
-    void getCompanyChartsWhatIf(ticker, { overrides: {} }, { asOf: payload.as_of, signal: controller.signal })
+    void getCompanyChartsWhatIf(ticker, { overrides: {} }, { asOf: requestedAsOf, signal: controller.signal })
       .then((response) => {
         if (cancelled) {
           return;
@@ -1431,7 +1432,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
       cancelled = true;
       controller.abort();
     };
-  }, [controlsRetryTick, payload, ticker]);
+  }, [controlsRetryTick, payload, requestedAsOf, ticker]);
 
   const baseStudio = basePayload.projection_studio ?? studio;
   const visibleStudio = visiblePayload.projection_studio ?? studio;
@@ -1469,7 +1470,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     setRecomputeError(null);
 
     const timeoutId = window.setTimeout(() => {
-      void getCompanyChartsWhatIf(ticker, { overrides: draftOverrides }, { asOf: basePayload.as_of, signal: controller.signal })
+      void getCompanyChartsWhatIf(ticker, { overrides: draftOverrides }, { asOf: requestedAsOf, signal: controller.signal })
         .then((response) => {
           if (controller.signal.aborted) {
             return;
@@ -1498,7 +1499,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
         recomputeAbortRef.current = null;
       }
     };
-  }, [activeOverrideCount, baseControls.length, basePayload, draftOverrides, overrideSignature, recomputeRetryTick, ticker]);
+  }, [activeOverrideCount, baseControls.length, basePayload, draftOverrides, overrideSignature, recomputeRetryTick, requestedAsOf, ticker]);
 
   const scheduleSections = useMemo(() => visibleStudio.schedule_sections.map((section) => withCheckRows(section)), [visibleStudio.schedule_sections]);
   const baselineScheduleSections = useMemo(() => baseStudio.schedule_sections.map((section) => withCheckRows(section)), [baseStudio.schedule_sections]);
@@ -1544,7 +1545,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     return {
       version: 1,
       ticker,
-      asOf: basePayload.as_of,
+      asOf: requestedAsOf,
       forecastYear: firstProjectedYear,
       source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
       scenarioName: loadedScenario?.name ?? null,
@@ -1552,7 +1553,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
       metrics,
       createdAt: new Date().toISOString(),
     };
-  }, [activeOverrideCount, basePayload.as_of, baseStudio, firstProjectedYear, loadedScenario?.name, ticker, visibleStudio]);
+  }, [activeOverrideCount, baseStudio, firstProjectedYear, loadedScenario?.name, requestedAsOf, ticker, visibleStudio]);
 
   const valuationImpactHref = useMemo(() => {
     const baseHref = `/company/${encodeURIComponent(ticker)}/models`;

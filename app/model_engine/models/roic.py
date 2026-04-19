@@ -12,7 +12,9 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "roic"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.1.0"
+
+MIN_INVESTED_CAPITAL_DELTA = 1e-6
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -31,6 +33,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     trend: list[dict[str, object]] = []
     roic_values: list[float] = []
     reinvestment_values: list[float] = []
+    period_metrics: list[dict[str, float]] = []
     incremental_roic: float | None = None
     proxy_used = False
     missing_fields: set[str] = set()
@@ -57,6 +60,13 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         roic = safe_divide(nopat, invested_capital)
         if roic is not None:
             roic_values.append(float(roic))
+        if nopat is not None and invested_capital is not None:
+            period_metrics.append(
+                {
+                    "nopat": float(nopat),
+                    "invested_capital": float(invested_capital),
+                }
+            )
 
         reinvestment = safe_divide(data.get("capex"), data.get("operating_cash_flow"))
         if reinvestment is not None:
@@ -73,11 +83,18 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             }
         )
 
-    if len(roic_values) >= 2:
-        roic_delta = roic_values[-1] - roic_values[0]
-        capital_base_delta = 1.0
-        if capital_base_delta != 0:
-            incremental_roic = roic_delta / capital_base_delta
+    if len(period_metrics) >= 2:
+        latest_period = period_metrics[-1]
+        previous_period = period_metrics[-2]
+        delta_nopat = latest_period["nopat"] - previous_period["nopat"]
+        delta_invested_capital = latest_period["invested_capital"] - previous_period["invested_capital"]
+        capital_delta_floor = max(
+            abs(latest_period["invested_capital"]),
+            abs(previous_period["invested_capital"]),
+            1.0,
+        ) * MIN_INVESTED_CAPITAL_DELTA
+        if abs(delta_invested_capital) > capital_delta_floor:
+            incremental_roic = delta_nopat / delta_invested_capital
 
     can_directional = bool(roic_values)
     status = status_from_data_quality(

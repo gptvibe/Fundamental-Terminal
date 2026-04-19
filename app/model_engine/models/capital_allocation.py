@@ -4,7 +4,7 @@ from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import annual_series, json_number, safe_divide, status_explanation, status_from_data_quality, trust_summary
 
 MODEL_NAME = "capital_allocation"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.1.0"
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -21,11 +21,14 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     total_buybacks = 0.0
     total_debt_change = 0.0
     total_sbc = 0.0
-    total_market_cap_proxy = 0.0
     rows: list[dict[str, object]] = []
+    market_cap_observations: list[float] = []
 
     missing_fields: set[str] = set()
     proxy_used = False
+    market_snapshot = dataset.market_snapshot
+    latest_price = market_snapshot.latest_price if market_snapshot is not None else None
+    latest_shares = annuals[0].data.get("weighted_average_diluted_shares") or annuals[0].data.get("shares_outstanding")
 
     for point in reversed(annuals):
         data = point.data or {}
@@ -49,10 +52,10 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         total_sbc += sbc
 
         shares = data.get("weighted_average_diluted_shares") or data.get("shares_outstanding")
-        if shares and data.get("eps"):
-            total_market_cap_proxy += abs(float(shares) * float(data.get("eps")) * 12)
-        else:
-            proxy_used = True
+        if shares is None:
+            missing_fields.update({"weighted_average_diluted_shares", "shares_outstanding"})
+        elif latest_price not in (None, 0):
+            market_cap_observations.append(abs(float(latest_price) * float(shares)))
 
         rows.append(
             {
@@ -65,7 +68,21 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             }
         )
 
-    shareholder_yield = safe_divide(total_dividends + total_buybacks - total_sbc, total_market_cap_proxy)
+    shareholder_distribution = total_dividends + total_buybacks - total_sbc
+    market_cap_denominator: float | None = None
+    denominator_method: str | None = None
+    if latest_price in (None, 0):
+        missing_fields.add("latest_price")
+        proxy_used = True
+    elif latest_shares not in (None, 0):
+        market_cap_denominator = abs(float(latest_price) * float(latest_shares))
+        denominator_method = "latest_market_cap"
+    elif market_cap_observations:
+        market_cap_denominator = sum(market_cap_observations) / len(market_cap_observations)
+        denominator_method = "average_market_cap"
+        proxy_used = True
+
+    shareholder_yield = safe_divide(shareholder_distribution, market_cap_denominator)
     net_payout_mix = {
         "dividends_share": json_number(safe_divide(total_dividends, total_dividends + total_buybacks)),
         "buybacks_share": json_number(safe_divide(total_buybacks, total_dividends + total_buybacks)),
@@ -84,9 +101,15 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "explanation": status_explanation(status),
         "confidence_summary": trust_summary(missing_fields=sorted(missing_fields), proxy_used=proxy_used),
         "shareholder_yield": json_number(shareholder_yield),
-        "net_shareholder_distribution": json_number(total_dividends + total_buybacks - total_sbc),
+        "net_shareholder_distribution": json_number(shareholder_distribution),
         "debt_financing_signal": json_number(total_debt_change),
         "capital_return_mix": net_payout_mix,
+        "shareholder_yield_basis": {
+            "method": denominator_method,
+            "market_cap_denominator": json_number(market_cap_denominator),
+            "latest_price": json_number(latest_price),
+            "share_count_periods_used": len(market_cap_observations),
+        },
         "series": rows,
         "missing_required_fields_last_3y": sorted(missing_fields),
     }

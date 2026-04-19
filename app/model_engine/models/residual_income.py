@@ -16,12 +16,11 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "residual_income"
-MODEL_VERSION = "1.0.0"
+MODEL_VERSION = "1.1.0"
 
 # Cost-of-equity assumptions
 EQUITY_RISK_PREMIUM = 0.05
 FINANCIAL_FIRM_ADDITIONAL_RISK = 0.005   # small size/complexity premium
-LONG_RUN_ROE = 0.10                      # fade target (represents CoE at steady state)
 TERMINAL_GROWTH_RATE = 0.025             # long-run nominal GDP proxy
 PROJECTION_YEARS = 5
 
@@ -125,23 +124,21 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     avg_roe = sum(historical_roes) / len(historical_roes) if historical_roes else roe
 
     # ----- Residual income projection -----
-    # Year 0: book equity = bv, ROE = avg_roe
-    # Fade ROE linearly toward CoE over PROJECTION_YEARS
+    # Year 0: book equity = bv, ROE = avg_roe.
+    # Fade ROE linearly toward CoE over PROJECTION_YEARS so residual income converges to zero.
     # RI_t = (ROE_t - CoE) × BV_{t-1}
-    # BV grows by retained earnings: BV_t = BV_{t-1} + RI_t + CoE × BV_{t-1} × (1 - payout_approx)
-    # Simplification: assume dividend payout = 1 - (g/ROE) where g = TERMINAL_GROWTH_RATE
+    # BV grows by retained earnings using the same payout simplification as the explicit forecast.
     payout = min(0.8, max(0.0, 1.0 - safe_divide(TERMINAL_GROWTH_RATE, avg_roe or coe) or 0.0))
     retention = 1.0 - payout
 
     projections: list[dict] = []
     pv_ri_sum = 0.0
     bv_roll = bv
-    roe_roll = avg_roe
 
     for t in range(1, PROJECTION_YEARS + 1):
         # Linear fade of ROE toward CoE
         fade_fraction = t / PROJECTION_YEARS
-        roe_t = roe_roll * (1 - fade_fraction) + coe * fade_fraction
+        roe_t = avg_roe * (1 - fade_fraction) + coe * fade_fraction
         ri_t = (roe_t - coe) * bv_roll
         discount_factor = (1 + coe) ** t
         pv_ri = ri_t / discount_factor
@@ -156,13 +153,10 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         # Roll forward book equity
         bv_roll = bv_roll + roe_t * bv_roll * retention
 
-    # Terminal residual income: Gordon growth in perpetuity
-    roe_terminal = LONG_RUN_ROE
+    # Once ROE has fully faded to CoE, steady-state residual income is zero.
+    roe_terminal = coe
     ri_terminal = (roe_terminal - coe) * bv_roll
-    terminal_divisor = coe - TERMINAL_GROWTH_RATE
-    if terminal_divisor <= 0:
-        terminal_divisor = 0.01
-    terminal_value = ri_terminal / terminal_divisor / ((1 + coe) ** PROJECTION_YEARS)
+    terminal_value = 0.0
 
     intrinsic_value_equity = bv + pv_ri_sum + terminal_value
     intrinsic_value_per_share = safe_divide(intrinsic_value_equity, shares)

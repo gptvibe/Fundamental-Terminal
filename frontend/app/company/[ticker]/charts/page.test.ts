@@ -3,13 +3,16 @@
 import * as React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { beforeEach } from "vitest";
 
 import CompanyChartsPage from "@/app/company/[ticker]/charts/page";
 import { getCompanyCharts } from "@/lib/api";
 
+const mockSearchParamsGet = vi.fn();
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "nvda" }),
-  useSearchParams: () => ({ get: () => null }),
+  useSearchParams: () => ({ get: (key: string) => mockSearchParamsGet(key) }),
   usePathname: () => "/company/NVDA/charts",
 }));
 
@@ -18,7 +21,49 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("CompanyChartsPage", () => {
+  beforeEach(() => {
+    mockSearchParamsGet.mockReset();
+    vi.mocked(getCompanyCharts).mockReset();
+  });
+
+  it("passes an explicit as_of query through to charts loading", async () => {
+    mockSearchParamsGet.mockImplementation((key: string) => {
+      if (key === "as_of") {
+        return "2025-12-27";
+      }
+      return null;
+    });
+    vi.mocked(getCompanyCharts).mockResolvedValue({
+      company: null,
+      title: "Growth Outlook",
+      build_state: "building",
+      build_status: "Preparing charts",
+      summary: { headline: "Growth Outlook", primary_score: { key: "growth", label: "Growth", score: null, tone: "unavailable", detail: null }, secondary_badges: [], thesis: "Loading", unavailable_notes: [], freshness_badges: [], source_badges: [] },
+      factors: { primary: null, supporting: [] },
+      legend: { title: "Actual vs Forecast", items: [] },
+      cards: { revenue: { key: "revenue", title: "Revenue", subtitle: null, metric_label: "Revenue", unit_label: "USD", empty_state: null, highlights: [], series: [] }, revenue_growth: { key: "revenue_growth", title: "Revenue Growth", subtitle: null, metric_label: "Revenue Growth", unit_label: "%", empty_state: null, highlights: [], series: [] }, profit_metric: { key: "profit_metric", title: "Profit Metric", subtitle: null, metric_label: "Profit", unit_label: "USD", empty_state: null, highlights: [], series: [] }, cash_flow_metric: { key: "cash_flow_metric", title: "Cash Flow Metric", subtitle: null, metric_label: "Cash Flow", unit_label: "USD", empty_state: null, highlights: [], series: [] }, eps: { key: "eps", title: "EPS", subtitle: null, metric_label: "EPS", unit_label: "USD/share", empty_state: null, highlights: [], series: [] }, growth_summary: { key: "growth_summary", title: "Growth Summary", subtitle: null, empty_state: null, comparisons: [] }, forecast_assumptions: null },
+      forecast_methodology: { version: "company_charts_dashboard_v9", label: "Method", summary: "Summary", disclaimer: "Disclaimer" },
+      payload_version: "company_charts_dashboard_v9",
+      provenance: [],
+      as_of: "2025-12-27",
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "NVDA", job_id: null },
+      diagnostics: { coverage_ratio: 0, fallback_ratio: 0, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+      projection_studio: null,
+      what_if: null,
+    } as never);
+
+    render(React.createElement(CompanyChartsPage));
+
+    await waitFor(() => {
+      expect(getCompanyCharts).toHaveBeenCalledWith("NVDA", { asOf: "2025-12-27" });
+    });
+  });
+
   it("renders the charts dashboard with explicit actual-vs-forecast separation", async () => {
+    mockSearchParamsGet.mockImplementation(() => null);
     vi.mocked(getCompanyCharts).mockResolvedValue({
       company: {
         ticker: "NVDA",
@@ -220,7 +265,7 @@ describe("CompanyChartsPage", () => {
     render(React.createElement(CompanyChartsPage));
 
     await waitFor(() => {
-      expect(getCompanyCharts).toHaveBeenCalledWith("NVDA");
+      expect(getCompanyCharts).toHaveBeenCalledWith("NVDA", undefined);
     });
 
     expect(screen.getAllByText("Growth Outlook").length).toBeGreaterThan(0);
