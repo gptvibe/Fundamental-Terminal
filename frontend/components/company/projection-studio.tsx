@@ -5,14 +5,21 @@ import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
+import { ForecastTrackRecord } from "@/components/charts/forecast-track-record";
+import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
+import { SourceStateBadge } from "@/components/ui/source-state-badge";
+import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
 import { getCompanyChartsWhatIf } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { exportRowsToCsv, type ExportRow, normalizeExportFileStem } from "@/lib/export";
+import { FORECAST_HANDOFF_QUERY_PARAM, encodeForecastHandoffPayload, type ForecastHandoffMetric, type ForecastHandoffPayload } from "@/lib/forecast-handoff";
+import { getForecastSourceStateDescriptor, resolveProjectionForecastSourceState, resolveSavedScenarioSourceState, type ForecastSourceState } from "@/lib/forecast-source-state";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import type {
   CompanyChartsDashboardResponse,
   CompanyChartsDriverCardPayload,
   CompanyChartsDriverControlMetadataPayload,
+  CompanyChartsForecastAccuracyResponse,
   CompanyChartsFormulaInputPayload,
   CompanyChartsFormulaTracePayload,
   CompanyChartsProjectedRowPayload,
@@ -86,6 +93,35 @@ const DRIVER_GROUP_TITLES: Record<string, string> = {
 };
 
 const WHAT_IF_DEBOUNCE_MS = 320;
+const SCENARIO_STORAGE_VERSION = 1;
+const MAX_COMPARE_SCENARIOS = 2;
+const EMPTY_DRIVER_CONTROLS: CompanyChartsDriverControlMetadataPayload[] = [];
+const EMPTY_WHAT_IF_IMPACT_METRICS: CompanyChartsWhatIfImpactMetricPayload[] = [];
+const FORECAST_METRIC_SPECS = [
+  { key: "revenue", label: "Revenue", unit: "usd" },
+  { key: "operating_income", label: "Operating Income", unit: "usd" },
+  { key: "net_income", label: "Net Income", unit: "usd" },
+  { key: "free_cash_flow", label: "Free Cash Flow", unit: "usd" },
+  { key: "eps", label: "EPS", unit: "usd_per_share" },
+] as const;
+
+interface SavedStudioScenarioMetric {
+  key: string;
+  label: string;
+  unit: string;
+  value: number | null;
+}
+
+interface SavedStudioScenario {
+  version: 1;
+  id: string;
+  name: string;
+  createdAt: string;
+  overrideCount: number;
+  source: "sec_base_forecast" | "user_scenario";
+  overrides: Record<string, number>;
+  metrics: SavedStudioScenarioMetric[];
+}
 
 function isSubtotalRow(key: string): boolean {
   return key.includes("_subtotal") || key.includes("_total") || key === "balance_check" || key === "reconciliation";
@@ -454,8 +490,34 @@ function buildExportRows(
   scheduleSections: CompanyChartsScheduleSectionPayload[],
   driverGroups: DriverGroup[],
   scenarios: CompanyChartsProjectedRowPayload[],
-  sensitivityCells: CompanyChartsSensitivityCellPayload[]
+  sensitivityCells: CompanyChartsSensitivityCellPayload[],
+  impactMetrics: CompanyChartsWhatIfImpactMetricPayload[],
+  comparedScenarios: SavedStudioScenario[],
+  sourceState: ForecastSourceState,
+  forecastAccuracy: CompanyChartsForecastAccuracyResponse | null
 ): ExportRow[] {
+  const sourceDescriptor = getForecastSourceStateDescriptor(sourceState);
+  const metadataRows: ExportRow[] = [
+    {
+      record_type: "source_state_meta",
+      source_state: sourceDescriptor.key,
+      source_state_label: sourceDescriptor.label,
+      source_state_description: sourceDescriptor.description,
+    },
+  ];
+
+  if (forecastAccuracy) {
+    metadataRows.push({
+      record_type: "forecast_accuracy_meta",
+      forecast_accuracy_status: forecastAccuracy.status,
+      insufficient_history_reason: forecastAccuracy.status === "insufficient_history" ? (forecastAccuracy.insufficient_history_reason ?? "") : "",
+      snapshot_count: forecastAccuracy.status === "ok" ? forecastAccuracy.aggregate.snapshot_count : "",
+      sample_count: forecastAccuracy.status === "ok" ? forecastAccuracy.aggregate.sample_count : "",
+      mean_absolute_percentage_error: forecastAccuracy.status === "ok" ? (forecastAccuracy.aggregate.mean_absolute_percentage_error ?? "") : "",
+      directional_accuracy: forecastAccuracy.status === "ok" ? (forecastAccuracy.aggregate.directional_accuracy ?? "") : "",
+    });
+  }
+
   const scheduleRows = scheduleSections.flatMap((section) =>
     section.rows.flatMap((row) => {
       const years = Array.from(new Set([...Object.keys(row.reported_values).map(Number), ...Object.keys(row.projected_values).map(Number)])).sort(
@@ -529,7 +591,192 @@ function buildExportRows(
       }) satisfies ExportRow
   );
 
-  return [...scheduleRows, ...driverRows, ...scenarioRows, ...sensitivityRows];
+  const impactRows = impactMetrics.map(
+    (metric) =>
+      ({
+        record_type: "scenario_impact",
+        metric_key: metric.key,
+        metric_label: metric.label,
+        unit: metric.unit,
+        baseline_value: metric.baseline_value ?? "",
+        scenario_value: metric.scenario_value ?? "",
+        delta_value: metric.delta_value ?? "",
+        delta_percent: metric.delta_percent ?? "",
+      }) satisfies ExportRow
+  );
+
+  const comparedScenarioRows =
+    comparedScenarios.length === MAX_COMPARE_SCENARIOS
+      ? buildComparedScenarioRows(comparedScenarios[0], comparedScenarios[1])
+      : [];
+
+  return [...metadataRows, ...scheduleRows, ...driverRows, ...scenarioRows, ...sensitivityRows, ...impactRows, ...comparedScenarioRows];
+}
+
+function buildComparedScenarioRows(left: SavedStudioScenario, right: SavedStudioScenario): ExportRow[] {
+  const leftMetricMap = new Map(left.metrics.map((metric) => [metric.key, metric]));
+  const rightMetricMap = new Map(right.metrics.map((metric) => [metric.key, metric]));
+  const metricKeys = Array.from(new Set([...leftMetricMap.keys(), ...rightMetricMap.keys()]));
+
+  return metricKeys.map((metricKey) => {
+    const leftMetric = leftMetricMap.get(metricKey) ?? null;
+    const rightMetric = rightMetricMap.get(metricKey) ?? null;
+    const delta =
+      leftMetric?.value != null && rightMetric?.value != null
+        ? rightMetric.value - leftMetric.value
+        : "";
+
+    return {
+      record_type: "scenario_compare",
+      metric_key: metricKey,
+      metric_label: leftMetric?.label ?? rightMetric?.label ?? metricKey,
+      unit: leftMetric?.unit ?? rightMetric?.unit ?? "",
+      left_scenario: left.name,
+      left_value: leftMetric?.value ?? "",
+      right_scenario: right.name,
+      right_value: rightMetric?.value ?? "",
+      delta,
+    } satisfies ExportRow;
+  });
+}
+
+function normalizeScenarioName(name: string | null | undefined): string | null {
+  const trimmed = (name ?? "").trim();
+  return trimmed ? trimmed : null;
+}
+
+function storageKeyForTicker(ticker: string): string {
+  return `ft:projection-studio:scenarios:${ticker.toUpperCase()}`;
+}
+
+function parseSavedScenarios(raw: string | null): SavedStudioScenario[] {
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((entry): SavedStudioScenario | null => {
+        if (!entry || typeof entry !== "object") {
+          return null;
+        }
+        const candidate = entry as Partial<SavedStudioScenario>;
+        if (
+          candidate.version !== SCENARIO_STORAGE_VERSION ||
+          typeof candidate.id !== "string" ||
+          typeof candidate.name !== "string" ||
+          typeof candidate.createdAt !== "string" ||
+          typeof candidate.overrides !== "object" ||
+          !candidate.overrides ||
+          !Array.isArray(candidate.metrics)
+        ) {
+          return null;
+        }
+
+        const normalizedOverrides: Record<string, number> = {};
+        Object.entries(candidate.overrides).forEach(([key, value]) => {
+          if (typeof value === "number" && Number.isFinite(value)) {
+            normalizedOverrides[key] = value;
+          }
+        });
+
+        const metrics = candidate.metrics
+          .map((metric): SavedStudioScenarioMetric | null => {
+            if (!metric || typeof metric !== "object") {
+              return null;
+            }
+            const nextMetric = metric as Partial<SavedStudioScenarioMetric>;
+            if (typeof nextMetric.key !== "string" || typeof nextMetric.label !== "string" || typeof nextMetric.unit !== "string") {
+              return null;
+            }
+            return {
+              key: nextMetric.key,
+              label: nextMetric.label,
+              unit: nextMetric.unit,
+              value: typeof nextMetric.value === "number" && Number.isFinite(nextMetric.value) ? nextMetric.value : null,
+            };
+          })
+          .filter((metric): metric is SavedStudioScenarioMetric => metric !== null);
+
+        return {
+          version: 1,
+          id: candidate.id,
+          name: candidate.name,
+          createdAt: candidate.createdAt,
+          overrideCount: typeof candidate.overrideCount === "number" && Number.isFinite(candidate.overrideCount) ? candidate.overrideCount : Object.keys(normalizedOverrides).length,
+          source: candidate.source === "user_scenario" ? "user_scenario" : "sec_base_forecast",
+          overrides: normalizedOverrides,
+          metrics,
+        };
+      })
+      .filter((entry): entry is SavedStudioScenario => entry !== null)
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  } catch {
+    return [];
+  }
+}
+
+function readProjectedValueByKey(studio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>, rowKey: string, year: number): number | null {
+  for (const section of studio.schedule_sections) {
+    const row = section.rows.find((candidate) => candidate.key === rowKey);
+    if (!row) {
+      continue;
+    }
+    const value = row.projected_values[year];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  return null;
+}
+
+function collectScenarioMetrics(studio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>, forecastYear: number | null): SavedStudioScenarioMetric[] {
+  if (forecastYear == null) {
+    return [];
+  }
+
+  return FORECAST_METRIC_SPECS.map((metricSpec) => ({
+    key: metricSpec.key,
+    label: metricSpec.label,
+    unit: metricSpec.unit,
+    value: readProjectedValueByKey(studio, metricSpec.key, forecastYear),
+  }));
+}
+
+function buildForecastHandoffMetrics(
+  baseStudio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>,
+  visibleStudio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>,
+  forecastYear: number | null
+): ForecastHandoffMetric[] {
+  if (forecastYear == null) {
+    return [];
+  }
+
+  return FORECAST_METRIC_SPECS.map((metricSpec) => ({
+    key: metricSpec.key,
+    label: metricSpec.label,
+    unit: metricSpec.unit,
+    base: readProjectedValueByKey(baseStudio, metricSpec.key, forecastYear),
+    scenario: readProjectedValueByKey(visibleStudio, metricSpec.key, forecastYear),
+  })).filter((metric) => metric.base != null || metric.scenario != null);
+}
+
+function formatScenarioTimestamp(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unknown";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
 function getSensitivityTone(cell: CompanyChartsSensitivityCellPayload | undefined, baseCell: CompanyChartsSensitivityCellPayload | null): string {
@@ -893,7 +1140,7 @@ function WhatIfSidebar({
             <p className="studio-panel-subtitle">Backend-provided operating assumptions for live scenario recomputation.</p>
           </div>
           <div className="studio-what-if-actions">
-            <button type="button" className="studio-secondary-button" onClick={onToggle} aria-expanded={isOpen} aria-controls="studio-what-if-sidebar">
+            <button type="button" className="studio-secondary-button" onClick={onToggle} aria-controls="studio-what-if-sidebar">
               {isOpen ? "Collapse Sidebar" : "Open Sidebar"}
             </button>
             <button type="button" className="studio-secondary-button" onClick={onResetAll} disabled={!activeOverrideCount && !recomputing}>
@@ -999,6 +1246,10 @@ function WhatIfSidebar({
 
 export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
   const ticker = payload.company?.ticker ?? "company";
+  const forecastAccuracy = useForecastAccuracy(ticker, {
+    asOf: payload.as_of,
+    enabled: Boolean(payload.company?.ticker),
+  });
   const [selectedTrace, setSelectedTrace] = useState<CompanyChartsFormulaTracePayload | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [basePayload, setBasePayload] = useState<CompanyChartsDashboardResponse>(payload);
@@ -1009,6 +1260,9 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
   const [recomputeError, setRecomputeError] = useState<string | null>(null);
   const [controlsRetryTick, setControlsRetryTick] = useState(0);
   const [recomputeRetryTick, setRecomputeRetryTick] = useState(0);
+  const [savedScenarios, setSavedScenarios] = useState<SavedStudioScenario[]>([]);
+  const [loadedScenarioId, setLoadedScenarioId] = useState<string | null>(null);
+  const [compareScenarioIds, setCompareScenarioIds] = useState<string[]>([]);
   const recomputeAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -1019,7 +1273,25 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     setRecomputing(false);
     setRecomputeError(null);
     setSelectedTrace(null);
+    setLoadedScenarioId(null);
+    setCompareScenarioIds([]);
   }, [payload]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setSavedScenarios(parseSavedScenarios(window.localStorage.getItem(storageKeyForTicker(ticker))));
+  }, [ticker]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(storageKeyForTicker(ticker), JSON.stringify(savedScenarios));
+  }, [savedScenarios, ticker]);
 
   useEffect(() => {
     return () => {
@@ -1068,7 +1340,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
   const visibleStudio = visiblePayload.projection_studio ?? studio;
   const baseWhatIf = basePayload.what_if;
   const visibleWhatIf = visiblePayload.what_if;
-  const baseControls = baseWhatIf?.driver_control_metadata ?? [];
+  const baseControls = baseWhatIf?.driver_control_metadata ?? EMPTY_DRIVER_CONTROLS;
   const baseControlMap = useMemo(() => new Map(baseControls.map((control) => [control.key, control])), [baseControls]);
   const appliedOverrides = useMemo(
     () => new Map((visibleWhatIf?.overrides_applied ?? []).map((override) => [override.key, override])),
@@ -1153,10 +1425,54 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     [allYears, scheduleSections]
   );
   const projectedYears = useMemo(() => allYears.filter((year) => !reportedYears.includes(year)), [allYears, reportedYears]);
+  const firstProjectedYear = projectedYears[0] ?? null;
   const bridgeCards = useMemo(() => buildBridgeCards(scheduleSections, projectedYears[0] ?? null), [projectedYears, scheduleSections]);
+  const scenarioImpactMetrics = visibleWhatIf?.impact_summary?.metrics ?? EMPTY_WHAT_IF_IMPACT_METRICS;
+  const comparedScenarios = useMemo(
+    () => compareScenarioIds.map((id) => savedScenarios.find((scenario) => scenario.id === id) ?? null).filter((scenario): scenario is SavedStudioScenario => scenario !== null),
+    [compareScenarioIds, savedScenarios]
+  );
+
+  const loadedScenario = useMemo(
+    () => (loadedScenarioId ? savedScenarios.find((scenario) => scenario.id === loadedScenarioId) ?? null : null),
+    [loadedScenarioId, savedScenarios]
+  );
+
+  const forecastHandoffPayload = useMemo<ForecastHandoffPayload | null>(() => {
+    const metrics = buildForecastHandoffMetrics(baseStudio, visibleStudio, firstProjectedYear);
+    if (!metrics.length) {
+      return null;
+    }
+
+    return {
+      version: 1,
+      ticker,
+      asOf: basePayload.as_of,
+      forecastYear: firstProjectedYear,
+      source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
+      scenarioName: loadedScenario?.name ?? null,
+      overrideCount: activeOverrideCount,
+      metrics,
+      createdAt: new Date().toISOString(),
+    };
+  }, [activeOverrideCount, basePayload.as_of, baseStudio, firstProjectedYear, loadedScenario?.name, ticker, visibleStudio]);
+
+  const valuationImpactHref = useMemo(() => {
+    const baseHref = `/company/${encodeURIComponent(ticker)}/models`;
+    if (!forecastHandoffPayload) {
+      return baseHref;
+    }
+
+    return `${baseHref}?${FORECAST_HANDOFF_QUERY_PARAM}=${encodeForecastHandoffPayload(forecastHandoffPayload)}`;
+  }, [forecastHandoffPayload, ticker]);
+  const sourceState = useMemo(
+    () => resolveProjectionForecastSourceState(visiblePayload, activeOverrideCount),
+    [activeOverrideCount, visiblePayload]
+  );
+
   const exportRows = useMemo(
-    () => buildExportRows(scheduleSections, driverGroups, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix),
-    [driverGroups, scheduleSections, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix]
+    () => buildExportRows(scheduleSections, driverGroups, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix, scenarioImpactMetrics, comparedScenarios, sourceState, forecastAccuracy.data),
+    [comparedScenarios, driverGroups, forecastAccuracy.data, scenarioImpactMetrics, scheduleSections, sourceState, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix]
   );
 
   function handleExportCsv() {
@@ -1170,6 +1486,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     }
 
     const clampedValue = clampValue(rawValue, control);
+    setLoadedScenarioId(null);
     setDraftOverrides((current) => {
       if (nearlyEqual(clampedValue, control.baseline_value)) {
         if (!(key in current)) {
@@ -1195,6 +1512,7 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
       setVisiblePayload(basePayload);
       setSelectedTrace(null);
     });
+    setLoadedScenarioId(null);
   }
 
   function handleRetry() {
@@ -1204,6 +1522,56 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
     }
     setRecomputeRetryTick((current) => current + 1);
   }
+
+  function handleSaveScenario() {
+    const suggestedName = loadedScenario?.name ?? `Scenario ${savedScenarios.length + 1}`;
+    const inputName = normalizeScenarioName(window.prompt("Name this scenario", suggestedName));
+    if (!inputName) {
+      return;
+    }
+
+    const nextScenario: SavedStudioScenario = {
+      version: 1,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: inputName,
+      createdAt: new Date().toISOString(),
+      overrideCount: activeOverrideCount,
+      source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
+      overrides: { ...draftOverrides },
+      metrics: collectScenarioMetrics(visibleStudio, firstProjectedYear),
+    };
+
+    setSavedScenarios((current) => [nextScenario, ...current]);
+    setLoadedScenarioId(nextScenario.id);
+  }
+
+  function handleLoadScenario(scenario: SavedStudioScenario) {
+    setDraftOverrides({ ...scenario.overrides });
+    setLoadedScenarioId(scenario.id);
+  }
+
+  function handleDeleteScenario(id: string) {
+    setSavedScenarios((current) => current.filter((scenario) => scenario.id !== id));
+    setCompareScenarioIds((current) => current.filter((scenarioId) => scenarioId !== id));
+    setLoadedScenarioId((current) => (current === id ? null : current));
+  }
+
+  function handleToggleCompare(id: string) {
+    setCompareScenarioIds((current) => {
+      if (current.includes(id)) {
+        return current.filter((scenarioId) => scenarioId !== id);
+      }
+      if (current.length >= MAX_COMPARE_SCENARIOS) {
+        return [...current.slice(1), id];
+      }
+      return [...current, id];
+    });
+  }
+
+  const compareRows =
+    comparedScenarios.length === MAX_COMPARE_SCENARIOS
+      ? buildComparedScenarioRows(comparedScenarios[0], comparedScenarios[1])
+      : [];
 
   return (
     <div className="charts-page-shell">
@@ -1220,17 +1588,26 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
             {payload.company?.market_sector ? <span className="charts-page-meta-pill">{payload.company.market_sector}</span> : null}
             {payload.forecast_methodology.confidence_label ? <span className="charts-page-meta-pill">{payload.forecast_methodology.confidence_label}</span> : null}
           </div>
+          <ForecastTrustCue
+            sourceState={sourceState}
+            accuracy={forecastAccuracy.data}
+            loading={forecastAccuracy.loading}
+            error={forecastAccuracy.error}
+          />
           <p className="charts-page-hero-thesis">Inspection of projected values, sensitivities, waterfall bridges, and traceable formulas.</p>
         </div>
         <div className="studio-hero-actions">
           <button type="button" className="studio-primary-button" onClick={handleExportCsv}>
             Export Studio CSV
           </button>
-          <button type="button" className="studio-secondary-button" onClick={() => setSidebarOpen((current) => !current)} aria-expanded={sidebarOpen} aria-controls="studio-what-if-sidebar">
+          <button type="button" className="studio-secondary-button" onClick={handleSaveScenario}>
+            Save Scenario
+          </button>
+          <button type="button" className="studio-secondary-button" onClick={() => setSidebarOpen((current) => !current)} aria-controls="studio-what-if-sidebar">
             {sidebarOpen ? "Hide What-If Sidebar" : "Show What-If Sidebar"}
           </button>
-          <Link href={`/company/${encodeURIComponent(ticker)}/models`} className="studio-secondary-link">
-            Open in Models for Valuation
+          <Link href={valuationImpactHref} className="studio-secondary-link">
+            See Valuation Impact
           </Link>
         </div>
       </header>
@@ -1238,6 +1615,84 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
       <div className={`studio-layout-shell ${sidebarOpen ? "has-sidebar" : "is-sidebar-collapsed"}`}>
         <div className="studio-layout-main">
           <ImpactSummaryStrip payload={visiblePayload} activeOverrideCount={activeOverrideCount} />
+
+          <div className="workspace-card-stack workspace-card-stack-tight" data-testid="projection-studio-track-record-section">
+            <div className="workspace-pill-row">
+              <SourceStateBadge state={sourceState} compact={false} />
+            </div>
+            <ForecastTrackRecord data={forecastAccuracy.data} loading={forecastAccuracy.loading} error={forecastAccuracy.error} />
+          </div>
+
+          <section className="studio-panel" aria-label="Saved scenarios">
+            <div className="studio-panel-header">
+              <div>
+                <h2 className="studio-panel-title">Scenario Library</h2>
+                <p className="studio-panel-subtitle">Saved locally in this browser. Compare up to two scenarios with simple deltas.</p>
+              </div>
+            </div>
+
+            {!savedScenarios.length ? <div className="studio-what-if-state">No saved scenarios yet. Save the current forecast setup to reuse it later.</div> : null}
+
+            {savedScenarios.length ? (
+              <div className="studio-scenario-library">
+                {savedScenarios.map((scenario) => (
+                  <article key={scenario.id} className={`studio-driver-card studio-scenario-card ${loadedScenarioId === scenario.id ? "is-active" : ""}`}>
+                    <div className="studio-driver-topline">
+                      <div>
+                        <div className="studio-driver-title">{scenario.name}</div>
+                        <div className="studio-driver-detail">Saved {formatScenarioTimestamp(scenario.createdAt)}</div>
+                      </div>
+                      <span className="studio-marker-chip is-default">{scenario.overrideCount} overrides</span>
+                    </div>
+                    <div className="studio-scenario-meta-row">
+                      <SourceStateBadge state={resolveSavedScenarioSourceState(scenario.source)} />
+                      <label className="studio-scenario-compare-toggle">
+                        <input
+                          type="checkbox"
+                          checked={compareScenarioIds.includes(scenario.id)}
+                          onChange={() => handleToggleCompare(scenario.id)}
+                        />
+                        Compare
+                      </label>
+                    </div>
+                    <div className="studio-scenario-action-row">
+                      <button type="button" className="studio-secondary-button" onClick={() => handleLoadScenario(scenario)}>
+                        Load
+                      </button>
+                      <button type="button" className="studio-secondary-button" onClick={() => handleDeleteScenario(scenario.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
+            {compareRows.length ? (
+              <div className="studio-table-wrapper">
+                <table className="studio-scenarios-table" data-testid="studio-scenario-compare-table">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>{comparedScenarios[0].name}</th>
+                      <th>{comparedScenarios[1].name}</th>
+                      <th>Delta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compareRows.map((row) => (
+                      <tr key={String(row.metric_key)}>
+                        <td>{String(row.metric_label)}</td>
+                        <td>{formatValue(typeof row.left_value === "number" ? row.left_value : null, String(row.unit ?? "usd"))}</td>
+                        <td>{formatValue(typeof row.right_value === "number" ? row.right_value : null, String(row.unit ?? "usd"))}</td>
+                        <td>{typeof row.delta === "number" ? formatSignedDelta(row.delta, String(row.unit ?? "usd")) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </section>
 
           <section className="studio-panel" aria-label="Key drivers">
             <div className="studio-panel-header">

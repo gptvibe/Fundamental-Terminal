@@ -100,9 +100,13 @@ from app.services.cache_queries import (
 )
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
 from app.services.company_charts_dashboard import (
+    CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
     CHARTS_DASHBOARD_SCHEMA_VERSION,
+    build_company_charts_forecast_accuracy_response,
     build_company_charts_dashboard_response,
+    get_company_charts_forecast_accuracy_snapshot,
     get_company_charts_dashboard_snapshot,
+    recompute_and_persist_company_charts_forecast_accuracy,
     recompute_and_persist_company_charts_dashboard,
 )
 from app.services.company_research_brief import (
@@ -141,6 +145,7 @@ from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVote
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
 from app.services.hot_cache import HotCacheLookup, _etag_for_json_bytes, _render_json_bytes, shared_hot_response_cache
+from app.services.refresh_state import get_dataset_last_checked
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.sec_edgar import CANONICAL_STATEMENT_TYPE, CompanyIdentity, EdgarClient, EdgarIngestionService, FilingMetadata
@@ -2857,6 +2862,107 @@ def company_charts_what_if(
     )
 
 
+@app.get("/api/companies/{ticker}/charts/forecast-accuracy", response_model=CompanyChartsForecastAccuracyResponse)
+def company_charts_forecast_accuracy(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsForecastAccuracyResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    hot_key = f"charts-forecast-accuracy:{normalized_ticker}:asof={normalized_as_of}"
+    cached_hot = shared_hot_response_cache.get_sync(hot_key, route="charts")
+    if cached_hot is not None and cached_hot.is_fresh:
+        return CompanyChartsForecastAccuracyResponse.model_validate(_decode_hot_cache_payload(cached_hot))
+
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        return CompanyChartsForecastAccuracyResponse(
+            company=None,
+            status="insufficient_history",
+            insufficient_history_reason="No persisted company snapshot is available yet.",
+            max_backtests=6,
+            metrics=[],
+            aggregate=CompanyChartsForecastAccuracyAggregatePayload(),
+            samples=[],
+            refresh=refresh,
+            diagnostics=_build_data_quality_diagnostics(missing_field_flags=["company_missing", "forecast_accuracy_insufficient_history"]),
+            **_empty_provenance_contract(),
+        )
+
+    stored_snapshot, payload = _load_company_charts_forecast_accuracy_snapshot_record(
+        session,
+        snapshot.company.id,
+        as_of=parsed_as_of,
+    )
+    refresh = _refresh_for_company_charts_forecast_accuracy(
+        background_tasks,
+        session,
+        snapshot,
+        stored_snapshot=stored_snapshot,
+        as_of=parsed_as_of,
+    )
+    if payload is None:
+        if hasattr(session, "execute") and hasattr(session, "commit"):
+            generated = recompute_and_persist_company_charts_forecast_accuracy(
+                session,
+                snapshot.company.id,
+                as_of=parsed_as_of,
+            )
+            if generated is not None:
+                session.commit()
+                response = generated.model_copy(
+                    update={
+                        "refresh": RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None),
+                    }
+                )
+                shared_hot_response_cache.store_sync(
+                    hot_key,
+                    route="charts",
+                    payload=response.model_dump(mode="json"),
+                    tags=_build_hot_cache_tags(
+                        ticker=snapshot.company.ticker,
+                        datasets=("charts_forecast_accuracy",),
+                        schema_versions=(CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,),
+                        as_of=normalized_as_of,
+                    ),
+                )
+                return response
+        if not refresh.triggered:
+            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return CompanyChartsForecastAccuracyResponse(
+            company=_serialize_company(snapshot),
+            status="insufficient_history",
+            insufficient_history_reason="Forecast accuracy payload is still building for this company.",
+            max_backtests=6,
+            metrics=[],
+            aggregate=CompanyChartsForecastAccuracyAggregatePayload(),
+            samples=[],
+            refresh=refresh,
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["forecast_accuracy_missing"], missing_field_flags=["forecast_accuracy_unavailable"]),
+            **_empty_provenance_contract(),
+        )
+
+    response = payload.model_copy(update={"refresh": refresh})
+    shared_hot_response_cache.store_sync(
+        hot_key,
+        route="charts",
+        payload=response.model_dump(mode="json"),
+        tags=_build_hot_cache_tags(
+            ticker=snapshot.company.ticker,
+            datasets=("charts_forecast_accuracy",),
+            schema_versions=(CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,),
+            as_of=normalized_as_of,
+        ),
+    )
+    return response
+
+
 def _build_company_charts_response(
     session: Session,
     normalized_ticker: str,
@@ -3212,6 +3318,41 @@ def _load_company_charts_snapshot_record(
     return stored, payload
 
 
+def _load_company_charts_forecast_accuracy_snapshot_record(
+    session: Session,
+    company_id: int,
+    *,
+    as_of: datetime | None = None,
+) -> tuple[Any | None, CompanyChartsForecastAccuracyResponse | None]:
+    try:
+        stored = get_company_charts_forecast_accuracy_snapshot(
+            session,
+            company_id,
+            as_of=as_of,
+            schema_version=CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to load company charts forecast accuracy snapshot for company_id=%s",
+            company_id,
+        )
+        return None, None
+
+    if stored is None:
+        return None, None
+
+    try:
+        payload = CompanyChartsForecastAccuracyResponse.model_validate(stored.payload)
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "Unable to validate company charts forecast accuracy snapshot for company_id=%s",
+            company_id,
+        )
+        return stored, None
+
+    return stored, payload
+
+
 def _refresh_for_company_charts(
     background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
@@ -3228,6 +3369,54 @@ def _refresh_for_company_charts(
     if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+
+
+def _refresh_for_company_charts_forecast_accuracy(
+    background_tasks: BackgroundTasks,
+    session: Session,
+    snapshot: CompanyCacheSnapshot,
+    *,
+    stored_snapshot: Any | None,
+    as_of: datetime | None,
+) -> RefreshState:
+    if stored_snapshot is None:
+        if snapshot.cache_state in {"missing", "stale"}:
+            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+    if as_of is not None:
+        return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    if snapshot.cache_state in {"missing", "stale"}:
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+    if not _snapshot_last_checked_is_fresh(stored_snapshot):
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    if _charts_forecast_accuracy_sources_newer_than_snapshot(session, snapshot.company.id, stored_snapshot):
+        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+
+
+def _charts_forecast_accuracy_sources_newer_than_snapshot(
+    session: Session,
+    company_id: int,
+    stored_snapshot: Any,
+) -> bool:
+    if not hasattr(session, "execute"):
+        return False
+
+    snapshot_timestamp = _normalize_utc_datetime(getattr(stored_snapshot, "last_updated", None)) or _normalize_utc_datetime(
+        getattr(stored_snapshot, "last_checked", None)
+    )
+    if snapshot_timestamp is None:
+        return False
+
+    financials_last_checked = _normalize_utc_datetime(get_dataset_last_checked(session, company_id, "financials"))
+    earnings_last_checked = _normalize_utc_datetime(get_dataset_last_checked(session, company_id, "earnings"))
+    latest_source_last_checked = max(
+        [value for value in [financials_last_checked, earnings_last_checked] if value is not None],
+        default=None,
+    )
+    if latest_source_last_checked is None:
+        return False
+    return latest_source_last_checked > snapshot_timestamp
 
 
 def _augment_company_charts_response(
@@ -3560,6 +3749,14 @@ def _snapshot_last_checked_is_fresh(stored_snapshot: Any) -> bool:
         normalized_last_checked = last_checked.astimezone(timezone.utc)
     freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.freshness_window_hours)
     return normalized_last_checked >= freshness_cutoff
+
+
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _company_research_brief_snapshot_is_fresh(stored_snapshot: Any) -> bool:

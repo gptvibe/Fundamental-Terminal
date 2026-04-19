@@ -2821,6 +2821,51 @@ export interface CompanyChartsWhatIfPayload {
   driver_control_metadata: CompanyChartsDriverControlMetadataPayload[];
 }
 
+export interface CompanyChartsForecastAccuracySamplePayload {
+  metric_key: string;
+  metric_label: string;
+  unit: string;
+  anchor_fiscal_year: number;
+  target_fiscal_year: number;
+  cutoff_as_of: string;
+  predicted_value: number | null;
+  actual_value: number | null;
+  absolute_error: number | null;
+  absolute_percentage_error: number | null;
+  directionally_correct: boolean | null;
+}
+
+export interface CompanyChartsForecastAccuracyMetricPayload {
+  key: string;
+  label: string;
+  unit: string;
+  sample_count: number;
+  directional_sample_count: number;
+  mean_absolute_error: number | null;
+  mean_absolute_percentage_error: number | null;
+  directional_accuracy: number | null;
+}
+
+export interface CompanyChartsForecastAccuracyAggregatePayload {
+  snapshot_count: number;
+  sample_count: number;
+  directional_sample_count: number;
+  mean_absolute_percentage_error: number | null;
+  directional_accuracy: number | null;
+}
+
+export interface CompanyChartsForecastAccuracyResponse extends ProvenanceEnvelope {
+  company: CompanyPayload | null;
+  status: "ok" | "insufficient_history";
+  insufficient_history_reason: string | null;
+  max_backtests: number;
+  metrics: CompanyChartsForecastAccuracyMetricPayload[];
+  aggregate: CompanyChartsForecastAccuracyAggregatePayload;
+  samples: CompanyChartsForecastAccuracySamplePayload[];
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
 export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   title: string;

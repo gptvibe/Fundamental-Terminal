@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
 
@@ -15,21 +15,25 @@ import { MarketContextPanel } from "@/components/models/market-context-panel";
 import { ModelEvaluationPanel } from "@/components/models/model-evaluation-panel";
 import { SectorContextPanel } from "@/components/models/sector-context-panel";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
+import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
+import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import { showAppToast } from "@/lib/app-toast";
-import { getCompanyCapitalStructure, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanyOilScenarioOverlay, getCompanySectorContext, getLatestModelEvaluation, invalidateApiReadCacheForTicker, refreshCompany } from "@/lib/api";
+import { getCompanyCapitalStructure, getCompanyChartsForecastAccuracy, getCompanyFinancials, getCompanyMarketContext, getCompanyModels, getCompanyOilScenarioOverlay, getCompanySectorContext, getLatestModelEvaluation, invalidateApiReadCacheForTicker, refreshCompany } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
+import { FORECAST_HANDOFF_QUERY_PARAM, decodeForecastHandoffPayload, type ForecastHandoffMetric, type ForecastHandoffPayload } from "@/lib/forecast-handoff";
+import { resolveForecastHandoffSourceState } from "@/lib/forecast-source-state";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { describeOilOverlayAvailability, describeOilSupportReason, resolveOilOverlayEvaluationSummary, supportsOilWorkspace } from "@/lib/oil-workspace";
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
-import type { CompanyCapitalStructureResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
+import type { CompanyCapitalStructureResponse, CompanyChartsForecastAccuracyResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
 interface ModelsWorkspaceData {
   modelData: CompanyModelsResponse;
@@ -70,6 +74,7 @@ type DupontMode = "auto" | "annual" | "ttm";
 
 export default function CompanyModelsPage() {
   const params = useParams<{ ticker: string }>();
+  const searchParams = useSearchParams();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
   const companyLayout = useCompanyLayoutContext();
   const [data, setData] = useState<CompanyModelsResponse | null>(null);
@@ -100,6 +105,17 @@ export default function CompanyModelsPage() {
   const showOilScenarioOverlay = supportsOilWorkspace(oilSupportStatus);
   const oilWorkspaceEvaluationSummary = useMemo(() => resolveOilOverlayEvaluationSummary(ticker, oilOverlayEvaluationData), [ticker, oilOverlayEvaluationData]);
   const sharedCompany = useMemo(() => data?.company ?? financialData?.company ?? null, [data?.company, financialData?.company]);
+  const forecastHandoff = useMemo(() => {
+    const decoded = decodeForecastHandoffPayload(searchParams?.get(FORECAST_HANDOFF_QUERY_PARAM) ?? null);
+    if (!decoded) {
+      return null;
+    }
+    return decoded.ticker.toUpperCase() === ticker ? decoded : null;
+  }, [searchParams, ticker]);
+  const forecastAccuracy = useForecastAccuracy(ticker, {
+    asOf: forecastHandoff?.asOf,
+    enabled: Boolean(forecastHandoff),
+  });
 
   useEffect(() => {
     if (!companyLayout) {
@@ -293,6 +309,9 @@ export default function CompanyModelsPage() {
         },
         () => getCompanyModels(ticker, MODEL_NAMES, { dupontMode, expandInputPeriods: true })
       );
+      const exportForecastAccuracy: CompanyChartsForecastAccuracyResponse | null = forecastHandoff
+        ? (forecastAccuracy.data ?? await getCompanyChartsForecastAccuracy(ticker, { asOf: forecastHandoff.asOf }))
+        : null;
 
       downloadJsonFile(`${normalizeExportFileStem(ticker, "company")}-model-outputs.json`, {
         exported_at: new Date().toISOString(),
@@ -305,6 +324,20 @@ export default function CompanyModelsPage() {
         capital_structure: capitalStructureData,
         oil_scenario_overlay: oilScenarioOverlayData,
         latest_evaluation: evaluationData,
+        forecast_context: forecastHandoff
+          ? {
+              handoff: forecastHandoff,
+              source_state: resolveForecastHandoffSourceState(forecastHandoff),
+              forecast_accuracy:
+                exportForecastAccuracy == null
+                  ? null
+                  : {
+                      status: exportForecastAccuracy.status,
+                      insufficient_history_reason: exportForecastAccuracy.insufficient_history_reason,
+                      aggregate: exportForecastAccuracy.status === "ok" ? exportForecastAccuracy.aggregate : null,
+                    },
+            }
+          : null,
       });
       showAppToast({ message: "Model outputs exported as JSON.", tone: "info" });
     } catch (nextError) {
@@ -490,6 +523,17 @@ export default function CompanyModelsPage() {
         />
       </Panel>
 
+      {forecastHandoff ? (
+        <Panel
+          title="Forecast-backed Valuation Impact"
+          subtitle="Additive handoff from Projection Studio. Existing valuation models remain unchanged."
+          className="models-page-span-full"
+          variant="subtle"
+        >
+          <ForecastBackedValuationCard handoff={forecastHandoff} models={models} ticker={ticker} accuracy={forecastAccuracy.data} accuracyLoading={forecastAccuracy.loading} accuracyError={forecastAccuracy.error} />
+        </Panel>
+      ) : null}
+
       <Panel
         title="Financial Health Score"
         subtitle={loading ? "Loading health inputs..." : "Profitability, strength, growth, and overall health on a 0-10 scale"}
@@ -663,6 +707,112 @@ export default function CompanyModelsPage() {
       </details>
     </CompanyWorkspaceShell>
   );
+}
+
+function ForecastBackedValuationCard({ handoff, models, ticker, accuracy, accuracyLoading, accuracyError }: { handoff: ForecastHandoffPayload; models: ModelPayload[]; ticker: string; accuracy: CompanyChartsForecastAccuracyResponse | null; accuracyLoading: boolean; accuracyError: string | null }) {
+  const dcfModel = models.find((model) => model.model_name === "dcf") ?? null;
+  const dcfResult = dcfModel?.result ?? null;
+  const baseFairValuePerShare = asNumber((dcfResult as Record<string, unknown> | null)?.fair_value_per_share);
+  const sourceState = resolveForecastHandoffSourceState(handoff) ?? "sec_default";
+
+  const fcfMetric = findHandoffMetric(handoff.metrics, "free_cash_flow");
+  const earningsMetric = findHandoffMetric(handoff.metrics, "net_income") ?? findHandoffMetric(handoff.metrics, "eps");
+  const revenueMetric = findHandoffMetric(handoff.metrics, "revenue");
+
+  const weightedChange = resolveWeightedForecastChange([fcfMetric, earningsMetric, revenueMetric]);
+  const estimatedFairValue =
+    baseFairValuePerShare != null && weightedChange != null ? baseFairValuePerShare * (1 + Math.max(-0.8, Math.min(1.5, weightedChange))) : null;
+
+  return (
+    <div className="workspace-card-stack workspace-card-stack-tight" data-testid="forecast-backed-valuation-card">
+      <div className="workspace-pill-row">
+        <span className="pill">Source {handoff.source === "user_scenario" ? "User scenario" : "SEC-derived base forecast"}</span>
+        <span className="pill">Forecast Year {handoff.forecastYear ?? "—"}</span>
+        <span className="pill">Overrides {handoff.overrideCount}</span>
+        {handoff.scenarioName ? <span className="pill">Scenario {handoff.scenarioName}</span> : null}
+      </div>
+      <ForecastTrustCue sourceState={sourceState} accuracy={accuracy} loading={accuracyLoading} error={accuracyError} />
+
+      <div className="models-forecast-impact-grid">
+        <div className="models-forecast-impact-card">
+          <div className="metric-label">DCF fair value per share (existing model)</div>
+          <div className="models-forecast-impact-value">{formatCompactNumber(baseFairValuePerShare)}</div>
+          <div className="text-muted">From cached DCF model outputs in Models.</div>
+        </div>
+        <div className="models-forecast-impact-card">
+          <div className="metric-label">Directional fair value with forecast handoff</div>
+          <div className="models-forecast-impact-value">{formatCompactNumber(estimatedFairValue)}</div>
+          <div className="text-muted">Additive estimate using projected FCF and earnings deltas from Studio.</div>
+        </div>
+      </div>
+
+      <div className="models-forecast-metrics-grid">
+        {handoff.metrics.map((metric) => {
+          const delta =
+            metric.base != null && metric.scenario != null
+              ? metric.scenario - metric.base
+              : null;
+          return (
+            <div key={metric.key} className="models-forecast-metric-row">
+              <strong>{metric.label}</strong>
+              <span>Base {formatForecastMetric(metric.base, metric.unit)}</span>
+              <span>Handoff {formatForecastMetric(metric.scenario, metric.unit)}</span>
+              <span>Delta {delta != null ? formatSignedMetric(delta, metric.unit) : "—"}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="text-muted">
+        This card is additive only. It does not modify the underlying Models compute pipeline or cached model runs.
+      </div>
+      <div>
+        <Link href={`/company/${encodeURIComponent(ticker)}/models`} className="ticker-button utility-action-button utility-action-link-button">
+          Reset to Standard Models View
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function findHandoffMetric(metrics: ForecastHandoffMetric[], key: string): ForecastHandoffMetric | null {
+  return metrics.find((metric) => metric.key === key) ?? null;
+}
+
+function resolveWeightedForecastChange(metrics: Array<ForecastHandoffMetric | null>): number | null {
+  const weightedDeltas = metrics
+    .map((metric, index) => {
+      if (!metric || metric.base == null || metric.scenario == null || metric.base === 0) {
+        return null;
+      }
+      const weight = index === 0 ? 0.65 : index === 1 ? 0.25 : 0.1;
+      return ((metric.scenario - metric.base) / Math.abs(metric.base)) * weight;
+    })
+    .filter((value): value is number => value != null);
+
+  if (!weightedDeltas.length) {
+    return null;
+  }
+
+  return weightedDeltas.reduce((sum, value) => sum + value, 0);
+}
+
+function formatForecastMetric(value: number | null, unit: string): string {
+  if (value == null) {
+    return "—";
+  }
+  if (unit === "percent") {
+    return formatPercent(value);
+  }
+  if (unit === "usd_per_share") {
+    return formatCompactNumber(value);
+  }
+  return formatCompactNumber(value);
+}
+
+function formatSignedMetric(value: number, unit: string): string {
+  const prefix = value >= 0 ? "+" : "-";
+  return `${prefix}${formatForecastMetric(Math.abs(value), unit)}`;
 }
 
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {

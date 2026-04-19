@@ -11929,6 +11929,87 @@ select {
   margin-bottom: 24px;
 }
 
+.studio-scenario-library {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.studio-scenario-card.is-active {
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--panel-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.studio-scenario-meta-row,
+.studio-scenario-action-row,
+.studio-scenario-compare-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.studio-scenario-meta-row {
+  font-size: var(--text-xs);
+  color: var(--surface-muted-text);
+}
+
+.studio-scenario-compare-toggle {
+  justify-content: flex-start;
+}
+
+.models-forecast-impact-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.models-forecast-impact-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 130%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 90%, transparent);
+}
+
+.models-forecast-impact-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--surface-strong-text);
+}
+
+.models-forecast-metrics-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.models-forecast-metric-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+  color: var(--surface-muted-text);
+}
+
+.models-forecast-metric-row strong {
+  color: var(--surface-strong-text);
+}
+
+.forecast-track-record-chart-card {
+  min-height: 260px;
+}
+
+.forecast-track-record-chart-shell {
+  width: 100%;
+  height: 220px;
+}
+
 /* Formula trace popover */
 .formula-trace-popover {
   position: fixed;
@@ -12154,6 +12235,8 @@ select {
   .studio-bridge-footer,
   .studio-what-if-actions,
   .studio-impact-card-topline,
+  .studio-scenario-meta-row,
+  .studio-scenario-action-row,
   .formula-trace-header {
     flex-direction: column;
     align-items: flex-start;

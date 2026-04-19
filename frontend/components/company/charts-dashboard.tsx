@@ -17,6 +17,9 @@ import {
 } from "recharts";
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
+import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
+import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
+import { resolveChartsForecastSourceState } from "@/lib/forecast-source-state";
 import { CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type {
@@ -67,6 +70,11 @@ export function CompanyChartsDashboard({
   studioEnabled?: boolean;
 }) {
   const company = payload.company;
+  const sourceState = useMemo(() => resolveChartsForecastSourceState(payload), [payload]);
+  const forecastAccuracy = useForecastAccuracy(company?.ticker ?? "", {
+    asOf: payload.as_of,
+    enabled: Boolean(company?.ticker),
+  });
   const revenuePhaseSummary = useMemo(() => buildChartPhaseSummary(buildChartRows(payload.cards.revenue.series)), [payload.cards.revenue.series]);
   const summaryBadges = useMemo(() => payload.summary.secondary_badges.slice(0, 4), [payload.summary.secondary_badges]);
   const freshnessLine = useMemo(() => buildChartsFreshnessLine(payload), [payload]);
@@ -129,6 +137,15 @@ export function CompanyChartsDashboard({
           <div className="charts-summary-data-lines">
             <SummaryDataLine label="Freshness" value={payload.summary.freshness_badges.join(" · ") || freshnessLine} />
             <SummaryDataLine label="Sources" value={sourceLine || "Official filings"} />
+          </div>
+          <div className="charts-summary-trust-block">
+            <div className="charts-summary-section-title">Forecast Trust</div>
+            <ForecastTrustCue
+              sourceState={sourceState}
+              accuracy={forecastAccuracy.data}
+              loading={forecastAccuracy.loading}
+              error={forecastAccuracy.error}
+            />
           </div>
           <div className="charts-methodology-copy charts-methodology-copy-compact">
             <div className="charts-methodology-heading">SEC-Derived Outlook</div>

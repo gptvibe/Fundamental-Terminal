@@ -5,10 +5,12 @@ import path from "node:path";
 
 import * as React from "react";
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompanyChartsDashboard, MetricChartTooltipContent } from "@/components/company/charts-dashboard";
 import type { CompanyChartsDashboardResponse } from "@/lib/types";
+
+const mockUseForecastAccuracy = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/company/ACME/charts",
@@ -17,6 +19,10 @@ vi.mock("next/navigation", () => ({
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
     React.createElement("a", { href, ...props }, children),
+}));
+
+vi.mock("@/hooks/use-forecast-accuracy", () => ({
+  useForecastAccuracy: (...args: unknown[]) => mockUseForecastAccuracy(...args),
 }));
 
 vi.mock("recharts", () => {
@@ -222,7 +228,19 @@ function makeMetricCard(
 }
 
 describe("CompanyChartsDashboard", () => {
+  beforeEach(() => {
+    mockUseForecastAccuracy.mockReturnValue({ data: null, loading: false, error: null });
+  });
+
   it("renders the requested dashboard matrix and forecast detail rows", () => {
+    mockUseForecastAccuracy.mockReturnValue({
+      data: {
+        status: "ok",
+        aggregate: { mean_absolute_percentage_error: 0.12, directional_accuracy: 0.75 },
+      },
+      loading: false,
+      error: null,
+    });
     render(React.createElement(CompanyChartsDashboard, { payload: makePayload() }));
 
     const assumptionsStrip = screen.getByText("Key Assumptions").closest("section");
@@ -246,6 +264,9 @@ describe("CompanyChartsDashboard", () => {
     expect(within(detailsGrid).getByText("Forecast Assumptions")).toBeTruthy();
     expect(screen.getByText("Key Assumptions")).toBeTruthy();
     expect(screen.getByText("SEC-Derived Outlook")).toBeTruthy();
+    expect(screen.getByTestId("forecast-trust-cue")).toBeTruthy();
+    expect(screen.getByText("SEC Default")).toBeTruthy();
+    expect(screen.getByText("MAPE 12.00%")).toBeTruthy();
     expect(screen.getByText("SEC EDGAR filings only")).toBeTruthy();
     expect(screen.getByText("No third-party consensus or price prediction content")).toBeTruthy();
     expect(screen.getByText("Projected periods begin at the divider and use a soft shaded region inside each chart.")).toBeTruthy();

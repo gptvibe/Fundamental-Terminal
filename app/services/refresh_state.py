@@ -33,6 +33,7 @@ DatasetName = Literal[
     "capital_structure",
     "company_research_brief",
     "charts_dashboard",
+    "charts_forecast_accuracy",
     "oil_scenario_overlay",
     "company_refresh",
 ]

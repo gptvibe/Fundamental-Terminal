@@ -7,6 +7,7 @@ import {
   CompanyCompareResponse,
   CompanyCapitalMarketsSummaryResponse,
   CompanyCapitalStructureResponse,
+  CompanyChartsForecastAccuracyResponse,
   CompanyChartsDashboardResponse,
   CompanyChartsWhatIfRequest,
   CompanyEquityClaimRiskResponse,
@@ -680,6 +681,16 @@ export function getCompanyCharts(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyChartsForecastAccuracy(
+  ticker: string,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyChartsForecastAccuracyResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/forecast-accuracy${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyChartsWhatIf(

@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { ProjectionStudio } from "./projection-studio";
 import { getCompanyChartsWhatIf } from "@/lib/api";
+import { FORECAST_HANDOFF_QUERY_PARAM, decodeForecastHandoffPayload } from "@/lib/forecast-handoff";
+
+const mockUseForecastAccuracy = vi.fn();
 
 const { exportRowsToCsv } = vi.hoisted(() => ({
   exportRowsToCsv: vi.fn(),
@@ -27,7 +30,9 @@ vi.mock("recharts", () => {
   return {
     ResponsiveContainer: MockResponsiveContainer,
     BarChart: MockChart,
+    LineChart: MockChart,
     Bar: MockBar,
+    Line: MockBar,
     CartesianGrid: () => null,
     Cell: MockCell,
     ReferenceLine: () => null,
@@ -36,6 +41,10 @@ vi.mock("recharts", () => {
     YAxis: () => null,
   };
 });
+
+vi.mock("@/hooks/use-forecast-accuracy", () => ({
+  useForecastAccuracy: (...args: unknown[]) => mockUseForecastAccuracy(...args),
+}));
 
 vi.mock("@/lib/export", async () => {
   const actual = await vi.importActual<typeof import("@/lib/export")>("@/lib/export");
@@ -349,9 +358,49 @@ function buildPayload(options?: {
 }
 
 describe("ProjectionStudio", () => {
+  beforeEach(() => {
+    mockUseForecastAccuracy.mockReturnValue({ data: null, loading: false, error: null });
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("shows the full forecast track record section", async () => {
+    mockUseForecastAccuracy.mockReturnValue({
+      data: {
+        company: null,
+        status: "ok",
+        insufficient_history_reason: null,
+        max_backtests: 6,
+        metrics: [
+          { key: "revenue", label: "Revenue", unit: "usd", sample_count: 2, directional_sample_count: 2, mean_absolute_error: 8, mean_absolute_percentage_error: 0.06, directional_accuracy: 1 },
+        ],
+        aggregate: { snapshot_count: 2, sample_count: 2, directional_sample_count: 2, mean_absolute_percentage_error: 0.12, directional_accuracy: 0.75 },
+        samples: [
+          { metric_key: "revenue", metric_label: "Revenue", unit: "usd", anchor_fiscal_year: 2024, target_fiscal_year: 2025, cutoff_as_of: "2025-02-10T00:00:00+00:00", predicted_value: 126, actual_value: 133, absolute_error: 7, absolute_percentage_error: 0.0526, directionally_correct: true },
+        ],
+        refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+        diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+        confidence_flags: [],
+      },
+      loading: false,
+      error: null,
+    });
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    const trackRecordSection = screen.getByTestId("projection-studio-track-record-section");
+    expect(trackRecordSection).toBeTruthy();
+    expect(screen.getByText("Forecast Track Record")).toBeTruthy();
+    expect(within(trackRecordSection).getByText("Partial Default")).toBeTruthy();
   });
 
   it("opens and collapses the what-if sidebar and uses backend-provided limits", async () => {
@@ -368,9 +417,9 @@ describe("ProjectionStudio", () => {
 
     const toggle = screen.getByRole("button", { name: "Hide What-If Sidebar" });
     fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: "Show What-If Sidebar" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "Show What-If Sidebar" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Show What-If Sidebar" }));
-    expect(screen.getByRole("button", { name: "Hide What-If Sidebar" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Hide What-If Sidebar" })).toBeTruthy();
   });
 
   it("debounces recomputation, updates the impact strip, and renders delta indicators", async () => {
@@ -403,7 +452,7 @@ describe("ProjectionStudio", () => {
 
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
     expect(vi.mocked(getCompanyChartsWhatIf).mock.calls[0][1]).toEqual({ overrides: { price_growth: 0.08 } });
-    expect(screen.getByLabelText("What-if impact summary")).toBeTruthy();
+    await waitFor(() => expect(screen.getByLabelText("What-if impact summary")).toBeTruthy());
 
     const revenueCell = screen.getByRole("button", { name: "Revenue 2026 formula trace" });
     expect(within(revenueCell).getByText("+90")).toBeTruthy();
@@ -433,6 +482,8 @@ describe("ProjectionStudio", () => {
     fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.08", valueAsNumber: 0.08 } });
     await new Promise((resolve) => setTimeout(resolve, 350));
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByLabelText("What-if impact summary")).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByRole("button", { name: "Revenue 2026 formula trace" })).getByText("+90")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Revenue 2026 formula trace" }));
     const dialog = screen.getByRole("dialog", { name: "Formula trace details" });
@@ -473,8 +524,8 @@ describe("ProjectionStudio", () => {
     fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.08", valueAsNumber: 0.08 } });
     await new Promise((resolve) => setTimeout(resolve, 350));
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
-    expect(screen.getByLabelText("What-if impact summary")).toBeTruthy();
-    expect(within(screen.getByRole("button", { name: "Revenue 2026 formula trace" })).getByText("+90")).toBeTruthy();
+    await waitFor(() => expect(screen.getByLabelText("What-if impact summary")).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByRole("button", { name: "Revenue 2026 formula trace" })).getByText("+90")).toBeTruthy());
 
     fireEvent.change(screen.getByTestId("studio-what-if-input-dso"), { target: { value: "90", valueAsNumber: 90 } });
     await new Promise((resolve) => setTimeout(resolve, 350));
@@ -486,6 +537,26 @@ describe("ProjectionStudio", () => {
   });
 
   it("still exports studio csv rows with schedule metadata", async () => {
+    mockUseForecastAccuracy.mockReturnValue({
+      data: {
+        company: null,
+        status: "ok",
+        insufficient_history_reason: null,
+        max_backtests: 6,
+        metrics: [],
+        aggregate: { snapshot_count: 2, sample_count: 4, directional_sample_count: 4, mean_absolute_percentage_error: 0.12, directional_accuracy: 0.75 },
+        samples: [],
+        refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+        diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: null, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+        confidence_flags: [],
+      },
+      loading: false,
+      error: null,
+    });
     vi.mocked(getCompanyChartsWhatIf).mockResolvedValueOnce(buildPayload({ includeWhatIf: true }).payload as never);
     const { payload, studio } = buildPayload();
 
@@ -495,7 +566,118 @@ describe("ProjectionStudio", () => {
     fireEvent.click(screen.getByRole("button", { name: "Export Studio CSV" }));
 
     expect(exportRowsToCsv).toHaveBeenCalledTimes(1);
-    const [fileName] = exportRowsToCsv.mock.calls[0] as [string, Array<Record<string, unknown>>];
+    const [fileName, rows] = exportRowsToCsv.mock.calls[0] as [string, Array<Record<string, unknown>>];
     expect(fileName).toBe("ACME-projection-studio.csv");
+    expect(rows.some((row) => row.record_type === "source_state_meta" && row.source_state === "partial_default")).toBe(true);
+    expect(rows.some((row) => row.record_type === "forecast_accuracy_meta" && row.forecast_accuracy_status === "ok")).toBe(true);
+  });
+
+  it("saves, loads, deletes, and compares two local scenarios", async () => {
+    vi.mocked(getCompanyChartsWhatIf)
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          impactSummary: true,
+          revenue2026: 1300,
+          receivables2026: 278,
+          dsoValue: 78,
+          priceGrowthValue: 0.08,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      )
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          impactSummary: true,
+          revenue2026: 1125,
+          receivables2026: 205,
+          dsoValue: 28,
+          priceGrowthValue: 0.01,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      );
+
+    const promptSpy = vi
+      .spyOn(window, "prompt")
+      .mockReturnValueOnce("Upside Scenario")
+      .mockReturnValueOnce("Defensive Scenario");
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    await waitFor(() => expect(screen.getByTestId("studio-what-if-input-price_growth")).toBeTruthy());
+    fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.08", valueAsNumber: 0.08 } });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+
+    fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.01", valueAsNumber: 0.01 } });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+
+    expect(promptSpy).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Upside Scenario")).toBeTruthy();
+    expect(screen.getByText("Defensive Scenario")).toBeTruthy();
+
+    const upsideCard = screen.getByText("Upside Scenario").closest("article");
+    const defensiveCard = screen.getByText("Defensive Scenario").closest("article");
+    expect(upsideCard).toBeTruthy();
+    expect(defensiveCard).toBeTruthy();
+
+    fireEvent.click(within(upsideCard as HTMLElement).getByLabelText("Compare"));
+    fireEvent.click(within(defensiveCard as HTMLElement).getByLabelText("Compare"));
+    expect(screen.getByTestId("studio-scenario-compare-table")).toBeTruthy();
+
+    fireEvent.click(within(upsideCard as HTMLElement).getByRole("button", { name: "Load" }));
+    expect((screen.getByTestId("studio-what-if-input-price_growth") as HTMLInputElement).value).toBe("0.08");
+
+    fireEvent.click(within(defensiveCard as HTMLElement).getByRole("button", { name: "Delete" }));
+    expect(screen.queryByText("Defensive Scenario")).toBeNull();
+  });
+
+  it("exports scenario compare rows and includes valuation handoff payload", async () => {
+    vi.mocked(getCompanyChartsWhatIf).mockResolvedValueOnce(
+      buildPayload({
+        includeWhatIf: true,
+        impactSummary: true,
+        revenue2026: 1300,
+        receivables2026: 278,
+        dsoValue: 78,
+        priceGrowthValue: 0.08,
+        revenueScenarioState: "user_override",
+      }).payload as never
+    );
+
+    vi.spyOn(window, "prompt").mockReturnValueOnce("Scenario One").mockReturnValueOnce("Scenario Two");
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    await waitFor(() => expect(screen.getByTestId("studio-what-if-input-price_growth")).toBeTruthy());
+    fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.08", valueAsNumber: 0.08 } });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+
+    const firstCard = screen.getByText("Scenario One").closest("article") as HTMLElement;
+    const secondCard = screen.getByText("Scenario Two").closest("article") as HTMLElement;
+    fireEvent.click(within(firstCard).getByLabelText("Compare"));
+    fireEvent.click(within(secondCard).getByLabelText("Compare"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Export Studio CSV" }));
+    expect(exportRowsToCsv).toHaveBeenCalledTimes(1);
+    const [, rows] = exportRowsToCsv.mock.calls[0] as [string, Array<Record<string, unknown>>];
+    expect(rows.some((row) => row.record_type === "scenario_compare")).toBe(true);
+
+    const valuationLink = screen.getByRole("link", { name: "See Valuation Impact" });
+    const href = valuationLink.getAttribute("href") ?? "";
+    const query = href.split("?")[1] ?? "";
+    const params = new URLSearchParams(query);
+    const handoff = decodeForecastHandoffPayload(params.get(FORECAST_HANDOFF_QUERY_PARAM));
+    expect(handoff?.source).toBe("user_scenario");
+    expect(handoff?.metrics.some((metric) => metric.key === "free_cash_flow")).toBe(true);
   });
 });

@@ -324,6 +324,51 @@ class CompanyChartsWhatIfPayload(BaseModel):
     driver_control_metadata: list[CompanyChartsDriverControlMetadataPayload] = Field(default_factory=list)
 
 
+class CompanyChartsForecastAccuracySamplePayload(BaseModel):
+    metric_key: str
+    metric_label: str
+    unit: str
+    anchor_fiscal_year: int
+    target_fiscal_year: int
+    cutoff_as_of: str
+    predicted_value: Number = None
+    actual_value: Number = None
+    absolute_error: Number = None
+    absolute_percentage_error: Number = None
+    directionally_correct: bool | None = None
+
+
+class CompanyChartsForecastAccuracyMetricPayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    sample_count: int = 0
+    directional_sample_count: int = 0
+    mean_absolute_error: Number = None
+    mean_absolute_percentage_error: Number = None
+    directional_accuracy: Number = None
+
+
+class CompanyChartsForecastAccuracyAggregatePayload(BaseModel):
+    snapshot_count: int = 0
+    sample_count: int = 0
+    directional_sample_count: int = 0
+    mean_absolute_percentage_error: Number = None
+    directional_accuracy: Number = None
+
+
+class CompanyChartsForecastAccuracyResponse(ProvenanceEnvelope):
+    company: CompanyPayload | None
+    status: str = "insufficient_history"
+    insufficient_history_reason: str | None = None
+    max_backtests: int = 6
+    metrics: list[CompanyChartsForecastAccuracyMetricPayload] = Field(default_factory=list)
+    aggregate: CompanyChartsForecastAccuracyAggregatePayload = Field(default_factory=CompanyChartsForecastAccuracyAggregatePayload)
+    samples: list[CompanyChartsForecastAccuracySamplePayload] = Field(default_factory=list)
+    refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+
+
 class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     title: str = "Growth Outlook"

@@ -25,6 +25,10 @@ from app.contracts.company_charts import (
     CompanyChartsForecastDiagnosticsPayload,
     CompanyChartsFormulaInputPayload,
     CompanyChartsFormulaTracePayload,
+    CompanyChartsForecastAccuracyAggregatePayload,
+    CompanyChartsForecastAccuracyMetricPayload,
+    CompanyChartsForecastAccuracyResponse,
+    CompanyChartsForecastAccuracySamplePayload,
     CompanyChartsLegendItemPayload,
     CompanyChartsLegendPayload,
     CompanyChartsMethodologyPayload,
@@ -58,6 +62,7 @@ from app.services.refresh_state import mark_dataset_checked
 
 
 CHARTS_DASHBOARD_SCHEMA_VERSION = "company_charts_dashboard_v9"
+CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION = "charts_forecast_accuracy_v1"
 CHARTS_DASHBOARD_INPUT_FINGERPRINT_VERSION = "company-charts-dashboard-inputs-v9"
 ANNUAL_FILING_TYPES = {"10-K", "20-F", "40-F"}
 FORECAST_STABILITY_MIN_SCORE = 20
@@ -122,9 +127,32 @@ DILUTED_SHARE_FORECAST_CHANGE_CAP = 0.06
 DILUTED_SHARE_FORECAST_REVERSION_SPEED = 0.5
 PROJECTION_STUDIO_REPORTED_PERIODS = 3
 PROJECTION_STUDIO_SENSITIVITY_DELTAS = (-0.04, -0.02, 0.0, 0.02, 0.04)
+FORECAST_ACCURACY_MAX_BACKTESTS = 6
+FORECAST_ACCURACY_MIN_SAMPLE_COUNT = 2
+FORECAST_ACCURACY_METRICS: tuple[tuple[str, str, str], ...] = (
+    ("revenue", "Revenue", "usd"),
+    ("operating_income", "Operating Income", "usd"),
+    ("eps", "Diluted EPS", "usd_per_share"),
+    ("free_cash_flow", "Free Cash Flow", "usd"),
+)
 
 
 def get_company_charts_dashboard_snapshot(session: Session, company_id: int, *, as_of: datetime | None = None, schema_version: str = CHARTS_DASHBOARD_SCHEMA_VERSION) -> CompanyChartsDashboardSnapshot | None:
+    statement = select(CompanyChartsDashboardSnapshot).where(
+        CompanyChartsDashboardSnapshot.company_id == company_id,
+        CompanyChartsDashboardSnapshot.as_of_key == _as_of_key(as_of),
+        CompanyChartsDashboardSnapshot.schema_version == schema_version,
+    )
+    return session.execute(statement).scalar_one_or_none()
+
+
+def get_company_charts_forecast_accuracy_snapshot(
+    session: Session,
+    company_id: int,
+    *,
+    as_of: datetime | None = None,
+    schema_version: str = CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
+) -> CompanyChartsDashboardSnapshot | None:
     statement = select(CompanyChartsDashboardSnapshot).where(
         CompanyChartsDashboardSnapshot.company_id == company_id,
         CompanyChartsDashboardSnapshot.as_of_key == _as_of_key(as_of),
@@ -355,6 +383,316 @@ def recompute_and_persist_company_charts_dashboard(session: Session, company_id:
     session.execute(statement)
     mark_dataset_checked(session, company_id, "charts_dashboard", checked_at=timestamp, success=True, payload_version_hash=payload_version_hash or payload.payload_version, invalidate_hot_cache=True)
     return payload
+
+
+def recompute_and_persist_company_charts_forecast_accuracy(
+    session: Session,
+    company_id: int,
+    *,
+    checked_at: datetime | None = None,
+    as_of: datetime | None = None,
+    payload_version_hash: str | None = None,
+    max_backtests: int = FORECAST_ACCURACY_MAX_BACKTESTS,
+) -> CompanyChartsForecastAccuracyResponse | None:
+    timestamp = checked_at or datetime.now(timezone.utc)
+    payload = build_company_charts_forecast_accuracy_response(
+        session,
+        company_id,
+        as_of=as_of,
+        generated_at=timestamp,
+        max_backtests=max_backtests,
+    )
+    if payload is None:
+        mark_dataset_checked(
+            session,
+            company_id,
+            "charts_forecast_accuracy",
+            checked_at=timestamp,
+            success=True,
+            payload_version_hash=payload_version_hash or CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
+            invalidate_hot_cache=True,
+        )
+        return None
+
+    statement = insert(CompanyChartsDashboardSnapshot).values(
+        company_id=company_id,
+        as_of_key=_as_of_key(as_of),
+        as_of_value=as_of,
+        schema_version=CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
+        payload=payload.model_dump(mode="json"),
+        last_updated=timestamp,
+        last_checked=timestamp,
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_company_charts_dashboard_snapshots_company_asof_schema",
+        set_={
+            "as_of_value": statement.excluded.as_of_value,
+            "payload": statement.excluded.payload,
+            "last_updated": statement.excluded.last_updated,
+            "last_checked": statement.excluded.last_checked,
+        },
+    )
+    session.execute(statement)
+    mark_dataset_checked(
+        session,
+        company_id,
+        "charts_forecast_accuracy",
+        checked_at=timestamp,
+        success=True,
+        payload_version_hash=payload_version_hash or CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
+        invalidate_hot_cache=True,
+    )
+    return payload
+
+
+def build_company_charts_forecast_accuracy_response(
+    session: Session,
+    company_id: int,
+    *,
+    as_of: datetime | None = None,
+    generated_at: datetime | None = None,
+    max_backtests: int = FORECAST_ACCURACY_MAX_BACKTESTS,
+) -> CompanyChartsForecastAccuracyResponse | None:
+    company = session.get(Company, company_id)
+    if company is None:
+        return None
+
+    snapshot = get_company_snapshot(session, company.ticker)
+    timestamp = generated_at or datetime.now(timezone.utc)
+    financials = get_company_financials(session, company_id)
+    if as_of is not None:
+        financials = select_point_in_time_financials(financials, as_of)
+    annuals = _annual_statements(financials)
+    earnings_releases = get_company_earnings_releases(session, company_id, limit=36, as_of=as_of)
+
+    samples = _build_forecast_accuracy_samples(
+        company,
+        financials,
+        earnings_releases,
+        max_backtests=max_backtests,
+    )
+    metric_payloads = _build_forecast_accuracy_metric_payloads(samples)
+    aggregate_payload = _build_forecast_accuracy_aggregate_payload(samples)
+    insufficient_reason = _forecast_accuracy_insufficient_reason(annuals, aggregate_payload.sample_count)
+    status = "ok" if insufficient_reason is None else "insufficient_history"
+
+    source_inputs_last_refreshed_at = _merge(
+        _latest_checked(annuals),
+        _latest_checked(earnings_releases),
+    )
+    company_payload = CompanyPayload(
+        ticker=company.ticker,
+        cik=company.cik,
+        name=company.name,
+        sector=company.sector,
+        market_sector=company.market_sector,
+        market_industry=company.market_industry,
+        strict_official_mode=True,
+        last_checked=getattr(snapshot, "last_checked", None),
+        cache_state=getattr(snapshot, "cache_state", "fresh") if snapshot is not None else "fresh",
+    )
+    latest_period = annuals[-1].period_end if annuals else None
+    provenance = build_provenance_entries(
+        [
+            usage
+            for usage in [
+                SourceUsage(
+                    "ft_company_charts_dashboard",
+                    role="derived",
+                    as_of=latest_period or as_of,
+                    last_refreshed_at=source_inputs_last_refreshed_at or timestamp,
+                ),
+                SourceUsage("sec_companyfacts", role="primary", as_of=latest_period or as_of, last_refreshed_at=_latest_checked(annuals)) if annuals else None,
+                SourceUsage("sec_edgar", role="primary", as_of=latest_period or as_of, last_refreshed_at=_latest_checked(earnings_releases)) if earnings_releases else None,
+            ]
+            if usage is not None
+        ]
+    )
+
+    diagnostics = DataQualityDiagnosticsPayload(
+        coverage_ratio=_round(float(aggregate_payload.sample_count) / max(1, max_backtests * len(FORECAST_ACCURACY_METRICS)), 3),
+        fallback_ratio=0.0,
+        stale_flags=[],
+        parser_confidence=None,
+        missing_field_flags=[] if status == "ok" else ["forecast_accuracy_insufficient_history"],
+        reconciliation_penalty=None,
+        reconciliation_disagreement_count=0,
+    )
+
+    return CompanyChartsForecastAccuracyResponse(
+        company=company_payload,
+        status=status,
+        insufficient_history_reason=insufficient_reason,
+        max_backtests=max_backtests,
+        metrics=metric_payloads,
+        aggregate=aggregate_payload,
+        samples=samples,
+        refresh=RefreshState(triggered=False, reason="fresh", ticker=company.ticker, job_id=None),
+        diagnostics=diagnostics,
+        provenance=provenance,
+        as_of=_as_of_text(as_of, latest_period),
+        last_refreshed_at=source_inputs_last_refreshed_at or timestamp,
+        source_mix=build_source_mix(provenance),
+        confidence_flags=(["forecast_accuracy_insufficient_history"] if status != "ok" else []),
+    )
+
+
+def _build_forecast_accuracy_samples(
+    company: Company,
+    financials: list[Any],
+    earnings_releases: list[Any],
+    *,
+    max_backtests: int,
+) -> list[CompanyChartsForecastAccuracySamplePayload]:
+    annuals = _annual_statements(financials)
+    if len(annuals) < 3:
+        return []
+
+    metric_actuals_by_year = {
+        metric: {
+            statement.period_end.year: value
+            for statement in annuals
+            if getattr(statement, "period_end", None) is not None
+            for value in [_actual_metric_value(statement, metric)]
+            if value is not None
+        }
+        for metric, _label, _unit in FORECAST_ACCURACY_METRICS
+    }
+
+    samples: list[CompanyChartsForecastAccuracySamplePayload] = []
+    realized_snapshot_count = 0
+    for cutoff_index in range(len(annuals) - 2, 0, -1):
+        if realized_snapshot_count >= max_backtests:
+            break
+
+        anchor_statement = annuals[cutoff_index]
+        cutoff_as_of = _statement_effective_at(anchor_statement)
+        if cutoff_as_of is None:
+            continue
+
+        visible_financials = select_point_in_time_financials(financials, cutoff_as_of)
+        visible_annuals = _annual_statements(visible_financials)
+        if len(visible_annuals) < 2:
+            continue
+
+        anchor_year = visible_annuals[-1].period_end.year
+        target_year = anchor_year + 1
+        visible_releases = _visible_releases_as_of(earnings_releases, cutoff_as_of)
+        revenue_actual = _actual_series(visible_annuals, "revenue")
+        if len(revenue_actual) < 2:
+            continue
+
+        driver_bundle = build_driver_forecast_bundle(visible_annuals, visible_releases)
+        growth_actual = _growth_series(revenue_actual, "actual")
+        hist_3y = _cagr([_point_value(point) for point in revenue_actual[-4:]]) if len(revenue_actual) >= 4 else None
+        forecast_state = _build_forecast_state(visible_annuals, revenue_actual, growth_actual, hist_3y, driver_bundle, company.name)
+
+        realized_snapshot = False
+        cutoff_as_of_text = cutoff_as_of.isoformat()
+        for metric, label, unit in FORECAST_ACCURACY_METRICS:
+            predicted_value = _forecast_metric_value_for_year(forecast_state, metric, target_year)
+            actual_value = metric_actuals_by_year[metric].get(target_year)
+            if predicted_value is None or actual_value is None:
+                continue
+
+            anchor_actual_value = _actual_metric_value(visible_annuals[-1], metric)
+            absolute_error = abs(float(predicted_value) - float(actual_value))
+            absolute_percentage_error = _absolute_percentage_error(predicted_value, actual_value)
+            directionally_correct = _directional_accuracy_sample(predicted_value, actual_value, anchor_actual_value)
+            samples.append(
+                CompanyChartsForecastAccuracySamplePayload(
+                    metric_key=metric,
+                    metric_label=label,
+                    unit=unit,
+                    anchor_fiscal_year=anchor_year,
+                    target_fiscal_year=target_year,
+                    cutoff_as_of=cutoff_as_of_text,
+                    predicted_value=_round(predicted_value, 6),
+                    actual_value=_round(actual_value, 6),
+                    absolute_error=_round(absolute_error, 6),
+                    absolute_percentage_error=_round(absolute_percentage_error, 6),
+                    directionally_correct=directionally_correct,
+                )
+            )
+            realized_snapshot = True
+
+        if realized_snapshot:
+            realized_snapshot_count += 1
+
+    return samples
+
+
+def _forecast_metric_value_for_year(forecast_state: dict[str, Any], metric: str, fiscal_year: int) -> float | None:
+    points = _forecast_metric_points(forecast_state, metric)
+    for point in points:
+        if point.fiscal_year != fiscal_year:
+            continue
+        return _point_value(point)
+    return None
+
+
+def _directional_accuracy_sample(predicted: float, actual: float, anchor_actual: float | None) -> bool | None:
+    if anchor_actual is None:
+        return None
+    predicted_delta = float(predicted) - float(anchor_actual)
+    actual_delta = float(actual) - float(anchor_actual)
+    if predicted_delta == 0 and actual_delta == 0:
+        return True
+    if predicted_delta == 0 or actual_delta == 0:
+        return None
+    return (predicted_delta > 0 and actual_delta > 0) or (predicted_delta < 0 and actual_delta < 0)
+
+
+def _build_forecast_accuracy_metric_payloads(
+    samples: list[CompanyChartsForecastAccuracySamplePayload],
+) -> list[CompanyChartsForecastAccuracyMetricPayload]:
+    payloads: list[CompanyChartsForecastAccuracyMetricPayload] = []
+    for metric, label, unit in FORECAST_ACCURACY_METRICS:
+        metric_samples = [sample for sample in samples if sample.metric_key == metric]
+        abs_errors = [float(sample.absolute_error) for sample in metric_samples if sample.absolute_error is not None]
+        ape_values = [float(sample.absolute_percentage_error) for sample in metric_samples if sample.absolute_percentage_error is not None]
+        directional_values = [sample.directionally_correct for sample in metric_samples if sample.directionally_correct is not None]
+        directional_correct = sum(1 for value in directional_values if value)
+        payloads.append(
+            CompanyChartsForecastAccuracyMetricPayload(
+                key=metric,
+                label=label,
+                unit=unit,
+                sample_count=len(metric_samples),
+                directional_sample_count=len(directional_values),
+                mean_absolute_error=_round(sum(abs_errors) / len(abs_errors), 6) if abs_errors else None,
+                mean_absolute_percentage_error=_round(sum(ape_values) / len(ape_values), 6) if ape_values else None,
+                directional_accuracy=_round(float(directional_correct) / len(directional_values), 6) if directional_values else None,
+            )
+        )
+    return payloads
+
+
+def _build_forecast_accuracy_aggregate_payload(
+    samples: list[CompanyChartsForecastAccuracySamplePayload],
+) -> CompanyChartsForecastAccuracyAggregatePayload:
+    snapshot_keys = {
+        (sample.anchor_fiscal_year, sample.target_fiscal_year, sample.cutoff_as_of)
+        for sample in samples
+    }
+    ape_values = [float(sample.absolute_percentage_error) for sample in samples if sample.absolute_percentage_error is not None]
+    directional_values = [sample.directionally_correct for sample in samples if sample.directionally_correct is not None]
+    directional_correct = sum(1 for value in directional_values if value)
+    return CompanyChartsForecastAccuracyAggregatePayload(
+        snapshot_count=len(snapshot_keys),
+        sample_count=len(samples),
+        directional_sample_count=len(directional_values),
+        mean_absolute_percentage_error=_round(sum(ape_values) / len(ape_values), 6) if ape_values else None,
+        directional_accuracy=_round(float(directional_correct) / len(directional_values), 6) if directional_values else None,
+    )
+
+
+def _forecast_accuracy_insufficient_reason(annuals: list[Any], sample_count: int) -> str | None:
+    if len(annuals) < 3:
+        return "Need at least three annual periods to evaluate one-year-forward forecast accuracy without lookahead."
+    if sample_count < FORECAST_ACCURACY_MIN_SAMPLE_COUNT:
+        return "Insufficient realized one-year-forward samples for a stable forecast-accuracy estimate."
+    return None
 
 
 def _build_forecast_state(
