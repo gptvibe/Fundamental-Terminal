@@ -680,4 +680,80 @@ describe("ProjectionStudio", () => {
     expect(handoff?.source).toBe("user_scenario");
     expect(handoff?.metrics.some((metric) => metric.key === "free_cash_flow")).toBe(true);
   });
+
+  it("hydrates saved scenarios without rewriting local storage on mount", async () => {
+    window.localStorage.setItem(
+      "ft:projection-studio:scenarios:ACME",
+      JSON.stringify([
+        {
+          version: 1,
+          id: "saved-1",
+          name: "Stored Scenario",
+          createdAt: "2026-04-19T00:00:00.000Z",
+          overrideCount: 1,
+          source: "user_scenario",
+          overrides: { price_growth: 0.08 },
+          metrics: [{ key: "revenue", label: "Revenue", unit: "usd", value: 1300 }],
+        },
+      ])
+    );
+
+    const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key: string, value: string) {
+      if (key === "ft:projection-studio:scenarios:ACME") {
+        throw new DOMException("quota", "QuotaExceededError");
+      }
+
+      return originalSetItem(key, value);
+    });
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    expect(await screen.findByText("Stored Scenario")).toBeTruthy();
+    expect(setItemSpy).not.toHaveBeenCalledWith("ft:projection-studio:scenarios:ACME", expect.any(String));
+
+    setItemSpy.mockRestore();
+  });
+
+  it("keeps the studio interactive when scenario persistence hits quota", async () => {
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Upside Scenario");
+    const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key: string, value: string) {
+      if (key === "ft:projection-studio:scenarios:ACME" && String(value).includes("Upside Scenario")) {
+        throw new DOMException("quota", "QuotaExceededError");
+      }
+
+      return originalSetItem(key, value);
+    });
+
+    vi.mocked(getCompanyChartsWhatIf).mockResolvedValueOnce(
+      buildPayload({
+        includeWhatIf: true,
+        impactSummary: true,
+        revenue2026: 1300,
+        receivables2026: 278,
+        dsoValue: 78,
+        priceGrowthValue: 0.08,
+        revenueScenarioState: "user_override",
+      }).payload as never
+    );
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    await waitFor(() => expect(screen.getByTestId("studio-what-if-input-price_growth")).toBeTruthy());
+    fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.08", valueAsNumber: 0.08 } });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+
+    expect(await screen.findByText("Upside Scenario")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("saved scenarios cannot persist on this device");
+    expect(screen.getByRole("button", { name: "Hide What-If Sidebar" })).toBeTruthy();
+
+    promptSpy.mockRestore();
+    setItemSpy.mockRestore();
+  });
 });

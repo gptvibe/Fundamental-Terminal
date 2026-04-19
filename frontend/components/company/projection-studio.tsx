@@ -123,6 +123,11 @@ interface SavedStudioScenario {
   metrics: SavedStudioScenarioMetric[];
 }
 
+type SavedScenarioPersistenceResult =
+  | { status: "ok"; persistedCount: number }
+  | { status: "trimmed"; persistedCount: number }
+  | { status: "failed"; persistedCount: 0 };
+
 function isSubtotalRow(key: string): boolean {
   return key.includes("_subtotal") || key.includes("_total") || key === "balance_check" || key === "reconciliation";
 }
@@ -647,6 +652,63 @@ function normalizeScenarioName(name: string | null | undefined): string | null {
 
 function storageKeyForTicker(ticker: string): string {
   return `ft:projection-studio:scenarios:${ticker.toUpperCase()}`;
+}
+
+function isQuotaExceededStorageError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED" || error.code === 22 || error.code === 1014;
+  }
+
+  return false;
+}
+
+function tryPersistSavedScenarios(storageKey: string, savedScenarios: SavedStudioScenario[]): boolean {
+  try {
+    if (!savedScenarios.length) {
+      window.localStorage.removeItem(storageKey);
+      return true;
+    }
+
+    window.localStorage.setItem(storageKey, JSON.stringify(savedScenarios));
+    return true;
+  } catch (error) {
+    if (isQuotaExceededStorageError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function persistSavedScenariosForTicker(ticker: string, savedScenarios: SavedStudioScenario[]): SavedScenarioPersistenceResult {
+  const storageKey = storageKeyForTicker(ticker);
+
+  if (tryPersistSavedScenarios(storageKey, savedScenarios)) {
+    return {
+      status: "ok",
+      persistedCount: savedScenarios.length,
+    };
+  }
+
+  for (let keepCount = savedScenarios.length - 1; keepCount >= 1; keepCount -= 1) {
+    if (tryPersistSavedScenarios(storageKey, savedScenarios.slice(0, keepCount))) {
+      return {
+        status: "trimmed",
+        persistedCount: keepCount,
+      };
+    }
+  }
+
+  try {
+    window.localStorage.removeItem(storageKey);
+  } catch {
+    // Ignore remove failures after quota issues. The current in-memory scenarios still remain usable.
+  }
+
+  return {
+    status: "failed",
+    persistedCount: 0,
+  };
 }
 
 function parseSavedScenarios(raw: string | null): SavedStudioScenario[] {
@@ -1261,9 +1323,12 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
   const [controlsRetryTick, setControlsRetryTick] = useState(0);
   const [recomputeRetryTick, setRecomputeRetryTick] = useState(0);
   const [savedScenarios, setSavedScenarios] = useState<SavedStudioScenario[]>([]);
+  const [savedScenarioPersistenceMessage, setSavedScenarioPersistenceMessage] = useState<string | null>(null);
   const [loadedScenarioId, setLoadedScenarioId] = useState<string | null>(null);
   const [compareScenarioIds, setCompareScenarioIds] = useState<string[]>([]);
+  const [loadedSavedScenarioTicker, setLoadedSavedScenarioTicker] = useState<string | null>(null);
   const recomputeAbortRef = useRef<AbortController | null>(null);
+  const persistedSavedScenarioSnapshotRef = useRef<string | null>(null);
 
   useEffect(() => {
     setBasePayload(payload);
@@ -1282,7 +1347,11 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
       return;
     }
 
-    setSavedScenarios(parseSavedScenarios(window.localStorage.getItem(storageKeyForTicker(ticker))));
+    const nextSavedScenarios = parseSavedScenarios(window.localStorage.getItem(storageKeyForTicker(ticker)));
+    persistedSavedScenarioSnapshotRef.current = JSON.stringify(nextSavedScenarios);
+    setSavedScenarios(nextSavedScenarios);
+    setSavedScenarioPersistenceMessage(null);
+    setLoadedSavedScenarioTicker(ticker);
   }, [ticker]);
 
   useEffect(() => {
@@ -1290,8 +1359,36 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
       return;
     }
 
-    window.localStorage.setItem(storageKeyForTicker(ticker), JSON.stringify(savedScenarios));
-  }, [savedScenarios, ticker]);
+    if (loadedSavedScenarioTicker !== ticker) {
+      return;
+    }
+
+    const savedScenarioSnapshot = JSON.stringify(savedScenarios);
+    if (savedScenarioSnapshot === persistedSavedScenarioSnapshotRef.current) {
+      return;
+    }
+
+    const persistenceResult = persistSavedScenariosForTicker(ticker, savedScenarios);
+    if (persistenceResult.status === "ok") {
+      persistedSavedScenarioSnapshotRef.current = savedScenarioSnapshot;
+      setSavedScenarioPersistenceMessage(null);
+      return;
+    }
+
+    if (persistenceResult.status === "trimmed") {
+      persistedSavedScenarioSnapshotRef.current = JSON.stringify(savedScenarios.slice(0, persistenceResult.persistedCount));
+      const plural = persistenceResult.persistedCount === 1 ? "" : "s";
+      setSavedScenarioPersistenceMessage(
+        `Browser storage is full. Projection Studio kept this tab live, but only the newest ${persistenceResult.persistedCount.toLocaleString()} saved scenario${plural} will persist on this device.`
+      );
+      return;
+    }
+
+    persistedSavedScenarioSnapshotRef.current = null;
+    setSavedScenarioPersistenceMessage(
+      "Browser storage is full. Projection Studio will keep scenario changes in this tab, but saved scenarios cannot persist on this device."
+    );
+  }, [loadedSavedScenarioTicker, savedScenarios, ticker]);
 
   useEffect(() => {
     return () => {
@@ -1630,6 +1727,12 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
                 <p className="studio-panel-subtitle">Saved locally in this browser. Compare up to two scenarios with simple deltas.</p>
               </div>
             </div>
+
+            {savedScenarioPersistenceMessage ? (
+              <div className="studio-what-if-error" role="alert">
+                <div>{savedScenarioPersistenceMessage}</div>
+              </div>
+            ) : null}
 
             {!savedScenarios.length ? <div className="studio-what-if-state">No saved scenarios yet. Save the current forecast setup to reuse it later.</div> : null}
 
