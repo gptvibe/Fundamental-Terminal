@@ -302,6 +302,38 @@ describe("CompanyResearchBriefPage", () => {
     expect(getCompanyResearchBrief).not.toHaveBeenCalled();
   });
 
+  it("falls back to a standalone brief request after overview bootstrap resolves without a brief", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      loading: false,
+      briefData: null,
+      refreshState: null,
+      activeJobId: null,
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(getCompanyResearchBrief).toHaveBeenCalledWith("ACME");
+    });
+  });
+
+  it("does not trigger a standalone brief request while the overview refresh job is still active", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      loading: false,
+      briefData: null,
+      refreshState: { triggered: true, reason: "missing", ticker: "ACME", job_id: "job-acme" },
+      activeJobId: "job-acme",
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /brief warming|cold start bootstrap/i })).toBeTruthy();
+    });
+
+    expect(getCompanyResearchBrief).not.toHaveBeenCalled();
+  });
+
   it("hydrates collapsed brief sections from localStorage", async () => {
     window.localStorage.setItem(
       "fundamental-terminal:research-brief:sections:ACME",
@@ -412,8 +444,10 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByText("No persisted filing context yet")).toBeTruthy();
     });
 
-    expect(screen.getByText("No cached model outputs yet")).toBeTruthy();
-    expect(screen.getByText("No active alerts")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("No cached model outputs yet")).toBeTruthy();
+      expect(screen.getByText("No active alerts")).toBeTruthy();
+    });
   });
 
   it("explains limited proxy coverage for foreign-issuer annual filings", async () => {
@@ -490,9 +524,11 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByRole("heading", { name: /Brief warming|Cold start bootstrap/i })).toBeTruthy();
     });
 
-    expect(screen.getAllByText(/cached brief catches up|warming the research brief/i).length).toBeGreaterThan(0);
-    expect(screen.getByText("Latest filing timeline")).toBeTruthy();
-    expect(screen.getByText("Annual report")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText(/cached brief catches up|warming the research brief/i).length).toBeGreaterThan(0);
+      expect(screen.getByText("Latest filing timeline")).toBeTruthy();
+      expect(screen.getByText("Annual report")).toBeTruthy();
+    });
     expect(getCompanyActivityOverview).not.toHaveBeenCalled();
     expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
     expect(getCompanyEarningsSummary).not.toHaveBeenCalled();

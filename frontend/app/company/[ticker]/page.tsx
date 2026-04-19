@@ -253,7 +253,13 @@ export default function CompanyResearchBriefPage() {
     auditScenario: "company_overview",
   });
 
-  const briefData = useResearchBriefData(ticker, reloadKey, initialBriefData, loading);
+  const briefData = useResearchBriefData(
+    ticker,
+    reloadKey,
+    initialBriefData,
+    loading,
+    activeJobId ?? refreshState?.job_id ?? initialBriefData?.refresh.job_id ?? null
+  );
   const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
   const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker);
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
@@ -1424,7 +1430,8 @@ function useResearchBriefData(
   ticker: string,
   reloadKey: string,
   initialBrief: CompanyResearchBriefResponse | null,
-  overviewBootstrapLoading: boolean
+  overviewBootstrapLoading: boolean,
+  warmupJobId: string | null
 ): ResearchBriefDataState {
   const [state, setState] = useState<ResearchBriefDataState>(() =>
     initialBrief ? mapBriefResponseToAsyncState(initialBrief) : INITIAL_RESEARCH_BRIEF_DATA_STATE
@@ -1432,32 +1439,14 @@ function useResearchBriefData(
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
 
-    if (initialBrief) {
-      setState(mapBriefResponseToAsyncState(initialBrief));
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (overviewBootstrapLoading) {
-      setState((current) => ({
-        ...current,
-        loading: true,
-        error: null,
-      }));
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setState((current) => ({
-      ...current,
-      loading: true,
-      error: null,
-    }));
-
-    async function load() {
+    const loadBrief = async () => {
       try {
         const brief = await withPerformanceAuditSource(
           {
@@ -1494,14 +1483,73 @@ function useResearchBriefData(
           peers: { data: null, error: message, loading: false },
         });
       }
+    };
+
+    const scheduleBriefLoad = () => {
+      const runLoad = () => {
+        void loadBrief();
+      };
+
+      if (typeof idleWindow.requestIdleCallback === "function") {
+        idleId = idleWindow.requestIdleCallback(runLoad, { timeout: 1200 });
+        return;
+      }
+
+      timeoutId = window.setTimeout(runLoad, 0);
+    };
+
+    if (initialBrief) {
+      setState(mapBriefResponseToAsyncState(initialBrief));
+
+      if (initialBrief.build_state !== "ready" && !warmupJobId) {
+        scheduleBriefLoad();
+      }
+
+      return () => {
+        cancelled = true;
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+        if (idleId != null && typeof idleWindow.cancelIdleCallback === "function") {
+          idleWindow.cancelIdleCallback(idleId);
+        }
+      };
     }
 
-    void load();
+    if (overviewBootstrapLoading || warmupJobId) {
+      setState((current) => ({
+        ...current,
+        loading: true,
+        error: null,
+      }));
+      return () => {
+        cancelled = true;
+        if (timeoutId != null) {
+          window.clearTimeout(timeoutId);
+        }
+        if (idleId != null && typeof idleWindow.cancelIdleCallback === "function") {
+          idleWindow.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    setState((current) => ({
+      ...current,
+      loading: true,
+      error: null,
+    }));
+    scheduleBriefLoad();
 
     return () => {
       cancelled = true;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (idleId != null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleId);
+      }
     };
-  }, [initialBrief, overviewBootstrapLoading, reloadKey, ticker]);
+  }, [initialBrief, overviewBootstrapLoading, reloadKey, ticker, warmupJobId]);
 
   return state;
 }

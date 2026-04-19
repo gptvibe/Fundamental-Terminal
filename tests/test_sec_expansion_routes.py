@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+import pytest
 
 import app.main as main_module
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload
@@ -1726,6 +1727,7 @@ def test_watchlist_summary_endpoint_normalizes_dedupes_and_ignores_blank_tickers
             snapshots["TSLA"].company.id: {"financial_periods": 0, "price_points": 0},
         },
     )
+    monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
 
     def _fake_item(_session, _background_tasks, ticker: str, **_kwargs):
         observed.append(ticker)
@@ -1774,6 +1776,7 @@ def test_watchlist_summary_endpoint_tolerates_activity_data_failures(monkeypatch
         "get_company_coverage_counts",
         lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
     )
+    monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module,
         "_refresh_for_snapshot",
@@ -1847,6 +1850,7 @@ def test_watchlist_summary_endpoint_includes_comment_letter_alerts(monkeypatch):
         "get_company_coverage_counts",
         lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
     )
+    monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module,
         "_refresh_for_snapshot",
@@ -1896,6 +1900,7 @@ def test_watchlist_summary_endpoint_includes_research_brief_material_change_dige
         "get_company_coverage_counts",
         lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
     )
+    monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module,
         "_refresh_for_snapshot",
@@ -1975,6 +1980,7 @@ def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monk
             snapshots["MSFT"].company.id: {"financial_periods": 2, "price_points": 3},
         },
     )
+    monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
 
     def _fake_item(_session, _background_tasks, ticker: str, **_kwargs):
         if ticker == "MSFT":
@@ -2010,6 +2016,105 @@ def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monk
     assert msft_item["ticker"] == "MSFT"
     assert msft_item["name"] is None
     assert msft_item["alert_summary"] == {"total": 0, "high": 0, "medium": 0, "low": 0}
+
+
+def test_watchlist_summary_endpoint_uses_batched_preload(monkeypatch):
+    snap = _snapshot("AAPL", "0000320193")
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snap})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_load_watchlist_summary_preload",
+        lambda *_args, **_kwargs: {
+            "activity_by_company_id": {
+                snap.company.id: {
+                    "beneficial_filings": [],
+                    "capital_filings": [],
+                    "insider_trades": [],
+                    "institutional_holdings": [],
+                    "filings": [],
+                    "filing_events": [],
+                    "governance_filings": [],
+                    "form144_filings": [],
+                    "comment_letters": [],
+                }
+            },
+            "models_by_company_id": {
+                snap.company.id: {
+                    "dcf": SimpleNamespace(result={"fair_value_per_share": 120.0, "model_status": "ready"}),
+                    "roic": SimpleNamespace(result={"roic": 0.18}),
+                    "reverse_dcf": SimpleNamespace(result={"implied_growth": 0.07, "status": "ready", "valuation_band_percentile": 0.65}),
+                    "capital_allocation": SimpleNamespace(result={"shareholder_yield": 0.03}),
+                    "ratios": SimpleNamespace(result={"values": {"net_debt_to_fcf": 1.8}}),
+                }
+            },
+            "latest_prices_by_company_id": {snap.company.id: 100.0},
+            "brief_snapshots_by_company_id": {
+                snap.company.id: SimpleNamespace(
+                    payload={
+                        "what_changed": {
+                            "changes": {
+                                "summary": {
+                                    "filing_type": "10-Q",
+                                    "high_signal_change_count": 1,
+                                },
+                                "high_signal_changes": [
+                                    {
+                                        "title": "Margin pressure",
+                                        "summary": "Gross margin compressed year over year.",
+                                        "importance": "high",
+                                    }
+                                ],
+                            }
+                        }
+                    }
+                )
+            },
+        },
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_load_company_activity_data",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not load per-ticker activity")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_models",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not load per-ticker models")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_visible_price_history",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not load per-ticker prices")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_research_brief_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("should not load per-ticker brief snapshot")),
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["AAPL"]})
+
+    assert response.status_code == 200
+    item = response.json()["companies"][0]
+    assert item["ticker"] == "AAPL"
+    assert item["fair_value_gap"] == pytest.approx(0.2)
+    assert item["roic"] == pytest.approx(0.18)
+    assert item["shareholder_yield"] == pytest.approx(0.03)
+    assert item["implied_growth"] == pytest.approx(0.07)
+    assert item["valuation_band_percentile"] == pytest.approx(0.65)
+    assert item["balance_sheet_risk"] == pytest.approx(1.8)
+    assert item["material_change"]["headline"] == "1 high-signal change since the last filing"
 
 
 def test_watchlist_calendar_endpoint_projects_expected_events(monkeypatch):

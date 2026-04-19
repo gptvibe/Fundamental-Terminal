@@ -45,6 +45,71 @@ class CompanyCacheSnapshot:
         return self.cache_state == "stale"
 
 
+def _normalize_company_ids(company_ids: list[int]) -> list[int]:
+    return sorted({int(company_id) for company_id in company_ids})
+
+
+def _group_rows_by_company_id(company_ids: list[int], rows: list[Any]) -> dict[int, list[Any]]:
+    grouped: dict[int, list[Any]] = {company_id: [] for company_id in company_ids}
+    for row in rows:
+        grouped.setdefault(int(row.company_id), []).append(row)
+    return grouped
+
+
+def _load_rows_by_company_ids(
+    session: Session,
+    model: Any,
+    company_ids: list[int],
+    *,
+    filters: tuple[Any, ...] = (),
+    order_by: tuple[Any, ...],
+    options: tuple[Any, ...] = (),
+) -> dict[int, list[Any]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    statement = select(model).where(model.company_id.in_(normalized_ids), *filters)
+    for option in options:
+        statement = statement.options(option)
+    statement = statement.order_by(model.company_id.asc(), *order_by)
+    return _group_rows_by_company_id(normalized_ids, list(session.execute(statement).scalars()))
+
+
+def _load_top_rows_by_company_ids(
+    session: Session,
+    model: Any,
+    company_ids: list[int],
+    *,
+    limit: int,
+    filters: tuple[Any, ...] = (),
+    order_by: tuple[Any, ...],
+    options: tuple[Any, ...] = (),
+) -> dict[int, list[Any]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    ranked = (
+        select(
+            model.id.label("id"),
+            model.company_id.label("company_id"),
+            func.row_number().over(
+                partition_by=model.company_id,
+                order_by=order_by,
+            ).label("rn"),
+        )
+        .where(model.company_id.in_(normalized_ids), *filters)
+        .subquery()
+    )
+
+    statement = select(model).join(ranked, model.id == ranked.c.id).where(ranked.c.rn <= limit)
+    for option in options:
+        statement = statement.options(option)
+    statement = statement.order_by(model.company_id.asc(), *order_by)
+    return _group_rows_by_company_id(normalized_ids, list(session.execute(statement).scalars()))
+
+
 def search_company_snapshots(
     session: Session,
     ticker_query: str,
@@ -332,6 +397,64 @@ def get_company_models(
     return [latest_by_model[name] for name in normalized_names if name in latest_by_model]
 
 
+def get_company_models_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    model_names: list[str] | None = None,
+    config_by_model: dict[str, dict[str, Any]] | None = None,
+) -> dict[int, dict[str, ModelRun]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    normalized_names: list[str] = []
+    ranked_statement = select(
+        ModelRun.id.label("id"),
+        ModelRun.company_id.label("company_id"),
+        func.lower(ModelRun.model_name).label("model_name_key"),
+        func.row_number().over(
+            partition_by=(ModelRun.company_id, func.lower(ModelRun.model_name)),
+            order_by=(ModelRun.created_at.desc(), ModelRun.id.desc()),
+        ).label("rn"),
+    ).where(ModelRun.company_id.in_(normalized_ids))
+    if model_names:
+        normalized_names = [model_name.lower() for model_name in model_names]
+        ranked_statement = ranked_statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
+
+    ranked = ranked_statement.subquery()
+    rows_statement = (
+        select(ModelRun)
+        .join(ranked, ModelRun.id == ranked.c.id)
+        .where(ranked.c.rn == 1)
+        .order_by(ModelRun.company_id.asc(), func.lower(ModelRun.model_name).asc())
+    )
+    rows = list(session.execute(rows_statement).scalars())
+
+    result: dict[int, dict[str, ModelRun]] = {company_id: {} for company_id in normalized_ids}
+    for row in rows:
+        key = row.model_name.lower()
+        expected_config = config_by_model.get(key) if config_by_model else None
+        if expected_config is not None and not _config_matches(row.input_periods, expected_config):
+            continue
+        company_models = result.setdefault(int(row.company_id), {})
+        if key not in company_models:
+            company_models[key] = row
+
+    if not normalized_names:
+        return result
+
+    ordered_result: dict[int, dict[str, ModelRun]] = {}
+    for company_id in normalized_ids:
+        company_models = result.get(company_id, {})
+        ordered_result[company_id] = {
+            model_name: company_models[model_name]
+            for model_name in normalized_names
+            if model_name in company_models
+        }
+    return ordered_result
+
+
 def _config_matches(input_periods: Any, expected: dict[str, Any]) -> bool:
     if expected is None:
         return True
@@ -373,6 +496,64 @@ def get_company_price_history(session: Session, company_id: int) -> list[PriceHi
         .order_by(PriceHistory.trade_date.asc())
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_financials_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int | None = None,
+) -> dict[int, list[FinancialStatement]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    if limit is None:
+        return _load_rows_by_company_ids(
+            session,
+            FinancialStatement,
+            normalized_ids,
+            filters=(FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,),
+            order_by=(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc()),
+        )
+
+    return _load_top_rows_by_company_ids(
+        session,
+        FinancialStatement,
+        normalized_ids,
+        limit=limit,
+        filters=(FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE,),
+        order_by=(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc()),
+    )
+
+
+def get_latest_company_price_points_by_company_ids(session: Session, company_ids: list[int]) -> dict[int, PriceHistory | None]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    ranked = (
+        select(
+            PriceHistory.id.label("id"),
+            PriceHistory.company_id.label("company_id"),
+            func.row_number().over(
+                partition_by=PriceHistory.company_id,
+                order_by=(PriceHistory.trade_date.desc(), PriceHistory.id.desc()),
+            ).label("rn"),
+        )
+        .where(PriceHistory.company_id.in_(normalized_ids))
+        .subquery()
+    )
+    rows_statement = (
+        select(PriceHistory)
+        .join(ranked, PriceHistory.id == ranked.c.id)
+        .where(ranked.c.rn == 1)
+        .order_by(PriceHistory.company_id.asc())
+    )
+    result: dict[int, PriceHistory | None] = {company_id: None for company_id in normalized_ids}
+    for row in session.execute(rows_statement).scalars():
+        result[int(row.company_id)] = row
+    return result
 
 
 def filter_price_history_as_of(price_history: list[PriceHistory], as_of: datetime) -> list[PriceHistory]:
@@ -452,6 +633,25 @@ def get_company_insider_trades(
     return list(session.execute(statement).scalars())
 
 
+def get_company_insider_trades_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 200,
+) -> dict[int, list[InsiderTrade]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        InsiderTrade,
+        company_ids,
+        limit=limit,
+        order_by=(
+            InsiderTrade.transaction_date.desc().nullslast(),
+            InsiderTrade.filing_date.desc().nullslast(),
+            InsiderTrade.id.desc(),
+        ),
+    )
+
+
 def get_company_insider_trade_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
     state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "insiders")
     if state_cache != "missing":
@@ -483,6 +683,25 @@ def get_company_form144_filings(
         .limit(limit)
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_form144_filings_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 200,
+) -> dict[int, list[Form144Filing]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        Form144Filing,
+        company_ids,
+        limit=limit,
+        order_by=(
+            Form144Filing.planned_sale_date.desc().nullslast(),
+            Form144Filing.filing_date.desc().nullslast(),
+            Form144Filing.id.desc(),
+        ),
+    )
 
 
 def get_company_form144_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
@@ -636,6 +855,25 @@ def get_company_institutional_holdings(
     return list(session.execute(statement).scalars())
 
 
+def get_company_institutional_holdings_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 200,
+) -> dict[int, list[InstitutionalHolding]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        InstitutionalHolding,
+        company_ids,
+        limit=limit,
+        order_by=(
+            InstitutionalHolding.reporting_date.desc(),
+            InstitutionalHolding.market_value.desc().nullslast(),
+        ),
+        options=(selectinload(InstitutionalHolding.fund),),
+    )
+
+
 def get_company_institutional_holdings_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
     state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "institutional")
     if state_cache != "missing":
@@ -664,6 +902,25 @@ def get_company_beneficial_ownership_reports(
         .limit(limit)
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_beneficial_ownership_reports_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 200,
+) -> dict[int, list[BeneficialOwnershipReport]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        BeneficialOwnershipReport,
+        company_ids,
+        limit=limit,
+        order_by=(
+            BeneficialOwnershipReport.filing_date.desc().nullslast(),
+            BeneficialOwnershipReport.id.desc(),
+        ),
+        options=(selectinload(BeneficialOwnershipReport.parties),),
+    )
 
 
 def get_company_beneficial_ownership_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
@@ -700,6 +957,26 @@ def get_company_filing_events(
     return list(session.execute(statement).scalars())
 
 
+def get_company_filing_events_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 300,
+) -> dict[int, list[FilingEvent]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        FilingEvent,
+        company_ids,
+        limit=limit,
+        order_by=(
+            FilingEvent.filing_date.desc().nullslast(),
+            FilingEvent.report_date.desc().nullslast(),
+            FilingEvent.accession_number.desc(),
+            FilingEvent.item_code.asc(),
+        ),
+    )
+
+
 def get_company_filing_events_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
     state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "filings")
     if state_cache != "missing":
@@ -729,6 +1006,24 @@ def get_company_capital_markets_events(
     return list(session.execute(statement).scalars())
 
 
+def get_company_capital_markets_events_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 200,
+) -> dict[int, list[CapitalMarketsEvent]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        CapitalMarketsEvent,
+        company_ids,
+        limit=limit,
+        order_by=(
+            CapitalMarketsEvent.filing_date.desc().nullslast(),
+            CapitalMarketsEvent.id.desc(),
+        ),
+    )
+
+
 def get_company_comment_letters(
     session: Session,
     company_id: int,
@@ -742,6 +1037,24 @@ def get_company_comment_letters(
         .limit(limit)
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_comment_letters_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 200,
+) -> dict[int, list[CommentLetter]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        CommentLetter,
+        company_ids,
+        limit=limit,
+        order_by=(
+            CommentLetter.filing_date.desc().nullslast(),
+            CommentLetter.id.desc(),
+        ),
+    )
 
 
 def get_company_capital_structure_snapshots(
@@ -824,6 +1137,28 @@ def get_company_proxy_statements(
         .limit(limit)
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_proxy_statements_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int = 60,
+) -> dict[int, list[ProxyStatement]]:
+    return _load_top_rows_by_company_ids(
+        session,
+        ProxyStatement,
+        company_ids,
+        limit=limit,
+        order_by=(
+            ProxyStatement.filing_date.desc().nullslast(),
+            ProxyStatement.id.desc(),
+        ),
+        options=(
+            selectinload(ProxyStatement.exec_comp_rows),
+            selectinload(ProxyStatement.vote_results),
+        ),
+    )
 
 
 def get_company_executive_compensation(

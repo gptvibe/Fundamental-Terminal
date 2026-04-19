@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { startTransition, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
@@ -13,15 +13,18 @@ import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
+import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { usePeriodSelection } from "@/hooks/use-period-selection";
+import { getCompanyFinancials } from "@/lib/api";
 import { resolveFilingChartCadence } from "@/lib/annual-financial-scope";
 import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import type { CompanyFinancialsResponse, FinancialPayload } from "@/lib/types";
 
 const BusinessSegmentBreakdown = dynamic(
   () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
@@ -90,6 +93,25 @@ function FinancialWorkflowSection({
   );
 }
 
+function DeferredWorkflowPlaceholder({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="financials-workflow-group">
+      <FinancialWorkflowSection eyebrow={eyebrow} title={title} description={description} />
+      <Panel title={title} subtitle="This deeper section loads as it approaches the viewport so the first financial view stays lighter.">
+        <div className="text-muted">Loading analysis surface...</div>
+      </Panel>
+    </div>
+  );
+}
+
 export default function CompanyFinancialsTabPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
@@ -111,14 +133,22 @@ export default function CompanyFinancialsTabPage() {
     reloadKey
   } = useCompanyWorkspace(ticker, {
     includeEarningsSummary: true,
+    financialsView: "core_segments",
     auditPageRoute: "/company/[ticker]/financials",
     auditScenario: "financials_page",
   });
+  const [fullData, setFullData] = useState<CompanyFinancialsResponse | null>(null);
   const bankMode = Boolean(company?.regulated_entity && financials.some((statement) => statement.regulated_bank));
   const periodSelection = usePeriodSelection(financials);
   const pageFinancials = periodSelection.visibleFinancials;
   const activeFinancial = periodSelection.selectedFinancial ?? latestFinancial;
   const comparisonFinancial = periodSelection.comparisonFinancial;
+  const fullFinancials = useMemo(() => fullData?.financials ?? [], [fullData?.financials]);
+  const fullActiveFinancial = useMemo(
+    () => findMatchingFinancial(fullFinancials, activeFinancial),
+    [activeFinancial, fullFinancials]
+  );
+  const diagnosticsReconciliation = fullActiveFinancial?.reconciliation ?? fullFinancials[0]?.reconciliation ?? null;
   const latestStatementPeriodEnd = latestFinancial?.period_end ?? data?.as_of ?? null;
   const latestReportedPeriodEnd = earningsSummaryData?.summary.latest_reported_period_end ?? null;
   const hasNewerReportedEarnings = isLaterPeriod(latestReportedPeriodEnd, latestStatementPeriodEnd);
@@ -197,6 +227,56 @@ export default function CompanyFinancialsTabPage() {
         { label: "Price History", value: priceHistory.length.toLocaleString(), accent: "cyan" as const },
       ];
 
+  useEffect(() => {
+    setFullData(null);
+  }, [ticker, reloadKey]);
+
+  useEffect(() => {
+    if (loading || error || !data || bankMode || fullData) {
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    const loadFullFinancials = () => {
+      startTransition(() => {
+        void getCompanyFinancials(ticker, { view: "full", signal: controller.signal })
+          .then((payload) => {
+            if (!cancelled) {
+              setFullData(payload);
+            }
+          })
+          .catch(() => {
+            // Keep the compact first-paint payload if the enrichment fetch fails.
+          });
+      });
+    };
+
+    let timeoutId: number | null = null;
+    let idleId: number | null = null;
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      idleId = idleWindow.requestIdleCallback(loadFullFinancials, { timeout: 1200 });
+    } else {
+      timeoutId = window.setTimeout(loadFullFinancials, 0);
+    }
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (idleId != null && typeof idleWindow.cancelIdleCallback === "function") {
+        idleWindow.cancelIdleCallback(idleId);
+      }
+    };
+  }, [bankMode, data, error, fullData, loading, ticker]);
+
   return (
     <CompanyWorkspaceShell
       rail={
@@ -262,7 +342,7 @@ export default function CompanyFinancialsTabPage() {
       </CompanyResearchHeader>
 
       <Panel title="Data Quality Diagnostics" subtitle="Coverage, freshness, and missing-field flags for the cached financial workspace">
-        <DataQualityDiagnostics diagnostics={data?.diagnostics} reconciliation={activeFinancial?.reconciliation ?? latestFinancial?.reconciliation} />
+        <DataQualityDiagnostics diagnostics={data?.diagnostics} reconciliation={diagnosticsReconciliation} />
       </Panel>
 
       <Panel title="Source & Freshness" subtitle="Centralized registry metadata for filing inputs, price overlays, and disclosure notes">
@@ -317,50 +397,70 @@ export default function CompanyFinancialsTabPage() {
             </Panel>
           </div>
 
-          <div className="financials-workflow-group">
-            <FinancialWorkflowSection
-              eyebrow="2. Compare Periods"
-              title="Period Comparison"
-              description="Use the shared comparison state to inspect one regulatory period against another before moving into longer-run bank metric history."
-            />
-
-            <Panel title="Regulated Bank Statements" subtitle="Shared selected/comparison state across official bank statement history, deposit mix, capital ratios, and credit-cost detail.">
-              {error ? (
-                <div className="text-muted">{error}</div>
-              ) : pageFinancials.length ? (
-                <BankFinancialStatementsTable
-                  financials={pageFinancials}
-                  ticker={ticker}
-                  showComparison={periodSelection.compareMode !== "off"}
-                  selectedPeriodKey={periodSelection.selectedPeriodKey}
-                  comparisonPeriodKey={periodSelection.activeComparisonPeriodKey}
-                  selectedFinancial={activeFinancial}
-                  comparisonFinancial={comparisonFinancial}
-                />
-              ) : (
-                <PanelEmptyState loading={loading} loadingMessage="Loading regulated bank statements..." message="No regulated bank statements are available yet for this ticker." />
-              )}
-            </Panel>
-          </div>
-
-          <div className="financials-workflow-group">
-            <FinancialWorkflowSection
-              eyebrow="3. Follow History"
-              title="Historical Trends"
-              description="After selecting and comparing a bank period, use the trend surfaces to trace multi-quarter and TTM movement through the broader reporting history."
-            />
-
-            <Panel title="Derived Bank Metrics" subtitle="Historical bank trend view with shared cadence across official FDIC and Federal Reserve regulatory financials.">
-              <DerivedMetricsPanel
-                ticker={ticker}
-                reloadKey={reloadKey}
-                cadence={periodSelection.cadence}
-                showCadenceSelector={false}
-                maxPoints={periodSelection.metricsMaxPoints}
-                latestReportedPeriodEnd={hasNewerReportedEarnings ? latestReportedPeriodEnd : null}
+          <DeferredClientSection
+            placeholder={
+              <DeferredWorkflowPlaceholder
+                eyebrow="2. Compare Periods"
+                title="Period Comparison"
+                description="Use the shared comparison state to inspect one regulatory period against another before moving into longer-run bank metric history."
               />
-            </Panel>
-          </div>
+            }
+          >
+            <div className="financials-workflow-group">
+              <FinancialWorkflowSection
+                eyebrow="2. Compare Periods"
+                title="Period Comparison"
+                description="Use the shared comparison state to inspect one regulatory period against another before moving into longer-run bank metric history."
+              />
+
+              <Panel title="Regulated Bank Statements" subtitle="Shared selected/comparison state across official bank statement history, deposit mix, capital ratios, and credit-cost detail.">
+                {error ? (
+                  <div className="text-muted">{error}</div>
+                ) : pageFinancials.length ? (
+                  <BankFinancialStatementsTable
+                    financials={pageFinancials}
+                    ticker={ticker}
+                    showComparison={periodSelection.compareMode !== "off"}
+                    selectedPeriodKey={periodSelection.selectedPeriodKey}
+                    comparisonPeriodKey={periodSelection.activeComparisonPeriodKey}
+                    selectedFinancial={activeFinancial}
+                    comparisonFinancial={comparisonFinancial}
+                  />
+                ) : (
+                  <PanelEmptyState loading={loading} loadingMessage="Loading regulated bank statements..." message="No regulated bank statements are available yet for this ticker." />
+                )}
+              </Panel>
+            </div>
+          </DeferredClientSection>
+
+          <DeferredClientSection
+            placeholder={
+              <DeferredWorkflowPlaceholder
+                eyebrow="3. Follow History"
+                title="Historical Trends"
+                description="After selecting and comparing a bank period, use the trend surfaces to trace multi-quarter and TTM movement through the broader reporting history."
+              />
+            }
+          >
+            <div className="financials-workflow-group">
+              <FinancialWorkflowSection
+                eyebrow="3. Follow History"
+                title="Historical Trends"
+                description="After selecting and comparing a bank period, use the trend surfaces to trace multi-quarter and TTM movement through the broader reporting history."
+              />
+
+              <Panel title="Derived Bank Metrics" subtitle="Historical bank trend view with shared cadence across official FDIC and Federal Reserve regulatory financials.">
+                <DerivedMetricsPanel
+                  ticker={ticker}
+                  reloadKey={reloadKey}
+                  cadence={periodSelection.cadence}
+                  showCadenceSelector={false}
+                  maxPoints={periodSelection.metricsMaxPoints}
+                  latestReportedPeriodEnd={hasNewerReportedEarnings ? latestReportedPeriodEnd : null}
+                />
+              </Panel>
+            </div>
+          </DeferredClientSection>
         </>
       ) : (
         <>
@@ -400,117 +500,137 @@ export default function CompanyFinancialsTabPage() {
             </Panel>
           </div>
 
-          <div className="financials-workflow-group">
-            <FinancialWorkflowSection
-              eyebrow="2. Chart-First Analysis"
-              title="Growth & Quality Lens"
-              description="Start with the annual growth view to frame revenue, earnings, and free cash flow momentum inside the shared range. Then move into quality and side-by-side comparison panels, with raw statement tables last."
-            />
+          <DeferredClientSection
+            placeholder={
+              <DeferredWorkflowPlaceholder
+                eyebrow="2. Chart-First Analysis"
+                title="Growth & Quality Lens"
+                description="Start with the annual growth view to frame revenue, earnings, and free cash flow momentum inside the shared range. Then move into quality and side-by-side comparison panels, with raw statement tables last."
+              />
+            }
+          >
+            <div className="financials-workflow-group">
+              <FinancialWorkflowSection
+                eyebrow="2. Chart-First Analysis"
+                title="Growth & Quality Lens"
+                description="Start with the annual growth view to frame revenue, earnings, and free cash flow momentum inside the shared range. Then move into quality and side-by-side comparison panels, with raw statement tables last."
+              />
 
-            <Panel title="Growth Waterfall" subtitle="Annual-only value bars with a YoY growth overlay for revenue, net income, and free cash flow across the shared range." aside={<span className="pill tone-gold">Annual only</span>}>
-              <GrowthWaterfallChart financials={financials} visibleFinancials={pageFinancials} chartState={sharedChartState} />
-            </Panel>
+              <Panel title="Growth Waterfall" subtitle="Annual-only value bars with a YoY growth overlay for revenue, net income, and free cash flow across the shared range." aside={<span className="pill tone-gold">Annual only</span>}>
+                <GrowthWaterfallChart financials={financials} visibleFinancials={pageFinancials} chartState={sharedChartState} />
+              </Panel>
 
-            <Panel title="Financial Quality" subtitle="Annual-only summary cards, expandable ratio trends, and multi-year ratio history aligned to the same shared range and comparison state." aside={<span className="pill tone-gold">Annual only</span>}>
-              <div style={{ display: "grid", gap: 18 }}>
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={{ display: "grid", gap: 4 }}>
-                    <div className="financials-workflow-eyebrow">Summary + Trend</div>
-                    <div className="company-data-table-note">Start with the selected-year quality snapshot, then expand trend mode for annual ratio sparklines inside the same shared fiscal-year context.</div>
-                  </div>
-                  <FinancialQualitySummary
-                    financials={financials}
-                    visibleFinancials={pageFinancials}
-                    chartState={sharedChartState}
-                  />
-                </div>
-
-                <div style={{ display: "grid", gap: 12, paddingTop: 16, borderTop: "1px solid color-mix(in srgb, var(--panel-border) 132%, transparent)" }}>
-                  <div style={{ display: "grid", gap: 6 }}>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <div className="financials-workflow-eyebrow">Ratio History</div>
-                      <span className="pill">Shared annual range</span>
+              <Panel title="Financial Quality" subtitle="Annual-only summary cards, expandable ratio trends, and multi-year ratio history aligned to the same shared range and comparison state." aside={<span className="pill tone-gold">Annual only</span>}>
+                <div style={{ display: "grid", gap: 18 }}>
+                  <div style={{ display: "grid", gap: 12 }}>
+                    <div style={{ display: "grid", gap: 4 }}>
+                      <div className="financials-workflow-eyebrow">Summary + Trend</div>
+                      <div className="company-data-table-note">Start with the selected-year quality snapshot, then expand trend mode for annual ratio sparklines inside the same shared fiscal-year context.</div>
                     </div>
-                    <div className="company-data-table-note">Use the same annual window to inspect multi-year ratio history in a horizontally scrollable matrix, with year-over-year cell tones where improvement direction is meaningful.</div>
+                    <FinancialQualitySummary
+                      financials={financials}
+                      visibleFinancials={pageFinancials}
+                      chartState={sharedChartState}
+                    />
                   </div>
-                  <RatioHistoryTable
-                    financials={financials}
-                    visibleFinancials={pageFinancials}
-                    chartState={sharedChartState}
-                    showContextChips={false}
-                    showTableNote={false}
-                    ticker={ticker}
-                  />
+
+                  <div style={{ display: "grid", gap: 12, paddingTop: 16, borderTop: "1px solid color-mix(in srgb, var(--panel-border) 132%, transparent)" }}>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <div className="financials-workflow-eyebrow">Ratio History</div>
+                        <span className="pill">Shared annual range</span>
+                      </div>
+                      <div className="company-data-table-note">Use the same annual window to inspect multi-year ratio history in a horizontally scrollable matrix, with year-over-year cell tones where improvement direction is meaningful.</div>
+                    </div>
+                    <RatioHistoryTable
+                      financials={financials}
+                      visibleFinancials={pageFinancials}
+                      chartState={sharedChartState}
+                      showContextChips={false}
+                      showTableNote={false}
+                      ticker={ticker}
+                    />
+                  </div>
                 </div>
-              </div>
-            </Panel>
+              </Panel>
 
-            <Panel title="Annual Financial Comparison" subtitle="Annual-only side-by-side comparison across core statements. Quarterly focus resolves to the matching fiscal year." aside={<span className="pill tone-gold">Annual only</span>}>
-              <FinancialComparisonPanel
-                financials={financials}
-                visibleFinancials={pageFinancials}
-                chartState={sharedChartState}
-                ticker={ticker}
-              />
-            </Panel>
-
-            <Panel title="Financial Statements" subtitle="Shared selected/comparison table across the visible statement history for direct period-by-period inspection.">
-              {error ? (
-                <div className="text-muted">{error}</div>
-              ) : pageFinancials.length ? (
-                <FinancialStatementsTable
-                  financials={pageFinancials}
+              <Panel title="Annual Financial Comparison" subtitle="Annual-only side-by-side comparison across core statements. Quarterly focus resolves to the matching fiscal year." aside={<span className="pill tone-gold">Annual only</span>}>
+                <FinancialComparisonPanel
+                  financials={financials}
+                  visibleFinancials={pageFinancials}
+                  chartState={sharedChartState}
                   ticker={ticker}
-                  showComparison={periodSelection.compareMode !== "off"}
-                  selectedPeriodKey={periodSelection.selectedPeriodKey}
-                  comparisonPeriodKey={periodSelection.activeComparisonPeriodKey}
-                  selectedFinancial={activeFinancial}
-                  comparisonFinancial={comparisonFinancial}
                 />
-              ) : (
-                <PanelEmptyState loading={loading} loadingMessage="Loading financial statements..." message="No financial statements are available yet for this ticker." />
-              )}
-            </Panel>
-          </div>
+              </Panel>
 
-          <div className="financials-workflow-group">
-            <FinancialWorkflowSection
-              eyebrow="3. Follow History"
-              title="Historical Trends"
-              description="After using the primary growth lens, step back into the longer-run trend surfaces to see how margins, balance sheet, liquidity, cost structure, dilution, and derived metrics evolve over time."
-            />
+              <Panel title="Financial Statements" subtitle="Shared selected/comparison table across the visible statement history for direct period-by-period inspection.">
+                {error ? (
+                  <div className="text-muted">{error}</div>
+                ) : pageFinancials.length ? (
+                  <FinancialStatementsTable
+                    financials={pageFinancials}
+                    ticker={ticker}
+                    showComparison={periodSelection.compareMode !== "off"}
+                    selectedPeriodKey={periodSelection.selectedPeriodKey}
+                    comparisonPeriodKey={periodSelection.activeComparisonPeriodKey}
+                    selectedFinancial={activeFinancial}
+                    comparisonFinancial={comparisonFinancial}
+                  />
+                ) : (
+                  <PanelEmptyState loading={loading} loadingMessage="Loading financial statements..." message="No financial statements are available yet for this ticker." />
+                )}
+              </Panel>
+            </div>
+          </DeferredClientSection>
 
-            <Panel title="Margin Trends" subtitle="Historical gross, operating, net, and free cash flow margins across the visible period range.">
-              <MarginTrendChart financials={pageFinancials} chartState={sharedChartState} />
-            </Panel>
-
-            <Panel title="Derived SEC Metrics" subtitle="Historical quarterly, annual, and TTM quality metrics derived from cached canonical SEC financials and cached market profile.">
-              <DerivedMetricsPanel
-                ticker={ticker}
-                reloadKey={reloadKey}
-                cadence={periodSelection.cadence}
-                showCadenceSelector={false}
-                maxPoints={periodSelection.metricsMaxPoints}
-                latestReportedPeriodEnd={hasNewerReportedEarnings ? latestReportedPeriodEnd : null}
+          <DeferredClientSection
+            placeholder={
+              <DeferredWorkflowPlaceholder
+                eyebrow="3. Follow History"
+                title="Historical Trends"
+                description="After using the primary growth lens, step back into the longer-run trend surfaces to see how margins, balance sheet, liquidity, cost structure, dilution, and derived metrics evolve over time."
               />
-            </Panel>
+            }
+          >
+            <div className="financials-workflow-group">
+              <FinancialWorkflowSection
+                eyebrow="3. Follow History"
+                title="Historical Trends"
+                description="After using the primary growth lens, step back into the longer-run trend surfaces to see how margins, balance sheet, liquidity, cost structure, dilution, and derived metrics evolve over time."
+              />
 
-            <Panel title="Balance Sheet" subtitle="Historical assets versus liabilities across the selected range.">
-              {pageFinancials.length ? <BalanceSheetChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState loading={loading} loadingMessage="Loading balance-sheet history..." message="No balance-sheet history is available yet." />}
-            </Panel>
+              <Panel title="Margin Trends" subtitle="Historical gross, operating, net, and free cash flow margins across the visible period range.">
+                <MarginTrendChart financials={pageFinancials} chartState={sharedChartState} />
+              </Panel>
 
-            <Panel title="Liquidity & Capital" subtitle="Historical current assets, liabilities, and retained earnings from reported filings.">
-              <LiquidityCapitalChart financials={pageFinancials} chartState={sharedChartState} />
-            </Panel>
+              <Panel title="Derived SEC Metrics" subtitle="Historical quarterly, annual, and TTM quality metrics derived from cached canonical SEC financials and cached market profile.">
+                <DerivedMetricsPanel
+                  ticker={ticker}
+                  reloadKey={reloadKey}
+                  cadence={periodSelection.cadence}
+                  showCadenceSelector={false}
+                  maxPoints={periodSelection.metricsMaxPoints}
+                  latestReportedPeriodEnd={hasNewerReportedEarnings ? latestReportedPeriodEnd : null}
+                />
+              </Panel>
 
-            <Panel title="Operating Cost Structure" subtitle="Historical SG&A, R&D, stock-based compensation, interest, and tax expense trends from reported filings.">
-              <OperatingCostStructureChart financials={pageFinancials} chartState={sharedChartState} />
-            </Panel>
+              <Panel title="Balance Sheet" subtitle="Historical assets versus liabilities across the selected range.">
+                {pageFinancials.length ? <BalanceSheetChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState loading={loading} loadingMessage="Loading balance-sheet history..." message="No balance-sheet history is available yet." />}
+              </Panel>
 
-            <Panel title="Share Dilution Tracker" subtitle="Historical shares outstanding and period-over-period dilution rates from reported filings.">
-              {pageFinancials.length ? <ShareDilutionTrackerChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState loading={loading} loadingMessage="Loading share-count history..." message="No share-count history is available yet." />}
-            </Panel>
-          </div>
+              <Panel title="Liquidity & Capital" subtitle="Historical current assets, liabilities, and retained earnings from reported filings.">
+                <LiquidityCapitalChart financials={pageFinancials} chartState={sharedChartState} />
+              </Panel>
+
+              <Panel title="Operating Cost Structure" subtitle="Historical SG&A, R&D, stock-based compensation, interest, and tax expense trends from reported filings.">
+                <OperatingCostStructureChart financials={pageFinancials} chartState={sharedChartState} />
+              </Panel>
+
+              <Panel title="Share Dilution Tracker" subtitle="Historical shares outstanding and period-over-period dilution rates from reported filings.">
+                {pageFinancials.length ? <ShareDilutionTrackerChart financials={pageFinancials} chartState={sharedChartState} /> : <PanelEmptyState loading={loading} loadingMessage="Loading share-count history..." message="No share-count history is available yet." />}
+              </Panel>
+            </div>
+          </DeferredClientSection>
         </>
       )}
     </CompanyWorkspaceShell>
@@ -532,5 +652,18 @@ function parsePeriodDate(value: string | null): number | null {
   }
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function findMatchingFinancial(
+  financials: FinancialPayload[],
+  target: FinancialPayload | null
+): FinancialPayload | null {
+  if (!target) {
+    return null;
+  }
+  return financials.find((statement) => (
+    statement.period_end === target.period_end &&
+    statement.filing_type === target.filing_type
+  )) ?? null;
 }
 

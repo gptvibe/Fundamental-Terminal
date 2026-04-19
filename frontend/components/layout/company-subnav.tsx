@@ -332,6 +332,7 @@ function shouldAwaitWorkspaceCompany(pathname: string | null, baseHref: string):
     "",
     "/overview",
     "/financials",
+    "/models",
     "/capital-markets",
     "/earnings",
     "/events",

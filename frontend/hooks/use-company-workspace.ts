@@ -34,6 +34,7 @@ interface UseCompanyWorkspaceOptions {
   includeOverviewBrief?: boolean;
   includeEarningsSummary?: boolean;
   includeChartConsole?: boolean;
+  financialsView?: "full" | "core_segments" | "core";
   auditPageRoute?: string;
   auditScenario?: string;
 }
@@ -57,6 +58,7 @@ export function useCompanyWorkspace(
     includeOverviewBrief = false,
     includeEarningsSummary = false,
     includeChartConsole = false,
+    financialsView,
     auditPageRoute,
     auditScenario,
   }: UseCompanyWorkspaceOptions = {}
@@ -141,6 +143,7 @@ export function useCompanyWorkspace(
             includeInstitutional,
             includeOverviewBrief,
             includeEarningsSummary,
+            financialsView,
           })
         );
         if (cancelled) {
@@ -170,7 +173,7 @@ export function useCompanyWorkspace(
     return () => {
       cancelled = true;
     };
-  }, [includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, ticker]);
+  }, [financialsView, includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, ticker]);
 
   useEffect(() => {
     if (!activeJobId || !lastEvent) {
@@ -193,6 +196,7 @@ export function useCompanyWorkspace(
         includeInstitutional,
         includeOverviewBrief,
         includeEarningsSummary,
+        financialsView,
       })
     )
       .then((result) => {
@@ -219,7 +223,7 @@ export function useCompanyWorkspace(
     return () => {
       cancelled = true;
     };
-  }, [activeJobId, includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, lastEvent, settledJobIds, ticker]);
+  }, [activeJobId, financialsView, includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, lastEvent, settledJobIds, ticker]);
 
   useEffect(() => {
     if (!includeChartConsole) {
@@ -351,21 +355,22 @@ export function useCompanyWorkspace(
 
 async function loadCompanyWorkspaceData(
   ticker: string,
-  options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary">
+  options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary" | "financialsView">
 ): Promise<LoadCompanyWorkspaceDataResult> {
+  const financialsView = options.financialsView ?? (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional ? "core_segments" : "full");
   let financialData: CompanyFinancialsResponse;
   let briefData: CompanyResearchBriefResponse | null = null;
   let earningsSummaryData: CompanyEarningsSummaryResponse | null = null;
   if (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional) {
     try {
-      const overviewData = await getCompanyOverview(ticker, { financialsView: "core_segments" });
+      const overviewData = await getCompanyOverview(ticker, { financialsView });
       financialData = overviewData.financials;
       briefData = overviewData.brief;
     } catch {
-      financialData = await getCompanyFinancials(ticker, { view: "core_segments" });
+      financialData = await getCompanyFinancials(ticker, { view: financialsView });
     }
   } else {
-    financialData = await getCompanyFinancials(ticker);
+    financialData = await getCompanyFinancials(ticker, { view: financialsView });
   }
   let activeJobId = financialData.refresh.job_id ?? briefData?.refresh.job_id ?? null;
   let insiderData: CompanyInsiderTradesResponse | null = null;

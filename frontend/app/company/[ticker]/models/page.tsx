@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import type { ColDef } from "ag-grid-community";
 
 import { CapitalStructureIntelligencePanel } from "@/components/company/capital-structure-intelligence-panel";
+import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -70,6 +71,7 @@ type DupontMode = "auto" | "annual" | "ttm";
 export default function CompanyModelsPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
+  const companyLayout = useCompanyLayoutContext();
   const [data, setData] = useState<CompanyModelsResponse | null>(null);
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
   const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
@@ -97,6 +99,23 @@ export default function CompanyModelsPage() {
   const oilSupportReasons = data?.company?.oil_support_reasons ?? financialData?.company?.oil_support_reasons ?? [];
   const showOilScenarioOverlay = supportsOilWorkspace(oilSupportStatus);
   const oilWorkspaceEvaluationSummary = useMemo(() => resolveOilOverlayEvaluationSummary(ticker, oilOverlayEvaluationData), [ticker, oilOverlayEvaluationData]);
+  const sharedCompany = useMemo(() => data?.company ?? financialData?.company ?? null, [data?.company, financialData?.company]);
+
+  useEffect(() => {
+    if (!companyLayout) {
+      return;
+    }
+
+    return companyLayout.registerPublisher();
+  }, [companyLayout]);
+
+  useEffect(() => {
+    companyLayout?.setCompany(null);
+  }, [companyLayout, ticker]);
+
+  useEffect(() => {
+    companyLayout?.setCompany(sharedCompany);
+  }, [companyLayout, sharedCompany]);
 
   useEffect(() => {
     let cancelled = false;

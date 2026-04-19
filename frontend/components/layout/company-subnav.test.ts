@@ -95,15 +95,32 @@ describe("CompanySubnav", () => {
     expect(ownershipTab.getAttribute("aria-current")).toBe("page");
   });
 
-  it("adds an Oil tab for supported or partial oil companies", async () => {
+  it("waits for shared Models route company state instead of fetching financials for Oil tab visibility", async () => {
     mockUsePathname.mockReturnValue("/company/XOM/models");
-    getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "partial" } });
+    mockUseCompanyLayoutContext.mockReturnValue({
+      company: null,
+      publisherCount: 1,
+      registerPublisher: () => () => undefined,
+      setCompany: vi.fn(),
+    });
 
-    const { container } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
+    const { container, rerender } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
     await waitFor(() => {
-      expect(getCompanyFinancials).toHaveBeenCalledWith("XOM", { view: "core" });
+      expect(getCompanyFinancials).not.toHaveBeenCalled();
+      expect(getCompanyOverview).not.toHaveBeenCalled();
+    });
+
+    mockUseCompanyLayoutContext.mockReturnValue({
+      company: { ticker: "XOM", oil_support_status: "partial" },
+      publisherCount: 1,
+      registerPublisher: () => () => undefined,
+      setCompany: vi.fn(),
+    });
+    rerender(React.createElement(CompanySubnav, { ticker: "XOM" }));
+
+    await waitFor(() => {
       const oilTab = within(desktopNav).getByRole("link", { name: "Oil" });
       expect(oilTab.getAttribute("href")).toBe("/company/XOM/oil");
     });
@@ -111,13 +128,19 @@ describe("CompanySubnav", () => {
 
   it("keeps the Oil tab hidden for unsupported companies", async () => {
     mockUsePathname.mockReturnValue("/company/KMI/models");
-    getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "unsupported" } });
+    mockUseCompanyLayoutContext.mockReturnValue({
+      company: null,
+      publisherCount: 1,
+      registerPublisher: () => () => undefined,
+      setCompany: vi.fn(),
+    });
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "KMI" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
     await waitFor(() => {
-      expect(getCompanyFinancials).toHaveBeenCalledWith("KMI", { view: "core" });
+      expect(getCompanyFinancials).not.toHaveBeenCalled();
+      expect(getCompanyOverview).not.toHaveBeenCalled();
     });
     expect(within(desktopNav).queryByRole("link", { name: "Oil" })).toBeNull();
   });

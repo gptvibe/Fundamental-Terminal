@@ -2341,12 +2341,24 @@ class EdgarIngestionService:
             return None
 
         if policy.can_skip_sec_refresh():
-            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
-            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(
+                session,
+                local_company.id,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_capital_structure=True,
+            )
+            _refresh_company_dashboard_caches(
+                session,
+                local_company,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_derived_metrics=True,
+                include_oil_scenario_overlay=True,
+                include_earnings_models=True,
+            )
             reporter.complete("Using fresh cached data.")
             session.commit()
             return IngestionResult(
@@ -2386,8 +2398,8 @@ class EdgarIngestionService:
                 reporter=reporter,
                 announce=False,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(session, local_company, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2423,9 +2435,15 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(
+                session,
+                local_company,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_earnings_models=True,
+            )
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2471,8 +2489,8 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(session, local_company, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2506,8 +2524,8 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(session, local_company, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2546,12 +2564,24 @@ class EdgarIngestionService:
                 logger.exception("Market data refresh failed for %s", local_company.ticker)
                 reporter.step("market", f"Market data refresh failed: {exc}")
                 session.rollback()
-            _refresh_derived_metrics_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_capital_structure_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_oil_scenario_overlay_cache(session, local_company, checked_at, reporter)
-            _refresh_earnings_model_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(
+                session,
+                local_company.id,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_capital_structure=True,
+            )
+            _refresh_company_dashboard_caches(
+                session,
+                local_company,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_derived_metrics=True,
+                include_oil_scenario_overlay=True,
+                include_earnings_models=True,
+            )
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2582,8 +2612,8 @@ class EdgarIngestionService:
                 checked_at=checked_at,
                 reporter=reporter,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(session, local_company, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2618,8 +2648,8 @@ class EdgarIngestionService:
                 checked_at=checked_at,
                 reporter=reporter,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(session, local_company, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2656,8 +2686,8 @@ class EdgarIngestionService:
                 reporter=reporter,
                 force=policy.force,
             )
-            _refresh_company_research_brief_cache(session, local_company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(session, local_company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_dashboard_caches(session, local_company, checked_at, reporter, force=policy.force)
             session.commit()
             reporter.complete("Refresh and compute complete.")
             return IngestionResult(
@@ -2911,12 +2941,24 @@ class EdgarIngestionService:
                     ),
                 )
 
-            _refresh_derived_metrics_cache(session, company.id, checked_at, reporter, force=policy.force)
-            _refresh_capital_structure_cache(session, company.id, checked_at, reporter, force=policy.force)
-            _refresh_oil_scenario_overlay_cache(session, company, checked_at, reporter)
-            _refresh_earnings_model_cache(session, company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_research_brief_cache(session, company.id, checked_at, reporter, force=policy.force)
-            _refresh_company_charts_dashboard_cache(session, company.id, checked_at, reporter, force=policy.force)
+            _refresh_company_brief_readiness_caches(
+                session,
+                company.id,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_capital_structure=True,
+            )
+            _refresh_company_dashboard_caches(
+                session,
+                company,
+                checked_at,
+                reporter,
+                force=policy.force,
+                include_derived_metrics=True,
+                include_oil_scenario_overlay=True,
+                include_earnings_models=True,
+            )
 
             session.commit()
             reporter.complete("Refresh and compute complete.")
@@ -3316,6 +3358,42 @@ def _build_company_charts_dashboard_inputs_fingerprint(session: Session, company
             "dependencies": dependency_hashes,
         },
     )
+
+
+def _refresh_company_brief_readiness_caches(
+    session: Session,
+    company_id: int,
+    checked_at: datetime,
+    reporter: JobReporter,
+    *,
+    force: bool = False,
+    include_capital_structure: bool = False,
+) -> None:
+    # Warm the brief as soon as its actual dependencies are refreshed so first
+    # company visits spend less time in snapshot-missing bootstrap states.
+    if include_capital_structure:
+        _refresh_capital_structure_cache(session, company_id, checked_at, reporter, force=force)
+    _refresh_company_research_brief_cache(session, company_id, checked_at, reporter, force=force)
+
+
+def _refresh_company_dashboard_caches(
+    session: Session,
+    company: Company,
+    checked_at: datetime,
+    reporter: JobReporter,
+    *,
+    force: bool = False,
+    include_derived_metrics: bool = False,
+    include_oil_scenario_overlay: bool = False,
+    include_earnings_models: bool = False,
+) -> None:
+    if include_derived_metrics:
+        _refresh_derived_metrics_cache(session, company.id, checked_at, reporter, force=force)
+    if include_oil_scenario_overlay:
+        _refresh_oil_scenario_overlay_cache(session, company, checked_at, reporter)
+    if include_earnings_models:
+        _refresh_earnings_model_cache(session, company.id, checked_at, reporter, force=force)
+    _refresh_company_charts_dashboard_cache(session, company.id, checked_at, reporter, force=force)
 
 
 def _refresh_derived_metrics_cache(

@@ -235,4 +235,34 @@ describe("useCompanyWorkspace", () => {
     expect(invalidateTickerCache).toHaveBeenCalledWith("RKLB");
     expect(invalidateTickerCache.mock.invocationCallOrder[0]).toBeLessThan(fetchFinancials.mock.invocationCallOrder[1]);
   });
+
+  it("passes through a compact financials view when requested", async () => {
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchFinancials.mockResolvedValue(
+      buildFinancialsResponse({
+        company: {
+          ticker: "RKLB",
+          name: "Rocket Lab Corp",
+          sector: "Space",
+          market_sector: "Space",
+          last_checked: "2026-03-31T00:00:00Z",
+          cache_state: "fresh",
+        },
+        refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
+      }) as never
+    );
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        financialsView: "core_segments",
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchFinancials).toHaveBeenCalledWith("RKLB", { view: "core_segments" });
+  });
 });

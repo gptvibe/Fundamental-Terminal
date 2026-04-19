@@ -116,6 +116,31 @@ def get_company_research_brief_snapshot(
     return session.execute(statement).scalar_one_or_none()
 
 
+def get_company_research_brief_snapshots(
+    session: Session,
+    company_ids: list[int],
+    *,
+    as_of: datetime | None = None,
+    schema_version: str = BRIEF_SCHEMA_VERSION,
+) -> dict[int, CompanyResearchBriefSnapshot | None]:
+    normalized_ids = sorted({int(company_id) for company_id in company_ids})
+    if not normalized_ids:
+        return {}
+
+    statement = select(CompanyResearchBriefSnapshot).where(
+        CompanyResearchBriefSnapshot.company_id.in_(normalized_ids),
+        CompanyResearchBriefSnapshot.as_of_key == _as_of_key(as_of),
+        CompanyResearchBriefSnapshot.schema_version == schema_version,
+    )
+    rows = list(session.execute(statement).scalars())
+    snapshots_by_company_id: dict[int, CompanyResearchBriefSnapshot | None] = {
+        company_id: None for company_id in normalized_ids
+    }
+    for row in rows:
+        snapshots_by_company_id[int(row.company_id)] = row
+    return snapshots_by_company_id
+
+
 def build_company_research_brief_response(
     session: Session,
     company_id: int,

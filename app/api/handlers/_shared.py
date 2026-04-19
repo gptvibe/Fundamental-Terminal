@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from calendar import monthrange
 import asyncio
+from contextvars import ContextVar
 import inspect
 import logging
 from copy import deepcopy
@@ -48,7 +49,9 @@ from app.services.segment_analysis import build_segment_analysis
 from app.services.cache_queries import (
     CompanyCacheSnapshot,
     get_company_capital_markets_events,
+    get_company_capital_markets_events_by_company_ids,
     get_company_comment_letters,
+    get_company_comment_letters_by_company_ids,
     get_company_comment_letters_cache_status,
     get_company_capital_structure_last_checked,
     get_company_capital_structure_snapshots,
@@ -63,26 +66,35 @@ from app.services.cache_queries import (
     get_company_financial_restatements,
     get_company_executive_compensation,
     get_company_filing_events,
+    get_company_filing_events_by_company_ids,
     get_company_filing_insights,
     get_company_financials,
+    get_company_financials_by_company_ids,
     get_company_regulated_bank_financials,
     get_company_form144_cache_status,
     get_company_form144_filings,
+    get_company_form144_filings_by_company_ids,
     get_company_insider_trade_cache_status,
     get_company_insider_trades,
+    get_company_insider_trades_by_company_ids,
     get_company_institutional_holdings,
+    get_company_institutional_holdings_by_company_ids,
     get_company_institutional_holdings_cache_status,
     get_company_models,
+    get_company_models_by_company_ids,
     get_company_price_cache_status,
     get_company_price_history,
+    get_latest_company_price_points_by_company_ids,
     get_company_proxy_cache_status,
     get_company_proxy_statements,
+    get_company_proxy_statements_by_company_ids,
     get_company_snapshot,
     get_company_snapshot_by_cik,
     get_company_snapshots_by_ticker,
     search_company_snapshots,
     filter_price_history_as_of,
     get_company_beneficial_ownership_reports,
+    get_company_beneficial_ownership_reports_by_company_ids,
     latest_price_as_of,
     select_point_in_time_financials,
 )
@@ -95,6 +107,7 @@ from app.services.company_charts_dashboard import (
 from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
     get_company_research_brief_snapshot,
+    get_company_research_brief_snapshots,
 )
 from app.services.equity_claim_risk import build_company_equity_claim_risk_response
 from app.services.derived_metrics_mart import (
@@ -165,6 +178,13 @@ WATCHLIST_PROJECTED_FILING_FORMS = {"10-K", "10-Q"}
 DEFAULT_FILING_LAG_DAYS = {"10-Q": 40, "10-K": 60}
 SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS = 72
 STRICT_OFFICIAL_DISABLED_SOURCE_TIERS = {"commercial_fallback", "manual_override"}
+WATCHLIST_SUMMARY_ACTIVITY_LIMIT = 80
+WATCHLIST_SUMMARY_PROXY_LIMIT = 40
+WATCHLIST_SUMMARY_MODEL_NAMES = ["dcf", "roic", "reverse_dcf", "capital_allocation", "ratios"]
+_watchlist_summary_preload_ctx: ContextVar[dict[str, Any] | None] = ContextVar(
+    "watchlist_summary_preload_ctx",
+    default=None,
+)
 SOURCE_REGISTRY_TIER_ORDER: dict[SourceTier, int] = {
     "official_regulator": 0,
     "official_statistical": 1,
@@ -4403,6 +4423,145 @@ def company_activity_overview(
     return _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
 
 
+def _build_watchlist_preloaded_activity_data(
+    session: Session,
+    snapshots_by_ticker: dict[str, CompanyCacheSnapshot],
+) -> dict[int, dict[str, Any]]:
+    snapshots = [snapshot for snapshot in snapshots_by_ticker.values() if snapshot is not None]
+    company_ids = sorted({snapshot.company.id for snapshot in snapshots})
+    if not company_ids:
+        return {}
+
+    filings_by_company_id: dict[int, list[FilingPayload] | None] = {}
+    uncached_filing_company_ids: list[int] = []
+    for snapshot in snapshots:
+        cached_filings = _load_filings_from_cache(snapshot.company.cik)
+        if cached_filings is None:
+            uncached_filing_company_ids.append(snapshot.company.id)
+            continue
+        filings_by_company_id[snapshot.company.id] = cached_filings[:24]
+
+    if uncached_filing_company_ids:
+        financials_by_company_id = get_company_financials_by_company_ids(session, uncached_filing_company_ids)
+        for company_id in uncached_filing_company_ids:
+            filings_by_company_id[company_id] = _serialize_cached_statement_filings(financials_by_company_id.get(company_id, []))[:24]
+
+    filing_events_by_company_id = get_company_filing_events_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    beneficial_reports_by_company_id = get_company_beneficial_ownership_reports_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    insider_trades_by_company_id = get_company_insider_trades_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    form144_filings_by_company_id = get_company_form144_filings_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    institutional_holdings_by_company_id = get_company_institutional_holdings_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    capital_markets_by_company_id = get_company_capital_markets_events_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    comment_letters_by_company_id = get_company_comment_letters_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_ACTIVITY_LIMIT,
+    )
+    proxy_statements_by_company_id = get_company_proxy_statements_by_company_ids(
+        session,
+        company_ids,
+        limit=WATCHLIST_SUMMARY_PROXY_LIMIT,
+    )
+
+    activity_by_company_id: dict[int, dict[str, Any]] = {}
+    for company_id in company_ids:
+        activity_by_company_id[company_id] = {
+            "filings": filings_by_company_id.get(company_id, []),
+            "filing_events": [
+                _serialize_cached_filing_event(event)
+                for event in filing_events_by_company_id.get(company_id, [])
+            ],
+            "governance_filings": [
+                _serialize_cached_proxy_statement(statement)
+                for statement in proxy_statements_by_company_id.get(company_id, [])
+            ],
+            "beneficial_filings": [
+                _serialize_cached_beneficial_ownership_report(report)
+                for report in beneficial_reports_by_company_id.get(company_id, [])
+            ],
+            "insider_trades": [
+                _serialize_insider_trade(trade)
+                for trade in insider_trades_by_company_id.get(company_id, [])
+            ],
+            "form144_filings": [
+                _serialize_form144_filing(filing)
+                for filing in form144_filings_by_company_id.get(company_id, [])
+            ],
+            "institutional_holdings": [
+                _serialize_institutional_holding(holding)
+                for holding in institutional_holdings_by_company_id.get(company_id, [])
+            ],
+            "capital_filings": [
+                _serialize_cached_capital_markets_event(event)
+                for event in capital_markets_by_company_id.get(company_id, [])
+            ],
+            "comment_letters": [
+                _serialize_comment_letter(letter)
+                for letter in comment_letters_by_company_id.get(company_id, [])
+            ],
+        }
+    return activity_by_company_id
+
+
+def _load_watchlist_summary_preload(
+    session: Session,
+    snapshots_by_ticker: dict[str, CompanyCacheSnapshot],
+) -> dict[str, Any] | None:
+    snapshots = [snapshot for snapshot in snapshots_by_ticker.values() if snapshot is not None]
+    company_ids = sorted({snapshot.company.id for snapshot in snapshots})
+    if not company_ids:
+        return None
+
+    latest_models_by_company_id = get_company_models_by_company_ids(
+        session,
+        company_ids,
+        model_names=WATCHLIST_SUMMARY_MODEL_NAMES,
+    )
+    latest_prices_by_company_id = (
+        {company_id: None for company_id in company_ids}
+        if settings.strict_official_mode
+        else {
+            company_id: (price.close if price is not None else None)
+            for company_id, price in get_latest_company_price_points_by_company_ids(session, company_ids).items()
+        }
+    )
+
+    return {
+        "activity_by_company_id": _build_watchlist_preloaded_activity_data(session, snapshots_by_ticker),
+        "models_by_company_id": latest_models_by_company_id,
+        "latest_prices_by_company_id": latest_prices_by_company_id,
+        "brief_snapshots_by_company_id": get_company_research_brief_snapshots(
+            session,
+            company_ids,
+            schema_version=BRIEF_SCHEMA_VERSION,
+        ),
+    }
+
+
 @app.post("/api/watchlist/summary", response_model=WatchlistSummaryResponse)
 def watchlist_summary(
     payload: WatchlistSummaryRequest,
@@ -4426,25 +4585,35 @@ def watchlist_summary(
             companies=[_build_missing_watchlist_summary_item(background_tasks, ticker) for ticker in normalized_tickers],
         )
 
+    preload: dict[str, Any] | None = None
+    try:
+        preload = _load_watchlist_summary_preload(session, snapshots_by_ticker)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to batch watchlist summary preload data")
+
     companies: list[WatchlistSummaryItemPayload] = []
-    for ticker in normalized_tickers:
-        snapshot = snapshots_by_ticker.get(ticker)
-        if snapshot is None:
-            companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
-            continue
-        try:
-            companies.append(
-                _build_watchlist_summary_item(
-                    session,
-                    background_tasks,
-                    ticker,
-                    snapshot=snapshot,
-                    coverage_counts=coverage_counts.get(snapshot.company.id),
+    preload_token = _watchlist_summary_preload_ctx.set(preload)
+    try:
+        for ticker in normalized_tickers:
+            snapshot = snapshots_by_ticker.get(ticker)
+            if snapshot is None:
+                companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+                continue
+            try:
+                companies.append(
+                    _build_watchlist_summary_item(
+                        session,
+                        background_tasks,
+                        ticker,
+                        snapshot=snapshot,
+                        coverage_counts=coverage_counts.get(snapshot.company.id),
+                    )
                 )
-            )
-        except Exception:
-            logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
-            companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+            except Exception:
+                logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
+                companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+    finally:
+        _watchlist_summary_preload_ctx.reset(preload_token)
     logging.getLogger(__name__).info(
         "TELEMETRY watchlist_summary tickers=%s companies=%s",
         len(normalized_tickers),
@@ -9415,8 +9584,11 @@ def _build_watchlist_summary_item(
 
     alerts: list[AlertPayload] = []
     entries: list[ActivityFeedEntryPayload] = []
+    preload = _watchlist_summary_preload_ctx.get()
+    activity_by_company_id = preload.get("activity_by_company_id", {}) if preload else {}
+    preloaded_activity = activity_by_company_id.get(snapshot.company.id)
     try:
-        activity = _load_company_activity_data(session, snapshot, compact=True)
+        activity = preloaded_activity if preloaded_activity is not None else _load_company_activity_data(session, snapshot, compact=True)
         alerts = _build_activity_alerts(
             beneficial_filings=activity["beneficial_filings"],
             capital_filings=activity["capital_filings"],
@@ -9445,22 +9617,38 @@ def _build_watchlist_summary_item(
     models: dict[str, ModelRun] = {}
     latest_price = None
     material_change = None
+    models_by_company_id = preload.get("models_by_company_id", {}) if preload else {}
+    latest_prices_by_company_id = preload.get("latest_prices_by_company_id", {}) if preload else {}
     try:
-        models = {
-            model.model_name.lower(): model
-            for model in get_company_models(
-                session,
-                snapshot.company.id,
-                model_names=["dcf", "roic", "reverse_dcf", "capital_allocation", "ratios"],
-            )
-        }
-        latest_price_series = _visible_price_history(session, snapshot.company.id)
-        latest_price = latest_price_series[-1].close if latest_price_series else None
+        if snapshot.company.id in models_by_company_id:
+            models = models_by_company_id.get(snapshot.company.id, {})
+        else:
+            models = {
+                model.model_name.lower(): model
+                for model in get_company_models(
+                    session,
+                    snapshot.company.id,
+                    model_names=WATCHLIST_SUMMARY_MODEL_NAMES,
+                )
+            }
+        if snapshot.company.id in latest_prices_by_company_id:
+            latest_price = latest_prices_by_company_id.get(snapshot.company.id)
+        else:
+            latest_price_series = _visible_price_history(session, snapshot.company.id)
+            latest_price = latest_price_series[-1].close if latest_price_series else None
     except Exception:
         logging.getLogger(__name__).exception("Unable to load watchlist model metrics for '%s'", snapshot.company.ticker)
 
+    brief_snapshots_by_company_id = preload.get("brief_snapshots_by_company_id", {}) if preload else {}
     try:
-        brief_snapshot = get_company_research_brief_snapshot(session, snapshot.company.id, schema_version=BRIEF_SCHEMA_VERSION)
+        if snapshot.company.id in brief_snapshots_by_company_id:
+            brief_snapshot = brief_snapshots_by_company_id.get(snapshot.company.id)
+        else:
+            brief_snapshot = get_company_research_brief_snapshot(
+                session,
+                snapshot.company.id,
+                schema_version=BRIEF_SCHEMA_VERSION,
+            )
         material_change = _build_watchlist_material_change_payload(brief_snapshot.payload if brief_snapshot is not None else None, refresh=refresh)
     except Exception:
         logging.getLogger(__name__).exception("Unable to load watchlist material-change summary for '%s'", snapshot.company.ticker)

@@ -140,7 +140,7 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
     monkeypatch.setattr(
         sec_edgar,
         "_refresh_company_research_brief_cache",
-        lambda *_args, **_kwargs: None,
+        lambda *_args, **_kwargs: cache_steps.append("brief"),
     )
     monkeypatch.setattr(
         sec_edgar,
@@ -159,7 +159,7 @@ def test_refresh_company_skips_when_cached_data_is_fresh(monkeypatch):
     assert result.status == "skipped"
     assert result.fetched_from_sec is False
     assert result.detail == "Freshness window still valid"
-    assert cache_steps == ["derived", "capital-structure", "oil-scenario", "earnings-model", "charts"]
+    assert cache_steps == ["capital-structure", "brief", "derived", "oil-scenario", "earnings-model", "charts"]
     assert reporter.completed == ["Using fresh cached data."]
     assert session.commit_count == 1
 
@@ -283,7 +283,7 @@ def test_refresh_company_rebuilds_brief_after_cached_earnings_refresh(monkeypatc
     assert result.status == "fetched"
     assert result.fetched_from_sec is True
     assert result.earnings_releases_written == 3
-    assert cache_steps == ["earnings-model", "brief", "charts"]
+    assert cache_steps == ["brief", "earnings-model", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -347,7 +347,7 @@ def test_refresh_company_prefers_cached_earnings_refresh_over_broad_sec_when_com
     assert result.fetched_from_sec is True
     assert result.earnings_releases_written == 3
     assert result.detail == "Cached 3 earnings release filings"
-    assert cache_steps == ["earnings-model", "brief", "charts"]
+    assert cache_steps == ["brief", "earnings-model", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -485,7 +485,7 @@ def test_refresh_company_prefers_cached_prices_refresh_over_broad_sec_when_filin
     assert result.fetched_from_sec is False
     assert result.price_points_written == 6
     assert result.detail == "Cached 6 daily price bars"
-    assert cache_steps == ["derived", "capital-structure", "oil-scenario", "earnings-model", "brief", "charts"]
+    assert cache_steps == ["capital-structure", "brief", "derived", "oil-scenario", "earnings-model", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
@@ -678,6 +678,7 @@ def test_refresh_company_uses_full_sec_refresh_when_core_financials_are_stale(mo
     recent = datetime.now(timezone.utc) - timedelta(hours=1)
     stale = datetime.now(timezone.utc) - timedelta(days=3)
     resolved: list[str] = []
+    cache_steps: list[str] = []
 
     monkeypatch.setattr(sec_edgar, "settings", _settings())
     monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
@@ -740,12 +741,12 @@ def test_refresh_company_uses_full_sec_refresh_when_core_financials_are_stale(mo
     monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 0)
     monkeypatch.setattr(service, "refresh_prices", lambda **_kwargs: 0)
     monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(sec_edgar, "_refresh_company_charts_dashboard_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: cache_steps.append("derived"))
+    monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: cache_steps.append("capital-structure"))
+    monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: cache_steps.append("oil-scenario"))
+    monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: cache_steps.append("earnings-model"))
+    monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: cache_steps.append("brief"))
+    monkeypatch.setattr(sec_edgar, "_refresh_company_charts_dashboard_cache", lambda *_args, **_kwargs: cache_steps.append("charts"))
 
     result = service.refresh_company("MSFT", reporter=reporter)
 
@@ -754,6 +755,7 @@ def test_refresh_company_uses_full_sec_refresh_when_core_financials_are_stale(mo
     assert result.fetched_from_sec is True
     assert result.statements_written == 1
     assert "Normalized 1 filings" in result.detail
+    assert cache_steps == ["capital-structure", "brief", "derived", "oil-scenario", "earnings-model", "charts"]
     assert reporter.completed == ["Refresh and compute complete."]
 
 
