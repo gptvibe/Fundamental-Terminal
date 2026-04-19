@@ -4,6 +4,7 @@ import {
   __resetApiClientCacheForTests,
   getCompanyCapitalStructure,
   getCompanyCharts,
+  getCompanyChartsWhatIf,
   getCompanyChangesSinceLastFiling,
   getCompaniesCompare,
   getCompanyEarningsWorkspace,
@@ -278,6 +279,8 @@ describe("api route stability", () => {
 
     await getCompanyCharts("AAPL");
     await getCompanyCharts("AAPL", { asOf: "2025-02-01" });
+    await getCompanyChartsWhatIf("AAPL", { overrides: { dso: 60 } });
+    await getCompanyChartsWhatIf("AAPL", { overrides: { dso: 60 } }, { asOf: "2025-02-01" });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -288,6 +291,24 @@ describe("api route stability", () => {
       2,
       "/backend/api/companies/AAPL/charts?as_of=2025-02-01",
       expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/backend/api/companies/AAPL/charts/what-if",
+      expect.objectContaining({
+        cache: "no-store",
+        method: "POST",
+        body: JSON.stringify({ overrides: { dso: 60 } }),
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/backend/api/companies/AAPL/charts/what-if?as_of=2025-02-01",
+      expect.objectContaining({
+        cache: "no-store",
+        method: "POST",
+        body: JSON.stringify({ overrides: { dso: 60 } }),
+      })
     );
   });
 

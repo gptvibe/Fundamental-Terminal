@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 import app.services.cache_queries as cache_queries
 import app.services.company_charts_dashboard as charts_service
@@ -949,6 +950,124 @@ def test_company_charts_dashboard_response_round_trips_new_cards_through_snapsho
         "income_statement",
         "revenue",
     ).projected_values
+
+
+def test_build_company_charts_dashboard_response_applies_what_if_overrides_and_surfaces_trace_metadata(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    baseline_response = charts_service.build_company_charts_dashboard_response(
+        fake_session,
+        1,
+        generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+    )
+    scenario_response = charts_service.build_company_charts_dashboard_response(
+        fake_session,
+        1,
+        generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        what_if_request=charts_service.CompanyChartsWhatIfRequest(
+            overrides={
+                "price_growth": 0.08,
+                "dso": 70.0,
+            }
+        ),
+    )
+
+    assert baseline_response is not None
+    assert baseline_response.projection_studio is not None
+    assert scenario_response is not None
+    assert scenario_response.projection_studio is not None
+    assert scenario_response.what_if is not None
+
+    forecast_year = scenario_response.what_if.impact_summary.forecast_year
+    assert forecast_year is not None
+    baseline_revenue = _projection_row(baseline_response.projection_studio, "income_statement", "revenue").projected_values[forecast_year]
+    scenario_revenue = _projection_row(scenario_response.projection_studio, "income_statement", "revenue").projected_values[forecast_year]
+    assert scenario_revenue != baseline_revenue
+
+    applied_keys = {item.key for item in scenario_response.what_if.overrides_applied}
+    assert applied_keys == {"price_growth", "dso"}
+    control_keys = {item.key for item in scenario_response.what_if.driver_control_metadata}
+    assert {"price_growth", "dso", "variable_cost_ratio", "sales_to_capital"}.issubset(control_keys)
+    price_control = next(item for item in scenario_response.what_if.driver_control_metadata if item.key == "price_growth")
+    assert price_control.current_value == pytest.approx(0.08, abs=1e-6)
+
+    revenue_trace = _projection_row(scenario_response.projection_studio, "income_statement", "revenue").formula_traces[forecast_year]
+    assert revenue_trace.scenario_state == "user_override"
+    assert any(input_item.is_override and input_item.key == "price_growth" for input_item in revenue_trace.inputs)
+
+    receivables_trace = _projection_row(scenario_response.projection_studio, "balance_sheet", "accounts_receivable").formula_traces[forecast_year]
+    assert receivables_trace.scenario_state == "user_override"
+    assert any(input_item.is_override and input_item.key == "accounts_receivable_days" for input_item in receivables_trace.inputs)
+
+
+def test_build_company_charts_dashboard_response_clips_out_of_range_what_if_overrides(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = _guidance_release(1200.0)
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(
+        fake_session,
+        1,
+        generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+        what_if_request=charts_service.CompanyChartsWhatIfRequest(
+            overrides={
+                "price_growth": 0.5,
+                "dso": 500.0,
+            }
+        ),
+    )
+
+    assert response is not None
+    assert response.what_if is not None
+    clipped_keys = {item.key for item in response.what_if.overrides_clipped}
+    assert clipped_keys == {"price_growth", "dso"}
+
+    clipped_price = next(item for item in response.what_if.overrides_clipped if item.key == "price_growth")
+    clipped_dso = next(item for item in response.what_if.overrides_clipped if item.key == "dso")
+    assert clipped_price.applied_value == pytest.approx(driver_model.PRICE_GROWTH_CAP, abs=1e-6)
+    assert clipped_dso.applied_value == pytest.approx(driver_model.DSO_CAP, abs=1e-6)
+
+
+def test_company_charts_what_if_request_rejects_unknown_or_non_numeric_overrides() -> None:
+    with pytest.raises(ValidationError, match="Unsupported override keys: mystery_driver"):
+        charts_service.CompanyChartsWhatIfRequest.model_validate({"overrides": {"mystery_driver": 0.1}})
+
+    with pytest.raises(ValidationError):
+        charts_service.CompanyChartsWhatIfRequest.model_validate({"overrides": {"dso": "not-a-number"}})
 
 
 def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, statements: list[SimpleNamespace]) -> tuple[driver_model.DriverForecastScenario, driver_model._ForecastBridgePoint]:

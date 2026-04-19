@@ -18,6 +18,7 @@ from app.contracts.company_charts import (
     CompanyChartsComparisonCardPayload,
     CompanyChartsComparisonItemPayload,
     CompanyChartsDashboardResponse,
+    CompanyChartsDriverControlMetadataPayload,
     CompanyChartsDriverCardPayload,
     CompanyChartsFactorValuePayload,
     CompanyChartsFactorsPayload,
@@ -36,6 +37,11 @@ from app.contracts.company_charts import (
     CompanyChartsSeriesPayload,
     CompanyChartsSeriesPointPayload,
     CompanyChartsSummaryPayload,
+    CompanyChartsWhatIfImpactMetricPayload,
+    CompanyChartsWhatIfImpactSummaryPayload,
+    CompanyChartsWhatIfOverridePayload,
+    CompanyChartsWhatIfPayload,
+    CompanyChartsWhatIfRequest,
 )
 from app.models import Company, CompanyChartsDashboardSnapshot
 from app.source_registry import SourceUsage, build_provenance_entries, build_source_mix
@@ -134,6 +140,7 @@ def build_company_charts_dashboard_response(
     as_of: datetime | None = None,
     generated_at: datetime | None = None,
     payload_version: str | None = None,
+    what_if_request: CompanyChartsWhatIfRequest | None = None,
 ) -> CompanyChartsDashboardResponse | None:
     company = session.get(Company, company_id)
     if company is None:
@@ -149,7 +156,13 @@ def build_company_charts_dashboard_response(
     earnings_points = get_company_earnings_model_points(session, company_id, limit=8, as_of=as_of)
     earnings_releases = get_company_earnings_releases(session, company_id, limit=24, as_of=as_of)
     restatements = get_company_financial_restatements(session, company_id, limit=200, as_of=as_of)
-    driver_bundle = build_driver_forecast_bundle(annuals, earnings_releases)
+    baseline_driver_bundle = build_driver_forecast_bundle(annuals, earnings_releases)
+    requested_overrides = dict(what_if_request.overrides) if what_if_request is not None else {}
+    driver_bundle = (
+        build_driver_forecast_bundle(annuals, earnings_releases, overrides=requested_overrides)
+        if requested_overrides
+        else baseline_driver_bundle
+    )
     timestamp = generated_at or datetime.now(timezone.utc)
     source_inputs_last_refreshed_at = _merge(
         _latest_checked(annuals),
@@ -268,6 +281,11 @@ def build_company_charts_dashboard_response(
         confidence_label=stability_label,
     )
     projection_studio = _build_projection_studio_payload(annuals, driver_bundle, forecast_methodology)
+    what_if_payload = (
+        _build_company_charts_what_if_payload(baseline_driver_bundle, driver_bundle)
+        if what_if_request is not None
+        else None
+    )
 
     return CompanyChartsDashboardResponse(
         company=company_payload,
@@ -311,6 +329,7 @@ def build_company_charts_dashboard_response(
         forecast_methodology=forecast_methodology,
         forecast_diagnostics=forecast_stability,
         projection_studio=projection_studio,
+        what_if=what_if_payload,
         payload_version=payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,
         refresh=RefreshState(triggered=False, reason="fresh", ticker=company.ticker, job_id=None),
         diagnostics=diagnostics,
@@ -886,11 +905,150 @@ def _serialize_projection_studio_formula_trace(trace: Any) -> CompanyChartsFormu
                 formatted_value=str(getattr(input_item, "formatted_value", "")),
                 source_detail=str(getattr(input_item, "source_detail", "")),
                 source_kind=str(getattr(input_item, "source_kind", "sec")),
+                is_override=bool(getattr(input_item, "is_override", False)),
+                original_value=getattr(input_item, "original_value", None),
+                original_source=str(getattr(input_item, "original_source", "")) if getattr(input_item, "original_source", None) is not None else None,
             )
             for input_item in getattr(trace, "inputs", [])
         ],
         confidence=str(getattr(trace, "confidence", "high")),
+        scenario_state=str(getattr(trace, "scenario_state", "baseline")),
     )
+
+
+def _build_company_charts_what_if_payload(
+    baseline_bundle: Any | None,
+    scenario_bundle: Any | None,
+) -> CompanyChartsWhatIfPayload:
+    override_context = getattr(scenario_bundle, "override_context", None) or getattr(baseline_bundle, "override_context", None)
+    if override_context is None:
+        return CompanyChartsWhatIfPayload()
+    return CompanyChartsWhatIfPayload(
+        impact_summary=_build_company_charts_what_if_impact_summary(baseline_bundle, scenario_bundle),
+        overrides_applied=[_serialize_company_charts_what_if_override(item) for item in getattr(override_context, "applied", [])],
+        overrides_clipped=[_serialize_company_charts_what_if_override(item) for item in getattr(override_context, "clipped", [])],
+        driver_control_metadata=[_serialize_company_charts_driver_control(item) for item in getattr(override_context, "controls", [])],
+    )
+
+
+def _build_company_charts_what_if_impact_summary(
+    baseline_bundle: Any | None,
+    scenario_bundle: Any | None,
+) -> CompanyChartsWhatIfImpactSummaryPayload | None:
+    if baseline_bundle is None or scenario_bundle is None:
+        return None
+
+    baseline_scenarios = getattr(baseline_bundle, "scenarios", None) or {}
+    scenario_scenarios = getattr(scenario_bundle, "scenarios", None) or {}
+    baseline_base = baseline_scenarios.get("base") if isinstance(baseline_scenarios, dict) else None
+    scenario_base = scenario_scenarios.get("base") if isinstance(scenario_scenarios, dict) else None
+    forecast_years = getattr(getattr(scenario_base, "revenue", None), "years", []) if scenario_base is not None else []
+    forecast_year = int(forecast_years[0]) if forecast_years else None
+    metrics = [
+        _build_company_charts_what_if_metric(
+            "revenue_growth",
+            "Revenue Growth",
+            "percent",
+            getattr(baseline_bundle, "base_next_year_growth", None),
+            getattr(scenario_bundle, "base_next_year_growth", None),
+        ),
+        _build_company_charts_what_if_metric(
+            "revenue",
+            "Revenue",
+            "usd",
+            _first_line_value(getattr(baseline_base, "revenue", None)),
+            _first_line_value(getattr(scenario_base, "revenue", None)),
+        ),
+        _build_company_charts_what_if_metric(
+            "operating_income",
+            "Operating Income",
+            "usd",
+            _first_line_value(getattr(baseline_base, "operating_income", None)),
+            _first_line_value(getattr(scenario_base, "operating_income", None)),
+        ),
+        _build_company_charts_what_if_metric(
+            "free_cash_flow",
+            "Free Cash Flow",
+            "usd",
+            _first_line_value(getattr(baseline_base, "free_cash_flow", None)),
+            _first_line_value(getattr(scenario_base, "free_cash_flow", None)),
+        ),
+        _build_company_charts_what_if_metric(
+            "eps",
+            "Diluted EPS",
+            "usd_per_share",
+            _first_line_value(getattr(baseline_base, "eps", None)),
+            _first_line_value(getattr(scenario_base, "eps", None)),
+        ),
+    ]
+    return CompanyChartsWhatIfImpactSummaryPayload(
+        forecast_year=forecast_year,
+        metrics=[metric for metric in metrics if metric is not None],
+    )
+
+
+def _build_company_charts_what_if_metric(
+    key: str,
+    label: str,
+    unit: str,
+    baseline_value: float | None,
+    scenario_value: float | None,
+) -> CompanyChartsWhatIfImpactMetricPayload | None:
+    if baseline_value is None and scenario_value is None:
+        return None
+    delta_value = None
+    delta_percent = None
+    if baseline_value is not None and scenario_value is not None:
+        delta_value = scenario_value - baseline_value
+        delta_percent = _safe_divide(delta_value, abs(baseline_value)) if baseline_value not in (None, 0) else None
+    return CompanyChartsWhatIfImpactMetricPayload(
+        key=key,
+        label=label,
+        unit=unit,
+        baseline_value=baseline_value,
+        scenario_value=scenario_value,
+        delta_value=delta_value,
+        delta_percent=delta_percent,
+    )
+
+
+def _serialize_company_charts_what_if_override(item: Any) -> CompanyChartsWhatIfOverridePayload:
+    return CompanyChartsWhatIfOverridePayload(
+        key=str(getattr(item, "key", "")),
+        label=str(getattr(item, "label", "")),
+        unit=str(getattr(item, "unit", "")),
+        requested_value=getattr(item, "requested_value", None),
+        applied_value=getattr(item, "applied_value", None),
+        baseline_value=getattr(item, "baseline_value", None),
+        min_value=getattr(item, "min_value", None),
+        max_value=getattr(item, "max_value", None),
+        clipped=bool(getattr(item, "clipped", False)),
+        source_detail=str(getattr(item, "source_detail", "")),
+        source_kind=str(getattr(item, "source_kind", "sec")),
+    )
+
+
+def _serialize_company_charts_driver_control(item: Any) -> CompanyChartsDriverControlMetadataPayload:
+    return CompanyChartsDriverControlMetadataPayload(
+        key=str(getattr(item, "key", "")),
+        label=str(getattr(item, "label", "")),
+        unit=str(getattr(item, "unit", "")),
+        baseline_value=getattr(item, "baseline_value", None),
+        current_value=getattr(item, "current_value", None),
+        min_value=getattr(item, "min_value", None),
+        max_value=getattr(item, "max_value", None),
+        step=getattr(item, "step", None),
+        source_detail=str(getattr(item, "source_detail", "")),
+        source_kind=str(getattr(item, "source_kind", "sec")),
+    )
+
+
+def _first_line_value(line: Any) -> float | None:
+    values = getattr(line, "values", None) or []
+    if not values:
+        return None
+    first_value = values[0]
+    return float(first_value) if first_value is not None else None
 
 
 def _build_projection_studio_driver_cards(

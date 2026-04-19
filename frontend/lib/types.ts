@@ -2707,6 +2707,9 @@ export interface CompanyChartsFormulaInputPayload {
   formatted_value: string;
   source_detail: string;
   source_kind: string;
+  is_override: boolean;
+  original_value: number | null;
+  original_source: string | null;
 }
 
 export interface CompanyChartsFormulaTracePayload {
@@ -2718,6 +2721,7 @@ export interface CompanyChartsFormulaTracePayload {
   result_value: number | null;
   inputs: CompanyChartsFormulaInputPayload[];
   confidence: string;
+  scenario_state: string;
 }
 
 export interface CompanyChartsProjectedRowPayload {
@@ -2764,6 +2768,59 @@ export interface CompanyChartsProjectionStudioPayload {
   sensitivity_matrix: CompanyChartsSensitivityCellPayload[];
 }
 
+export interface CompanyChartsWhatIfRequest {
+  overrides?: Record<string, number>;
+}
+
+export interface CompanyChartsWhatIfImpactMetricPayload {
+  key: string;
+  label: string;
+  unit: string;
+  baseline_value: number | null;
+  scenario_value: number | null;
+  delta_value: number | null;
+  delta_percent: number | null;
+}
+
+export interface CompanyChartsWhatIfImpactSummaryPayload {
+  forecast_year: number | null;
+  metrics: CompanyChartsWhatIfImpactMetricPayload[];
+}
+
+export interface CompanyChartsWhatIfOverridePayload {
+  key: string;
+  label: string;
+  unit: string;
+  requested_value: number | null;
+  applied_value: number | null;
+  baseline_value: number | null;
+  min_value: number | null;
+  max_value: number | null;
+  clipped: boolean;
+  source_detail: string;
+  source_kind: string;
+}
+
+export interface CompanyChartsDriverControlMetadataPayload {
+  key: string;
+  label: string;
+  unit: string;
+  baseline_value: number | null;
+  current_value: number | null;
+  min_value: number | null;
+  max_value: number | null;
+  step: number | null;
+  source_detail: string;
+  source_kind: string;
+}
+
+export interface CompanyChartsWhatIfPayload {
+  impact_summary: CompanyChartsWhatIfImpactSummaryPayload | null;
+  overrides_applied: CompanyChartsWhatIfOverridePayload[];
+  overrides_clipped: CompanyChartsWhatIfOverridePayload[];
+  driver_control_metadata: CompanyChartsDriverControlMetadataPayload[];
+}
+
 export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   company: CompanyPayload | null;
   title: string;
@@ -2776,6 +2833,7 @@ export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   forecast_methodology: CompanyChartsMethodologyPayload;
   forecast_diagnostics?: CompanyChartsForecastDiagnosticsPayload;
   projection_studio: CompanyChartsProjectionStudioPayload | null;
+  what_if: CompanyChartsWhatIfPayload | null;
   payload_version: string;
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;

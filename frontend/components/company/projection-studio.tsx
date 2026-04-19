@@ -1,21 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
+import { getCompanyChartsWhatIf } from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { exportRowsToCsv, type ExportRow, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import type {
   CompanyChartsDashboardResponse,
   CompanyChartsDriverCardPayload,
+  CompanyChartsDriverControlMetadataPayload,
   CompanyChartsFormulaInputPayload,
   CompanyChartsFormulaTracePayload,
   CompanyChartsProjectedRowPayload,
   CompanyChartsScheduleSectionPayload,
   CompanyChartsSensitivityCellPayload,
+  CompanyChartsWhatIfImpactMetricPayload,
+  CompanyChartsWhatIfOverridePayload,
 } from "@/lib/types";
 
 import { FormulaTracePopover } from "./formula-trace-popover";
@@ -29,6 +33,12 @@ interface DriverGroup {
   key: string;
   title: string;
   drivers: CompanyChartsDriverCardPayload[];
+}
+
+interface DriverControlGroup {
+  key: string;
+  title: string;
+  controls: CompanyChartsDriverControlMetadataPayload[];
 }
 
 interface SensitivityGrid {
@@ -60,6 +70,11 @@ interface BridgeCard {
   rows: BridgeChartRow[];
 }
 
+interface CellDelta {
+  label: string;
+  tone: "up" | "down";
+}
+
 const DRIVER_GROUP_TITLES: Record<string, string> = {
   revenue: "Revenue Drivers",
   cost: "Cost Structure",
@@ -69,6 +84,8 @@ const DRIVER_GROUP_TITLES: Record<string, string> = {
   dilution: "Shares & Dilution",
   other: "Other Inputs",
 };
+
+const WHAT_IF_DEBOUNCE_MS = 320;
 
 function isSubtotalRow(key: string): boolean {
   return key.includes("_subtotal") || key.includes("_total") || key === "balance_check" || key === "reconciliation";
@@ -82,6 +99,27 @@ function formatValue(value: number | null | undefined, unit: string): string {
     return formatPercent(value);
   }
   return formatCompactNumber(value);
+}
+
+function formatDriverValue(value: number | null | undefined, unit: string): string {
+  if (value == null) {
+    return "—";
+  }
+  if (unit === "percent") {
+    return formatPercent(value);
+  }
+  if (unit === "days") {
+    return `${formatCompactNumber(value)}d`;
+  }
+  if (unit === "multiple") {
+    return `${value.toFixed(2)}x`;
+  }
+  return formatCompactNumber(value);
+}
+
+function formatSignedDelta(value: number, unit: string): string {
+  const prefix = value > 0 ? "+" : "-";
+  return `${prefix}${formatDriverValue(Math.abs(value), unit)}`;
 }
 
 function readYearValue(values: Record<number, number | null>, year: number): number | null {
@@ -197,25 +235,25 @@ function withCheckRows(section: CompanyChartsScheduleSectionPayload): CompanyCha
   };
 }
 
-function getDriverGroupKey(driver: CompanyChartsDriverCardPayload): string {
-  const normalizedKey = `${driver.key} ${driver.title}`.toLowerCase();
+function getDriverGroupKey(driver: { key: string; title?: string; label?: string }): string {
+  const normalizedKey = `${driver.key} ${driver.title ?? driver.label ?? ""}`.toLowerCase();
 
-  if (normalizedKey.includes("revenue") || normalizedKey.includes("growth") || normalizedKey.includes("price") || normalizedKey.includes("volume")) {
+  if (normalizedKey.includes("revenue") || normalizedKey.includes("growth") || normalizedKey.includes("price") || normalizedKey.includes("volume") || normalizedKey.includes("demand")) {
     return "revenue";
   }
   if (normalizedKey.includes("cost") || normalizedKey.includes("margin") || normalizedKey.includes("opex") || normalizedKey.includes("sga") || normalizedKey.includes("r&d")) {
     return "cost";
   }
-  if (normalizedKey.includes("working_capital") || normalizedKey.includes("receivable") || normalizedKey.includes("inventory") || normalizedKey.includes("payable")) {
+  if (normalizedKey.includes("working_capital") || normalizedKey.includes("receivable") || normalizedKey.includes("inventory") || normalizedKey.includes("payable") || normalizedKey.includes("days")) {
     return "working_capital";
   }
-  if (normalizedKey.includes("reinvestment") || normalizedKey.includes("capex") || normalizedKey.includes("depreciation")) {
+  if (normalizedKey.includes("reinvestment") || normalizedKey.includes("capex") || normalizedKey.includes("depreciation") || normalizedKey.includes("capital")) {
     return "reinvestment";
   }
   if (normalizedKey.includes("below_line") || normalizedKey.includes("interest") || normalizedKey.includes("tax") || normalizedKey.includes("other income")) {
     return "below_line";
   }
-  if (normalizedKey.includes("dilution") || normalizedKey.includes("share") || normalizedKey.includes("buyback")) {
+  if (normalizedKey.includes("dilution") || normalizedKey.includes("share")) {
     return "dilution";
   }
   return "other";
@@ -233,6 +271,21 @@ function groupDrivers(drivers: CompanyChartsDriverCardPayload[]): DriverGroup[] 
     key,
     title: DRIVER_GROUP_TITLES[key] ?? DRIVER_GROUP_TITLES.other,
     drivers: groupedDrivers,
+  }));
+}
+
+function groupDriverControls(controls: CompanyChartsDriverControlMetadataPayload[]): DriverControlGroup[] {
+  const grouped = new Map<string, CompanyChartsDriverControlMetadataPayload[]>();
+
+  controls.forEach((control) => {
+    const key = getDriverGroupKey({ key: control.key, label: control.label });
+    grouped.set(key, [...(grouped.get(key) ?? []), control]);
+  });
+
+  return Array.from(grouped.entries()).map(([key, groupedControls]) => ({
+    key,
+    title: DRIVER_GROUP_TITLES[key] ?? DRIVER_GROUP_TITLES.other,
+    controls: groupedControls,
   }));
 }
 
@@ -405,9 +458,9 @@ function buildExportRows(
 ): ExportRow[] {
   const scheduleRows = scheduleSections.flatMap((section) =>
     section.rows.flatMap((row) => {
-      const years = Array.from(
-        new Set([...Object.keys(row.reported_values).map(Number), ...Object.keys(row.projected_values).map(Number)])
-      ).sort((left, right) => left - right);
+      const years = Array.from(new Set([...Object.keys(row.reported_values).map(Number), ...Object.keys(row.projected_values).map(Number)])).sort(
+        (left, right) => left - right
+      );
 
       return years.map((year) => {
         const trace = row.formula_traces[year];
@@ -505,18 +558,76 @@ function getBridgeFill(row: BridgeChartRow): string {
   return row.amount >= 0 ? "var(--positive)" : "var(--negative)";
 }
 
+function nearlyEqual(left: number | null | undefined, right: number | null | undefined): boolean {
+  if (left == null || right == null) {
+    return left == null && right == null;
+  }
+  return Math.abs(left - right) <= 1e-9;
+}
+
+function clampValue(value: number, control: CompanyChartsDriverControlMetadataPayload): number {
+  const minimum = control.min_value ?? value;
+  const maximum = control.max_value ?? value;
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function materialityThreshold(unit: string, baselineValue: number): number {
+  if (unit === "percent") {
+    return 0.005;
+  }
+  if (unit === "days") {
+    return 1;
+  }
+  if (unit === "multiple") {
+    return 0.05;
+  }
+  if (unit === "usd_per_share") {
+    return 0.05;
+  }
+  return Math.max(Math.abs(baselineValue) * 0.01, 1);
+}
+
+function buildCellDelta(baselineValue: number | null, scenarioValue: number | null, unit: string): CellDelta | null {
+  if (baselineValue == null || scenarioValue == null || nearlyEqual(baselineValue, scenarioValue)) {
+    return null;
+  }
+
+  const deltaValue = scenarioValue - baselineValue;
+  if (Math.abs(deltaValue) < materialityThreshold(unit, baselineValue)) {
+    return null;
+  }
+
+  return {
+    label: formatSignedDelta(deltaValue, unit),
+    tone: deltaValue >= 0 ? "up" : "down",
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function asErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function ScheduleTable({
   section,
+  baselineSection,
   reportedYears,
   projectedYears,
+  hasScenarioOverrides,
   onCellClick,
 }: {
   section: CompanyChartsScheduleSectionPayload;
+  baselineSection: CompanyChartsScheduleSectionPayload | null;
   reportedYears: number[];
   projectedYears: number[];
+  hasScenarioOverrides: boolean;
   onCellClick: (trace: CompanyChartsFormulaTracePayload) => void;
 }) {
   const allYears = [...reportedYears, ...projectedYears];
+  const baselineRowsByKey = useMemo(() => new Map((baselineSection?.rows ?? []).map((row) => [row.key, row])), [baselineSection]);
 
   return (
     <div className="studio-schedule-table">
@@ -540,6 +651,7 @@ function ScheduleTable({
           <tbody>
             {section.rows.map((row) => {
               const isSubtotal = isSubtotalRow(row.key);
+              const baselineRow = baselineRowsByKey.get(row.key) ?? null;
               return (
                 <tr key={row.key} className={`studio-table-body-row ${isSubtotal ? "is-subtotal" : ""}`}>
                   <td className="studio-table-label-cell">
@@ -551,11 +663,22 @@ function ScheduleTable({
                     const value = isProjected ? row.projected_values[year] : row.reported_values[year];
                     const trace = isProjected ? row.formula_traces[year] : null;
                     const isClickable = Boolean(isProjected && trace);
+                    const delta =
+                      isProjected && hasScenarioOverrides
+                        ? buildCellDelta(baselineRow?.projected_values[year] ?? null, value ?? null, row.unit)
+                        : null;
+
+                    const cellContent = (
+                      <span className="studio-table-value-stack">
+                        <span className="studio-table-main-value">{formatValue(value, row.unit)}</span>
+                        {delta ? <span className={`studio-table-delta-badge is-${delta.tone}`}>{delta.label}</span> : null}
+                      </span>
+                    );
 
                     return (
                       <td
                         key={`${row.key}-${year}`}
-                        className={`studio-table-value-cell ${isProjected ? "is-projected" : "is-reported"} ${isClickable ? "is-clickable" : ""}`}
+                        className={`studio-table-value-cell ${isProjected ? "is-projected" : "is-reported"} ${isClickable ? "is-clickable" : ""} ${delta ? `has-delta is-${delta.tone}` : ""}`}
                         data-projected={isProjected ? "true" : "false"}
                       >
                         {isClickable && trace ? (
@@ -565,10 +688,10 @@ function ScheduleTable({
                             onClick={() => onCellClick(trace)}
                             aria-label={`${row.label} ${year} formula trace`}
                           >
-                            {formatValue(value, row.unit)}
+                            {cellContent}
                           </button>
                         ) : (
-                          formatValue(value, row.unit)
+                          cellContent
                         )}
                       </td>
                     );
@@ -682,12 +805,337 @@ function BridgeChartCard({ card, onInspect }: { card: BridgeCard; onInspect: (tr
   );
 }
 
-export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
-  const [selectedTrace, setSelectedTrace] = useState<CompanyChartsFormulaTracePayload | null>(null);
+function ImpactMetricCard({ metric }: { metric: CompanyChartsWhatIfImpactMetricPayload }) {
+  return (
+    <article className="studio-impact-card">
+      <div className="studio-impact-card-topline">
+        <div className="studio-impact-card-label">{metric.label}</div>
+        {metric.delta_value != null ? (
+          <div className={`studio-impact-card-delta ${metric.delta_value >= 0 ? "is-up" : "is-down"}`}>{formatSignedDelta(metric.delta_value, metric.unit)}</div>
+        ) : null}
+      </div>
+      <div className="studio-impact-card-values">
+        <span>Base {formatDriverValue(metric.baseline_value, metric.unit)}</span>
+        <span>Scenario {formatDriverValue(metric.scenario_value, metric.unit)}</span>
+      </div>
+      {metric.delta_percent != null ? (
+        <div className="studio-impact-card-detail">{metric.delta_percent >= 0 ? "+" : ""}{formatPercent(metric.delta_percent)} vs base</div>
+      ) : null}
+    </article>
+  );
+}
 
-  const scheduleSections = useMemo(() => studio.schedule_sections.map((section) => withCheckRows(section)), [studio.schedule_sections]);
-  const driverGroups = useMemo(() => groupDrivers(studio.drivers_used), [studio.drivers_used]);
-  const sensitivityGrid = useMemo(() => buildSensitivityGrid(studio.sensitivity_matrix), [studio.sensitivity_matrix]);
+function ImpactSummaryStrip({
+  payload,
+  activeOverrideCount,
+}: {
+  payload: CompanyChartsDashboardResponse;
+  activeOverrideCount: number;
+}) {
+  const impactSummary = payload.what_if?.impact_summary;
+  const metrics = impactSummary?.metrics ?? [];
+  if (!activeOverrideCount || !metrics.length) {
+    return null;
+  }
+
+  return (
+    <section className="studio-impact-strip" aria-label="What-if impact summary">
+      <div className="studio-impact-strip-copy">
+        <div className="studio-impact-strip-eyebrow">User Scenario</div>
+        <h2 className="studio-impact-strip-title">Forecast impact for {impactSummary?.forecast_year ?? "next forecast year"}</h2>
+        <p className="studio-impact-strip-subtitle">Live deltas against the baseline forecast remain visible while the rest of Studio updates in place.</p>
+      </div>
+      <div className="studio-impact-strip-grid">
+        {metrics.map((metric) => (
+          <ImpactMetricCard key={metric.key} metric={metric} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function WhatIfSidebar({
+  controls,
+  draftOverrides,
+  appliedOverrides,
+  clippedOverrides,
+  isOpen,
+  controlsLoading,
+  recomputing,
+  error,
+  onToggle,
+  onResetAll,
+  onRetry,
+  onControlChange,
+}: {
+  controls: CompanyChartsDriverControlMetadataPayload[];
+  draftOverrides: Record<string, number>;
+  appliedOverrides: Map<string, CompanyChartsWhatIfOverridePayload>;
+  clippedOverrides: Set<string>;
+  isOpen: boolean;
+  controlsLoading: boolean;
+  recomputing: boolean;
+  error: string | null;
+  onToggle: () => void;
+  onResetAll: () => void;
+  onRetry: () => void;
+  onControlChange: (key: string, value: number) => void;
+}) {
+  const groupedControls = useMemo(() => groupDriverControls(controls), [controls]);
+  const activeOverrideCount = Object.keys(draftOverrides).length;
+
+  return (
+    <aside id="studio-what-if-sidebar" className={`studio-what-if-sidebar ${isOpen ? "is-open" : "is-collapsed"}`} aria-label="Projection Studio what-if sidebar">
+      <div className="studio-panel studio-what-if-shell">
+        <div className="studio-panel-header studio-what-if-header">
+          <div>
+            <h2 className="studio-panel-title">What-If Controls</h2>
+            <p className="studio-panel-subtitle">Backend-provided operating assumptions for live scenario recomputation.</p>
+          </div>
+          <div className="studio-what-if-actions">
+            <button type="button" className="studio-secondary-button" onClick={onToggle} aria-expanded={isOpen} aria-controls="studio-what-if-sidebar">
+              {isOpen ? "Collapse Sidebar" : "Open Sidebar"}
+            </button>
+            <button type="button" className="studio-secondary-button" onClick={onResetAll} disabled={!activeOverrideCount && !recomputing}>
+              Reset All
+            </button>
+          </div>
+        </div>
+
+        {controlsLoading && !controls.length ? <div className="studio-what-if-state">Loading backend control limits...</div> : null}
+        {recomputing ? <div className="studio-what-if-state">Recomputing scenario. The current Studio view stays visible until fresh results land.</div> : null}
+        {error ? (
+          <div className="studio-what-if-error" role="alert">
+            <div>{error}</div>
+            <button type="button" className="studio-secondary-button" onClick={onRetry}>
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {clippedOverrides.size ? <div className="studio-what-if-state">One or more overrides were clipped by backend limits before the scenario was applied.</div> : null}
+
+        {!controlsLoading && !controls.length ? (
+          <div className="studio-what-if-empty">
+            <p>Controls are not available yet.</p>
+            <button type="button" className="studio-secondary-button" onClick={onRetry}>
+              Load Controls
+            </button>
+          </div>
+        ) : null}
+
+        {controls.length ? (
+          <>
+            <div className="studio-what-if-summary-row">
+              <span className="studio-marker-chip is-default">Active overrides: {activeOverrideCount}</span>
+              <span className="studio-marker-chip is-default">Backend limits: live</span>
+            </div>
+
+            <div className="studio-what-if-group-stack">
+              {groupedControls.map((group) => (
+                <section key={group.key} className="studio-what-if-group">
+                  <div className="studio-driver-group-title">{group.title}</div>
+                  <div className="studio-what-if-control-grid">
+                    {group.controls.map((control) => {
+                      const controlValue = draftOverrides[control.key] ?? control.baseline_value ?? control.current_value ?? 0;
+                      const appliedOverride = appliedOverrides.get(control.key) ?? null;
+                      const isActive = control.key in draftOverrides;
+                      return (
+                        <article key={control.key} className={`studio-driver-card studio-what-if-card ${isActive ? "is-active" : ""}`} data-testid={`studio-what-if-control-${control.key}`}>
+                          <div className="studio-driver-topline">
+                            <div>
+                              <div className="studio-driver-title">{control.label}</div>
+                              <div className="studio-driver-detail">{control.source_detail}</div>
+                            </div>
+                            <div className="studio-driver-value">{formatDriverValue(controlValue, control.unit)}</div>
+                          </div>
+
+                          <div className="studio-what-if-range-row">
+                            <span>{formatDriverValue(control.min_value, control.unit)}</span>
+                            <input
+                              data-testid={`studio-what-if-slider-${control.key}`}
+                              className="studio-what-if-range"
+                              type="range"
+                              min={control.min_value ?? undefined}
+                              max={control.max_value ?? undefined}
+                              step={control.step ?? "any"}
+                              value={controlValue}
+                              onChange={(event) => onControlChange(control.key, event.currentTarget.valueAsNumber)}
+                              aria-label={`${control.label} slider`}
+                            />
+                            <span>{formatDriverValue(control.max_value, control.unit)}</span>
+                          </div>
+
+                          <label className="studio-what-if-input-shell">
+                            <span className="studio-what-if-input-label">Manual value</span>
+                            <input
+                              data-testid={`studio-what-if-input-${control.key}`}
+                              className="studio-what-if-number"
+                              type="number"
+                              min={control.min_value ?? undefined}
+                              max={control.max_value ?? undefined}
+                              step={control.step ?? "any"}
+                              value={controlValue}
+                              onChange={(event) => onControlChange(control.key, event.currentTarget.valueAsNumber)}
+                            />
+                          </label>
+
+                          <div className="studio-what-if-meta-row">
+                            <span>Baseline {formatDriverValue(control.baseline_value, control.unit)}</span>
+                            {appliedOverride ? <span>Applied {formatDriverValue(appliedOverride.applied_value, control.unit)}</span> : <span>{control.source_kind}</span>}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
+export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
+  const ticker = payload.company?.ticker ?? "company";
+  const [selectedTrace, setSelectedTrace] = useState<CompanyChartsFormulaTracePayload | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [basePayload, setBasePayload] = useState<CompanyChartsDashboardResponse>(payload);
+  const [visiblePayload, setVisiblePayload] = useState<CompanyChartsDashboardResponse>(payload);
+  const [draftOverrides, setDraftOverrides] = useState<Record<string, number>>({});
+  const [controlsLoading, setControlsLoading] = useState(!payload.what_if);
+  const [recomputing, setRecomputing] = useState(false);
+  const [recomputeError, setRecomputeError] = useState<string | null>(null);
+  const [controlsRetryTick, setControlsRetryTick] = useState(0);
+  const [recomputeRetryTick, setRecomputeRetryTick] = useState(0);
+  const recomputeAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setBasePayload(payload);
+    setVisiblePayload(payload);
+    setDraftOverrides({});
+    setControlsLoading(!payload.what_if);
+    setRecomputing(false);
+    setRecomputeError(null);
+    setSelectedTrace(null);
+  }, [payload]);
+
+  useEffect(() => {
+    return () => {
+      recomputeAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (payload.what_if) {
+      setControlsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    setControlsLoading(true);
+
+    void getCompanyChartsWhatIf(ticker, { overrides: {} }, { asOf: payload.as_of, signal: controller.signal })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        startTransition(() => {
+          setBasePayload(response);
+          setVisiblePayload(response);
+        });
+      })
+      .catch((error) => {
+        if (!cancelled && !isAbortError(error)) {
+          setRecomputeError(asErrorMessage(error, "Unable to load what-if controls"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setControlsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [controlsRetryTick, payload, ticker]);
+
+  const baseStudio = basePayload.projection_studio ?? studio;
+  const visibleStudio = visiblePayload.projection_studio ?? studio;
+  const baseWhatIf = basePayload.what_if;
+  const visibleWhatIf = visiblePayload.what_if;
+  const baseControls = baseWhatIf?.driver_control_metadata ?? [];
+  const baseControlMap = useMemo(() => new Map(baseControls.map((control) => [control.key, control])), [baseControls]);
+  const appliedOverrides = useMemo(
+    () => new Map((visibleWhatIf?.overrides_applied ?? []).map((override) => [override.key, override])),
+    [visibleWhatIf?.overrides_applied]
+  );
+  const clippedOverrides = useMemo(() => new Set((visibleWhatIf?.overrides_clipped ?? []).map((override) => override.key)), [visibleWhatIf?.overrides_clipped]);
+  const overrideSignature = useMemo(() => JSON.stringify(draftOverrides), [draftOverrides]);
+  const activeOverrideCount = Object.keys(draftOverrides).length;
+
+  useEffect(() => {
+    if (!baseControls.length) {
+      return;
+    }
+
+    if (!activeOverrideCount) {
+      recomputeAbortRef.current?.abort();
+      setRecomputeError(null);
+      setRecomputing(false);
+      startTransition(() => {
+        setVisiblePayload(basePayload);
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    recomputeAbortRef.current?.abort();
+    recomputeAbortRef.current = controller;
+    setRecomputing(true);
+    setRecomputeError(null);
+
+    const timeoutId = window.setTimeout(() => {
+      void getCompanyChartsWhatIf(ticker, { overrides: draftOverrides }, { asOf: basePayload.as_of, signal: controller.signal })
+        .then((response) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+          startTransition(() => {
+            setVisiblePayload(response);
+            setSelectedTrace(null);
+          });
+        })
+        .catch((error) => {
+          if (!controller.signal.aborted && !isAbortError(error)) {
+            setRecomputeError(asErrorMessage(error, "Unable to recompute the what-if scenario"));
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setRecomputing(false);
+          }
+        });
+    }, WHAT_IF_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+      if (recomputeAbortRef.current === controller) {
+        recomputeAbortRef.current = null;
+      }
+    };
+  }, [activeOverrideCount, baseControls.length, basePayload, draftOverrides, overrideSignature, recomputeRetryTick, ticker]);
+
+  const scheduleSections = useMemo(() => visibleStudio.schedule_sections.map((section) => withCheckRows(section)), [visibleStudio.schedule_sections]);
+  const baselineScheduleSections = useMemo(() => baseStudio.schedule_sections.map((section) => withCheckRows(section)), [baseStudio.schedule_sections]);
+  const baselineSectionsByKey = useMemo(() => new Map(baselineScheduleSections.map((section) => [section.key, section])), [baselineScheduleSections]);
+  const driverGroups = useMemo(() => groupDrivers(visibleStudio.drivers_used), [visibleStudio.drivers_used]);
+  const sensitivityGrid = useMemo(() => buildSensitivityGrid(visibleStudio.sensitivity_matrix), [visibleStudio.sensitivity_matrix]);
 
   const allYears = useMemo(() => {
     const years = new Set<number>();
@@ -707,14 +1155,54 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
   const projectedYears = useMemo(() => allYears.filter((year) => !reportedYears.includes(year)), [allYears, reportedYears]);
   const bridgeCards = useMemo(() => buildBridgeCards(scheduleSections, projectedYears[0] ?? null), [projectedYears, scheduleSections]);
   const exportRows = useMemo(
-    () => buildExportRows(scheduleSections, driverGroups, studio.scenarios_comparison, studio.sensitivity_matrix),
-    [driverGroups, scheduleSections, studio.scenarios_comparison, studio.sensitivity_matrix]
+    () => buildExportRows(scheduleSections, driverGroups, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix),
+    [driverGroups, scheduleSections, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix]
   );
-
-  const ticker = payload.company?.ticker ?? "company";
 
   function handleExportCsv() {
     exportRowsToCsv(`${normalizeExportFileStem(`${ticker}-projection-studio`, "projection-studio")}.csv`, exportRows);
+  }
+
+  function handleControlChange(key: string, rawValue: number) {
+    const control = baseControlMap.get(key);
+    if (!control || Number.isNaN(rawValue)) {
+      return;
+    }
+
+    const clampedValue = clampValue(rawValue, control);
+    setDraftOverrides((current) => {
+      if (nearlyEqual(clampedValue, control.baseline_value)) {
+        if (!(key in current)) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[key];
+        return next;
+      }
+      return {
+        ...current,
+        [key]: clampedValue,
+      };
+    });
+  }
+
+  function handleResetAll() {
+    setDraftOverrides({});
+    setRecomputeError(null);
+    setRecomputing(false);
+    recomputeAbortRef.current?.abort();
+    startTransition(() => {
+      setVisiblePayload(basePayload);
+      setSelectedTrace(null);
+    });
+  }
+
+  function handleRetry() {
+    if (!baseControls.length) {
+      setControlsRetryTick((current) => current + 1);
+      return;
+    }
+    setRecomputeRetryTick((current) => current + 1);
   }
 
   return (
@@ -738,108 +1226,134 @@ export function ProjectionStudio({ payload, studio }: ProjectionStudioProps) {
           <button type="button" className="studio-primary-button" onClick={handleExportCsv}>
             Export Studio CSV
           </button>
+          <button type="button" className="studio-secondary-button" onClick={() => setSidebarOpen((current) => !current)} aria-expanded={sidebarOpen} aria-controls="studio-what-if-sidebar">
+            {sidebarOpen ? "Hide What-If Sidebar" : "Show What-If Sidebar"}
+          </button>
           <Link href={`/company/${encodeURIComponent(ticker)}/models`} className="studio-secondary-link">
             Open in Models for Valuation
           </Link>
         </div>
       </header>
 
-      <section className="studio-panel" aria-label="Key drivers">
-        <div className="studio-panel-header">
-          <div>
-            <h2 className="studio-panel-title">Key Drivers</h2>
-            <p className="studio-panel-subtitle">Grouped assumption cards with source periods and fallback markers.</p>
-          </div>
-        </div>
-        <div className="studio-driver-groups">
-          {driverGroups.map((group) => (
-            <div key={group.key} className="studio-driver-group">
-              <div className="studio-driver-group-title">{group.title}</div>
-              <div className="studio-driver-group-grid">
-                {group.drivers.map((driver) => (
-                  <article key={driver.key} className="studio-driver-card">
-                    <div className="studio-driver-topline">
-                      <div className="studio-driver-title">{driver.title}</div>
-                      <div className="studio-driver-value">{driver.value}</div>
-                    </div>
-                    {driver.detail ? <div className="studio-driver-detail">{driver.detail}</div> : null}
-                    {driver.source_periods.length ? <div className="studio-driver-periods">Source periods: {driver.source_periods.join(" · ")}</div> : null}
-                    <div className="studio-driver-marker-row">
-                      {driver.default_markers.map((marker) => (
-                        <span key={`${driver.key}-default-${marker}`} className="studio-marker-chip is-default">
-                          Default: {marker}
-                        </span>
-                      ))}
-                      {driver.fallback_markers.map((marker) => (
-                        <span key={`${driver.key}-fallback-${marker}`} className="studio-marker-chip is-fallback">
-                          Fallback: {marker}
-                        </span>
-                      ))}
-                    </div>
-                  </article>
-                ))}
+      <div className={`studio-layout-shell ${sidebarOpen ? "has-sidebar" : "is-sidebar-collapsed"}`}>
+        <div className="studio-layout-main">
+          <ImpactSummaryStrip payload={visiblePayload} activeOverrideCount={activeOverrideCount} />
+
+          <section className="studio-panel" aria-label="Key drivers">
+            <div className="studio-panel-header">
+              <div>
+                <h2 className="studio-panel-title">Key Drivers</h2>
+                <p className="studio-panel-subtitle">Grouped assumption cards with source periods and fallback markers.</p>
               </div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="studio-analytics-grid">
-        <SensitivityMatrix grid={sensitivityGrid} />
-
-        <section className="studio-panel" aria-label="Scenarios comparison">
-          <div className="studio-panel-header">
-            <div>
-              <h2 className="studio-panel-title">Scenarios Comparison</h2>
-              <p className="studio-panel-subtitle">Base, bull, and bear outputs from the backend projection payload.</p>
+            <div className="studio-driver-groups">
+              {driverGroups.map((group) => (
+                <div key={group.key} className="studio-driver-group">
+                  <div className="studio-driver-group-title">{group.title}</div>
+                  <div className="studio-driver-group-grid">
+                    {group.drivers.map((driver) => (
+                      <article key={driver.key} className="studio-driver-card">
+                        <div className="studio-driver-topline">
+                          <div className="studio-driver-title">{driver.title}</div>
+                          <div className="studio-driver-value">{driver.value}</div>
+                        </div>
+                        {driver.detail ? <div className="studio-driver-detail">{driver.detail}</div> : null}
+                        {driver.source_periods.length ? <div className="studio-driver-periods">Source periods: {driver.source_periods.join(" · ")}</div> : null}
+                        <div className="studio-driver-marker-row">
+                          {driver.default_markers.map((marker) => (
+                            <span key={`${driver.key}-default-${marker}`} className="studio-marker-chip is-default">
+                              Default: {marker}
+                            </span>
+                          ))}
+                          {driver.fallback_markers.map((marker) => (
+                            <span key={`${driver.key}-fallback-${marker}`} className="studio-marker-chip is-fallback">
+                              Fallback: {marker}
+                            </span>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="studio-table-wrapper">
-            <table className="studio-scenarios-table">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>Base</th>
-                  <th>Bull</th>
-                  <th>Bear</th>
-                </tr>
-              </thead>
-              <tbody>
-                {studio.scenarios_comparison.map((row) => (
-                  <tr key={row.key}>
-                    <td>
-                      <div className="studio-row-label">{row.label}</div>
-                    </td>
-                    <td>{formatValue(row.scenario_values.base, row.unit)}</td>
-                    <td>{formatValue(row.scenario_values.bull, row.unit)}</td>
-                    <td>{formatValue(row.scenario_values.bear, row.unit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </section>
+          </section>
 
-      {bridgeCards.length ? (
-        <section className="studio-bridge-grid" aria-label="Bridge charts">
-          {bridgeCards.map((card) => (
-            <BridgeChartCard key={card.key} card={card} onInspect={setSelectedTrace} />
-          ))}
-        </section>
-      ) : null}
+          <section className="studio-analytics-grid">
+            <SensitivityMatrix grid={sensitivityGrid} />
 
-      <section className="studio-schedule-stack" aria-label="Projection studio schedules">
-        {scheduleSections.map((section) => (
-          <ScheduleTable
-            key={section.key}
-            section={section}
-            reportedYears={reportedYears}
-            projectedYears={projectedYears}
-            onCellClick={setSelectedTrace}
-          />
-        ))}
-      </section>
+            <section className="studio-panel" aria-label="Scenarios comparison">
+              <div className="studio-panel-header">
+                <div>
+                  <h2 className="studio-panel-title">Scenarios Comparison</h2>
+                  <p className="studio-panel-subtitle">Base, bull, and bear outputs from the backend projection payload.</p>
+                </div>
+              </div>
+              <div className="studio-table-wrapper">
+                <table className="studio-scenarios-table">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Base</th>
+                      <th>Bull</th>
+                      <th>Bear</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleStudio.scenarios_comparison.map((row) => (
+                      <tr key={row.key}>
+                        <td>
+                          <div className="studio-row-label">{row.label}</div>
+                        </td>
+                        <td>{formatValue(row.scenario_values.base, row.unit)}</td>
+                        <td>{formatValue(row.scenario_values.bull, row.unit)}</td>
+                        <td>{formatValue(row.scenario_values.bear, row.unit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          {bridgeCards.length ? (
+            <section className="studio-bridge-grid" aria-label="Bridge charts">
+              {bridgeCards.map((card) => (
+                <BridgeChartCard key={card.key} card={card} onInspect={setSelectedTrace} />
+              ))}
+            </section>
+          ) : null}
+
+          <section className="studio-schedule-stack" aria-label="Projection studio schedules">
+            {scheduleSections.map((section) => (
+              <ScheduleTable
+                key={section.key}
+                section={section}
+                baselineSection={baselineSectionsByKey.get(section.key) ?? null}
+                reportedYears={reportedYears}
+                projectedYears={projectedYears}
+                hasScenarioOverrides={activeOverrideCount > 0}
+                onCellClick={setSelectedTrace}
+              />
+            ))}
+          </section>
+        </div>
+
+        <WhatIfSidebar
+          controls={baseControls}
+          draftOverrides={draftOverrides}
+          appliedOverrides={appliedOverrides}
+          clippedOverrides={clippedOverrides}
+          isOpen={sidebarOpen}
+          controlsLoading={controlsLoading}
+          recomputing={recomputing}
+          error={recomputeError}
+          onToggle={() => setSidebarOpen((current) => !current)}
+          onResetAll={handleResetAll}
+          onRetry={handleRetry}
+          onControlChange={handleControlChange}
+        />
+      </div>
 
       <FormulaTracePopover trace={selectedTrace} isOpen={Boolean(selectedTrace)} onClose={() => setSelectedTrace(null)} />
     </div>

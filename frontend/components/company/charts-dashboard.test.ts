@@ -10,6 +10,15 @@ import { describe, expect, it, vi } from "vitest";
 import { CompanyChartsDashboard, MetricChartTooltipContent } from "@/components/company/charts-dashboard";
 import type { CompanyChartsDashboardResponse } from "@/lib/types";
 
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/company/ACME/charts",
+}));
+
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) =>
+    React.createElement("a", { href, ...props }, children),
+}));
+
 vi.mock("recharts", () => {
   function Wrapper({ children }: { children?: React.ReactNode }) {
     return React.createElement("div", null, children);

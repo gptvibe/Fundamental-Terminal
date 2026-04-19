@@ -29,6 +29,23 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
             "diagnostics",
             *provenance_fields,
         },
+        "/api/companies/{ticker}/charts/what-if": {
+            "company",
+            "title",
+            "build_state",
+            "build_status",
+            "summary",
+            "factors",
+            "legend",
+            "cards",
+            "forecast_methodology",
+            "projection_studio",
+            "what_if",
+            "payload_version",
+            "refresh",
+            "diagnostics",
+            *provenance_fields,
+        },
         "/api/companies/{ticker}/financials": {"company", "financials", "price_history", "refresh", "diagnostics", *provenance_fields},
         "/api/companies/{ticker}/capital-structure": {
             "company",
@@ -142,7 +159,8 @@ def test_hot_endpoint_openapi_contracts_include_diagnostics_fields() -> None:
     }
 
     for path, expected_fields in endpoint_expectations.items():
-        response_ref = schema["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
+        method = "post" if path.endswith("/what-if") else "get"
+        response_ref = schema["paths"][path][method]["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
         response_name = response_ref.rsplit("/", 1)[-1]
         response_schema = schema["components"]["schemas"][response_name]
         response_fields = set(response_schema.get("properties", {}).keys())
@@ -169,6 +187,12 @@ def test_hot_endpoint_openapi_contracts_include_point_in_time_query_params() -> 
     ):
         parameter_names = {item["name"] for item in schema["paths"][path]["get"].get("parameters", [])}
         assert "as_of" in parameter_names, path
+
+    post_parameter_names = {
+        item["name"]
+        for item in schema["paths"]["/api/companies/{ticker}/charts/what-if"]["post"].get("parameters", [])
+    }
+    assert "as_of" in post_parameter_names
 
 
 def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metadata() -> None:
@@ -222,6 +246,11 @@ def test_frontend_types_include_matching_hot_endpoint_diagnostics_and_job_metada
     assert "ticker: string;" in frontend_types
     assert "kind: string;" in frontend_types
     assert "interface ModelEvaluationResponse" in frontend_types
+    assert "interface CompanyChartsWhatIfPayload" in frontend_types
+    assert "interface CompanyChartsDriverControlMetadataPayload" in frontend_types
+    assert "what_if: CompanyChartsWhatIfPayload | null;" in frontend_types
+    assert "scenario_state: string;" in frontend_types
+    assert "is_override: boolean;" in frontend_types
 
 
 def test_model_evaluation_endpoint_openapi_contract_includes_provenance_fields() -> None:

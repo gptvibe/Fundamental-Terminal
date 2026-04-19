@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date as DateType
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.contracts.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
 
@@ -153,6 +153,25 @@ class CompanyChartsAssumptionsCardPayload(BaseModel):
     empty_state: str | None = None
 
 
+class CompanyChartsWhatIfRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    overrides: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("overrides")
+    @classmethod
+    def _validate_override_keys(cls, overrides: dict[str, float]) -> dict[str, float]:
+        from app.services.company_charts_driver_model import SUPPORTED_DRIVER_OVERRIDE_KEYS
+
+        unknown_keys = sorted(set(overrides) - set(SUPPORTED_DRIVER_OVERRIDE_KEYS))
+        if unknown_keys:
+            supported_keys = ", ".join(sorted(SUPPORTED_DRIVER_OVERRIDE_KEYS))
+            raise ValueError(
+                f"Unsupported override keys: {', '.join(unknown_keys)}. Supported keys: {supported_keys}."
+            )
+        return overrides
+
+
 class CompanyChartsFormulaInputPayload(BaseModel):
     key: str
     label: str
@@ -160,6 +179,9 @@ class CompanyChartsFormulaInputPayload(BaseModel):
     formatted_value: str
     source_detail: str
     source_kind: str
+    is_override: bool = False
+    original_value: Number = None
+    original_source: str | None = None
 
 
 class CompanyChartsFormulaTracePayload(BaseModel):
@@ -171,6 +193,7 @@ class CompanyChartsFormulaTracePayload(BaseModel):
     result_value: Number = None
     inputs: list[CompanyChartsFormulaInputPayload] = Field(default_factory=list)
     confidence: str = "high"
+    scenario_state: str = "baseline"
 
 
 class CompanyChartsProjectedRowPayload(BaseModel):
@@ -252,6 +275,55 @@ class CompanyChartsProjectionStudioPayload(BaseModel):
     sensitivity_matrix: list[CompanyChartsSensitivityCellPayload] = Field(default_factory=list)
 
 
+class CompanyChartsWhatIfImpactMetricPayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    baseline_value: Number = None
+    scenario_value: Number = None
+    delta_value: Number = None
+    delta_percent: Number = None
+
+
+class CompanyChartsWhatIfImpactSummaryPayload(BaseModel):
+    forecast_year: int | None = None
+    metrics: list[CompanyChartsWhatIfImpactMetricPayload] = Field(default_factory=list)
+
+
+class CompanyChartsWhatIfOverridePayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    requested_value: Number = None
+    applied_value: Number = None
+    baseline_value: Number = None
+    min_value: Number = None
+    max_value: Number = None
+    clipped: bool = False
+    source_detail: str
+    source_kind: str
+
+
+class CompanyChartsDriverControlMetadataPayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    baseline_value: Number = None
+    current_value: Number = None
+    min_value: Number = None
+    max_value: Number = None
+    step: Number = None
+    source_detail: str
+    source_kind: str
+
+
+class CompanyChartsWhatIfPayload(BaseModel):
+    impact_summary: CompanyChartsWhatIfImpactSummaryPayload | None = None
+    overrides_applied: list[CompanyChartsWhatIfOverridePayload] = Field(default_factory=list)
+    overrides_clipped: list[CompanyChartsWhatIfOverridePayload] = Field(default_factory=list)
+    driver_control_metadata: list[CompanyChartsDriverControlMetadataPayload] = Field(default_factory=list)
+
+
 class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     company: CompanyPayload | None
     title: str = "Growth Outlook"
@@ -271,6 +343,7 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     )
     forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)
     projection_studio: CompanyChartsProjectionStudioPayload | None = None
+    what_if: CompanyChartsWhatIfPayload | None = None
     payload_version: str = "company_charts_dashboard_v9"
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)

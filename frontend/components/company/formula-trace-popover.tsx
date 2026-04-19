@@ -13,6 +13,13 @@ interface FormulaTracePopoverProps {
 export function FormulaTracePopover({ trace, isOpen, onClose }: FormulaTracePopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
 
+  function formatOriginalValue(value: number | null): string {
+    if (value == null) {
+      return "—";
+    }
+    return formatCompactNumber(value);
+  }
+
   // Handle click-outside dismiss
   useEffect(() => {
     if (!isOpen) return;
@@ -55,7 +62,14 @@ export function FormulaTracePopover({ trace, isOpen, onClose }: FormulaTracePopo
       <div className="formula-trace-popover-inner">
         {/* Header: formula label and confidence */}
         <div className="formula-trace-header">
-          <h3 className="formula-trace-title">{trace.formula_label}</h3>
+          <div className="formula-trace-header-copy">
+            <h3 className="formula-trace-title">{trace.formula_label}</h3>
+            <div className="formula-trace-scenario-line">
+              <span className={`formula-trace-scenario-badge ${trace.scenario_state === "user_override" ? "is-user-override" : "is-baseline"}`}>
+                {trace.scenario_state === "user_override" ? "User scenario" : "Baseline"}
+              </span>
+            </div>
+          </div>
           <span className={`formula-trace-confidence formula-trace-confidence-${trace.confidence}`}>{trace.confidence}</span>
         </div>
 
@@ -81,12 +95,19 @@ export function FormulaTracePopover({ trace, isOpen, onClose }: FormulaTracePopo
             <div className="formula-trace-label">Inputs</div>
             <div className="formula-trace-inputs">
               {trace.inputs.map((input) => (
-                <div key={input.key} className="formula-trace-input-row">
+                <div key={input.key} className={`formula-trace-input-row ${input.is_override ? "is-override" : ""}`}>
                   <div className="formula-trace-input-label">{input.label}</div>
                   <div className="formula-trace-input-value">
                     <span className="formula-trace-input-number">{input.formatted_value}</span>
                     <span className="formula-trace-input-source">{input.source_kind}</span>
+                    {input.is_override ? <span className="formula-trace-input-override-badge">Override</span> : null}
                     {input.source_detail ? <span className="formula-trace-input-detail">{input.source_detail}</span> : null}
+                    {input.is_override ? (
+                      <span className="formula-trace-input-original">
+                        Baseline {formatOriginalValue(input.original_value)}
+                        {input.original_source ? ` · ${input.original_source}` : ""}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               ))}

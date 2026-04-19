@@ -39,6 +39,13 @@ def build_router() -> APIRouter:
     )
     add_user_visible_route(
         router,
+        "/api/companies/{ticker}/charts/what-if",
+        handlers.company_charts_what_if,
+        methods=["POST"],
+        response_model=CompanyChartsDashboardResponse,
+    )
+    add_user_visible_route(
+        router,
         "/api/companies/{ticker}/financials",
         handlers.company_financials,
         methods=["GET"],

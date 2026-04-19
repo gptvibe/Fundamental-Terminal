@@ -8,6 +8,7 @@ import {
   CompanyCapitalMarketsSummaryResponse,
   CompanyCapitalStructureResponse,
   CompanyChartsDashboardResponse,
+  CompanyChartsWhatIfRequest,
   CompanyEquityClaimRiskResponse,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsResponse,
@@ -679,6 +680,24 @@ export function getCompanyCharts(
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts${suffix}`, { signal: options?.signal });
+}
+
+export function getCompanyChartsWhatIf(
+  ticker: string,
+  body: CompanyChartsWhatIfRequest,
+  options?: { asOf?: string | null; signal?: AbortSignal }
+): Promise<CompanyChartsDashboardResponse> {
+  const params = new URLSearchParams();
+  appendAsOf(params, options?.asOf);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/what-if${suffix}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
 }
 
 export function getCompanyEquityClaimRisk(

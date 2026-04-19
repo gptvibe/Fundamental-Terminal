@@ -320,3 +320,99 @@ def test_company_charts_rebuilds_when_persisted_snapshot_uses_legacy_hash_payloa
     assert response.summary.primary_score.score == 84
     assert response.projection_studio is not None
     assert session.commits == 1
+
+
+def test_company_charts_what_if_builds_stateless_response_without_db_writes(monkeypatch):
+    snapshot = SimpleNamespace(
+        company=SimpleNamespace(
+            id=1,
+            ticker="ACME",
+            cik="0000123456",
+            name="Acme Corp",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Software",
+        ),
+        cache_state="fresh",
+        last_checked=datetime(2026, 4, 10, tzinfo=timezone.utc),
+    )
+    refresh = main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None)
+    generated_payload = main_module.CompanyChartsDashboardResponse(
+        company=main_module._serialize_company(snapshot),
+        title="Growth Outlook",
+        build_state="ready",
+        build_status="Charts dashboard ready.",
+        summary=main_module.CompanyChartsSummaryPayload(
+            headline="Growth Outlook",
+            primary_score=main_module.CompanyChartsScoreBadgePayload(key="growth", label="Growth", score=84, tone="positive"),
+            thesis="Stateless what-if compute updated the projection view.",
+        ),
+        factors=main_module.CompanyChartsFactorsPayload(),
+        legend=main_module.CompanyChartsLegendPayload(),
+        cards=main_module.CompanyChartsCardsPayload(),
+        forecast_methodology=main_module.CompanyChartsMethodologyPayload(
+            version="company_charts_dashboard_v9",
+            label="Driver-based integrated forecast",
+            summary="What-if compute",
+            disclaimer="Forecast values are projections.",
+        ),
+        what_if=main_module.CompanyChartsWhatIfPayload(
+            impact_summary=None,
+            overrides_applied=[
+                main_module.CompanyChartsWhatIfOverridePayload(
+                    key="dso",
+                    label="Days Sales Outstanding",
+                    unit="days",
+                    requested_value=60.0,
+                    applied_value=60.0,
+                    baseline_value=55.0,
+                    min_value=5.0,
+                    max_value=150.0,
+                    clipped=False,
+                    source_detail="SEC-derived dso input",
+                    source_kind="sec",
+                )
+            ],
+            overrides_clipped=[],
+            driver_control_metadata=[],
+        ),
+        payload_version="company_charts_dashboard_v9",
+        refresh=refresh,
+        diagnostics=main_module._build_data_quality_diagnostics(),
+        **main_module._empty_provenance_contract(),
+    )
+
+    class _Session:
+        def __init__(self) -> None:
+            self.commits = 0
+
+        def commit(self) -> None:
+            self.commits += 1
+
+        def execute(self, *_args, **_kwargs):
+            return None
+
+    session = _Session()
+    observed_overrides: list[dict[str, float]] = []
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda session, ticker: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "build_company_charts_dashboard_response",
+        lambda session, company_id, **kwargs: (
+            observed_overrides.append(dict(kwargs["what_if_request"].overrides)) or generated_payload
+        ),
+    )
+
+    response = main_module.company_charts_what_if(
+        "ACME",
+        main_module.CompanyChartsWhatIfRequest(overrides={"dso": 60.0}),
+        BackgroundTasks(),
+        as_of=None,
+        session=session,
+    )
+
+    assert observed_overrides == [{"dso": 60.0}]
+    assert response.what_if is not None
+    assert response.what_if.overrides_applied[0].key == "dso"
+    assert session.commits == 0

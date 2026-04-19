@@ -9,6 +9,8 @@ import { getCompanyCharts } from "@/lib/api";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "nvda" }),
+  useSearchParams: () => ({ get: () => null }),
+  usePathname: () => "/company/NVDA/charts",
 }));
 
 vi.mock("@/lib/api", () => ({

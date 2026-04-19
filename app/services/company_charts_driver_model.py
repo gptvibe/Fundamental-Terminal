@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import isfinite
 from statistics import fmean, median
 from typing import Any
@@ -81,6 +81,22 @@ FORECAST_FORMULA_CAPEX = "max(maintenance capex, D&A + max(delta revenue, 0) / s
 FORECAST_FORMULA_OCF = "Net income + D&A + SBC - delta operating working capital"
 FORECAST_FORMULA_FCF = "Operating cash flow - capex"
 FORECAST_FORMULA_EPS = "Net income / diluted shares"
+SUPPORTED_DRIVER_OVERRIDE_KEYS = (
+    "price_growth",
+    "residual_demand_growth",
+    "share_mix_shift",
+    "variable_cost_ratio",
+    "semi_variable_cost_ratio",
+    "fixed_cost_growth",
+    "dso",
+    "dio",
+    "dpo",
+    "deferred_revenue_days",
+    "accrued_operating_liability_days",
+    "sales_to_capital",
+    "capex_intensity",
+    "depreciation_ratio",
+)
 
 
 @dataclass(slots=True)
@@ -97,6 +113,9 @@ class FormulaInput:
     formatted_value: str
     source_detail: str
     source_kind: str
+    is_override: bool = False
+    original_value: float | None = None
+    original_source: str | None = None
 
 
 @dataclass(slots=True)
@@ -109,6 +128,43 @@ class FormulaTrace:
     result_value: float | None
     inputs: list[FormulaInput] = field(default_factory=list)
     confidence: str = "high"
+    scenario_state: str = "baseline"
+
+
+@dataclass(slots=True)
+class DriverOverrideControl:
+    key: str
+    label: str
+    unit: str
+    baseline_value: float
+    current_value: float
+    min_value: float
+    max_value: float
+    step: float
+    source_detail: str
+    source_kind: str
+
+
+@dataclass(slots=True)
+class DriverOverrideResult:
+    key: str
+    label: str
+    unit: str
+    requested_value: float
+    applied_value: float
+    baseline_value: float
+    min_value: float
+    max_value: float
+    clipped: bool
+    source_detail: str
+    source_kind: str
+
+
+@dataclass(slots=True)
+class DriverOverrideContext:
+    controls: list[DriverOverrideControl] = field(default_factory=list)
+    applied: list[DriverOverrideResult] = field(default_factory=list)
+    clipped: list[DriverOverrideResult] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -149,6 +205,7 @@ class DriverForecastBundle:
     revenue_bridge_rows: list[dict[str, Any]] = field(default_factory=list)
     projected_gross_margin: float | None = None
     line_traces: dict[str, dict[int, FormulaTrace]] = field(default_factory=dict)
+    override_context: DriverOverrideContext | None = None
 
 
 @dataclass(slots=True)
@@ -318,6 +375,7 @@ def build_driver_forecast_bundle(
     releases: list[Any],
     *,
     horizon_years: int = 3,
+    overrides: dict[str, float] | None = None,
 ) -> DriverForecastBundle | None:
     history = _normalize_statements(statements)
     if len(history) < 3:
@@ -338,9 +396,17 @@ def build_driver_forecast_bundle(
     revenue_drivers = _derive_revenue_drivers(history, releases)
     cost_schedule = _derive_cost_schedule(history)
     reinvestment_schedule = _derive_reinvestment_schedule(history, cost_schedule)
+    revenue_drivers, cost_schedule, reinvestment_schedule, override_context = _apply_driver_overrides(
+        history,
+        revenue_drivers,
+        cost_schedule,
+        reinvestment_schedule,
+        overrides,
+    )
     below_line_schedule = _derive_below_line_schedule(history)
     latest_year = int(history[-1]["year"])
     scenario_tweaks = _scenario_tweaks()
+    override_results_by_key = {item.key: item for item in (override_context.applied if override_context is not None else [])}
 
     scenarios: dict[str, DriverForecastScenario] = {}
     line_traces: dict[str, dict[int, FormulaTrace]] = {}
@@ -357,6 +423,7 @@ def build_driver_forecast_bundle(
             latest_year=latest_year,
             tweaks=scenario_tweaks[scenario_key],
             capture_traces=scenario_key == "base",
+            override_results_by_key=override_results_by_key,
         )
         scenarios[scenario_key] = scenario
         if scenario_key == "base":
@@ -411,7 +478,288 @@ def build_driver_forecast_bundle(
         revenue_bridge_rows=revenue_bridge_rows,
         projected_gross_margin=projected_gross_margin,
         line_traces=line_traces,
+        override_context=override_context,
     )
+
+
+def _apply_driver_overrides(
+    history: list[dict[str, Any]],
+    revenue_drivers: _RevenueDrivers,
+    cost_schedule: _CostSchedule,
+    reinvestment_schedule: _ReinvestmentSchedule,
+    overrides: dict[str, float] | None,
+) -> tuple[_RevenueDrivers, _CostSchedule, _ReinvestmentSchedule, DriverOverrideContext]:
+    controls = _build_driver_override_controls(history, revenue_drivers, cost_schedule, reinvestment_schedule)
+    if not overrides:
+        return revenue_drivers, cost_schedule, reinvestment_schedule, DriverOverrideContext(controls=list(controls.values()))
+
+    applied: list[DriverOverrideResult] = []
+    clipped: list[DriverOverrideResult] = []
+    for key in SUPPORTED_DRIVER_OVERRIDE_KEYS:
+        requested_value = overrides.get(key)
+        if requested_value is None:
+            continue
+        control = controls[key]
+        applied_value = _clip(float(requested_value), control.min_value, control.max_value)
+        is_clipped = not _nearly_equal(applied_value, float(requested_value))
+        result = DriverOverrideResult(
+            key=control.key,
+            label=control.label,
+            unit=control.unit,
+            requested_value=float(requested_value),
+            applied_value=applied_value,
+            baseline_value=control.baseline_value,
+            min_value=control.min_value,
+            max_value=control.max_value,
+            clipped=is_clipped,
+            source_detail=control.source_detail,
+            source_kind=control.source_kind,
+        )
+        applied.append(result)
+        if is_clipped:
+            clipped.append(result)
+        controls[key] = replace(control, current_value=applied_value)
+
+    price_growth_delta = controls["price_growth"].current_value - revenue_drivers.pricing_growth_proxy
+    share_mix_delta = controls["share_mix_shift"].current_value - revenue_drivers.share_shift_proxy
+    segment_profiles = [
+        {
+            **segment,
+            "price_growth_proxy": _clip(float(segment["price_growth_proxy"]) + price_growth_delta, PRICE_GROWTH_FLOOR, PRICE_GROWTH_CAP),
+            "share_mix_shift_proxy": _clip(float(segment["share_mix_shift_proxy"]) + share_mix_delta, SHARE_CHANGE_FLOOR, SHARE_CHANGE_CAP),
+        }
+        for segment in revenue_drivers.segment_profiles
+    ]
+    revenue_drivers = replace(
+        revenue_drivers,
+        pricing_growth_proxy=controls["price_growth"].current_value,
+        residual_market_growth=controls["residual_demand_growth"].current_value,
+        share_shift_proxy=controls["share_mix_shift"].current_value,
+        volume_growth_proxy=_clip(
+            controls["residual_demand_growth"].current_value + controls["share_mix_shift"].current_value,
+            REVENUE_GROWTH_FLOOR,
+            REVENUE_GROWTH_CAP,
+        ),
+        segment_profiles=segment_profiles,
+    )
+    cost_schedule = replace(
+        cost_schedule,
+        variable_cost_ratio=controls["variable_cost_ratio"].current_value,
+        semi_variable_cost_ratio=controls["semi_variable_cost_ratio"].current_value,
+        fixed_cost_growth=controls["fixed_cost_growth"].current_value,
+    )
+    operating_working_capital = replace(
+        reinvestment_schedule.operating_working_capital,
+        dso=controls["dso"].current_value,
+        dio=controls["dio"].current_value,
+        dpo=controls["dpo"].current_value,
+        deferred_revenue_days=controls["deferred_revenue_days"].current_value,
+        accrued_operating_liability_days=controls["accrued_operating_liability_days"].current_value,
+    )
+    reinvestment_schedule = replace(
+        reinvestment_schedule,
+        operating_working_capital=operating_working_capital,
+        sales_to_capital=controls["sales_to_capital"].current_value,
+        capex_intensity=controls["capex_intensity"].current_value,
+        depreciation_ratio=controls["depreciation_ratio"].current_value,
+    )
+    return (
+        revenue_drivers,
+        cost_schedule,
+        reinvestment_schedule,
+        DriverOverrideContext(
+            controls=[controls[key] for key in SUPPORTED_DRIVER_OVERRIDE_KEYS],
+            applied=applied,
+            clipped=clipped,
+        ),
+    )
+
+
+def _build_driver_override_controls(
+    history: list[dict[str, Any]],
+    revenue_drivers: _RevenueDrivers,
+    cost_schedule: _CostSchedule,
+    reinvestment_schedule: _ReinvestmentSchedule,
+) -> dict[str, DriverOverrideControl]:
+    dso_detail, dso_source_kind = _working_capital_days_source("accounts_receivable", history)
+    dio_detail, dio_source_kind = _working_capital_days_source("inventory", history)
+    dpo_detail, dpo_source_kind = _working_capital_days_source("accounts_payable", history)
+    deferred_detail, deferred_source_kind = _working_capital_days_source("deferred_revenue", history)
+    accrued_detail, accrued_source_kind = _working_capital_days_source("accrued_operating_liabilities", history)
+    return {
+        "price_growth": DriverOverrideControl(
+            key="price_growth",
+            label="Price Growth",
+            unit="percent",
+            baseline_value=revenue_drivers.pricing_growth_proxy,
+            current_value=revenue_drivers.pricing_growth_proxy,
+            min_value=PRICE_GROWTH_FLOOR,
+            max_value=PRICE_GROWTH_CAP,
+            step=0.005,
+            source_detail="SEC-derived pricing proxy",
+            source_kind="sec",
+        ),
+        "residual_demand_growth": DriverOverrideControl(
+            key="residual_demand_growth",
+            label="Residual Demand Growth",
+            unit="percent",
+            baseline_value=revenue_drivers.residual_market_growth,
+            current_value=revenue_drivers.residual_market_growth,
+            min_value=-0.05,
+            max_value=0.18,
+            step=0.005,
+            source_detail="SEC-derived residual demand proxy",
+            source_kind="sec",
+        ),
+        "share_mix_shift": DriverOverrideControl(
+            key="share_mix_shift",
+            label="Share or Mix Shift",
+            unit="percent",
+            baseline_value=revenue_drivers.share_shift_proxy,
+            current_value=revenue_drivers.share_shift_proxy,
+            min_value=SHARE_CHANGE_FLOOR,
+            max_value=SHARE_CHANGE_CAP,
+            step=0.005,
+            source_detail="SEC-derived share or mix proxy",
+            source_kind="sec",
+        ),
+        "variable_cost_ratio": DriverOverrideControl(
+            key="variable_cost_ratio",
+            label="Variable Cost Ratio",
+            unit="percent",
+            baseline_value=cost_schedule.variable_cost_ratio,
+            current_value=cost_schedule.variable_cost_ratio,
+            min_value=VARIABLE_COST_RATIO_FLOOR,
+            max_value=VARIABLE_COST_RATIO_CAP,
+            step=0.005,
+            source_detail=_variable_cost_ratio_basis_detail(history),
+            source_kind=_variable_cost_ratio_source_kind(history),
+        ),
+        "semi_variable_cost_ratio": DriverOverrideControl(
+            key="semi_variable_cost_ratio",
+            label="Semi-Variable Cost Ratio",
+            unit="percent",
+            baseline_value=cost_schedule.semi_variable_cost_ratio,
+            current_value=cost_schedule.semi_variable_cost_ratio,
+            min_value=SEMI_VARIABLE_COST_RATIO_FLOOR,
+            max_value=SEMI_VARIABLE_COST_RATIO_CAP,
+            step=0.005,
+            source_detail=_semi_variable_cost_ratio_basis_detail(history),
+            source_kind=_semi_variable_cost_ratio_source_kind(history),
+        ),
+        "fixed_cost_growth": DriverOverrideControl(
+            key="fixed_cost_growth",
+            label="Fixed Cost Growth",
+            unit="percent",
+            baseline_value=cost_schedule.fixed_cost_growth,
+            current_value=cost_schedule.fixed_cost_growth,
+            min_value=FIXED_COST_GROWTH_FLOOR,
+            max_value=FIXED_COST_GROWTH_CAP,
+            step=0.005,
+            source_detail=_fixed_cost_growth_basis_detail(history),
+            source_kind=_fixed_cost_growth_source_kind(history),
+        ),
+        "dso": DriverOverrideControl(
+            key="dso",
+            label="Days Sales Outstanding",
+            unit="days",
+            baseline_value=reinvestment_schedule.operating_working_capital.dso,
+            current_value=reinvestment_schedule.operating_working_capital.dso,
+            min_value=DSO_FLOOR,
+            max_value=DSO_CAP,
+            step=1.0,
+            source_detail=dso_detail,
+            source_kind=dso_source_kind,
+        ),
+        "dio": DriverOverrideControl(
+            key="dio",
+            label="Days Inventory Outstanding",
+            unit="days",
+            baseline_value=reinvestment_schedule.operating_working_capital.dio,
+            current_value=reinvestment_schedule.operating_working_capital.dio,
+            min_value=DIO_FLOOR,
+            max_value=DIO_CAP,
+            step=1.0,
+            source_detail=dio_detail,
+            source_kind=dio_source_kind,
+        ),
+        "dpo": DriverOverrideControl(
+            key="dpo",
+            label="Days Payables Outstanding",
+            unit="days",
+            baseline_value=reinvestment_schedule.operating_working_capital.dpo,
+            current_value=reinvestment_schedule.operating_working_capital.dpo,
+            min_value=DPO_FLOOR,
+            max_value=DPO_CAP,
+            step=1.0,
+            source_detail=dpo_detail,
+            source_kind=dpo_source_kind,
+        ),
+        "deferred_revenue_days": DriverOverrideControl(
+            key="deferred_revenue_days",
+            label="Deferred Revenue Days",
+            unit="days",
+            baseline_value=reinvestment_schedule.operating_working_capital.deferred_revenue_days,
+            current_value=reinvestment_schedule.operating_working_capital.deferred_revenue_days,
+            min_value=DEFERRED_REVENUE_DAYS_FLOOR,
+            max_value=DEFERRED_REVENUE_DAYS_CAP,
+            step=1.0,
+            source_detail=deferred_detail,
+            source_kind=deferred_source_kind,
+        ),
+        "accrued_operating_liability_days": DriverOverrideControl(
+            key="accrued_operating_liability_days",
+            label="Accrued Operating Liability Days",
+            unit="days",
+            baseline_value=reinvestment_schedule.operating_working_capital.accrued_operating_liability_days,
+            current_value=reinvestment_schedule.operating_working_capital.accrued_operating_liability_days,
+            min_value=ACCRUED_OPERATING_LIABILITY_DAYS_FLOOR,
+            max_value=ACCRUED_OPERATING_LIABILITY_DAYS_CAP,
+            step=1.0,
+            source_detail=accrued_detail,
+            source_kind=accrued_source_kind,
+        ),
+        "sales_to_capital": DriverOverrideControl(
+            key="sales_to_capital",
+            label="Sales to Capital",
+            unit="multiple",
+            baseline_value=reinvestment_schedule.sales_to_capital,
+            current_value=reinvestment_schedule.sales_to_capital,
+            min_value=SALES_TO_CAPITAL_FLOOR,
+            max_value=SALES_TO_CAPITAL_CAP,
+            step=0.05,
+            source_detail=_growth_reinvestment_basis_detail(history),
+            source_kind=_growth_reinvestment_source_kind(history),
+        ),
+        "capex_intensity": DriverOverrideControl(
+            key="capex_intensity",
+            label="Capex Intensity",
+            unit="percent",
+            baseline_value=reinvestment_schedule.capex_intensity,
+            current_value=reinvestment_schedule.capex_intensity,
+            min_value=CAPEX_INTENSITY_FLOOR,
+            max_value=CAPEX_INTENSITY_CAP,
+            step=0.005,
+            source_detail=_capex_basis_detail(history),
+            source_kind=_capex_source_kind(history),
+        ),
+        "depreciation_ratio": DriverOverrideControl(
+            key="depreciation_ratio",
+            label="Depreciation Ratio",
+            unit="percent",
+            baseline_value=reinvestment_schedule.depreciation_ratio,
+            current_value=reinvestment_schedule.depreciation_ratio,
+            min_value=DEPRECIATION_RATIO_FLOOR,
+            max_value=DEPRECIATION_RATIO_CAP,
+            step=0.005,
+            source_detail=_depreciation_basis_detail(history),
+            source_kind=_depreciation_source_kind(history),
+        ),
+    }
+
+
+def _nearly_equal(left: float, right: float) -> bool:
+    return abs(left - right) <= 1e-9
 
 
 def _normalize_statements(statements: list[Any]) -> list[dict[str, Any]]:
@@ -890,6 +1238,7 @@ def _project_scenario(
     latest_year: int,
     tweaks: _ScenarioTweaks,
     capture_traces: bool = False,
+    override_results_by_key: dict[str, DriverOverrideResult] | None = None,
 ) -> tuple[DriverForecastScenario, dict[str, dict[int, FormulaTrace]]]:
     revenue_projection = (
         _bottom_up_revenue_projection(history, revenue_drivers, tweaks, latest_year, horizon_years)
@@ -1079,6 +1428,7 @@ def _project_scenario(
                 share_bridge_point=share_bridge_point,
                 diluted_shares=diluted_shares,
                 eps=eps,
+                override_results_by_key=override_results_by_key,
             )
             for line_item, trace in year_traces.items():
                 line_traces.setdefault(line_item, {})[year] = trace
@@ -1134,6 +1484,7 @@ def _build_line_traces_for_year(
     share_bridge_point: _ForecastShareBridgePoint,
     diluted_shares: float,
     eps: float | None,
+    override_results_by_key: dict[str, DriverOverrideResult] | None,
 ) -> dict[str, FormulaTrace]:
     revenue_trace = _build_revenue_line_trace(
         revenue_drivers=revenue_drivers,
@@ -1142,6 +1493,7 @@ def _build_line_traces_for_year(
         year=year,
         previous_revenue=previous_revenue,
         revenue=revenue,
+        override_results_by_key=override_results_by_key,
     )
     cost_of_revenue_trace = _build_formula_trace(
         line_item="cost_of_revenue",
@@ -1157,6 +1509,16 @@ def _build_line_traces_for_year(
                 _pct(reinvestment_schedule.operating_working_capital.cost_of_revenue_ratio),
                 _cost_of_revenue_basis_detail(history),
                 _cost_of_revenue_source_kind(history),
+            ),
+            _formula_input(
+                "variable_cost_ratio",
+                "Variable Cost Ratio",
+                cost_schedule.variable_cost_ratio,
+                _pct(cost_schedule.variable_cost_ratio),
+                _variable_cost_ratio_basis_detail(history),
+                _variable_cost_ratio_source_kind(history),
+                override_key="variable_cost_ratio",
+                override_results_by_key=override_results_by_key,
             ),
             _formula_input("variable_cost", "Variable Costs", variable_cost, _money(variable_cost), "SEC-derived variable cost ratio", "sec"),
         ],
@@ -1184,6 +1546,7 @@ def _build_line_traces_for_year(
         ],
         formula_computation=f"{_money(revenue)} - {_money(cost_of_revenue)} = {_money(gross_profit)}",
         result_value=gross_profit,
+        upstream_states=(cost_of_revenue_trace.scenario_state,),
     )
     depreciation_trace = _build_formula_trace(
         line_item="depreciation_amortization",
@@ -1206,6 +1569,8 @@ def _build_line_traces_for_year(
                 _pct(reinvestment_schedule.depreciation_ratio),
                 _depreciation_basis_detail(history),
                 _depreciation_source_kind(history),
+                override_key="depreciation_ratio",
+                override_results_by_key=override_results_by_key,
             ),
             _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
         ],
@@ -1253,7 +1618,14 @@ def _build_line_traces_for_year(
         formula_template="Revenue x DSO / 365",
         inputs=[
             _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
-            _working_capital_days_input("accounts_receivable_days", "DSO", accounts_receivable_days, "accounts_receivable", history),
+            _working_capital_days_input(
+                "accounts_receivable_days",
+                "DSO",
+                accounts_receivable_days,
+                "accounts_receivable",
+                history,
+                override_results_by_key=override_results_by_key,
+            ),
         ],
         formula_computation=f"{_money(revenue)} x {_days(accounts_receivable_days)} / 365 = {_money(working_capital_point['accounts_receivable'])}",
         result_value=working_capital_point["accounts_receivable"],
@@ -1272,10 +1644,18 @@ def _build_line_traces_for_year(
                 f"Derived from cost of revenue trace confidence {_trace_source_kind(cost_of_revenue_trace.confidence)}",
                 _trace_source_kind(cost_of_revenue_trace.confidence),
             ),
-            _working_capital_days_input("inventory_days", "DIO", inventory_days, "inventory", history),
+            _working_capital_days_input(
+                "inventory_days",
+                "DIO",
+                inventory_days,
+                "inventory",
+                history,
+                override_results_by_key=override_results_by_key,
+            ),
         ],
         formula_computation=f"{_money(cost_of_revenue)} x {_days(inventory_days)} / 365 = {_money(working_capital_point['inventory'])}",
         result_value=working_capital_point["inventory"],
+        upstream_states=(cost_of_revenue_trace.scenario_state,),
     )
     accounts_payable_trace = _build_formula_trace(
         line_item="accounts_payable",
@@ -1291,10 +1671,18 @@ def _build_line_traces_for_year(
                 f"Derived from cost of revenue trace confidence {_trace_source_kind(cost_of_revenue_trace.confidence)}",
                 _trace_source_kind(cost_of_revenue_trace.confidence),
             ),
-            _working_capital_days_input("accounts_payable_days", "DPO", accounts_payable_days, "accounts_payable", history),
+            _working_capital_days_input(
+                "accounts_payable_days",
+                "DPO",
+                accounts_payable_days,
+                "accounts_payable",
+                history,
+                override_results_by_key=override_results_by_key,
+            ),
         ],
         formula_computation=f"{_money(cost_of_revenue)} x {_days(accounts_payable_days)} / 365 = {_money(working_capital_point['accounts_payable'])}",
         result_value=working_capital_point["accounts_payable"],
+        upstream_states=(cost_of_revenue_trace.scenario_state,),
     )
     deferred_revenue_trace = _build_formula_trace(
         line_item="deferred_revenue",
@@ -1303,7 +1691,14 @@ def _build_line_traces_for_year(
         formula_template="Revenue x deferred-revenue days / 365",
         inputs=[
             _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
-            _working_capital_days_input("deferred_revenue_days", "Deferred-Revenue Days", deferred_revenue_days, "deferred_revenue", history),
+            _working_capital_days_input(
+                "deferred_revenue_days",
+                "Deferred-Revenue Days",
+                deferred_revenue_days,
+                "deferred_revenue",
+                history,
+                override_results_by_key=override_results_by_key,
+            ),
         ],
         formula_computation=f"{_money(revenue)} x {_days(deferred_revenue_days)} / 365 = {_money(working_capital_point['deferred_revenue'])}",
         result_value=working_capital_point["deferred_revenue"],
@@ -1328,12 +1723,14 @@ def _build_line_traces_for_year(
                 accrued_operating_liabilities_days,
                 "accrued_operating_liabilities",
                 history,
+                override_results_by_key=override_results_by_key,
             ),
         ],
         formula_computation=(
             f"{_money(cash_operating_cost)} x {_days(accrued_operating_liabilities_days)} / 365 = {_money(working_capital_point['accrued_operating_liabilities'])}"
         ),
         result_value=working_capital_point["accrued_operating_liabilities"],
+        upstream_states=(depreciation_trace.scenario_state,),
     )
     income_tax_trace = _build_formula_trace(
         line_item="income_tax",
@@ -1360,6 +1757,7 @@ def _build_line_traces_for_year(
         ],
         formula_computation=_income_tax_computation(bridge_point.pretax_income, below_line_schedule.effective_tax_rate, bridge_point.taxes),
         result_value=bridge_point.taxes,
+        scenario_state=_scenario_state_for_override_keys(override_results_by_key, SUPPORTED_DRIVER_OVERRIDE_KEYS),
     )
     capex_trace = _build_formula_trace(
         line_item="capex",
@@ -1374,6 +1772,8 @@ def _build_line_traces_for_year(
                 _money(maintenance_capex),
                 _capex_basis_detail(history),
                 _capex_source_kind(history),
+                override_key="capex_intensity",
+                override_results_by_key=override_results_by_key,
             ),
             _formula_input(
                 "depreciation_amortization",
@@ -1391,6 +1791,16 @@ def _build_line_traces_for_year(
                 _growth_reinvestment_basis_detail(history),
                 _growth_reinvestment_source_kind(history),
             ),
+            _formula_input(
+                "sales_to_capital",
+                "Sales-to-Capital",
+                reinvestment_schedule.sales_to_capital,
+                f"{reinvestment_schedule.sales_to_capital:.2f}x",
+                _growth_reinvestment_basis_detail(history),
+                _growth_reinvestment_source_kind(history),
+                override_key="sales_to_capital",
+                override_results_by_key=override_results_by_key,
+            ),
         ],
         formula_computation=(
             f"max({_money(maintenance_capex)}, {_money(bridge_point.depreciation)} + {_money(growth_reinvestment)}) = {_money(bridge_point.capex)}"
@@ -1407,6 +1817,36 @@ def _build_line_traces_for_year(
             _formula_input("variable_cost", "Variable Costs", variable_cost, _money(variable_cost), "SEC-derived variable cost ratio", "sec"),
             _formula_input("semi_variable_cost", "Semi-Variable Costs", semi_cost, _money(semi_cost), "SEC-derived semi-variable cost schedule", "sec"),
             _formula_input("fixed_cost", "Fixed Costs", fixed_cost, _money(fixed_cost), "SEC-derived fixed cost schedule", "sec"),
+            _formula_input(
+                "variable_cost_ratio",
+                "Variable Cost Ratio",
+                cost_schedule.variable_cost_ratio,
+                _pct(cost_schedule.variable_cost_ratio),
+                _variable_cost_ratio_basis_detail(history),
+                _variable_cost_ratio_source_kind(history),
+                override_key="variable_cost_ratio",
+                override_results_by_key=override_results_by_key,
+            ),
+            _formula_input(
+                "semi_variable_cost_ratio",
+                "Semi-Variable Cost Ratio",
+                cost_schedule.semi_variable_cost_ratio,
+                _pct(cost_schedule.semi_variable_cost_ratio),
+                _semi_variable_cost_ratio_basis_detail(history),
+                _semi_variable_cost_ratio_source_kind(history),
+                override_key="semi_variable_cost_ratio",
+                override_results_by_key=override_results_by_key,
+            ),
+            _formula_input(
+                "fixed_cost_growth",
+                "Fixed Cost Growth",
+                cost_schedule.fixed_cost_growth,
+                _pct(cost_schedule.fixed_cost_growth),
+                _fixed_cost_growth_basis_detail(history),
+                _fixed_cost_growth_source_kind(history),
+                override_key="fixed_cost_growth",
+                override_results_by_key=override_results_by_key,
+            ),
         ],
         formula_computation=(
             f"{_money(revenue)} - {_money(variable_cost)} - {_money(semi_cost)} - {_money(fixed_cost)} = {_money(operating_income)}"
@@ -1450,6 +1890,7 @@ def _build_line_traces_for_year(
             f"{_money(bridge_point.other_income_expense)} = {_money(bridge_point.pretax_income)}"
         ),
         result_value=bridge_point.pretax_income,
+        upstream_states=(operating_income_trace.scenario_state,),
     )
     net_income_trace = _build_formula_trace(
         line_item="net_income",
@@ -1476,6 +1917,7 @@ def _build_line_traces_for_year(
         ],
         formula_computation=f"{_money(bridge_point.pretax_income)} - {_money(bridge_point.taxes)} = {_money(bridge_point.net_income)}",
         result_value=bridge_point.net_income,
+        upstream_states=(pretax_trace.scenario_state, income_tax_trace.scenario_state),
     )
     operating_cash_flow_trace = _build_formula_trace(
         line_item="operating_cash_flow",
@@ -1521,6 +1963,16 @@ def _build_line_traces_for_year(
             f"{_money(bridge_point.delta_working_capital)} = {_money(bridge_point.operating_cash_flow)}"
         ),
         result_value=bridge_point.operating_cash_flow,
+        upstream_states=(
+            net_income_trace.scenario_state,
+            depreciation_trace.scenario_state,
+            sbc_trace.scenario_state,
+            accounts_receivable_trace.scenario_state,
+            inventory_trace.scenario_state,
+            accounts_payable_trace.scenario_state,
+            deferred_revenue_trace.scenario_state,
+            accrued_operating_liabilities_trace.scenario_state,
+        ),
     )
     free_cash_flow_trace = _build_formula_trace(
         line_item="free_cash_flow",
@@ -1547,6 +1999,7 @@ def _build_line_traces_for_year(
         ],
         formula_computation=f"{_money(bridge_point.operating_cash_flow)} - {_money(bridge_point.capex)} = {_money(bridge_point.free_cash_flow)}",
         result_value=bridge_point.free_cash_flow,
+        upstream_states=(operating_cash_flow_trace.scenario_state, capex_trace.scenario_state),
     )
     diluted_shares_trace = _build_diluted_shares_trace(
         dilution_schedule=dilution_schedule,
@@ -1578,6 +2031,7 @@ def _build_line_traces_for_year(
         ],
         formula_computation=f"{_money(bridge_point.net_income)} / {_shares(diluted_shares)} = {_money(eps)}",
         result_value=eps,
+        upstream_states=(net_income_trace.scenario_state, diluted_shares_trace.scenario_state),
     )
     return {
         "revenue": revenue_trace,
@@ -1610,6 +2064,7 @@ def _build_revenue_line_trace(
     year: int,
     previous_revenue: float,
     revenue: float,
+    override_results_by_key: dict[str, DriverOverrideResult] | None,
 ) -> FormulaTrace:
     applied_growth = _growth_rate(revenue, previous_revenue) or 0.0
     inputs = [
@@ -1619,6 +2074,40 @@ def _build_revenue_line_trace(
     computation = f"{_money(previous_revenue)} x (1 + {_pct(applied_growth)}) = {_money(revenue)}"
     if projection_index == 0:
         components = _revenue_components_for_trace(revenue_drivers, tweaks, projection_index)
+        inputs.extend(
+            [
+                _formula_input(
+                    "residual_demand_growth",
+                    "Residual Demand Growth",
+                    revenue_drivers.residual_market_growth,
+                    _pct(revenue_drivers.residual_market_growth),
+                    "SEC-derived residual demand proxy",
+                    "sec",
+                    override_key="residual_demand_growth",
+                    override_results_by_key=override_results_by_key,
+                ),
+                _formula_input(
+                    "share_mix_shift",
+                    "Share or Mix Shift",
+                    revenue_drivers.share_shift_proxy,
+                    _pct(revenue_drivers.share_shift_proxy),
+                    "SEC-derived share or mix proxy",
+                    "sec",
+                    override_key="share_mix_shift",
+                    override_results_by_key=override_results_by_key,
+                ),
+                _formula_input(
+                    "price_growth",
+                    "Price Growth",
+                    revenue_drivers.pricing_growth_proxy,
+                    _pct(revenue_drivers.pricing_growth_proxy),
+                    "SEC-derived pricing proxy",
+                    "sec",
+                    override_key="price_growth",
+                    override_results_by_key=override_results_by_key,
+                ),
+            ]
+        )
         detail_parts = [
             f"Driver stack: residual demand {_pct(components['demand_effect'])}, share/mix {_pct(components['share_effect'])}, price proxy {_pct(components['price_effect'])}, cross term {_pct(components['cross_term'])}."
         ]
@@ -1633,6 +2122,10 @@ def _build_revenue_line_trace(
         inputs=inputs,
         formula_computation=computation,
         result_value=revenue,
+        scenario_state=_scenario_state_for_override_keys(
+            override_results_by_key,
+            ("residual_demand_growth", "share_mix_shift", "price_growth"),
+        ),
     )
 
 
@@ -1719,7 +2212,27 @@ def _formula_input(
     formatted_value: str,
     source_detail: str,
     source_kind: str,
+    *,
+    override_key: str | None = None,
+    override_results_by_key: dict[str, DriverOverrideResult] | None = None,
 ) -> FormulaInput:
+    if override_key is not None and override_results_by_key is not None:
+        override = override_results_by_key.get(override_key)
+        if override is not None:
+            override_source_detail = "User scenario override"
+            if override.clipped:
+                override_source_detail = f"User scenario override clipped to {formatted_value}"
+            return FormulaInput(
+                key=key,
+                label=label,
+                value=value,
+                formatted_value=formatted_value,
+                source_detail=f"{override_source_detail}. Baseline source: {source_detail}.",
+                source_kind="override",
+                is_override=True,
+                original_value=override.baseline_value,
+                original_source=source_detail,
+            )
     return FormulaInput(
         key=key,
         label=label,
@@ -1739,6 +2252,8 @@ def _build_formula_trace(
     inputs: list[FormulaInput],
     formula_computation: str,
     result_value: float | None,
+    scenario_state: str | None = None,
+    upstream_states: tuple[str, ...] = (),
 ) -> FormulaTrace:
     return FormulaTrace(
         line_item=line_item,
@@ -1749,7 +2264,25 @@ def _build_formula_trace(
         result_value=result_value,
         inputs=inputs,
         confidence=_trace_confidence(inputs),
+        scenario_state=scenario_state or _trace_scenario_state(inputs, upstream_states),
     )
+
+
+def _trace_scenario_state(inputs: list[FormulaInput], upstream_states: tuple[str, ...] = ()) -> str:
+    if any(state == "user_override" for state in upstream_states):
+        return "user_override"
+    if any(input_item.is_override for input_item in inputs):
+        return "user_override"
+    return "baseline"
+
+
+def _scenario_state_for_override_keys(
+    override_results_by_key: dict[str, DriverOverrideResult] | None,
+    keys: tuple[str, ...],
+) -> str:
+    if override_results_by_key is None:
+        return "baseline"
+    return "user_override" if any(key in override_results_by_key for key in keys) else "baseline"
 
 
 def _trace_confidence(inputs: list[FormulaInput]) -> str:
@@ -1830,6 +2363,57 @@ def _cost_of_revenue_basis_detail(history: list[dict[str, Any]]) -> str:
     return "Fallback cost-of-revenue proxy from variable-cost schedule"
 
 
+def _variable_cost_ratio_source_kind(history: list[dict[str, Any]]) -> str:
+    for previous, current in zip(history, history[1:]):
+        previous_revenue = previous["revenue"]
+        current_revenue = current["revenue"]
+        previous_cost = _operating_cost(previous)
+        current_cost = _operating_cost(current)
+        if previous_revenue is None or current_revenue is None or previous_cost is None or current_cost is None:
+            continue
+        if current_revenue - previous_revenue > 0:
+            return "sec"
+    return "default"
+
+
+def _variable_cost_ratio_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _variable_cost_ratio_source_kind(history) == "sec":
+        return "SEC-derived variable cost ratio"
+    return "Default variable cost ratio from latest operating margin"
+
+
+def _semi_variable_cost_ratio_source_kind(history: list[dict[str, Any]]) -> str:
+    for row in history:
+        if row["revenue"] in (None, 0):
+            continue
+        if (row["sga"] or 0.0) > 0 or (row["research_and_development"] or 0.0) > 0:
+            return "sec"
+    return "default"
+
+
+def _semi_variable_cost_ratio_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _semi_variable_cost_ratio_source_kind(history) == "sec":
+        return "SEC-derived semi-variable cost ratio"
+    return "Default semi-variable cost ratio from operating expense fallback"
+
+
+def _fixed_cost_growth_source_kind(history: list[dict[str, Any]]) -> str:
+    for previous, current in zip(history, history[1:]):
+        previous_cost = _operating_cost(previous)
+        current_cost = _operating_cost(current)
+        if previous_cost is None or current_cost is None:
+            continue
+        if _growth_rate(current_cost, previous_cost) is not None:
+            return "sec"
+    return "default"
+
+
+def _fixed_cost_growth_basis_detail(history: list[dict[str, Any]]) -> str:
+    if _fixed_cost_growth_source_kind(history) == "sec":
+        return "SEC-derived fixed cost growth trend"
+    return "Default fixed cost growth fallback"
+
+
 def _depreciation_source_kind(history: list[dict[str, Any]]) -> str:
     return "sec" if _median_abs_ratio(history, "depreciation", "revenue") is not None else "default"
 
@@ -1882,9 +2466,26 @@ def _working_capital_days_input(
     days_value: float,
     history_key: str,
     history: list[dict[str, Any]],
+    override_results_by_key: dict[str, DriverOverrideResult] | None = None,
 ) -> FormulaInput:
     source_detail, source_kind = _working_capital_days_source(history_key, history)
-    return _formula_input(key, label, days_value, _days(days_value), source_detail, source_kind)
+    override_key = {
+        "accounts_receivable": "dso",
+        "inventory": "dio",
+        "accounts_payable": "dpo",
+        "deferred_revenue": "deferred_revenue_days",
+        "accrued_operating_liabilities": "accrued_operating_liability_days",
+    }.get(history_key)
+    return _formula_input(
+        key,
+        label,
+        days_value,
+        _days(days_value),
+        source_detail,
+        source_kind,
+        override_key=override_key,
+        override_results_by_key=override_results_by_key,
+    )
 
 
 def _income_tax_computation(pretax_income: float, effective_tax_rate: float, taxes: float) -> str:

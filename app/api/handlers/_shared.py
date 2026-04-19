@@ -101,6 +101,7 @@ from app.services.cache_queries import (
 from app.services.beneficial_ownership import collect_beneficial_ownership_reports
 from app.services.company_charts_dashboard import (
     CHARTS_DASHBOARD_SCHEMA_VERSION,
+    build_company_charts_dashboard_response,
     get_company_charts_dashboard_snapshot,
     recompute_and_persist_company_charts_dashboard,
 )
@@ -2834,6 +2835,28 @@ def company_charts(
     )
 
 
+@app.post("/api/companies/{ticker}/charts/what-if", response_model=CompanyChartsDashboardResponse)
+def company_charts_what_if(
+    ticker: str,
+    payload: CompanyChartsWhatIfRequest,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsDashboardResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    return _build_company_charts_what_if_response(
+        session,
+        normalized_ticker,
+        background_tasks,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+        payload=payload,
+    )
+
+
 def _build_company_charts_response(
     session: Session,
     normalized_ticker: str,
@@ -2922,6 +2945,47 @@ def _build_company_charts_response(
         ),
     )
     return response
+
+
+def _build_company_charts_what_if_response(
+    session: Session,
+    normalized_ticker: str,
+    background_tasks: BackgroundTasks,
+    *,
+    requested_as_of: str | None,
+    parsed_as_of: datetime | None,
+    payload: CompanyChartsWhatIfRequest,
+    snapshot: CompanyCacheSnapshot | None = None,
+) -> CompanyChartsDashboardResponse:
+    resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
+    if resolved_snapshot is None:
+        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        return _build_company_charts_bootstrap_for_missing_ticker(
+            normalized_ticker,
+            refresh=refresh,
+            as_of=requested_as_of,
+        )
+
+    generated = build_company_charts_dashboard_response(
+        session,
+        resolved_snapshot.company.id,
+        as_of=parsed_as_of,
+        generated_at=datetime.now(timezone.utc),
+        what_if_request=payload,
+    )
+    if generated is None:
+        return _build_company_charts_bootstrap_for_snapshot(
+            resolved_snapshot,
+            refresh=RefreshState(triggered=False, reason="fresh", ticker=resolved_snapshot.company.ticker, job_id=None),
+            as_of=requested_as_of,
+        )
+
+    return _augment_company_charts_response(
+        resolved_snapshot,
+        generated,
+        refresh=RefreshState(triggered=False, reason="fresh", ticker=resolved_snapshot.company.ticker, job_id=None),
+        as_of=requested_as_of,
+    )
 
 
 def _attempt_inline_company_snapshot_refresh_for_charts(

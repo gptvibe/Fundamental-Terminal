@@ -148,7 +148,12 @@ export default function CompanyFinancialsTabPage() {
     () => findMatchingFinancial(fullFinancials, activeFinancial),
     [activeFinancial, fullFinancials]
   );
-  const diagnosticsReconciliation = fullActiveFinancial?.reconciliation ?? fullFinancials[0]?.reconciliation ?? null;
+  const diagnosticsReconciliation =
+    fullActiveFinancial?.reconciliation ??
+    fullFinancials[0]?.reconciliation ??
+    activeFinancial?.reconciliation ??
+    latestFinancial?.reconciliation ??
+    null;
   const latestStatementPeriodEnd = latestFinancial?.period_end ?? data?.as_of ?? null;
   const latestReportedPeriodEnd = earningsSummaryData?.summary.latest_reported_period_end ?? null;
   const hasNewerReportedEarnings = isLaterPeriod(latestReportedPeriodEnd, latestStatementPeriodEnd);

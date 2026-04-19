@@ -1,0 +1,118 @@
+
+> fundamental-terminal-frontend@0.1.0 test
+> vitest run
+
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/fungk/Desktop/GitHub/Fundamental-Terminal/frontend[39m
+
+ [32m✓[39m lib/api.cache.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 11[2mms[22m[39m
+ [32m✓[39m app/page.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 475[2mms[22m[39m
+ [32m✓[39m components/charts/business-segment-breakdown.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 587[2mms[22m[39m
+   [33m[2m✓[22m[39m BusinessSegmentBreakdown[2m > [22mrenders summary-led business and geography insights before the charts [33m470[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/financials/page.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 564[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/models/page.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 621[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 1952[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanyResearchBriefPage[2m > [22mrenders the six narrative brief sections with fallback and monitoring cues [33m779[2mms[22m[39m
+ [32m✓[39m components/charts/derived-metrics-panel.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 506[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/oil/page.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 288[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx [2m([22m[2m5 tests[22m[2m)[22m[33m 2652[2mms[22m[39m
+   [33m[2m✓[22m[39m ProjectionStudio[2m > [22mopens and collapses the what-if sidebar and uses backend-provided limits [33m528[2mms[22m[39m
+   [33m[2m✓[22m[39m ProjectionStudio[2m > [22mdebounces recomputation, updates the impact strip, and renders delta indicators [33m539[2mms[22m[39m
+   [33m[2m✓[22m[39m ProjectionStudio[2m > [22mshows override metadata in formula popovers and reset returns to the base case [33m600[2mms[22m[39m
+   [33m[2m✓[22m[39m ProjectionStudio[2m > [22mpreserves the current Studio view when recomputation fails [33m890[2mms[22m[39m
+ [32m✓[39m components/company/charts-dashboard.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 437[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanyChartsDashboard[2m > [22mrenders the requested dashboard matrix and forecast detail rows [33m376[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/charts/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 147[2mms[22m[39m
+ [32m✓[39m app/screener/page.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 1099[2mms[22m[39m
+   [33m[2m✓[22m[39m OfficialScreenerPage[2m > [22mrenders ranked results and exposes a Research Brief jump [33m475[2mms[22m[39m
+   [33m[2m✓[22m[39m OfficialScreenerPage[2m > [22msaves presets from the current draft and reruns ranking sort from table headers [33m465[2mms[22m[39m
+ [32m✓[39m components/company/changes-since-last-filing-card.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 172[2mms[22m[39m
+ [32m✓[39m hooks/use-company-workspace.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 148[2mms[22m[39m
+ [32m✓[39m app/watchlist/page.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 1121[2mms[22m[39m
+   [33m[2m✓[22m[39m WatchlistPage[2m > [22mfilters the list by review-due and applies saved views [33m524[2mms[22m[39m
+ [32m✓[39m components/models/oil-scenario-overlay-panel.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 1106[2mms[22m[39m
+   [33m[2m✓[22m[39m OilScenarioOverlayPanel redesigned UX[2m > [22mdefaults to simple mode and can switch to advanced mode [33m534[2mms[22m[39m
+   [33m[2m✓[22m[39m OilScenarioOverlayPanel redesigned UX[2m > [22mapplies scenario presets and supports scenario node editing with live output formatting [33m313[2mms[22m[39m
+ [32m✓[39m components/models/valuation-scenario-workbench.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 564[2mms[22m[39m
+   [33m[2m✓[22m[39m ValuationScenarioWorkbench[2m > [22mrenders overlap, editable sensitivities, and traceability for valuation models [33m550[2mms[22m[39m
+ [32m✓[39m components/company/capital-structure-intelligence-panel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 160[2mms[22m[39m
+ [32m✓[39m components/peers/peer-comparison-dashboard.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 520[2mms[22m[39m
+   [33m[2m✓[22m[39m PeerComparisonDashboard[2m > [22mloads default peers, supports explicit selection, and resets to focus defaults [33m496[2mms[22m[39m
+ [32m✓[39m components/layout/app-chrome.test.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 213[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/earnings/page.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 1370[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanyEarningsPage[2m > [22mrenders earnings summary, trend, and release detail panels [33m931[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanyEarningsPage[2m > [22msupports workspace panel interactions and metadata toggle [33m438[2mms[22m[39m
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 795[2mms[22m[39m
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 3097[2mms[22m[39m
+   [33m[2m✓[22m[39m chart expansion rollout[2m > [22mexposes shared expansion for BalanceSheetChart [33m476[2mms[22m[39m
+ [32m✓[39m components/company/ratio-history-table.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 389[2mms[22m[39m
+   [33m[2m✓[22m[39m RatioHistoryTable[2m > [22mrenders annual ratio history from the visible range with tone-coded cells [33m322[2mms[22m[39m
+ [32m✓[39m components/models/market-context-panel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 191[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/sec-feed/page.interaction.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 532[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanySecFeedPage interactions[2m > [22mfilters alerts by severity and preserves feed entry order [33m529[2mms[22m[39m
+ [32m✓[39m components/company/financial-statements-table.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 458[2mms[22m[39m
+   [33m[2m✓[22m[39m financial statements tables[2m > [22mshows selected and comparison columns with deltas and exports only the visible statements [33m400[2mms[22m[39m
+stderr | components/company/financial-statements-table.test.ts
+Not implemented: navigation to another Document
+
+ [32m✓[39m app/company/[ticker]/ownership/page.reload.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 110[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/capital-markets/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 408[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanyCapitalMarketsPage[2m > [22mrenders the equity claim risk pack summary and evidence panels [33m407[2mms[22m[39m
+ [32m✓[39m hooks/use-period-selection.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 34[2mms[22m[39m
+ [32m✓[39m components/company/metrics-explorer-panel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 136[2mms[22m[39m
+ [32m✓[39m components/layout/company-subnav.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 676[2mms[22m[39m
+ [32m✓[39m components/charts/growth-waterfall-chart.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 312[2mms[22m[39m
+   [33m[2m✓[22m[39m GrowthWaterfallChart[2m > [22mscopes to the shared annual range and switches metrics [33m311[2mms[22m[39m
+ [32m✓[39m components/company/financial-comparison-panel.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 699[2mms[22m[39m
+   [33m[2m✓[22m[39m FinancialComparisonPanel[2m > [22muses shared selected and comparison state with annual fallback and formats missing fields safely [33m450[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/charts/page.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[90m 59[2mms[22m[39m
+ [32m✓[39m components/ui/commercial-fallback-notice.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 30[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/peers/page.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 322[2mms[22m[39m
+ [32m✓[39m app/data-sources/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 102[2mms[22m[39m
+ [32m✓[39m components/models/sector-context-panel.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 121[2mms[22m[39m
+ [32m✓[39m components/company/financial-quality-summary.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 576[2mms[22m[39m
+   [33m[2m✓[22m[39m FinancialQualitySummary[2m > [22mkeeps summary cards as the default view and expands into annual ratio trends on demand [33m575[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/filings/page.integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 358[2mms[22m[39m
+   [33m[2m✓[22m[39m CompanyFilingsPage integration[2m > [22mupdates filing viewer when timeline selection changes [33m358[2mms[22m[39m
+ [32m✓[39m lib/local-user-data.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/insiders/page.reload.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 56[2mms[22m[39m
+ [32m✓[39m components/models/investment-summary-panel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 107[2mms[22m[39m
+ [32m✓[39m app/compare/page.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[90m 144[2mms[22m[39m
+ [32m✓[39m lib/local-screener.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m components/personal/home-saved-companies-panel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 359[2mms[22m[39m
+ [32m✓[39m components/ui/source-freshness-summary.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 289[2mms[22m[39m
+ [32m✓[39m components/company/bank-regulatory-overview.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 301[2mms[22m[39m
+ [32m✓[39m hooks/use-chart-preferences.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 21[2mms[22m[39m
+ [32m✓[39m lib/recent-companies.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m components/personal/company-device-panel.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 246[2mms[22m[39m
+ [32m✓[39m components/performance/deferred-client-section.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 35[2mms[22m[39m
+ [32m✓[39m components/layout/company-research-header.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 259[2mms[22m[39m
+ [32m✓[39m lib/api.routes.test.ts [2m([22m[2m8 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m lib/local-compare-set.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [32m✓[39m components/home/economic-dashboard.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 47[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/sec-feed/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 27[2mms[22m[39m
+ [32m✓[39m lib/chart-windowing.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m components/charts/governance-filing-chart.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 35[2mms[22m[39m
+ [32m✓[39m lib/financial-chart-transforms.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m components/filings/filing-parser-insights.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/governance/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 26[2mms[22m[39m
+ [32m✓[39m lib/annual-financial-scope.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m components/tables/form144-filings-table.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 38[2mms[22m[39m
+ [32m✓[39m components/tables/hedge-fund-activity-table.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 33[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/ownership-changes/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 30[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/filings/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 32[2mms[22m[39m
+ [32m✓[39m components/company/charts-mode-switch.test.tsx [2m([22m[2m1 test[22m[2m)[22m[90m 271[2mms[22m[39m
+ [32m✓[39m components/tables/insider-transactions-table.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 35[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/events/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 25[2mms[22m[39m
+ [32m✓[39m lib/api.metrics-timeseries.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32m✓[39m lib/export.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m lib/chart-capabilities.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m components/charts/company-visualization-lab.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/stakes/page.test.ts [2m([22m[2m1 test[22m[2m)[22m[90m 3[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m76 passed[39m[22m[90m (76)[39m
+[2m      Tests [22m [1m[32m230 passed[39m[22m[90m (230)[39m
+[2m   Start at [22m 12:45:12
+[2m   Duration [22m 21.64s[2m (transform 3.81s, setup 16.05s, collect 13.91s, tests 26.66s, environment 68.28s, prepare 6.75s)[22m
+
