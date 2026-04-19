@@ -16,6 +16,7 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 - Reduces duplicate work when multiple requests converge on the same data close together.
 - If Redis is unavailable, the hot-response cache falls back to local in-process memory.
 - This fallback preserves availability, but cross-instance cache reuse and shared singleflight coordination become weaker because each backend process keeps its own hot cache.
+- Operators should treat `local_memory_fallback` as an availability-preserving degraded mode rather than an equivalent Redis-backed deployment.
 
 3. PostgreSQL persisted research tables
 
@@ -47,8 +48,28 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 ## Operator Checks
 - Inspect startup logs for `shared_hot_cache.backend` to confirm the active backend mode.
 - Inspect runtime logs for `shared_hot_cache.local_fallback` when Redis operations fail and requests drop to process-local fallback.
-- Inspect `/api/internal/cache-metrics` for `hot_cache_backend_mode` plus `hot_cache.backend_details.startup_reason`, `fallback_events_total`, and `cross_instance_reuse`.
+- Inspect `/api/internal/cache-metrics` for `hot_cache_backend`, `hot_cache_backend_mode`, `hot_cache_status`, `hot_cache_operator_summary`, plus `hot_cache.backend_details.startup_reason`, `fallback_events_total`, and `cross_instance_reuse`.
 - If the cache is in `local_memory_fallback`, verify `REDIS_URL`, Redis health, and network reachability from every app instance.
+
+Sample metrics signal:
+
+```json
+{
+  "hot_cache_backend": "local",
+  "hot_cache_backend_mode": "local_memory_fallback",
+  "hot_cache_status": "fallback",
+  "hot_cache_scope": "process-local",
+  "hot_cache_cross_instance_reuse": "disabled",
+  "hot_cache_operator_summary": "Redis was configured, but the app is currently using process-local hot-cache fallback."
+}
+```
+
+Sample logs:
+
+```json
+{"event":"shared_hot_cache.backend","backend":"local","backend_mode":"local_memory_fallback","status":"fallback","summary":"Redis was configured, but the app is currently using process-local hot-cache fallback.","operational_impact":"Cross-instance cache reuse and shared singleflight coordination are weaker because each backend process keeps its own hot cache.","startup_reason":"redis_connect_failed"}
+{"event":"shared_hot_cache.local_fallback","backend":"redis","backend_mode":"redis_with_local_fallbacks","status":"degraded","operation":"read","summary":"Redis is configured as the shared hot-cache backend, but one or more operations fell back to process-local memory.","operational_impact":"Cross-instance cache reuse and shared singleflight coordination may be partial until Redis recovers.","fallback_reason":"redis_read_failed"}
+```
 
 ## Module Boundaries
 - Routers under `app/api/routers/` stay registration-only and may depend on FastAPI, Starlette, and `app/api/schemas/` only.

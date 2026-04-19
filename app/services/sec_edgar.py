@@ -830,7 +830,6 @@ class RefreshPolicy:
             and self.effective_insider_fresh
             and self.effective_institutional_fresh
             and self.earnings_fresh
-            and self.effective_non_core_fresh
             and not self.beneficial_fresh
         )
 
@@ -844,7 +843,6 @@ class RefreshPolicy:
             and self.effective_insider_fresh
             and self.effective_institutional_fresh
             and self.effective_beneficial_fresh
-            and self.effective_non_core_fresh
             and not self.earnings_fresh
         )
 
@@ -859,7 +857,6 @@ class RefreshPolicy:
             and self.effective_institutional_fresh
             and self.effective_beneficial_fresh
             and self.earnings_fresh
-            and self.effective_non_core_fresh
             and not self.effective_insider_fresh
         )
 
@@ -874,7 +871,6 @@ class RefreshPolicy:
             and self.effective_insider_fresh
             and self.effective_beneficial_fresh
             and self.earnings_fresh
-            and self.effective_non_core_fresh
             and not self.institutional_fresh
         )
 
@@ -889,7 +885,6 @@ class RefreshPolicy:
             and self.effective_institutional_fresh
             and self.effective_beneficial_fresh
             and self.earnings_fresh
-            and self.effective_non_core_fresh
         )
 
     def can_refresh_filings_only(self) -> bool:

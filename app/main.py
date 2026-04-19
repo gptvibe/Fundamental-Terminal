@@ -45,6 +45,10 @@ def _canonicalize_company_query_string(request: Request) -> str:
     singleton_names = {"as_of"}
     if request.url.path == "/api/companies/compare":
         singleton_names.add("tickers")
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/financials"):
+        singleton_names.add("view")
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/overview"):
+        singleton_names.add("financials_view")
     elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/models"):
         singleton_names.update({"expand", "dupont_mode"})
 
@@ -71,6 +75,24 @@ def _canonicalize_company_query_string(request: Request) -> str:
             singleton_values["as_of"] = None if normalized_as_of == "latest" else normalized_as_of
             singleton_values["expand"] = ",".join(sorted(requested_expansions)) or None
             singleton_values["dupont_mode"] = normalized_mode
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/financials"):
+        normalize_financials_controls = globals().get("_normalize_company_financials_query_controls")
+        if callable(normalize_financials_controls):
+            _parsed_as_of, normalized_view, normalized_as_of = normalize_financials_controls(
+                requested_as_of=singleton_values.get("as_of"),
+                view=singleton_values.get("view"),
+            )
+            singleton_values["as_of"] = None if normalized_as_of == "latest" else normalized_as_of
+            singleton_values["view"] = None if normalized_view == "full" else normalized_view
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/overview"):
+        normalize_financials_controls = globals().get("_normalize_company_financials_query_controls")
+        if callable(normalize_financials_controls):
+            _parsed_as_of, normalized_view, normalized_as_of = normalize_financials_controls(
+                requested_as_of=singleton_values.get("as_of"),
+                view=singleton_values.get("financials_view"),
+            )
+            singleton_values["as_of"] = None if normalized_as_of == "latest" else normalized_as_of
+            singleton_values["financials_view"] = None if normalized_view == "full" else normalized_view
 
     query_items = sorted(
         [
@@ -165,6 +187,32 @@ def _resolved_company_models_controls(request: Request) -> tuple[dict[str, str |
     }, True
 
 
+def _resolved_company_financials_controls(
+    request: Request,
+    *,
+    view_param_name: str,
+) -> tuple[dict[str, str] | None, bool]:
+    try:
+        requested_as_of = read_singleton_query_param(request, "as_of")
+        requested_view = read_singleton_query_param(request, view_param_name)
+    except DuplicateSingletonQueryParamError:
+        return None, False
+
+    normalize_financials_controls = globals().get("_normalize_company_financials_query_controls")
+    if not callable(normalize_financials_controls):
+        return None, False
+
+    try:
+        _parsed_as_of, normalized_view, normalized_as_of = normalize_financials_controls(
+            requested_as_of=requested_as_of,
+            view=requested_view,
+        )
+    except Exception:
+        return None, False
+
+    return {"as_of": normalized_as_of, "view": normalized_view}, True
+
+
 def _company_route_hot_cache_keys(request: Request) -> list[str]:
     path = request.url.path
     if not path.startswith("/api/companies/"):
@@ -185,10 +233,19 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
         return []
 
     if route_name == "financials":
-        return [f"financials:{normalized_ticker}:asof={normalized_as_of}"]
+        financial_controls, controls_are_valid = _resolved_company_financials_controls(request, view_param_name="view")
+        if not controls_are_valid or financial_controls is None:
+            return []
+        return [f"financials:{normalized_ticker}:view={financial_controls['view']}:asof={financial_controls['as_of']}"]
 
-    if route_name in {"overview", "brief"}:
-        return [f"financials:{normalized_ticker}:asof={normalized_as_of}"]
+    if route_name == "overview":
+        financial_controls, controls_are_valid = _resolved_company_financials_controls(request, view_param_name="financials_view")
+        if not controls_are_valid or financial_controls is None:
+            return []
+        return [f"financials:{normalized_ticker}:view={financial_controls['view']}:asof={financial_controls['as_of']}"]
+
+    if route_name == "brief":
+        return [f"financials:{normalized_ticker}:view=full:asof={normalized_as_of}"]
 
     if route_name == "charts":
         return [f"charts:{normalized_ticker}:asof={normalized_as_of}"]

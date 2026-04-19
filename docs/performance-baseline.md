@@ -83,6 +83,16 @@ Search-flow counters are only collected during local frontend audit runs. Duplic
 - Treat stale-cache returns separately from background revalidation in the UI. A page can feel slow even when network fan-out is lower because the client still fans out many logical reads and background revalidators.
 - Memoize or batch homepage search follow-ups. The audit makes it visible when autocomplete search and resolve-style lookup happen back-to-back for the same input.
 
+## Financials Payload Views
+
+The financials endpoint now supports additive compact views so screens can skip heavyweight statement substructures without changing the default public response:
+
+- `view=full` keeps the historical default payload.
+- `view=core_segments` keeps core statement rows, price history, and segment payloads while omitting reconciliation detail.
+- `view=core` keeps core statement rows and price history while omitting both reconciliation detail and segment payloads.
+
+The overview workspace uses `financials_view=core_segments`, and the models workspace uses `view=core`, so initial-screen reads stay narrower while export and deep-dive flows can keep using the full payload.
+
 ### Lower Impact
 - Increase the visibility of route-level payload and serialization metrics in local developer workflows so regressions show up before they reach UI review.
 - Keep the internal audit collector enabled only for local measurement runs. It is structured and low-risk, but it still adds measurable overhead when active.

@@ -211,8 +211,8 @@ describe("api route stability", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    await getCompanyFinancials("AAPL", { asOf: "2025-02-01" });
-    await getCompanyOverview("AAPL", { asOf: "2025-02-01" });
+    await getCompanyFinancials("AAPL", { asOf: "2025-02-01", view: "core" });
+    await getCompanyOverview("AAPL", { asOf: "2025-02-01", financialsView: "core_segments" });
     await getCompanyCapitalStructure("AAPL", { maxPeriods: 6, asOf: "2025-02-01" });
     await getCompanyResearchBrief("AAPL", { asOf: "2025-02-01" });
     await getCompanyChangesSinceLastFiling("AAPL", { asOf: "2025-02-01" });
@@ -223,12 +223,12 @@ describe("api route stability", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "/backend/api/companies/AAPL/financials?as_of=2025-02-01",
+      "/backend/api/companies/AAPL/financials?view=core&as_of=2025-02-01",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "/backend/api/companies/AAPL/overview?as_of=2025-02-01",
+      "/backend/api/companies/AAPL/overview?financials_view=core_segments&as_of=2025-02-01",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

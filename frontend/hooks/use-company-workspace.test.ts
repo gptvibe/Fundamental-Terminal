@@ -147,7 +147,7 @@ describe("useCompanyWorkspace", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(fetchOverview).toHaveBeenCalledWith("RKLB");
+    expect(fetchOverview).toHaveBeenCalledWith("RKLB", { financialsView: "core_segments" });
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
   });

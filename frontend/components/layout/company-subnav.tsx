@@ -99,8 +99,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     async function loadOilTabVisibility() {
       try {
         const company = isOverviewRoute(pathname, baseHref)
-          ? await getCompanyOverview(ticker).then((overviewData) => overviewData.company ?? overviewData.financials.company)
-          : await getCompanyFinancials(ticker).then((financialData) => financialData.company);
+          ? await getCompanyOverview(ticker, { financialsView: "core_segments" }).then((overviewData) => overviewData.company ?? overviewData.financials.company)
+          : await getCompanyFinancials(ticker, { view: "core" }).then((financialData) => financialData.company);
         if (!cancelled) {
           setShowOilTab(companySupportsOilWorkspace(company));
         }

@@ -649,7 +649,7 @@ export default function CompanyModelsPage() {
 async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
   const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, oilScenarioOverlayResult, evaluationResult, oilOverlayEvaluationResult] = await Promise.allSettled([
     getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
-    getCompanyFinancials(ticker),
+    getCompanyFinancials(ticker, { view: "core" }),
     getCompanyMarketContext(ticker),
     getCompanySectorContext(ticker),
     getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),

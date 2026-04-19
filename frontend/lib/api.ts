@@ -611,9 +611,12 @@ function appendAsOf(params: URLSearchParams, asOf?: string | null): void {
 
 export function getCompanyFinancials(
   ticker: string,
-  options?: { asOf?: string | null; signal?: AbortSignal }
+  options?: { asOf?: string | null; view?: "full" | "core_segments" | "core"; signal?: AbortSignal }
 ): Promise<CompanyFinancialsResponse> {
   const params = new URLSearchParams();
+  if (options?.view && options.view !== "full") {
+    params.set("view", options.view);
+  }
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/financials${suffix}`, { signal: options?.signal });
@@ -621,14 +624,23 @@ export function getCompanyFinancials(
 
 export function getCompanyOverview(
   ticker: string,
-  options?: { asOf?: string | null; signal?: AbortSignal }
+  options?: { asOf?: string | null; financialsView?: "full" | "core_segments" | "core"; signal?: AbortSignal }
 ): Promise<CompanyOverviewResponse> {
   const params = new URLSearchParams();
+  if (options?.financialsView && options.financialsView !== "full") {
+    params.set("financials_view", options.financialsView);
+  }
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
+  const financialsParams = new URLSearchParams();
+  if (options?.financialsView && options.financialsView !== "full") {
+    financialsParams.set("view", options.financialsView);
+  }
+  appendAsOf(financialsParams, options?.asOf);
+  const financialsSuffix = financialsParams.toString() ? `?${financialsParams.toString()}` : "";
   const normalizedTicker = encodeURIComponent(ticker);
   return fetchJson<CompanyOverviewResponse>(`/companies/${normalizedTicker}/overview${suffix}`, { signal: options?.signal }).then((payload) => {
-    shareReadCacheValue(`/companies/${normalizedTicker}/financials${suffix}`, payload.financials);
+    shareReadCacheValue(`/companies/${normalizedTicker}/financials${financialsSuffix}`, payload.financials);
     return payload;
   });
 }

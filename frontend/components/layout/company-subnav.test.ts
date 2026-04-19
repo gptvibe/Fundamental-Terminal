@@ -7,11 +7,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CompanySubnav } from "@/components/layout/company-subnav";
 
 const mockUsePathname = vi.fn();
+const mockUseCompanyLayoutContext = vi.fn();
 const getCompanyFinancials = vi.fn();
 const getCompanyOverview = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
+}));
+
+vi.mock("@/components/layout/company-layout-context", () => ({
+  useCompanyLayoutContext: () => mockUseCompanyLayoutContext(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -26,8 +31,10 @@ vi.mock("next/link", () => ({
 describe("CompanySubnav", () => {
   beforeEach(() => {
     mockUsePathname.mockReset();
+    mockUseCompanyLayoutContext.mockReset();
     getCompanyFinancials.mockReset();
     getCompanyOverview.mockReset();
+    mockUseCompanyLayoutContext.mockReturnValue(null);
     getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "unsupported" } });
     getCompanyOverview.mockResolvedValue({ company: { oil_support_status: "unsupported" }, financials: { company: { oil_support_status: "unsupported" } } });
   });
@@ -89,16 +96,16 @@ describe("CompanySubnav", () => {
   });
 
   it("adds an Oil tab for supported or partial oil companies", async () => {
-    mockUsePathname.mockReturnValue("/company/XOM/oil");
+    mockUsePathname.mockReturnValue("/company/XOM/models");
     getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "partial" } });
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
     await waitFor(() => {
+      expect(getCompanyFinancials).toHaveBeenCalledWith("XOM", { view: "core" });
       const oilTab = within(desktopNav).getByRole("link", { name: "Oil" });
       expect(oilTab.getAttribute("href")).toBe("/company/XOM/oil");
-      expect(oilTab.getAttribute("aria-current")).toBe("page");
     });
   });
 
@@ -110,25 +117,27 @@ describe("CompanySubnav", () => {
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
     await waitFor(() => {
-      expect(getCompanyFinancials).toHaveBeenCalledWith("KMI");
+      expect(getCompanyFinancials).toHaveBeenCalledWith("KMI", { view: "core" });
     });
     expect(within(desktopNav).queryByRole("link", { name: "Oil" })).toBeNull();
   });
 
-  it("reuses the overview payload on the overview route when deciding Oil tab visibility", async () => {
+  it("reuses shared company context on the overview route when deciding Oil tab visibility", async () => {
     mockUsePathname.mockReturnValue("/company/XOM");
-    getCompanyOverview.mockResolvedValue({
-      company: { oil_support_status: "partial" },
-      financials: { company: { oil_support_status: "partial" } },
+    mockUseCompanyLayoutContext.mockReturnValue({
+      company: { ticker: "XOM", oil_support_status: "partial" },
+      publisherCount: 1,
+      registerPublisher: () => () => undefined,
+      setCompany: vi.fn(),
     });
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
     await waitFor(() => {
-      expect(getCompanyOverview).toHaveBeenCalledWith("XOM");
+      expect(within(desktopNav).getByRole("link", { name: "Oil" }).getAttribute("href")).toBe("/company/XOM/oil");
     });
+    expect(getCompanyOverview).not.toHaveBeenCalled();
     expect(getCompanyFinancials).not.toHaveBeenCalled();
-    expect(within(desktopNav).getByRole("link", { name: "Oil" }).getAttribute("href")).toBe("/company/XOM/oil");
   });
 });

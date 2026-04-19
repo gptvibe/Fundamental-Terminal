@@ -237,6 +237,10 @@ def test_shared_hot_cache_snapshot_reports_local_fallback_details(monkeypatch) -
     assert metrics["backend"] == "local"
     assert metrics["backend_mode"] == "local_memory_fallback"
     assert metrics["backend_details"]["fallback_active"] is True
+    assert metrics["backend_details"]["status"] == "fallback"
+    assert "process-local hot-cache fallback" in metrics["backend_details"]["summary"]
+    assert "cache reuse" in metrics["backend_details"]["operational_impact"]
+    assert metrics["backend_details"]["recommended_checks"][0] == "Verify REDIS_URL."
     assert metrics["backend_details"]["startup_reason"] == "redis_dependency_missing"
     assert metrics["backend_details"]["cross_instance_reuse"] == "disabled"
 
@@ -261,6 +265,7 @@ def test_shared_hot_cache_logs_connect_fallback_on_startup(monkeypatch, caplog) 
     messages = [record.message for record in caplog.records]
     assert any('"event":"shared_hot_cache.local_fallback"' in message and '"operation":"startup_connect"' in message for message in messages)
     assert any('"event":"shared_hot_cache.backend"' in message and '"startup_reason":"redis_connect_failed"' in message for message in messages)
+    assert any('"summary":"Redis was configured, but the app is currently using process-local hot-cache fallback."' in message for message in messages)
 
 
 def test_shared_hot_cache_runtime_read_fallback_updates_metrics(monkeypatch, caplog) -> None:
@@ -278,5 +283,8 @@ def test_shared_hot_cache_runtime_read_fallback_updates_metrics(monkeypatch, cap
     assert metrics["backend"] == "redis"
     assert metrics["backend_mode"] == "redis_with_local_fallbacks"
     assert metrics["backend_details"]["fallback_events_total"] >= 1
+    assert metrics["backend_details"]["status"] == "degraded"
+    assert "fell back to process-local memory" in metrics["backend_details"]["summary"]
     assert metrics["backend_details"]["last_fallback_reason"] == "redis_read_failed"
     assert any('"event":"shared_hot_cache.local_fallback"' in record.message and '"operation":"read"' in record.message for record in caplog.records)
+    assert any('"operational_impact":"Cross-instance cache reuse and shared singleflight coordination may be partial until Redis recovers."' in record.message for record in caplog.records)

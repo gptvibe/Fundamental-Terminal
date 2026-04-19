@@ -491,14 +491,28 @@ def test_company_route_etag_canonicalizes_repeated_non_singleton_query_params_de
 def test_company_route_hot_cache_keys_use_latest_when_as_of_absent():
     request = _request_with_query_string("", path="/api/companies/AAPL/financials")
 
-    assert main_module._company_route_hot_cache_keys(request) == ["financials:AAPL:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(request) == ["financials:AAPL:view=full:asof=latest"]
+
+
+def test_company_route_hot_cache_keys_include_financials_view_when_requested():
+    financials_request = _request_with_query_string("view=core", path="/api/companies/AAPL/financials")
+    overview_request = _request_with_query_string("financials_view=core_segments", path="/api/companies/AAPL/overview")
+
+    assert main_module._company_route_hot_cache_keys(financials_request) == ["financials:AAPL:view=core:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(overview_request) == ["financials:AAPL:view=core_segments:asof=latest"]
 
 
 def test_company_route_hot_cache_keys_bypass_invalid_as_of():
     latest_request = _request_with_query_string("", path="/api/companies/AAPL/financials")
     invalid_request = _request_with_query_string("as_of=not-a-date", path="/api/companies/AAPL/financials")
 
-    assert main_module._company_route_hot_cache_keys(latest_request) == ["financials:AAPL:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(latest_request) == ["financials:AAPL:view=full:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(invalid_request) == []
+
+
+def test_company_route_hot_cache_keys_bypass_invalid_financials_view():
+    invalid_request = _request_with_query_string("view=bogus", path="/api/companies/AAPL/financials")
+
     assert main_module._company_route_hot_cache_keys(invalid_request) == []
 
 
@@ -657,6 +671,49 @@ def test_financials_route_invalid_as_of_does_not_match_latest_hot_cache_etag(mon
 
     assert response.status_code == 400
     assert response.json()["detail"] == "as_of must be an ISO-8601 date or timestamp"
+    assert hot_cache_keys == []
+    assert response.headers.get("etag") is None
+
+
+def test_financials_route_rejects_duplicate_view_regardless_of_order(monkeypatch):
+    _stub_financials_route(monkeypatch)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/financials?view=bogus&view=core")
+    second = client.get("/api/companies/AAPL/financials?view=core&view=bogus")
+
+    assert first.status_code == 400
+    assert second.status_code == 400
+    assert first.json()["detail"] == "view may only be provided once"
+    assert second.json()["detail"] == "view may only be provided once"
+
+
+def test_financials_route_invalid_view_does_not_match_latest_hot_cache_etag(monkeypatch):
+    hot_cache_keys: list[str] = []
+
+    async def _get_cached(cache_key, *_args, **_kwargs):
+        hot_cache_keys.append(cache_key)
+        return HotCacheLookup(
+            content=b'{"company":{"ticker":"AAPL"}}',
+            etag='W/"financials-hot"',
+            last_modified="Sun, 13 Apr 2026 00:00:00 GMT",
+            is_fresh=True,
+        )
+
+    def _unexpected_session_scope():
+        raise AssertionError("invalid view should be rejected before cache metadata opens a DB session")
+
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
+    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/companies/AAPL/financials?view=bogus",
+        headers={"If-None-Match": 'W/"financials-hot"'},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "view must be one of: full, core_segments, core"
     assert hot_cache_keys == []
     assert response.headers.get("etag") is None
 

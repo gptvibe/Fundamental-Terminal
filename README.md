@@ -144,7 +144,7 @@ The mobile layout swaps the desktop tab rail for a compact section picker and st
    set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
    ```
 
-   `REDIS_URL` is used for the shared hot-response cache. If Redis is unavailable, the app falls back to an in-process local cache automatically. That keeps reads working, but weakens cross-instance hot-cache reuse and shared singleflight coordination.
+  `REDIS_URL` is used for the shared hot-response cache. If Redis is unavailable, the app falls back to an in-process local cache automatically. That keeps reads working, but weakens cross-instance hot-cache reuse and shared singleflight coordination because cache entries stay inside a single backend process.
 
    Optional regulated-bank source configuration:
 
@@ -199,8 +199,28 @@ Hot-cache backend visibility:
 
 - Check startup logs for `shared_hot_cache.backend` to confirm whether the app is using Redis or the local in-process fallback.
 - Check runtime logs for `shared_hot_cache.local_fallback` if Redis operations start failing after boot.
-- Check `/api/internal/cache-metrics` for `hot_cache_backend_mode` and `hot_cache.backend_details`.
+- Check `/api/internal/cache-metrics` for `hot_cache_backend`, `hot_cache_backend_mode`, `hot_cache_status`, and `hot_cache_operator_summary`.
 - If `hot_cache_backend_mode` is `local_memory_fallback`, verify `REDIS_URL`, Redis reachability, and that all app instances can reach the same Redis deployment.
+
+Sample cache-metrics response fields:
+
+```json
+{
+  "hot_cache_backend": "local",
+  "hot_cache_backend_mode": "local_memory_fallback",
+  "hot_cache_status": "fallback",
+  "hot_cache_scope": "process-local",
+  "hot_cache_cross_instance_reuse": "disabled",
+  "hot_cache_operator_summary": "Redis was configured, but the app is currently using process-local hot-cache fallback."
+}
+```
+
+Sample startup/runtime log lines:
+
+```json
+{"event":"shared_hot_cache.backend","backend":"local","backend_mode":"local_memory_fallback","status":"fallback","summary":"Redis was configured, but the app is currently using process-local hot-cache fallback.","operational_impact":"Cross-instance cache reuse and shared singleflight coordination are weaker because each backend process keeps its own hot cache.","startup_reason":"redis_connect_failed"}
+{"event":"shared_hot_cache.local_fallback","backend":"redis","backend_mode":"redis_with_local_fallbacks","status":"degraded","operation":"read","summary":"Redis is configured as the shared hot-cache backend, but one or more operations fell back to process-local memory.","operational_impact":"Cross-instance cache reuse and shared singleflight coordination may be partial until Redis recovers.","fallback_reason":"redis_read_failed"}
+```
 
 API composition notes:
 

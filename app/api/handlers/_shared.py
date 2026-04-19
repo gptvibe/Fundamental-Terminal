@@ -263,12 +263,18 @@ async def readiness_check() -> dict[str, str]:
 @app.get("/api/internal/cache-metrics")
 async def cache_metrics() -> dict[str, Any]:
     hot_cache_metrics = await shared_hot_response_cache.snapshot_metrics()
+    backend_details = hot_cache_metrics.get("backend_details", {})
     return {
         "search_cache": {
             "entries": len(_search_response_cache),
             "ttl_seconds": 0,
         },
+        "hot_cache_backend": hot_cache_metrics["backend"],
         "hot_cache_backend_mode": hot_cache_metrics["backend_mode"],
+        "hot_cache_status": backend_details.get("status"),
+        "hot_cache_scope": backend_details.get("cache_scope"),
+        "hot_cache_cross_instance_reuse": backend_details.get("cross_instance_reuse"),
+        "hot_cache_operator_summary": backend_details.get("summary"),
         "hot_cache": hot_cache_metrics,
     }
 
@@ -591,13 +597,17 @@ async def company_financials(
     http_response: Response,
     ticker: str,
     background_tasks: BackgroundTasks,
+    view: str | None = Query(default=None, description="response shape: full|core_segments|core"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyFinancialsResponse:
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
-    parsed_as_of = _validated_as_of(requested_as_of)
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
-    hot_key = f"financials:{normalized_ticker}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    requested_view = _read_singleton_query_param_or_400(request, "view", fallback=view)
+    parsed_as_of, normalized_view, normalized_as_of = _normalize_company_financials_query_controls(
+        requested_as_of=requested_as_of,
+        view=requested_view,
+    )
+    hot_key = f"financials:{normalized_ticker}:view={normalized_view}:asof={normalized_as_of}"
     hot_tags = _build_hot_cache_tags(
         ticker=normalized_ticker,
         datasets=("financials", "prices"),
@@ -639,6 +649,7 @@ async def company_financials(
                 background_tasks,
                 requested_as_of=requested_as_of,
                 parsed_as_of=parsed_as_of,
+                view=normalized_view,
             )
 
         payload = await _fill_hot_cached_payload(
@@ -663,12 +674,17 @@ def company_overview(
     ticker: str,
     background_tasks: BackgroundTasks,
     request: Request = None,
+    financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyOverviewResponse:
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
-    parsed_as_of = _validated_as_of(requested_as_of)
+    requested_financials_view = _read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
+    parsed_as_of, normalized_financials_view, _normalized_as_of = _normalize_company_financials_query_controls(
+        requested_as_of=requested_as_of,
+        view=requested_financials_view,
+    )
     snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
     financials = _build_company_financials_response(
         session,
@@ -677,6 +693,7 @@ def company_overview(
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
         snapshot=snapshot,
+        view=normalized_financials_view,
     )
     brief = _build_company_research_brief_response(
         session,
@@ -5026,6 +5043,7 @@ def _build_company_financials_response(
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
     snapshot: CompanyCacheSnapshot | None = None,
+    view: str = "full",
 ) -> CompanyFinancialsResponse:
     resolved_snapshot = snapshot or _resolve_cached_company_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
@@ -5048,9 +5066,24 @@ def _build_company_financials_response(
     if parsed_as_of is not None:
         compare_financials = select_point_in_time_financials(compare_financials, parsed_as_of)
         compare_price_history = filter_price_history_as_of(compare_price_history, parsed_as_of)
-    serialized_financials = [_serialize_financial(statement) for statement in compare_financials]
-    segment_analysis_payload = build_segment_analysis(serialized_financials)
-    diagnostics = _diagnostics_for_financial_response(serialized_financials, refresh)
+    include_segment_breakdown = view in {"full", "core_segments"}
+    include_reconciliation = view == "full"
+    include_segment_analysis = view in {"full", "core_segments"}
+    serialized_financials = [
+        _serialize_financial(
+            statement,
+            include_segment_breakdown=include_segment_breakdown,
+            include_reconciliation=include_reconciliation,
+        )
+        for statement in compare_financials
+    ]
+    segment_analysis_payload = build_segment_analysis(serialized_financials) if include_segment_analysis else None
+    latest_reconciliation = _serialize_financial_reconciliation(getattr(compare_financials[0], "reconciliation", None)) if compare_financials else None
+    diagnostics = _diagnostics_for_financial_response(
+        serialized_financials,
+        refresh,
+        latest_reconciliation=latest_reconciliation,
+    )
     payload = CompanyFinancialsResponse(
         company=_serialize_company(
             resolved_snapshot,
@@ -5502,6 +5535,20 @@ def _normalize_company_models_query_controls(
     return parsed_as_of, requested_expansions, normalized_mode, normalized_as_of
 
 
+def _normalize_company_financials_query_controls(
+    *,
+    requested_as_of: str | None,
+    view: str | None,
+) -> tuple[datetime | None, str, str]:
+    parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_view = (view or "").strip().lower() or "full"
+    if normalized_view not in {"full", "core_segments", "core"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="view must be one of: full, core_segments, core")
+
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    return parsed_as_of, normalized_view, normalized_as_of
+
+
 def _apply_requested_as_of(payload: BaseModel, as_of: str | None) -> Any:
     if as_of is None:
         return payload
@@ -5612,10 +5659,13 @@ def _missing_fields_for_fields(payload: Any, field_names: tuple[str, ...]) -> li
 def _diagnostics_for_financial_response(
     financials: list[FinancialPayload],
     refresh: RefreshState,
+    *,
+    latest_reconciliation: FinancialReconciliationPayload | None = None,
 ) -> DataQualityDiagnosticsPayload:
     coverage_ratio = _mean_ratio([_coverage_ratio_for_fields(item, _FINANCIAL_DIAGNOSTIC_FIELDS) for item in financials])
     latest_missing = _missing_fields_for_fields(financials[0], _FINANCIAL_DIAGNOSTIC_FIELDS) if financials else []
-    latest_reconciliation = financials[0].reconciliation if financials else None
+    if latest_reconciliation is None and financials:
+        latest_reconciliation = financials[0].reconciliation
     return _build_data_quality_diagnostics(
         coverage_ratio=coverage_ratio,
         stale_flags=_stale_flags_from_refresh(refresh),
@@ -6787,7 +6837,12 @@ def _model_response_as_of(model_runs: list[ModelRun | dict[str, Any]]) -> str | 
     return _latest_as_of(*values)
 
 
-def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
+def _serialize_financial(
+    statement: FinancialStatement,
+    *,
+    include_segment_breakdown: bool = True,
+    include_reconciliation: bool = True,
+) -> FinancialPayload:
     data = statement.data or {}
     return FinancialPayload(
         filing_type=statement.filing_type,
@@ -6834,8 +6889,12 @@ def _serialize_financial(statement: FinancialStatement) -> FinancialPayload:
         stock_based_compensation=data.get("stock_based_compensation"),
         weighted_average_diluted_shares=data.get("weighted_average_diluted_shares"),
         regulated_bank=_serialize_regulated_bank_financial(data),
-        segment_breakdown=[_serialize_financial_segment(item) for item in data.get("segment_breakdown", []) if isinstance(item, dict)],
-        reconciliation=_serialize_financial_reconciliation(getattr(statement, "reconciliation", None)),
+        segment_breakdown=[
+            _serialize_financial_segment(item)
+            for item in data.get("segment_breakdown", [])
+            if include_segment_breakdown and isinstance(item, dict)
+        ],
+        reconciliation=_serialize_financial_reconciliation(getattr(statement, "reconciliation", None)) if include_reconciliation else None,
     )
 
 

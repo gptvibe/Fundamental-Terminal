@@ -24,6 +24,13 @@ def test_cache_metrics_route_exposes_hot_cache_backend_mode(monkeypatch) -> None
                 "last_fallback_error": "RedisError: timeout",
                 "last_fallback_at": "2026-04-13T00:00:00+00:00",
                 "cross_instance_reuse": "disabled",
+                "status": "fallback",
+                "summary": "Redis was configured, but the app is currently using process-local hot-cache fallback.",
+                "operational_impact": "Cross-instance cache reuse and shared singleflight coordination are weaker because each backend process keeps its own hot cache.",
+                "recommended_checks": [
+                    "Verify REDIS_URL.",
+                    "Check Redis reachability from this app instance.",
+                ],
             },
             "config": {
                 "ttl_seconds": 20,
@@ -43,6 +50,11 @@ def test_cache_metrics_route_exposes_hot_cache_backend_mode(monkeypatch) -> None
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["hot_cache_backend"] == "local"
     assert payload["hot_cache_backend_mode"] == "local_memory_fallback"
+    assert payload["hot_cache_status"] == "fallback"
+    assert payload["hot_cache_scope"] == "process-local"
+    assert payload["hot_cache_cross_instance_reuse"] == "disabled"
+    assert "process-local hot-cache fallback" in payload["hot_cache_operator_summary"]
     assert payload["hot_cache"]["backend_details"]["cross_instance_reuse"] == "disabled"
     assert payload["hot_cache"]["backend_details"]["startup_reason"] == "redis_connect_failed"

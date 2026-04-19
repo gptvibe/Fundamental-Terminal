@@ -31,3 +31,9 @@ Using the compose-built stack and a Playwright request capture against `http://1
 - `/companies/search?query=AAPL&refresh=false`
 
 That observation is within the cold-load budget.
+
+## Payload Narrowing Notes
+
+- The overview workspace should prefer `/companies/{ticker}/overview?financials_view=core_segments` for initial loads so it keeps segment surfaces without paying the reconciliation payload cost up front.
+- The models workspace should prefer `/companies/{ticker}/financials?view=core` because it only needs the core statement rows and price history for initial model rendering.
+- The default `/companies/{ticker}/financials` contract remains `view=full` for exports, deep-dive diagnostics, and backward-compatible external callers.

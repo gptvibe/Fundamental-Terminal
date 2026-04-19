@@ -270,12 +270,13 @@ class SharedHotResponseCache:
             for route, route_metrics in metrics.items()
             if route != "overall"
         }
+        backend_status = self._backend_status()
         return {
             "backend": self.backend,
             "backend_mode": self.backend_mode,
             "shared": self.is_shared,
             "namespace": self._namespace,
-            "backend_details": self._backend_details(),
+            "backend_details": self._backend_details(backend_status),
             "config": {
                 "ttl_seconds": settings.hot_response_cache_ttl_seconds,
                 "stale_ttl_seconds": settings.hot_response_cache_stale_ttl_seconds,
@@ -938,7 +939,49 @@ class SharedHotResponseCache:
                 for route, values in self._local_metrics.items()
             }
 
-    def _backend_details(self) -> dict[str, Any]:
+    def _backend_status(self) -> dict[str, Any]:
+        if self._redis is not None:
+            if self._fallback_events_total > 0:
+                return {
+                    "status": "degraded",
+                    "summary": "Redis is configured as the shared hot-cache backend, but one or more operations fell back to process-local memory.",
+                    "operational_impact": "Cross-instance cache reuse and shared singleflight coordination may be partial until Redis recovers.",
+                    "recommended_checks": [
+                        "Check Redis health and latency.",
+                        "Inspect recent shared_hot_cache.local_fallback logs for the failing operation.",
+                        "Confirm all app instances still reach the same Redis deployment.",
+                    ],
+                }
+            return {
+                "status": "healthy",
+                "summary": "Redis-backed shared hot cache is active.",
+                "operational_impact": "Cross-instance cache reuse and shared singleflight coordination are enabled.",
+                "recommended_checks": [],
+            }
+
+        if self._redis_configured:
+            return {
+                "status": "fallback",
+                "summary": "Redis was configured, but the app is currently using process-local hot-cache fallback.",
+                "operational_impact": "Cross-instance cache reuse and shared singleflight coordination are weaker because each backend process keeps its own hot cache.",
+                "recommended_checks": [
+                    "Verify REDIS_URL.",
+                    "Check Redis reachability from this app instance.",
+                    "Confirm every app instance can reach the same Redis deployment.",
+                ],
+            }
+
+        return {
+            "status": "local_only",
+            "summary": "Redis is not configured, so the app is using process-local hot cache only.",
+            "operational_impact": "Cross-instance cache reuse and shared singleflight coordination are disabled because cache entries stay within one backend process.",
+            "recommended_checks": [
+                "Set REDIS_URL to a shared Redis deployment if you want cross-instance hot-cache reuse.",
+            ],
+        }
+
+    def _backend_details(self, backend_status: dict[str, Any] | None = None) -> dict[str, Any]:
+        backend_status = backend_status or self._backend_status()
         fallback_active = self._redis is None and self._redis_configured
         return {
             "configured_backend": "redis" if self._redis_configured else "local",
@@ -951,6 +994,10 @@ class SharedHotResponseCache:
             "last_fallback_error": self._last_fallback_error,
             "last_fallback_at": self._last_fallback_at.isoformat() if self._last_fallback_at is not None else None,
             "cross_instance_reuse": "enabled" if self.is_shared else "disabled",
+            "status": backend_status["status"],
+            "summary": backend_status["summary"],
+            "operational_impact": backend_status["operational_impact"],
+            "recommended_checks": list(backend_status["recommended_checks"]),
         }
 
     def _emit_backend_log(
@@ -960,6 +1007,7 @@ class SharedHotResponseCache:
         reason: str,
         error: str | None = None,
     ) -> None:
+        backend_status = self._backend_status()
         emit_structured_log(
             logger,
             "shared_hot_cache.backend",
@@ -969,6 +1017,10 @@ class SharedHotResponseCache:
             cache_scope="cross-instance" if self.is_shared else "process-local",
             redis_configured=self._redis_configured,
             shared=self.is_shared,
+            status=backend_status["status"],
+            summary=backend_status["summary"],
+            operational_impact=backend_status["operational_impact"],
+            recommended_checks=backend_status["recommended_checks"],
             startup_reason=reason,
             fallback_reason=self._last_fallback_reason,
             fallback_events_total=self._fallback_events_total,
@@ -986,6 +1038,7 @@ class SharedHotResponseCache:
         self._last_fallback_reason = f"redis_{operation}_failed"
         self._last_fallback_error = f"{type(exc).__name__}: {exc}"
         self._last_fallback_at = datetime.now(timezone.utc)
+        backend_status = self._backend_status()
         if log_once and operation in self._logged_runtime_fallback_operations:
             return
         self._logged_runtime_fallback_operations.add(operation)
@@ -997,6 +1050,10 @@ class SharedHotResponseCache:
             backend_mode=self.backend_mode,
             cache_scope="process-local-on-fallback",
             operation=operation,
+            status=backend_status["status"],
+            summary=backend_status["summary"],
+            operational_impact=backend_status["operational_impact"],
+            recommended_checks=backend_status["recommended_checks"],
             fallback_reason=self._last_fallback_reason,
             error=self._last_fallback_error,
             redis_configured=self._redis_configured,

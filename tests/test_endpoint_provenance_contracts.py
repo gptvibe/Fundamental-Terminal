@@ -267,6 +267,85 @@ def test_financials_route_exposes_reconciliation_metadata(monkeypatch):
     assert {entry["source_id"] for entry in payload["provenance"]} == {"sec_companyfacts", "sec_edgar", "yahoo_finance"}
 
 
+def test_financials_route_core_view_omits_reconciliation_and_segment_payloads_but_keeps_diagnostics(monkeypatch):
+    statement = _financial_statement()
+    statement.data["segment_breakdown"] = [
+        {"segment_id": "cloud", "segment_name": "Cloud", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 520.0, "share_of_revenue": 0.52, "operating_income": 170.0, "assets": None},
+    ]
+    statement.reconciliation = {
+        "status": "disagreement",
+        "as_of": date(2025, 12, 31),
+        "last_refreshed_at": datetime(2026, 3, 22, tzinfo=timezone.utc),
+        "provenance_sources": ["sec_companyfacts", "sec_edgar"],
+        "confidence_score": 0.88,
+        "confidence_penalty": 0.12,
+        "confidence_flags": ["revenue_reconciliation_disagreement"],
+        "missing_field_flags": [],
+        "matched_accession_number": "0000320193-26-000010",
+        "matched_filing_type": "10-K",
+        "matched_period_start": date(2025, 1, 1),
+        "matched_period_end": date(2025, 12, 31),
+        "matched_source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/form10k.htm",
+        "disagreement_count": 1,
+        "comparisons": [
+            {
+                "metric_key": "revenue",
+                "status": "disagreement",
+                "companyfacts_value": 391_000_000_000,
+                "filing_parser_value": 389_000_000_000,
+                "delta": -2_000_000_000,
+                "relative_delta": 0.0051,
+                "confidence_penalty": 0.05,
+                "companyfacts_fact": {
+                    "accession_number": "0000320193-26-000010",
+                    "form": "10-K",
+                    "taxonomy": "us-gaap",
+                    "tag": "RevenueFromContractWithCustomerExcludingAssessedTax",
+                    "unit": "USD",
+                    "source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
+                    "filed_at": date(2026, 2, 1),
+                    "period_start": date(2025, 1, 1),
+                    "period_end": date(2025, 12, 31),
+                    "value": 391_000_000_000,
+                },
+                "filing_parser_fact": {
+                    "accession_number": "0000320193-26-000010",
+                    "form": "10-K",
+                    "taxonomy": None,
+                    "tag": None,
+                    "unit": None,
+                    "source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/form10k.htm",
+                    "filed_at": None,
+                    "period_start": date(2025, 1, 1),
+                    "period_end": date(2025, 12, 31),
+                    "value": 389_000_000_000,
+                },
+            }
+        ],
+    }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [statement])
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/financials?view=core")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["financials"][0]["segment_breakdown"] == []
+    assert payload["financials"][0]["reconciliation"] is None
+    assert payload["segment_analysis"] is None
+    assert payload["diagnostics"]["reconciliation_disagreement_count"] == 1
+    assert payload["diagnostics"]["reconciliation_penalty"] == 0.12
+
+
 def test_financials_route_exposes_segment_analysis_metadata(monkeypatch):
     latest = _financial_statement()
     latest.data["segment_breakdown"] = [
@@ -319,6 +398,67 @@ def test_financials_route_exposes_segment_analysis_metadata(monkeypatch):
     assert payload["segment_analysis"]["geographic"]["concentration"]["top_segment_name"] == "United States"
     assert "sec_companyfacts" in payload["segment_analysis"]["business"]["provenance_sources"]
     assert any(item["code"] == "geographic_revenue_only" for item in payload["segment_analysis"]["geographic"]["unusual_disclosures"])
+
+
+def test_financials_route_core_segments_view_keeps_segment_payloads_without_reconciliation(monkeypatch):
+    latest = _financial_statement()
+    latest.data["segment_breakdown"] = [
+        {"segment_id": "cloud", "segment_name": "Cloud", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 520.0, "share_of_revenue": 0.52, "operating_income": 170.0, "assets": None},
+        {"segment_id": "devices", "segment_name": "Devices", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 300.0, "share_of_revenue": 0.30, "operating_income": 45.0, "assets": None},
+    ]
+    latest.data["revenue"] = 1000.0
+    latest.data["operating_income"] = 260.0
+    latest.reconciliation = {
+        "status": "disagreement",
+        "as_of": date(2025, 12, 31),
+        "last_refreshed_at": datetime(2026, 3, 22, tzinfo=timezone.utc),
+        "provenance_sources": ["sec_companyfacts", "sec_edgar"],
+        "confidence_score": 0.88,
+        "confidence_penalty": 0.12,
+        "confidence_flags": ["revenue_reconciliation_disagreement"],
+        "missing_field_flags": [],
+        "matched_accession_number": "0000320193-26-000010",
+        "matched_filing_type": "10-K",
+        "matched_period_start": date(2025, 1, 1),
+        "matched_period_end": date(2025, 12, 31),
+        "matched_source": "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/form10k.htm",
+        "disagreement_count": 1,
+        "comparisons": [],
+    }
+
+    previous = _financial_statement()
+    previous.period_start = date(2024, 1, 1)
+    previous.period_end = date(2024, 12, 31)
+    previous.last_updated = datetime(2025, 3, 21, tzinfo=timezone.utc)
+    previous.last_checked = datetime(2025, 3, 22, tzinfo=timezone.utc)
+    previous.data = {
+        "revenue": 900.0,
+        "operating_income": 220.0,
+        "segment_breakdown": [
+            {"segment_id": "cloud", "segment_name": "Cloud", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 410.0, "share_of_revenue": 0.4556, "operating_income": 125.0, "assets": None},
+            {"segment_id": "devices", "segment_name": "Devices", "axis_key": "StatementBusinessSegmentsAxis", "axis_label": "Business Segments", "kind": "business", "revenue": 340.0, "share_of_revenue": 0.3778, "operating_income": 55.0, "assets": None},
+        ],
+    }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [latest, previous])
+    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_financial_page",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/financials?view=core_segments")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["financials"][0]["segment_breakdown"]) == 2
+    assert payload["financials"][0]["reconciliation"] is None
+    assert payload["segment_analysis"]["business"]["top_mix_movers"][0]["segment_name"] == "Devices"
+    assert payload["diagnostics"]["reconciliation_penalty"] == 0.12
 
 
 def test_financials_route_exposes_regulated_bank_payload_and_provenance(monkeypatch):

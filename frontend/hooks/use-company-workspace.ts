@@ -358,11 +358,11 @@ async function loadCompanyWorkspaceData(
   let earningsSummaryData: CompanyEarningsSummaryResponse | null = null;
   if (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional) {
     try {
-      const overviewData = await getCompanyOverview(ticker);
+      const overviewData = await getCompanyOverview(ticker, { financialsView: "core_segments" });
       financialData = overviewData.financials;
       briefData = overviewData.brief;
     } catch {
-      financialData = await getCompanyFinancials(ticker);
+      financialData = await getCompanyFinancials(ticker, { view: "core_segments" });
     }
   } else {
     financialData = await getCompanyFinancials(ticker);
