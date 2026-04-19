@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.derived_metrics import build_metrics_timeseries
 
 
@@ -116,6 +118,39 @@ def test_build_metrics_timeseries_includes_quarterly_annual_and_ttm_rows():
     assert latest_ttm["metrics"]["segment_concentration"] is not None
     assert latest_ttm["quality"]["coverage_ratio"] > 0.8
     assert latest_ttm["provenance"]["price_source"] == "yahoo_finance"
+    assert latest_ttm["provenance"]["formula_version"] == "sec_metrics_v2"
+    assert latest_quarterly["provenance"]["metric_semantics"]["buyback_yield"] == "annualized"
+    assert latest_quarterly["provenance"]["metric_semantics"]["dividend_yield"] == "annualized"
+    assert latest_quarterly["provenance"]["metric_semantics"]["working_capital_days"] == "annualized"
+    assert latest_ttm["provenance"]["metric_semantics"]["buyback_yield"] == "ttm"
+    assert latest_ttm["provenance"]["metric_semantics"]["working_capital_days"] == "ttm"
+
+
+def test_build_metrics_timeseries_annualizes_quarterly_flow_metrics_to_match_stable_ttm():
+    statements = [
+        _statement(date(2025, 1, 1), date(2025, 3, 31), "10-Q", 100, 100),
+        _statement(date(2025, 4, 1), date(2025, 6, 30), "10-Q", 100, 100),
+        _statement(date(2025, 7, 1), date(2025, 9, 30), "10-Q", 100, 100),
+        _statement(date(2025, 10, 1), date(2025, 12, 31), "10-Q", 100, 100),
+    ]
+    prices = [_price(date(2025, 12, 31), 50.0)]
+
+    series = build_metrics_timeseries(statements, prices)
+    latest_quarterly = [point for point in series if point["cadence"] == "quarterly"][-1]
+    latest_ttm = [point for point in series if point["cadence"] == "ttm"][-1]
+
+    expected_buyback_yield = (100.0 * 0.02 * 4.0) / (50.0 * 100.0)
+    expected_dividend_yield = (100.0 * 0.01 * 4.0) / (50.0 * 100.0)
+    expected_working_capital_days = ((100.0 * 0.2) + (100.0 * 0.08) - (100.0 * 0.12)) / (100.0 * 4.0) * 365.0
+
+    assert latest_quarterly["metrics"]["buyback_yield"] == pytest.approx(expected_buyback_yield, rel=1e-9)
+    assert latest_ttm["metrics"]["buyback_yield"] == pytest.approx(expected_buyback_yield, rel=1e-9)
+    assert latest_quarterly["metrics"]["dividend_yield"] == pytest.approx(expected_dividend_yield, rel=1e-9)
+    assert latest_ttm["metrics"]["dividend_yield"] == pytest.approx(expected_dividend_yield, rel=1e-9)
+    assert latest_quarterly["metrics"]["working_capital_days"] == pytest.approx(expected_working_capital_days, rel=1e-9)
+    assert latest_ttm["metrics"]["working_capital_days"] == pytest.approx(expected_working_capital_days, rel=1e-9)
+    assert latest_quarterly["provenance"]["metric_semantics"]["buyback_yield"] == "annualized"
+    assert latest_ttm["provenance"]["metric_semantics"]["buyback_yield"] == "ttm"
 
 
 def test_build_metrics_timeseries_includes_bank_specific_metrics():

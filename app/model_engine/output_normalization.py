@@ -31,6 +31,9 @@ _MODEL_FIELDS: dict[str, list[str]] = {
         "retained_earnings",
         "revenue",
         "operating_income",
+        "shares_outstanding",
+        "weighted_average_diluted_shares",
+        "market_snapshot.latest_price",
     ],
     "capital_allocation": [
         "dividends",
@@ -66,7 +69,7 @@ _MODEL_FIELDS: dict[str, list[str]] = {
         "current_liabilities",
         "operating_cash_flow",
         "shares_outstanding",
-        "total_liabilities",
+        "long_term_debt",
         "gross_profit",
         "revenue",
     ],
@@ -355,7 +358,11 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
         )
 
     shareholder_yield_basis = result.get("shareholder_yield_basis")
-    if model_name == "capital_allocation" and isinstance(shareholder_yield_basis, dict) and shareholder_yield_basis.get("method") == "average_market_cap":
+    if (
+        model_name == "capital_allocation"
+        and isinstance(shareholder_yield_basis, dict)
+        and str(shareholder_yield_basis.get("method") or "").startswith("average_market_cap")
+    ):
         items.append(
             {
                 "target": "market_cap_proxy",
@@ -372,17 +379,6 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
                 "reason": "ROIC spread is compared against a proxy capital cost built from the risk-free rate plus a fixed spread.",
             }
         )
-
-    if model_name == "altman_z":
-        basis = str(result.get("basis") or "").lower()
-        if "proxy" in basis:
-            items.append(
-                {
-                    "target": "book_equity_to_liabilities",
-                    "proxy_fields": ["total_assets", "total_liabilities"],
-                    "reason": "Altman Z uses a normalized book equity proxy instead of market capitalization inputs.",
-                }
-            )
 
     return {"used": bool(items), "items": items}
 

@@ -275,7 +275,7 @@ export function CompanyVisualizationLab({ ticker, financials, reloadKey }: Compa
       { label: "Source", value: statementSource },
       { label: "Price", value: priceSource },
       { label: "Freshness", value: staleness },
-      { label: "Provenance", value: latest?.provenance.formula_version ?? "sec_metrics_v1" },
+      { label: "Provenance", value: latest?.provenance.formula_version ?? "sec_metrics_v2" },
     ];
   }, [metricsPayload?.series, metricsPayload?.staleness_reason]);
 

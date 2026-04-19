@@ -8,11 +8,11 @@
   "metrics": {
     "dcf": {
       "calibration": 0.833333,
-      "mean_absolute_error": 0.348712,
-      "mean_signed_error": 0.2299,
-      "root_mean_square_error": 0.427732,
+      "mean_absolute_error": 0.340268,
+      "mean_signed_error": 0.215256,
+      "root_mean_square_error": 0.415895,
       "sample_count": 6,
-      "stability": 0.219525,
+      "stability": 0.217442,
       "status": "ok"
     },
     "earnings": {

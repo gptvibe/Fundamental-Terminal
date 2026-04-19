@@ -80,7 +80,7 @@ def test_metrics_timeseries_endpoint_returns_typed_payload(monkeypatch):
                     "statement_type": "canonical_xbrl",
                     "statement_source": "https://data.sec.gov/example",
                     "price_source": "yahoo_finance",
-                    "formula_version": "sec_metrics_v1",
+                    "formula_version": "sec_metrics_v2",
                 },
                 "quality": {
                     "available_metrics": 2,
@@ -103,7 +103,7 @@ def test_metrics_timeseries_endpoint_returns_typed_payload(monkeypatch):
     assert payload["company"]["ticker"] == "AAPL"
     assert payload["series"][0]["cadence"] == "ttm"
     assert payload["series"][0]["metrics"]["revenue_growth"] == 0.12
-    assert payload["series"][0]["provenance"]["formula_version"] == "sec_metrics_v1"
+    assert payload["series"][0]["provenance"]["formula_version"] == "sec_metrics_v2"
     assert "price_source" in payload["series"][0]["provenance"]
     assert payload["series"][0]["provenance"]["price_source"] == "yahoo_finance"
     assert payload["last_financials_check"] is not None
@@ -185,7 +185,7 @@ def test_metrics_timeseries_endpoint_hides_price_fields_in_strict_mode(monkeypat
                     "statement_type": "canonical_xbrl",
                     "statement_source": "https://data.sec.gov/example",
                     "price_source": "yahoo_finance",
-                    "formula_version": "sec_metrics_v1",
+                    "formula_version": "sec_metrics_v2",
                 },
                 "quality": {
                     "available_metrics": 3,
@@ -267,7 +267,7 @@ def test_metrics_timeseries_endpoint_prefers_regulated_bank_statements(monkeypat
                     "statement_type": "canonical_bank_regulatory",
                     "statement_source": "https://api.fdic.gov/banks/financials",
                     "price_source": None,
-                    "formula_version": "sec_metrics_v1",
+                    "formula_version": "sec_metrics_v2",
                 },
                 "quality": {
                     "available_metrics": 1,

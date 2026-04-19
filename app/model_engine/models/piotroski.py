@@ -13,7 +13,7 @@ from app.model_engine.utils import (
 )
 
 MODEL_NAME = "piotroski"
-MODEL_VERSION = "1.3.0"
+MODEL_VERSION = "1.4.0"
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -35,6 +35,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     current_operating_cash_flow = statement_value(current, "operating_cash_flow")
     current_shares = statement_value(current, "shares_outstanding")
     previous_shares = statement_value(previous, "shares_outstanding") if previous else None
+    current_long_term_debt = statement_value(current, "long_term_debt")
+    previous_long_term_debt = statement_value(previous, "long_term_debt") if previous else None
     current_roa = safe_divide(
         current_net_income,
         average(current_assets, previous_assets),
@@ -43,8 +45,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         previous_net_income,
         average(previous_assets, prior_assets) if prior_assets is not None else previous_assets,
     ) if previous else None
-    current_leverage = safe_divide(statement_value(current, "total_liabilities"), current_assets)
-    previous_leverage = safe_divide(statement_value(previous, "total_liabilities") if previous else None, previous_assets)
+    current_leverage = safe_divide(current_long_term_debt, current_assets)
+    previous_leverage = safe_divide(previous_long_term_debt, previous_assets)
     current_ratio = safe_divide(current_assets_current, current_liabilities_current)
     previous_ratio = safe_divide(previous_assets_current, previous_liabilities_current)
     current_margin = safe_divide(statement_value(current, "gross_profit"), statement_value(current, "revenue"))
@@ -85,6 +87,10 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "criteria": criteria,
         "unavailable_criteria": [key for key, value in criteria.items() if value is None],
         "equity_proxy": json_number(book_equity(current)),
+        "criterion_basis": {
+            "lower_leverage": "long_term_debt_to_total_assets",
+            "better_liquidity": "current_ratio",
+        },
     }
 
 

@@ -54,6 +54,7 @@ FLOW_FIELDS = {
     "provision_for_credit_losses",
 }
 METRIC_KEYS = [*GENERAL_METRIC_KEYS, *BANK_METRIC_KEYS]
+FORMULA_VERSION = "sec_metrics_v2"
 
 
 def build_metrics_timeseries(
@@ -187,7 +188,8 @@ def _build_cadence_points(
                     "statement_type": row["statement_type"],
                     "statement_source": row["source"],
                     "price_source": matched_price["source"] if matched_price else None,
-                    "formula_version": "sec_metrics_v1",
+                    "formula_version": FORMULA_VERSION,
+                    "metric_semantics": _metric_semantics(cadence, row["statement_type"]),
                 },
                 "quality": {
                     "available_metrics": metrics["available_metrics"],
@@ -262,6 +264,9 @@ def _compute_metrics(
     if net_debt is not None and cash_proxy is not None:
         net_debt = net_debt - cash_proxy
 
+    quarterly_annualization_scale = 4.0 if cadence == "quarterly" else 1.0
+    working_capital_days_scale = 365.0 / quarterly_annualization_scale
+
     segment_concentration = _segment_revenue_concentration(current.get("segment_breakdown"))
     average_tangible_common_equity = None
     if tangible_common_equity is not None:
@@ -277,9 +282,13 @@ def _compute_metrics(
         "current_ratio": _safe_div(current_assets, current_liabilities),
         "share_dilution": _pct_change(shares_proxy, previous_shares_proxy),
         "sbc_burden": _safe_div(stock_based_compensation, revenue),
-        "buyback_yield": _safe_div(_abs_if_negative(share_buybacks), market_cap),
-        "dividend_yield": _safe_div(_abs_if_negative(dividends), market_cap),
-        "working_capital_days": _safe_div(_sum_non_null(accounts_receivable, inventory, _negate(accounts_payable)), revenue, scale=365.0),
+        "buyback_yield": _safe_div(_abs_if_negative(share_buybacks), market_cap, scale=quarterly_annualization_scale),
+        "dividend_yield": _safe_div(_abs_if_negative(dividends), market_cap, scale=quarterly_annualization_scale),
+        "working_capital_days": _safe_div(
+            _sum_non_null(accounts_receivable, inventory, _negate(accounts_payable)),
+            revenue,
+            scale=working_capital_days_scale,
+        ),
         "accrual_ratio": _safe_div(_difference(net_income, operating_cash_flow), total_assets),
         "cash_conversion": _safe_div(free_cash_flow, net_income),
         "segment_concentration": segment_concentration,
@@ -316,6 +325,21 @@ def _compute_metrics(
         "coverage_ratio": round(coverage_ratio, 4),
         "flags": flags,
     }
+
+
+def _metric_semantics(cadence: str, statement_type: str) -> dict[str, str]:
+    metric_keys = BANK_METRIC_KEYS if statement_type == "canonical_bank_regulatory" else GENERAL_METRIC_KEYS
+    if cadence == "ttm":
+        default_semantic = "ttm"
+    else:
+        default_semantic = "period_based"
+
+    semantics = {key: default_semantic for key in metric_keys}
+    if cadence == "quarterly":
+        for key in ("buyback_yield", "dividend_yield", "working_capital_days", "roatce"):
+            if key in semantics:
+                semantics[key] = "annualized"
+    return semantics
 
 
 def _price_on_or_before(prices: list[dict[str, Any]], period_end: date) -> dict[str, Any] | None:

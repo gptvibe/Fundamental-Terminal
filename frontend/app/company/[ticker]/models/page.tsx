@@ -444,7 +444,7 @@ export default function CompanyModelsPage() {
           { label: "DCF EV", value: formatCompactNumber(modelSummary.dcfEnterpriseValue), accent: modelSummary.dcfEnterpriseValue != null && modelSummary.dcfEnterpriseValue < 0 ? "red" : "cyan" },
           { label: "Piotroski", value: modelSummary.piotroskiLabel, accent: "cyan" },
           { label: "DuPont ROE", value: formatPercent(modelSummary.dupontRoe), accent: modelSummary.dupontRoe != null && modelSummary.dupontRoe < 0 ? "red" : "cyan" },
-          { label: "Altman Proxy", value: formatSigned(modelSummary.altmanZ), accent: modelSummary.altmanZ != null && modelSummary.altmanZ < 0 ? "red" : "cyan" }
+        { label: "Altman Z", value: formatSigned(modelSummary.altmanZ), accent: modelSummary.altmanZ != null && modelSummary.altmanZ < 0 ? "red" : "cyan" }
         ]}
         className="model-hero models-page-hero models-page-span-full"
       >
@@ -610,7 +610,7 @@ export default function CompanyModelsPage() {
         </div>
       )}
 
-      <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, the Altman proxy, and ratios"} className="models-page-span-full" variant="subtle">
+      <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, Altman Z, and ratios"} className="models-page-span-full" variant="subtle">
         {hasModels ? (
           <DeferredClientSection placeholder={<div className="text-muted">Loading model analytics...</div>}>
             <ModelDashboard models={models} />

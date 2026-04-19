@@ -5,8 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
+import app.model_engine.models.altman_z as altman_z_model
 import app.model_engine.models.capital_allocation as capital_allocation_model
 import app.model_engine.models.dcf as dcf_model
+import app.model_engine.models.piotroski as piotroski_model
+import app.model_engine.models.ratios as ratios_model
 import app.model_engine.models.reverse_dcf as reverse_dcf_model
 import app.model_engine.models.roic as roic_model
 from app.model_engine.registry import MODEL_REGISTRY
@@ -29,6 +32,19 @@ def _point(year: int, data: dict[str, float | int | None]) -> FinancialPoint:
         filing_type="10-K",
         period_start=date(year, 1, 1),
         period_end=date(year, 12, 31),
+        source="sec",
+        last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
+        data=data,
+    )
+
+
+def _quarterly_point(year: int, quarter_end: date, data: dict[str, float | int | None]) -> FinancialPoint:
+    quarter_start_month = quarter_end.month - 2
+    return FinancialPoint(
+        statement_id=int(quarter_end.strftime("%Y%m%d")),
+        filing_type="10-Q",
+        period_start=date(year, quarter_start_month, 1),
+        period_end=quarter_end,
         source="sec",
         last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
         data=data,
@@ -196,6 +212,255 @@ def test_dcf_normal_partial_and_insufficient(monkeypatch):
     assert insufficient_result["model_status"] == "insufficient_data"
 
 
+def test_altman_z_classic_public_variant_uses_market_cap_for_x4():
+    points = [
+        _point(
+            2025,
+            {
+                "total_assets": 1000,
+                "total_liabilities": 400,
+                "current_assets": 500,
+                "current_liabilities": 200,
+                "retained_earnings": 100,
+                "operating_income": 150,
+                "revenue": 1000,
+                "shares_outstanding": 50,
+                "weighted_average_diluted_shares": 40,
+            },
+        )
+    ]
+
+    result = altman_z_model.compute(_dataset(points, price=10.0))
+
+    assert result["model_status"] == "supported"
+    assert result["variant"] == "classic_public_company_1968"
+    assert result["factors"]["market_value_equity_to_liabilities"] == pytest.approx(1.25, rel=1e-9)
+    assert result["factors"]["market_value_equity_to_liabilities"] != pytest.approx(1.5, rel=1e-9)
+    assert result["z_score_approximate"] == pytest.approx(2.745, rel=1e-9)
+
+
+def test_altman_z_quarterly_only_inputs_are_not_treated_as_supported_annual_score():
+    points = [
+        _quarterly_point(
+            2025,
+            date(2025, 9, 30),
+            {
+                "total_assets": 1000,
+                "total_liabilities": 400,
+                "current_assets": 500,
+                "current_liabilities": 200,
+                "retained_earnings": 100,
+                "operating_income": 150,
+                "revenue": 1000,
+                "shares_outstanding": 50,
+            },
+        )
+    ]
+
+    result = altman_z_model.compute(_dataset(points, price=10.0))
+
+    assert result["model_status"] == "partial"
+    assert result["filing_type"] == "10-Q"
+    assert result["z_score_approximate"] is None
+    assert "annual" in result["reason"].lower()
+
+
+def test_altman_z_missing_factors_do_not_rescale_score_upward():
+    points = [
+        _point(
+            2025,
+            {
+                "total_assets": 1000,
+                "total_liabilities": 400,
+                "current_assets": 500,
+                "current_liabilities": 200,
+                "retained_earnings": 100,
+                "operating_income": 150,
+                "revenue": None,
+                "shares_outstanding": 50,
+            },
+        )
+    ]
+
+    result = altman_z_model.compute(_dataset(points, price=10.0))
+
+    assert result["model_status"] == "partial"
+    assert result["z_score_approximate"] is None
+    assert "sales_to_assets" in result["missing_factors"]
+
+
+def test_piotroski_lower_leverage_uses_long_term_debt_not_total_liabilities():
+    points = [
+        _point(
+            2025,
+            {
+                "net_income": 120,
+                "total_assets": 1000,
+                "current_assets": 420,
+                "current_liabilities": 220,
+                "operating_cash_flow": 150,
+                "shares_outstanding": 100,
+                "long_term_debt": 180,
+                "total_liabilities": 720,
+                "gross_profit": 500,
+                "revenue": 900,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "net_income": 100,
+                "total_assets": 950,
+                "current_assets": 380,
+                "current_liabilities": 240,
+                "operating_cash_flow": 120,
+                "shares_outstanding": 100,
+                "long_term_debt": 240,
+                "total_liabilities": 650,
+                "gross_profit": 460,
+                "revenue": 840,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "net_income": 90,
+                "total_assets": 900,
+                "current_assets": 360,
+                "current_liabilities": 235,
+                "operating_cash_flow": 110,
+                "shares_outstanding": 101,
+                "long_term_debt": 260,
+                "total_liabilities": 620,
+                "gross_profit": 430,
+                "revenue": 800,
+            },
+        ),
+    ]
+
+    result = piotroski_model.compute(_dataset(points))
+
+    assert result["model_status"] == "supported"
+    assert result["criteria"]["lower_leverage"] is True
+    assert result["criterion_basis"]["lower_leverage"] == "long_term_debt_to_total_assets"
+
+
+def test_piotroski_lower_leverage_is_unavailable_without_long_term_debt():
+    points = [
+        _point(
+            2025,
+            {
+                "net_income": 120,
+                "total_assets": 1000,
+                "current_assets": 420,
+                "current_liabilities": 220,
+                "operating_cash_flow": 150,
+                "shares_outstanding": 100,
+                "long_term_debt": None,
+                "total_liabilities": 720,
+                "gross_profit": 500,
+                "revenue": 900,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "net_income": 100,
+                "total_assets": 950,
+                "current_assets": 380,
+                "current_liabilities": 240,
+                "operating_cash_flow": 120,
+                "shares_outstanding": 100,
+                "long_term_debt": None,
+                "total_liabilities": 650,
+                "gross_profit": 460,
+                "revenue": 840,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "net_income": 90,
+                "total_assets": 900,
+                "current_assets": 360,
+                "current_liabilities": 235,
+                "operating_cash_flow": 110,
+                "shares_outstanding": 101,
+                "long_term_debt": None,
+                "total_liabilities": 620,
+                "gross_profit": 430,
+                "revenue": 800,
+            },
+        ),
+    ]
+
+    result = piotroski_model.compute(_dataset(points))
+
+    assert result["model_status"] == "partial"
+    assert result["criteria"]["lower_leverage"] is None
+    assert "lower_leverage" in result["unavailable_criteria"]
+
+
+def test_dcf_prefers_point_in_time_shares_outstanding_for_per_share_value(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    points[0].data["shares_outstanding"] = 200
+    points[0].data["weighted_average_diluted_shares"] = 100
+
+    result = dcf_model.compute(_dataset(points))
+
+    assert result["fair_value_per_share"] == pytest.approx(result["equity_value"] / 200, rel=1e-9)
+    assert result["fair_value_per_share"] != pytest.approx(result["equity_value"] / 100, rel=1e-9)
+
+
+def test_dcf_cash_fallback_marks_capital_structure_proxy_without_company_risk_premium(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    for point in points:
+        point.data["cash_and_short_term_investments"] = None
+
+    dataset = _dataset(points)
+    result = dcf_model.compute(dataset)
+    expected_discount_rate = (
+        _mock_risk_free().rate_used
+        + dcf_model.EQUITY_RISK_PREMIUM
+        + dcf_model._sector_risk_premium(dataset)
+    )
+
+    assert result["assumptions"]["discount_rate"] == pytest.approx(expected_discount_rate, rel=1e-9)
+    assert result["assumption_provenance"]["discount_rate_inputs"]["company_risk_premium"] == pytest.approx(0.0, abs=1e-12)
+    assert result["input_quality"]["starting_cash_flow_proxied"] is False
+    assert result["input_quality"]["capital_structure_proxied"] is True
+
+
+def test_dcf_starting_cash_flow_proxy_flag_only_tracks_fcf_proxying(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    points[0].data["free_cash_flow"] = None
+    points[0].data["operating_cash_flow"] = 190
+    points[0].data["capex"] = 70
+
+    dataset = _dataset(points)
+    result = dcf_model.compute(dataset)
+    expected_discount_rate = (
+        _mock_risk_free().rate_used
+        + dcf_model.EQUITY_RISK_PREMIUM
+        + dcf_model._sector_risk_premium(dataset)
+        + dcf_model.BASE_COMPANY_RISK_PREMIUM
+    )
+
+    assert result["assumptions"]["discount_rate"] == pytest.approx(expected_discount_rate, rel=1e-9)
+    assert result["assumption_provenance"]["discount_rate_inputs"]["company_risk_premium"] == pytest.approx(
+        dcf_model.BASE_COMPANY_RISK_PREMIUM,
+        rel=1e-9,
+    )
+    assert result["input_quality"]["starting_cash_flow_proxied"] is True
+    assert result["input_quality"]["capital_structure_proxied"] is False
+
+
 def test_reverse_dcf_status_variants(monkeypatch):
     monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
@@ -217,7 +482,7 @@ def test_reverse_dcf_status_variants(monkeypatch):
     assert insufficient_result["model_status"] == "insufficient_data"
 
 
-def test_capital_allocation_uses_price_backed_market_cap_not_eps_proxy():
+def test_capital_allocation_annualizes_shareholder_yield_over_average_market_cap_horizon():
     points = [
         _point(
             2025,
@@ -257,9 +522,134 @@ def test_capital_allocation_uses_price_backed_market_cap_not_eps_proxy():
     result = capital_allocation_model.compute(_dataset(points, price=10.0))
 
     assert result["net_shareholder_distribution"] == pytest.approx(33.0)
-    assert result["shareholder_yield"] == pytest.approx(0.033, rel=1e-6)
-    assert result["shareholder_yield_basis"]["method"] == "latest_market_cap"
+    assert result["annualized_shareholder_distribution"] == pytest.approx(11.0)
+    assert result["shareholder_yield"] == pytest.approx(0.011, rel=1e-6)
+    assert result["cumulative_shareholder_distribution_ratio"] == pytest.approx(0.033, rel=1e-6)
+    assert result["shareholder_yield_basis"]["method"] == "average_market_cap"
     assert result["shareholder_yield_basis"]["market_cap_denominator"] == pytest.approx(1000.0)
+    assert result["shareholder_yield_basis"]["metric_definition"] == "annualized_net_shareholder_distribution_divided_by_market_cap"
+    assert result["shareholder_yield_basis"]["numerator_horizon_years"] == 3
+    assert result["shareholder_yield_basis"]["market_cap_observations_used"] == 3
+
+
+def test_ratios_quarterly_stock_flow_metrics_are_annualized_and_disclosed():
+    points = [
+        _quarterly_point(
+            2025,
+            date(2025, 9, 30),
+            {
+                "revenue": 100,
+                "gross_profit": 55,
+                "operating_income": 20,
+                "net_income": 10,
+                "operating_cash_flow": 18,
+                "free_cash_flow": 12,
+                "capex": -6,
+                "interest_expense": -5,
+                "stock_based_compensation": 2,
+                "dividends": -3,
+                "total_assets": 200,
+                "total_liabilities": 80,
+                "stockholders_equity": 120,
+                "current_debt": 15,
+                "long_term_debt": 40,
+                "cash_and_short_term_investments": 20,
+            },
+        ),
+        _quarterly_point(
+            2025,
+            date(2025, 6, 30),
+            {
+                "revenue": 90,
+                "gross_profit": 48,
+                "operating_income": 18,
+                "net_income": 9,
+                "operating_cash_flow": 16,
+                "free_cash_flow": 10,
+                "capex": -5,
+                "interest_expense": -4,
+                "stock_based_compensation": 2,
+                "dividends": -2,
+                "total_assets": 180,
+                "total_liabilities": 70,
+                "stockholders_equity": 110,
+                "current_debt": 12,
+                "long_term_debt": 42,
+                "cash_and_short_term_investments": 18,
+            },
+        ),
+    ]
+
+    result = ratios_model.compute(_dataset(points))
+    values = result["values"]
+    semantics = result["metric_semantics"]
+
+    assert result["model_status"] == "supported"
+    assert result["cadence"] == "quarterly"
+    assert result["annualization_factor"] == 4
+    assert semantics["return_on_assets"] == "annualized"
+    assert semantics["return_on_equity"] == "annualized"
+    assert semantics["asset_turnover"] == "annualized"
+    assert semantics["net_margin"] == "period_based"
+    assert values["return_on_assets"] == pytest.approx((10 / 190) * 4, rel=1e-9)
+    assert values["return_on_equity"] == pytest.approx((10 / 115) * 4, rel=1e-9)
+    assert values["asset_turnover"] == pytest.approx((100 / 190) * 4, rel=1e-9)
+    assert values["return_on_assets"] != pytest.approx(10 / 190, rel=1e-9)
+    assert values["return_on_equity"] != pytest.approx(10 / 115, rel=1e-9)
+    assert values["asset_turnover"] != pytest.approx(100 / 190, rel=1e-9)
+
+
+def test_ratios_capex_intensity_uses_abs_capex_for_negative_outflow():
+    points = [
+        _point(
+            2025,
+            {
+                "revenue": 100,
+                "gross_profit": 55,
+                "operating_income": 20,
+                "net_income": 10,
+                "operating_cash_flow": 18,
+                "free_cash_flow": 12,
+                "capex": -25,
+                "interest_expense": -5,
+                "stock_based_compensation": 2,
+                "dividends": -3,
+                "total_assets": 200,
+                "total_liabilities": 80,
+                "stockholders_equity": 120,
+                "current_debt": 15,
+                "long_term_debt": 40,
+                "cash_and_short_term_investments": 20,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "revenue": 90,
+                "gross_profit": 50,
+                "operating_income": 18,
+                "net_income": 9,
+                "operating_cash_flow": 16,
+                "free_cash_flow": 11,
+                "capex": -20,
+                "interest_expense": -4,
+                "stock_based_compensation": 2,
+                "dividends": -2,
+                "total_assets": 190,
+                "total_liabilities": 78,
+                "stockholders_equity": 112,
+                "current_debt": 14,
+                "long_term_debt": 42,
+                "cash_and_short_term_investments": 18,
+            },
+        ),
+    ]
+
+    result = ratios_model.compute(_dataset(points))
+
+    assert result["model_status"] == "supported"
+    assert result["values"]["capex_intensity"] == pytest.approx(0.25, rel=1e-9)
+    assert result["values"]["capex_intensity"] > 0
 
 
 def test_reverse_dcf_uses_enterprise_value_target_when_capital_structure_available(monkeypatch):
@@ -429,9 +819,12 @@ def test_roic_status_variants(monkeypatch):
 
 def test_capital_allocation_status_variants():
     normal_result = capital_allocation_model.compute(_dataset(_base_points()))
+    expected_market_cap = sum([85.0 * 118.0, 85.0 * 119.0, 85.0 * 120.0]) / 3
     assert normal_result["model_status"] in {"supported", "partial", "proxy"}
     assert normal_result["net_shareholder_distribution"] == pytest.approx(212.0)
-    assert normal_result["shareholder_yield"] == pytest.approx(212.0 / (85.0 * 118.0), rel=1e-6)
+    assert normal_result["annualized_shareholder_distribution"] == pytest.approx(212.0 / 3.0, rel=1e-6)
+    assert normal_result["shareholder_yield"] == pytest.approx((212.0 / 3.0) / expected_market_cap, rel=1e-6)
+    assert normal_result["cumulative_shareholder_distribution_ratio"] == pytest.approx(212.0 / expected_market_cap, rel=1e-6)
 
     partial_points = _base_points()
     partial_points[0].data["dividends"] = None

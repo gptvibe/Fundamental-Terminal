@@ -585,6 +585,7 @@ export interface MetricsProvenancePayload {
   statement_source: string;
   price_source: string | null;
   formula_version: string;
+  metric_semantics?: Record<string, "annualized" | "period_based" | "ttm">;
 }
 
 export interface MetricsQualityPayload {

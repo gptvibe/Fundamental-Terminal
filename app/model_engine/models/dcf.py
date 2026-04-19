@@ -101,7 +101,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     risk_free = get_latest_risk_free_rate(dataset.as_of_date)
 
     historical_fcfs: list[float] = []
-    used_proxy_fcf = False
+    starting_cash_flow_proxied = False
     for point in reversed(annuals):
         fcf = statement_value(point, "free_cash_flow")
         if fcf is not None:
@@ -111,7 +111,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         capex = statement_value(point, "capex")
         if ocf is not None and capex is not None:
             historical_fcfs.append(float(ocf) - abs(float(capex)))
-            used_proxy_fcf = True
+            starting_cash_flow_proxied = True
 
     if not historical_fcfs:
         return {
@@ -122,7 +122,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "applicability": applicability,
             "price_snapshot": _price_snapshot_payload(dataset),
             "input_quality": {
-                "starting_cash_flow_proxied": used_proxy_fcf,
+                "starting_cash_flow_proxied": starting_cash_flow_proxied,
                 "capital_structure_proxied": False,
             },
             "assumption_provenance": {
@@ -149,7 +149,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
 
     sector_premium = _sector_risk_premium(dataset)
     discount_rate = risk_free.rate_used + EQUITY_RISK_PREMIUM + sector_premium
-    if used_proxy_fcf:
+    if starting_cash_flow_proxied:
         discount_rate += BASE_COMPANY_RISK_PREMIUM
     terminal_growth_rate = min(0.03, max(0.005, risk_free.rate_used * 0.6))
 
@@ -187,28 +187,21 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     terminal_present_value = terminal_value / ((1 + discount_rate) ** PROJECTION_YEARS)
 
     enterprise_value = present_value_sum + terminal_present_value
-    cash = latest_non_null(dataset, "cash_and_short_term_investments")
-    if cash is None:
-        cash_only = latest_non_null(dataset, "cash_and_cash_equivalents")
-        short_term = latest_non_null(dataset, "short_term_investments")
-        if cash_only is not None and short_term is not None:
-            cash = cash_only + short_term
-            used_proxy_fcf = True
+    cash, cash_balance_proxied = _cash_balance(dataset)
 
     current_debt = latest_non_null(dataset, "current_debt")
     long_term_debt = latest_non_null(dataset, "long_term_debt")
     net_debt: float | None = None
     capital_structure_incomplete = any(item is None for item in (cash, current_debt, long_term_debt))
+    capital_structure_proxied = cash_balance_proxied or capital_structure_incomplete
     if cash is not None and current_debt is not None and long_term_debt is not None:
         net_debt = (current_debt + long_term_debt) - cash
 
     equity_value = enterprise_value - net_debt if net_debt is not None else enterprise_value
 
-    shares_outstanding = latest_non_null(dataset, "weighted_average_diluted_shares") or latest_non_null(dataset, "shares_outstanding")
+    shares_outstanding = latest_non_null(dataset, "shares_outstanding") or latest_non_null(dataset, "weighted_average_diluted_shares")
     fair_value_per_share = safe_divide(equity_value, shares_outstanding)
 
-    starting_cash_flow_proxied = used_proxy_fcf
-    capital_structure_proxied = capital_structure_incomplete
     proxy_used = starting_cash_flow_proxied or capital_structure_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
@@ -256,7 +249,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "risk_free_rate": json_number(risk_free.rate_used),
                 "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
                 "sector_risk_premium": json_number(sector_premium),
-                "company_risk_premium": json_number(BASE_COMPANY_RISK_PREMIUM if used_proxy_fcf else 0.0),
+                "company_risk_premium": json_number(BASE_COMPANY_RISK_PREMIUM if starting_cash_flow_proxied else 0.0),
             },
             "terminal_assumptions": {
                 "terminal_growth_rate": json_number(terminal_growth_rate),
@@ -277,6 +270,18 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "capital_structure_proxied": capital_structure_proxied,
         },
     }
+
+
+def _cash_balance(dataset: CompanyDataset) -> tuple[float | None, bool]:
+    cash = latest_non_null(dataset, "cash_and_short_term_investments")
+    if cash is not None:
+        return float(cash), False
+
+    cash_only = latest_non_null(dataset, "cash_and_cash_equivalents")
+    short_term = latest_non_null(dataset, "short_term_investments")
+    if cash_only is not None and short_term is not None:
+        return float(cash_only) + float(short_term), True
+    return None, False
 
 
 def _price_snapshot_payload(dataset: CompanyDataset) -> dict[str, object]:

@@ -453,6 +453,7 @@ class MetricsProvenancePayload(BaseModel):
     statement_source: str
     price_source: str | None = None
     formula_version: str
+    metric_semantics: dict[str, Literal["annualized", "period_based", "ttm"]] = Field(default_factory=dict)
 
 
 class MetricsQualityPayload(BaseModel):

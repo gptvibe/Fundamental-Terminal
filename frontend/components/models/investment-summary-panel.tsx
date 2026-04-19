@@ -109,7 +109,7 @@ export function InvestmentSummaryPanel({ ticker, models, financials, priceHistor
         <span className="pill">Valuation state {summary.valuationStateLabel}</span>
         <span className="pill">Primary anchor {summary.primaryValuationLabel}</span>
         <span className="pill">Piotroski {summary.piotroskiDisplay}</span>
-        <span className="pill">Altman Proxy {formatSigned(summary.altmanZScore)}</span>
+        <span className="pill">Altman Z {formatSigned(summary.altmanZScore)}</span>
         <span className="pill">Revenue Growth {formatPercent(summary.revenueGrowth)}</span>
         <span className="pill">Net Margin {formatPercent(summary.netMargin)}</span>
         <span className="pill">Debt / Equity {formatSigned(summary.debtToEquity)}</span>
@@ -192,8 +192,8 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
 
   const piotroskiScore = piotroskiState.score;
   const piotroskiDisplay = formatResolvedPiotroskiDisplay(piotroskiState);
-  const altmanZScore = safeNumber(altman.z_score_approximate) ?? fallbackAltman(current);
-  const altmanApproximate = altmanZScore !== null && (safeNumber(altman.z_score_approximate) === null || isApproximateAltman(altman));
+  const altmanZScore = safeNumber(altman.z_score_approximate);
+  const altmanApproximate = altmanZScore !== null && isApproximateAltman(altman);
   const revenueGrowth = safeNumber(ratioValues.revenue_growth) ?? growthRate(current?.revenue ?? null, previous?.revenue ?? null);
   const netMargin =
     safeNumber(dupont.net_profit_margin) ??
@@ -261,7 +261,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
       {
         label: "Financial Strength",
         score: financialStrengthRating,
-        detail: `Piotroski ${piotroskiDisplay} · Altman proxy ${formatSigned(altmanZScore)}`
+        detail: `Piotroski ${piotroskiDisplay} · Altman Z ${formatSigned(altmanZScore)}`
       },
       {
         label: "Growth",
@@ -351,9 +351,9 @@ function buildStrengthSummary(
       : `Piotroski is ${piotroskiScore.toFixed(1)}/9`;
   const altmanText =
     altmanZScore === null
-      ? "Altman proxy is unavailable"
+      ? "Altman Z is unavailable"
       : altmanApproximate
-        ? `Altman proxy is ${altmanZScore.toFixed(2)}`
+        ? `Altman Z estimate is ${altmanZScore.toFixed(2)}`
         : `Altman Z is ${altmanZScore.toFixed(2)}`;
   const debtText = debtToEquity === null ? "debt/equity is unavailable" : `debt/equity is ${debtToEquity.toFixed(2)}`;
   const strongPiotroski = piotroskiPartial || (piotroskiScore ?? 0) >= 7;
@@ -363,9 +363,9 @@ function buildStrengthSummary(
     return `${piotroskiText}, ${altmanText}, and ${debtText}, which together point to a strong balance-sheet and operating quality profile${altmanApproximate ? ", while treating the Altman reading as contextual rather than threshold-based" : ""}.`;
   }
   if (weakPiotroski || (debtToEquity ?? 0) > 2.2 || (!altmanApproximate && (altmanZScore ?? 99) < 1.8)) {
-    return `${piotroskiText}, ${altmanText}, and ${debtText}, which flags weaker financial resilience and higher balance-sheet risk${altmanApproximate ? "; the Altman value is shown as a partial proxy only" : ""}.`;
+    return `${piotroskiText}, ${altmanText}, and ${debtText}, which flags weaker financial resilience and higher balance-sheet risk${altmanApproximate ? "; the Altman value is shown as a partial estimate only" : ""}.`;
   }
-  return `${piotroskiText}, ${altmanText}, and ${debtText}, suggesting a workable but not pristine financial strength profile${altmanApproximate ? ", with the Altman proxy included for context rather than a hard cutoff" : ""}.`;
+  return `${piotroskiText}, ${altmanText}, and ${debtText}, suggesting a workable but not pristine financial strength profile${altmanApproximate ? ", with the Altman estimate included for context rather than a hard cutoff" : ""}.`;
 }
 
 function buildGrowthSummary(revenueGrowth: number | null, netMargin: number | null) {
@@ -463,17 +463,6 @@ function shareCount(statement: FinancialPayload | null): number | null {
     return derivedShares > 0 ? derivedShares : null;
   }
   return null;
-}
-
-function fallbackAltman(statement: FinancialPayload | null): number | null {
-  if (!statement || statement.total_assets === null || statement.total_liabilities === null || statement.revenue === null || statement.operating_income === null) {
-    return null;
-  }
-  if (statement.total_assets === 0 || statement.total_liabilities === 0) {
-    return null;
-  }
-  const bookEquity = statement.total_assets - statement.total_liabilities;
-  return 3.3 * (statement.operating_income / statement.total_assets) + 0.6 * (bookEquity / statement.total_liabilities) + statement.revenue / statement.total_assets;
 }
 
 function safeDivide(numerator: number | null | undefined, denominator: number | null | undefined): number | null {

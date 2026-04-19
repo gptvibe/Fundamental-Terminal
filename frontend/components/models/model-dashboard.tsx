@@ -541,14 +541,14 @@ function AltmanModelView({ model }: { model: ModelPayload }) {
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
         metrics={[
-          { label: "Altman Proxy", value: formatSigned(asNumber(result.z_score_approximate)) },
+          { label: "Altman Z", value: formatSigned(asNumber(result.z_score_approximate)) },
           { label: "Status", value: String(result.status ?? "—") },
           { label: "Filing Type", value: String(result.filing_type ?? "—") },
           { label: "Period End", value: String(result.period_end ?? "—") }
         ]}
       />
 
-      <ChartShell title="Altman Proxy Factors">
+      <ChartShell title="Altman Z Factors">
         <ResponsiveContainer>
           <BarChart data={factors}>
             <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
@@ -575,7 +575,7 @@ function AltmanModelView({ model }: { model: ModelPayload }) {
           { key: "value", label: "Value", align: "right" }
         ]}
         rows={[
-          { metric: "Altman Proxy", value: formatSigned(asNumber(result.z_score_approximate)) },
+          { metric: "Altman Z", value: formatSigned(asNumber(result.z_score_approximate)) },
           ...factors.map((entry) => ({ metric: entry.label, value: entry.formatted })),
           {
             metric: "Missing Factors",
@@ -592,6 +592,8 @@ function AltmanModelView({ model }: { model: ModelPayload }) {
 function RatiosModelView({ model }: { model: ModelPayload }) {
   const result = asRecord(model.result);
   const values = asRecord(result.values);
+  const cadence = String(result.cadence ?? "unknown");
+  const metricSemantics = asRecord(result.metric_semantics);
   const chartKeys = [
     "gross_margin",
     "operating_margin",
@@ -607,8 +609,15 @@ function RatiosModelView({ model }: { model: ModelPayload }) {
   }));
   const tableRows = Object.entries(values).map(([key, value]) => ({
     metric: titleCase(key),
-    value: formatRatioMetric(key, asNumber(value))
+    value: formatRatioMetric(key, asNumber(value)),
+    basis: formatMetricSemantic(metricSemantics[key])
   }));
+  const cadenceSummary =
+    cadence === "quarterly"
+      ? "Stock/flow ratios annualized for quarterly filings"
+      : cadence === "annual"
+        ? "Annual filing basis"
+        : "Unknown basis";
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
@@ -616,6 +625,8 @@ function RatiosModelView({ model }: { model: ModelPayload }) {
         metrics={[
           { label: "Period End", value: String(result.period_end ?? "—") },
           { label: "Previous Period", value: String(result.previous_period_end ?? "—") },
+          { label: "Cadence", value: titleCase(cadence) },
+          { label: "Ratio Basis", value: cadenceSummary },
           { label: "Net Margin", value: formatPercent(asNumber(values.net_margin)) },
           { label: "ROE", value: formatPercent(asNumber(values.return_on_equity)) }
         ]}
@@ -644,6 +655,7 @@ function RatiosModelView({ model }: { model: ModelPayload }) {
         title="Ratio Number Table"
         columns={[
           { key: "metric", label: "Metric" },
+          { key: "basis", label: "Basis" },
           { key: "value", label: "Value", align: "right" }
         ]}
         rows={tableRows}
@@ -886,6 +898,19 @@ function formatRatioMetric(metric: string, value: number | null): string {
   }
 
   return formatPercent(value);
+}
+
+function formatMetricSemantic(value: unknown): string {
+  if (typeof value !== "string") {
+    return "Unknown";
+  }
+  if (value === "annualized") {
+    return "Annualized";
+  }
+  if (value === "period_based") {
+    return "Reported Period";
+  }
+  return titleCase(value);
 }
 
 function formatUnknown(value: unknown): string {

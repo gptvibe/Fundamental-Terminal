@@ -37,7 +37,7 @@ export function FinancialHealthScore({ models, financials }: FinancialHealthScor
 
       <div className="health-score-inputs">
         <span className="pill">Piotroski {health.inputs.piotroskiDisplay}</span>
-        <span className="pill">Altman Proxy {formatSigned(health.inputs.altmanProxyScore)}</span>
+        <span className="pill">Altman Z {formatSigned(health.inputs.altmanZScore)}</span>
         <span className="pill">ROA {formatPercent(health.inputs.returnOnAssets)}</span>
         <span className="pill">Debt / Equity {formatSigned(health.inputs.debtToEquity)}</span>
         <span className="pill">Revenue Growth {formatPercent(health.inputs.revenueGrowth)}</span>
@@ -120,7 +120,7 @@ function buildHealthScores(models: ModelPayload[], financials: FinancialPayload[
   return {
     inputs: {
       piotroskiDisplay,
-      altmanProxyScore: altmanRaw,
+      altmanZScore: altmanRaw,
       returnOnAssets,
       debtToEquity,
       revenueGrowth
@@ -134,7 +134,7 @@ function buildHealthScores(models: ModelPayload[], financials: FinancialPayload[
       {
         label: "Financial Strength",
         score: financialStrength,
-        detail: `Altman proxy ${formatSigned(altmanRaw)} · D/E ${formatSigned(debtToEquity)}`
+        detail: `Altman Z ${formatSigned(altmanRaw)} · D/E ${formatSigned(debtToEquity)}`
       },
       {
         label: "Growth",
