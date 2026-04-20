@@ -59,6 +59,7 @@ const SUMMARY_SKELETON_WIDTHS = ["64%", "78%", "56%", "70%"];
 type FreshnessTone = "fresh" | "stale" | "error";
 
 export function CompanyResearchHeader({
+  ticker,
   title,
   companyName,
   sector,
