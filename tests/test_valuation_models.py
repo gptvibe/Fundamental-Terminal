@@ -482,7 +482,7 @@ def test_reverse_dcf_status_variants(monkeypatch):
     assert insufficient_result["model_status"] == "insufficient_data"
 
 
-def test_capital_allocation_annualizes_shareholder_yield_over_average_market_cap_horizon():
+def test_capital_allocation_uses_latest_market_cap_for_shareholder_yield():
     points = [
         _point(
             2025,
@@ -491,8 +491,9 @@ def test_capital_allocation_annualizes_shareholder_yield_over_average_market_cap
                 "share_buybacks": 2,
                 "stock_based_compensation": 1,
                 "debt_changes": 0,
+                "shares_outstanding": 200,
                 "weighted_average_diluted_shares": 100,
-                "eps": 100,
+                "eps": 1000,
             },
         ),
         _point(
@@ -502,8 +503,9 @@ def test_capital_allocation_annualizes_shareholder_yield_over_average_market_cap
                 "share_buybacks": 2,
                 "stock_based_compensation": 1,
                 "debt_changes": 0,
+                "shares_outstanding": 100,
                 "weighted_average_diluted_shares": 100,
-                "eps": 100,
+                "eps": 1,
             },
         ),
         _point(
@@ -513,8 +515,9 @@ def test_capital_allocation_annualizes_shareholder_yield_over_average_market_cap
                 "share_buybacks": 2,
                 "stock_based_compensation": 1,
                 "debt_changes": 0,
+                "shares_outstanding": 100,
                 "weighted_average_diluted_shares": 100,
-                "eps": 100,
+                "eps": 1,
             },
         ),
     ]
@@ -523,13 +526,71 @@ def test_capital_allocation_annualizes_shareholder_yield_over_average_market_cap
 
     assert result["net_shareholder_distribution"] == pytest.approx(33.0)
     assert result["annualized_shareholder_distribution"] == pytest.approx(11.0)
-    assert result["shareholder_yield"] == pytest.approx(0.011, rel=1e-6)
-    assert result["cumulative_shareholder_distribution_ratio"] == pytest.approx(0.033, rel=1e-6)
-    assert result["shareholder_yield_basis"]["method"] == "average_market_cap"
-    assert result["shareholder_yield_basis"]["market_cap_denominator"] == pytest.approx(1000.0)
+    assert result["shareholder_yield"] == pytest.approx(11.0 / 2000.0, rel=1e-6)
+    assert result["cumulative_shareholder_distribution_ratio"] == pytest.approx(33.0 / 2000.0, rel=1e-6)
+    assert result["shareholder_yield_basis"]["method"] == "latest_market_cap"
+    assert result["shareholder_yield_basis"]["market_cap_denominator"] == pytest.approx(2000.0)
     assert result["shareholder_yield_basis"]["metric_definition"] == "annualized_net_shareholder_distribution_divided_by_market_cap"
     assert result["shareholder_yield_basis"]["numerator_horizon_years"] == 3
-    assert result["shareholder_yield_basis"]["market_cap_observations_used"] == 3
+    assert result["shareholder_yield_basis"]["market_cap_observations_used"] == 1
+
+
+def test_capital_allocation_missing_price_returns_none_for_shareholder_yield():
+    result = capital_allocation_model.compute(_dataset(_base_points(), price=None))
+
+    assert result["model_status"] == "proxy"
+    assert result["shareholder_yield"] is None
+    assert result["shareholder_yield_basis"]["method"] is None
+    assert result["shareholder_yield_basis"]["market_cap_denominator"] is None
+    assert result["net_shareholder_distribution"] == pytest.approx(212.0)
+
+
+def test_capital_allocation_has_no_eps_based_fallback_for_shareholder_yield():
+    points = [
+        _point(
+            2025,
+            {
+                "dividends": 10,
+                "share_buybacks": 2,
+                "stock_based_compensation": 1,
+                "debt_changes": 0,
+                "shares_outstanding": 100,
+                "weighted_average_diluted_shares": 100,
+                "eps": 5000,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "dividends": 10,
+                "share_buybacks": 2,
+                "stock_based_compensation": 1,
+                "debt_changes": 0,
+                "shares_outstanding": 100,
+                "weighted_average_diluted_shares": 100,
+                "eps": 1,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "dividends": 10,
+                "share_buybacks": 2,
+                "stock_based_compensation": 1,
+                "debt_changes": 0,
+                "shares_outstanding": 100,
+                "weighted_average_diluted_shares": 100,
+                "eps": 1,
+            },
+        ),
+    ]
+
+    result = capital_allocation_model.compute(_dataset(points, price=10.0))
+
+    assert result["shareholder_yield"] == pytest.approx(11.0 / 1000.0, rel=1e-6)
+    assert result["shareholder_yield"] != pytest.approx(11.0 / (100.0 * 5000.0 * 12.0), rel=1e-6)
+    assert result["shareholder_yield_basis"]["method"] == "latest_market_cap"
+    assert result["shareholder_yield_basis"]["market_cap_denominator"] == pytest.approx(1000.0)
 
 
 def test_ratios_quarterly_stock_flow_metrics_are_annualized_and_disclosed():
@@ -774,8 +835,189 @@ def test_roic_incremental_roic_uses_delta_nopat_over_delta_invested_capital(monk
 
     result = roic_model.compute(_dataset(points))
 
-    assert result["roic"] == pytest.approx(0.20, abs=1e-9)
-    assert result["incremental_roic"] == pytest.approx(0.20, abs=1e-9)
+    assert result["roic"] == pytest.approx(0.1975, abs=1e-9)
+    assert result["incremental_roic"] == pytest.approx(0.29625, abs=1e-9)
+
+
+def test_roic_uses_pretax_income_for_tax_rate_when_available(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "pretax_income": 100,
+                "income_tax_expense": 20,
+                "stockholders_equity": 300,
+                "current_debt": 100,
+                "long_term_debt": 100,
+                "cash_and_short_term_investments": 0,
+                "capex": 20,
+                "operating_cash_flow": 100,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "pretax_income": 90,
+                "income_tax_expense": 18,
+                "stockholders_equity": 290,
+                "current_debt": 100,
+                "long_term_debt": 90,
+                "cash_and_short_term_investments": 0,
+                "capex": 18,
+                "operating_cash_flow": 95,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["roic"] == pytest.approx((200.0 * (1.0 - 0.20)) / 500.0, abs=1e-9)
+    assert result["roic"] != pytest.approx((200.0 * (1.0 - 0.10)) / 500.0, abs=1e-9)
+
+
+def test_roic_incremental_roic_changes_with_capital_deployed(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    low_capital_delta_points = [
+        _point(
+            2025,
+            {
+                "operating_income": 220,
+                "income_tax_expense": 22,
+                "stockholders_equity": 410,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 20,
+                "operating_cash_flow": 100,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 205,
+                "income_tax_expense": 20.5,
+                "stockholders_equity": 405,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 18,
+                "operating_cash_flow": 95,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "operating_income": 200,
+                "income_tax_expense": 20,
+                "stockholders_equity": 400,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 16,
+                "operating_cash_flow": 90,
+            },
+        ),
+    ]
+    high_capital_delta_points = [
+        _point(
+            2025,
+            {
+                "operating_income": 220,
+                "income_tax_expense": 22,
+                "stockholders_equity": 600,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 20,
+                "operating_cash_flow": 100,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 205,
+                "income_tax_expense": 20.5,
+                "stockholders_equity": 500,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 18,
+                "operating_cash_flow": 95,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "operating_income": 200,
+                "income_tax_expense": 20,
+                "stockholders_equity": 400,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 16,
+                "operating_cash_flow": 90,
+            },
+        ),
+    ]
+
+    low_capital_delta_result = roic_model.compute(_dataset(low_capital_delta_points))
+    high_capital_delta_result = roic_model.compute(_dataset(high_capital_delta_points))
+
+    assert low_capital_delta_result["incremental_roic"] == pytest.approx((173.8 - 158.0) / (510.0 - 500.0), abs=1e-9)
+    assert high_capital_delta_result["incremental_roic"] == pytest.approx((173.8 - 158.0) / (700.0 - 500.0), abs=1e-9)
+    assert high_capital_delta_result["incremental_roic"] != low_capital_delta_result["incremental_roic"]
+
+
+def test_roic_zero_capital_delta_returns_none(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 220,
+                "income_tax_expense": 22,
+                "stockholders_equity": 400,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 20,
+                "operating_cash_flow": 100,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 210,
+                "income_tax_expense": 21,
+                "stockholders_equity": 400,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 18,
+                "operating_cash_flow": 95,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "operating_income": 200,
+                "income_tax_expense": 20,
+                "stockholders_equity": 400,
+                "current_debt": 50,
+                "long_term_debt": 50,
+                "cash_and_short_term_investments": 0,
+                "capex": 16,
+                "operating_cash_flow": 90,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["incremental_roic"] is None
 
 
 def test_dcf_and_reverse_dcf_mark_financial_sector_unsupported(monkeypatch):
@@ -797,8 +1039,8 @@ def test_roic_status_variants(monkeypatch):
 
     normal_result = roic_model.compute(_dataset(_base_points()))
     assert normal_result["model_status"] in {"supported", "partial"}
-    assert normal_result["roic"] == pytest.approx(0.1912280702, abs=1e-6)
-    assert normal_result["incremental_roic"] == pytest.approx(1.4666666667, abs=1e-6)
+    assert normal_result["roic"] == pytest.approx(0.1801754386, abs=1e-6)
+    assert normal_result["incremental_roic"] == pytest.approx(6.32, abs=1e-6)
 
     partial_points = _base_points()
     partial_points[0].data["stockholders_equity"] = None
@@ -819,7 +1061,7 @@ def test_roic_status_variants(monkeypatch):
 
 def test_capital_allocation_status_variants():
     normal_result = capital_allocation_model.compute(_dataset(_base_points()))
-    expected_market_cap = sum([85.0 * 118.0, 85.0 * 119.0, 85.0 * 120.0]) / 3
+    expected_market_cap = 85.0 * 120.0
     assert normal_result["model_status"] in {"supported", "partial", "proxy"}
     assert normal_result["net_shareholder_distribution"] == pytest.approx(212.0)
     assert normal_result["annualized_shareholder_distribution"] == pytest.approx(212.0 / 3.0, rel=1e-6)
@@ -835,6 +1077,7 @@ def test_capital_allocation_status_variants():
     no_price_result = capital_allocation_model.compute(_dataset(_base_points(), price=None))
     assert no_price_result["model_status"] == "proxy"
     assert no_price_result["shareholder_yield"] is None
+    assert no_price_result["shareholder_yield_basis"]["market_cap_denominator"] is None
     assert no_price_result["net_shareholder_distribution"] == pytest.approx(212.0)
 
     insufficient_points = [

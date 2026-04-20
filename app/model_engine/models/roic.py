@@ -12,7 +12,7 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "roic"
-MODEL_VERSION = "1.1.0"
+MODEL_VERSION = "1.2.0"
 
 MIN_INVESTED_CAPITAL_DELTA = 1e-6
 
@@ -42,8 +42,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         data = point.data or {}
         nopat = None
         if data.get("operating_income") is not None:
-            tax_rate_proxy = safe_divide(data.get("income_tax_expense"), data.get("operating_income"))
-            effective_tax = 0.21 if tax_rate_proxy is None else max(0.0, min(0.40, float(tax_rate_proxy)))
+            effective_tax = _effective_tax_rate(data)
             nopat = float(data.get("operating_income")) * (1 - effective_tax)
         else:
             missing_fields.add("operating_income")
@@ -84,13 +83,13 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         )
 
     if len(period_metrics) >= 2:
+        earliest_period = period_metrics[0]
         latest_period = period_metrics[-1]
-        previous_period = period_metrics[-2]
-        delta_nopat = latest_period["nopat"] - previous_period["nopat"]
-        delta_invested_capital = latest_period["invested_capital"] - previous_period["invested_capital"]
+        delta_nopat = latest_period["nopat"] - earliest_period["nopat"]
+        delta_invested_capital = latest_period["invested_capital"] - earliest_period["invested_capital"]
         capital_delta_floor = max(
             abs(latest_period["invested_capital"]),
-            abs(previous_period["invested_capital"]),
+            abs(earliest_period["invested_capital"]),
             1.0,
         ) * MIN_INVESTED_CAPITAL_DELTA
         if abs(delta_invested_capital) > capital_delta_floor:
@@ -124,3 +123,12 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         },
         "missing_required_fields_last_3y": sorted(missing_fields),
     }
+
+
+def _effective_tax_rate(data: dict[str, object]) -> float:
+    pretax_income = data.get("pretax_income")
+    if pretax_income is not None and float(pretax_income) > 0:
+        tax_rate_proxy = safe_divide(data.get("income_tax_expense"), pretax_income)
+        if tax_rate_proxy is not None:
+            return max(0.0, min(0.40, float(tax_rate_proxy)))
+    return 0.21

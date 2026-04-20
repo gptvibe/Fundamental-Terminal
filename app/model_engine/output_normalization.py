@@ -358,18 +358,32 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
         )
 
     shareholder_yield_basis = result.get("shareholder_yield_basis")
-    if (
-        model_name == "capital_allocation"
-        and isinstance(shareholder_yield_basis, dict)
-        and str(shareholder_yield_basis.get("method") or "").startswith("average_market_cap")
-    ):
-        items.append(
-            {
-                "target": "market_cap_proxy",
-                "proxy_fields": ["latest_price", "weighted_average_diluted_shares", "shares_outstanding"],
-                "reason": "Shareholder yield used an average market-cap denominator built from latest price and available share counts.",
-            }
-        )
+    if model_name == "capital_allocation" and isinstance(shareholder_yield_basis, dict):
+        shareholder_yield_method = str(shareholder_yield_basis.get("method") or "")
+        if shareholder_yield_method.startswith("average_market_cap"):
+            items.append(
+                {
+                    "target": "market_cap_proxy",
+                    "proxy_fields": ["latest_price", "weighted_average_diluted_shares", "shares_outstanding"],
+                    "reason": "Shareholder yield used an average market-cap denominator built from latest price and available share counts.",
+                }
+            )
+        elif shareholder_yield_method == "latest_market_cap_proxy_shares":
+            items.append(
+                {
+                    "target": "market_cap_proxy",
+                    "proxy_fields": ["latest_price", "weighted_average_diluted_shares"],
+                    "reason": "Shareholder yield fell back to diluted shares because point-in-time shares outstanding were unavailable.",
+                }
+            )
+        elif shareholder_yield_basis.get("market_cap_denominator") is None:
+            items.append(
+                {
+                    "target": "market_cap_proxy",
+                    "proxy_fields": ["latest_price", "shares_outstanding"],
+                    "reason": "Shareholder yield was left unavailable because a current market-cap denominator could not be observed directly.",
+                }
+            )
 
     if model_name == "roic" and result.get("capital_cost_proxy") is not None:
         items.append(

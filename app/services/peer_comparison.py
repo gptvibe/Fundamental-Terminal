@@ -175,7 +175,7 @@ def build_peer_comparison(
         "selected_tickers": selected,
         "peers": rows,
         "notes": {
-            "ev_to_ebit": "Approximate EV/EBIT using market cap plus total liabilities as the enterprise-value proxy and operating income as EBIT.",
+            "ev_to_ebit": "Approximate EV/EBIT using market cap plus debt-like claims minus cash as the enterprise-value proxy and operating income as EBIT.",
             "price_to_free_cash_flow": "Uses cached shares outstanding when available, otherwise derives a share-count proxy from net income and EPS.",
             "piotroski": "Piotroski in peer views uses the reported 9-point score when complete; otherwise it scales the available signals proportionally so partial filings still appear in the chart.",
             "fair_value_gap": "Fair value gap uses model fair value per share relative to latest cached price; positive values indicate implied undervaluation.",
@@ -303,11 +303,10 @@ def _build_peer_row(
     latest_price_value = latest_price.close if latest_price is not None else None
     eps = _as_float(current_data.get("eps"))
     free_cash_flow = _as_float(current_data.get("free_cash_flow"))
-    total_liabilities = _as_float(current_data.get("total_liabilities"))
     operating_income = _as_float(current_data.get("operating_income"))
     shares_outstanding = _shares_outstanding(current_data)
     market_cap = latest_price_value * shares_outstanding if latest_price_value is not None and shares_outstanding is not None else None
-    enterprise_value_proxy = market_cap + total_liabilities if market_cap is not None and total_liabilities is not None else None
+    enterprise_value_proxy = _enterprise_value_proxy(current_data, latest_price_value, shares_outstanding)
 
     revenue_growth = _as_float(ratio_values.get("revenue_growth"))
     if revenue_growth is None:
@@ -633,6 +632,43 @@ def _shares_outstanding(data: dict[str, Any]) -> float | None:
     return derived_value
 
 
+def _enterprise_value_proxy(
+    data: dict[str, Any],
+    latest_price: float | None,
+    shares_outstanding: float | None,
+) -> float | None:
+    if latest_price is None or shares_outstanding is None:
+        return None
+
+    debt_like_claims = _debt_like_claims(data)
+    cash = _cash_balance(data)
+    if debt_like_claims is None or cash is None:
+        return None
+
+    market_cap = latest_price * shares_outstanding
+    return market_cap + debt_like_claims - cash
+
+
+def _debt_like_claims(data: dict[str, Any]) -> float | None:
+    current_debt = _as_float(data.get("current_debt"))
+    long_term_debt = _as_float(data.get("long_term_debt"))
+    if current_debt is not None or long_term_debt is not None:
+        total = 0.0
+        if current_debt is not None:
+            total += current_debt
+        if long_term_debt is not None:
+            total += long_term_debt
+        return total
+    return _as_float(data.get("total_debt"))
+
+
+def _cash_balance(data: dict[str, Any]) -> float | None:
+    cash_and_short_term = _as_float(data.get("cash_and_short_term_investments"))
+    if cash_and_short_term is not None:
+        return cash_and_short_term
+    return _as_float(data.get("cash_and_cash_equivalents"))
+
+
 def _valuation_band_percentile(
     statements: list[FinancialStatement],
     latest_price: float | None,
@@ -653,11 +689,10 @@ def _valuation_band_percentile(
         data = dict(statement.data or {})
         eps = _as_float(data.get("eps"))
         fcf = _as_float(data.get("free_cash_flow"))
-        liabilities = _as_float(data.get("total_liabilities"))
         op_income = _as_float(data.get("operating_income"))
         shares = _shares_outstanding(data) or shares_outstanding
         market_cap = latest_price * shares if shares is not None else None
-        enterprise_value_proxy = market_cap + liabilities if market_cap is not None and liabilities is not None else None
+        enterprise_value_proxy = _enterprise_value_proxy(data, latest_price, shares)
         pe = _safe_divide(latest_price, eps)
         pfcf = _safe_divide(market_cap, fcf)
         evebit = _safe_divide(enterprise_value_proxy, op_income)

@@ -44,11 +44,11 @@
     },
     "roic": {
       "calibration": 1.0,
-      "mean_absolute_error": 0.001759,
-      "mean_signed_error": 0.001759,
-      "root_mean_square_error": 0.001836,
+      "mean_absolute_error": 0.001695,
+      "mean_signed_error": 0.001695,
+      "root_mean_square_error": 0.001769,
       "sample_count": 6,
-      "stability": 0.001595,
+      "stability": 0.001537,
       "status": "ok"
     }
   },
