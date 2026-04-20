@@ -3116,14 +3116,6 @@ select {
   gap: 8px;
 }
 
-.company-research-header-kicker {
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: 0.03em;
-}
-
 .company-research-header-tag,
 .company-source-chip {
   display: inline-flex;

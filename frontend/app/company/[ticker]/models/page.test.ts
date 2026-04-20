@@ -11,6 +11,7 @@ import { FORECAST_HANDOFF_QUERY_PARAM, encodeForecastHandoffPayload, type Foreca
 
 let mockedSearchParams = new URLSearchParams();
 const mockUseForecastAccuracy = vi.fn();
+const mockUseJobStream = vi.fn();
 const downloadJsonFile = vi.fn();
 const showAppToast = vi.fn();
 
@@ -24,7 +25,7 @@ vi.mock("next/link", () => ({
 }));
 
 vi.mock("@/hooks/use-job-stream", () => ({
-  useJobStream: () => ({ consoleEntries: [], connectionState: "connected", lastEvent: null }),
+  useJobStream: (...args: unknown[]) => mockUseJobStream(...args),
 }));
 
 vi.mock("@/hooks/use-forecast-accuracy", () => ({
@@ -103,8 +104,136 @@ describe("CompanyModelsPage", () => {
     mockedSearchParams = new URLSearchParams();
     mockUseForecastAccuracy.mockReset();
     mockUseForecastAccuracy.mockReturnValue({ data: null, loading: false, error: null });
+    mockUseJobStream.mockReset();
+    mockUseJobStream.mockReturnValue({ consoleEntries: [], connectionState: "connected", lastEvent: null });
     downloadJsonFile.mockReset();
     showAppToast.mockReset();
+  });
+
+  it("does not subscribe to job events for evaluation run ids when no refresh job exists", async () => {
+    vi.mocked(getCompanyModels).mockResolvedValue({
+      company: null,
+      requested_models: MODEL_NAMES,
+      models: [],
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyFinancials).mockResolvedValue({
+      company: null,
+      financials: [],
+      price_history: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue(undefined as never);
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      curve_points: [],
+      slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null },
+      slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null },
+      fred_series: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      provenance_details: {},
+      fetched_at: "2026-03-22T00:00:00Z",
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      rates_credit: [],
+      inflation_labor: [],
+      growth_activity: [],
+      cyclical_demand: [],
+      cyclical_costs: [],
+      relevant_series: [],
+      relevant_indicators: [],
+      sector_exposure: [],
+      hqm_snapshot: null,
+    });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      matched_plugin_ids: [],
+      plugins: [],
+      fetched_at: "2026-03-22T00:00:00Z",
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
+      company: null,
+      latest: null,
+      history: [],
+      last_capital_structure_check: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({
+      run: {
+        id: 63,
+        suite_key: "historical_fixture_v1",
+        candidate_label: "fixture_baseline_v1",
+        baseline_label: "fixture_baseline_v1",
+        status: "completed",
+        completed_at: "2026-04-20T00:00:00Z",
+        configuration: { horizon_days: 420, earnings_horizon_days: 30 },
+        summary: { company_count: 2, snapshot_count: 8, model_count: 5, provenance_mode: "synthetic_fixture", latest_as_of: "2024-08-07" },
+        models: [
+          {
+            model_name: "dcf",
+            sample_count: 8,
+            calibration: 0.75,
+            stability: 0.08,
+            mean_absolute_error: 0.11,
+            root_mean_square_error: 0.13,
+            mean_signed_error: 0.02,
+            status: "supported",
+            delta: {
+              calibration: 0,
+              stability: 0,
+              mean_absolute_error: 0,
+              root_mean_square_error: 0,
+              mean_signed_error: 0,
+              sample_count: 0,
+            },
+          },
+        ],
+        deltas_present: false,
+      },
+      entries: [],
+      provenance: [],
+      as_of: "2024-08-07",
+      last_refreshed_at: "2026-04-20T00:00:00Z",
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false },
+      confidence_flags: [],
+    });
+
+    render(React.createElement(CompanyModelsPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("Model Evaluation Harness")).toBeTruthy();
+    });
+
+    expect(mockUseJobStream).not.toHaveBeenCalledWith("63");
   });
 
   it("adds forecast-backed valuation card when handoff params are present and supports reset", async () => {

@@ -59,7 +59,6 @@ const SUMMARY_SKELETON_WIDTHS = ["64%", "78%", "56%", "70%"];
 type FreshnessTone = "fresh" | "stale" | "error";
 
 export function CompanyResearchHeader({
-  ticker,
   title,
   companyName,
   sector,
@@ -82,15 +81,16 @@ export function CompanyResearchHeader({
     <section className={clsx("company-research-header", className)}>
       <div className="company-research-header-top">
         <div className="company-research-header-copy">
-          <div className="company-research-header-kicker-row">
-            <span className="company-research-header-kicker">{ticker}</span>
-            {sector ? <span className="company-research-header-tag">{sector}</span> : null}
-            {cacheState ? (
-              <span className={clsx("company-research-header-tag", `tone-${cacheState}`)}>
-                {cacheState}
-              </span>
-            ) : null}
-          </div>
+          {sector || cacheState ? (
+            <div className="company-research-header-kicker-row">
+              {sector ? <span className="company-research-header-tag">{sector}</span> : null}
+              {cacheState ? (
+                <span className={clsx("company-research-header-tag", `tone-${cacheState}`)}>
+                  {cacheState}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <div className="company-research-header-title-row">
             <div className="company-research-header-heading-stack">
               <div className="company-research-header-heading-line">

@@ -852,7 +852,7 @@ async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): 
       oilScenarioOverlayData?.refresh.job_id ??
       marketContextData?.refresh.job_id ??
       sectorContextData?.refresh.job_id ??
-      evaluationData?.run?.id?.toString() ?? null
+      null
   };
 }
 
