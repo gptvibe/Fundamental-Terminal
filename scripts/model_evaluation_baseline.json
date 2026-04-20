@@ -26,20 +26,20 @@
     },
     "residual_income": {
       "calibration": 0.0,
-      "mean_absolute_error": 1.149295,
-      "mean_signed_error": -1.149295,
-      "root_mean_square_error": 1.149467,
+      "mean_absolute_error": 1.148806,
+      "mean_signed_error": -1.148806,
+      "root_mean_square_error": 1.148979,
       "sample_count": 6,
-      "stability": 0.005573,
+      "stability": 0.005621,
       "status": "ok"
     },
     "reverse_dcf": {
       "calibration": 0.166667,
-      "mean_absolute_error": 0.372762,
-      "mean_signed_error": -0.3501,
-      "root_mean_square_error": 0.396914,
+      "mean_absolute_error": 0.376313,
+      "mean_signed_error": -0.346548,
+      "root_mean_square_error": 0.397617,
       "sample_count": 6,
-      "stability": 0.127749,
+      "stability": 0.133077,
       "status": "ok"
     },
     "roic": {
