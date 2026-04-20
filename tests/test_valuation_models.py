@@ -802,6 +802,85 @@ def test_reverse_dcf_uses_enterprise_value_target_when_capital_structure_availab
     assert result["assumption_provenance"]["target_value"]["basis"] == "enterprise_value"
 
 
+def test_reverse_dcf_prefers_point_in_time_shares_outstanding_for_market_cap(monkeypatch):
+    monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "revenue": 1000,
+                "operating_income": 180,
+                "free_cash_flow": 100,
+                "cash_and_short_term_investments": 100,
+                "current_debt": 100,
+                "long_term_debt": 300,
+                "shares_outstanding": 100,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "revenue": 960,
+                "operating_income": 168,
+                "free_cash_flow": 96,
+                "cash_and_short_term_investments": 90,
+                "current_debt": 90,
+                "long_term_debt": 280,
+                "shares_outstanding": 100,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+    ]
+
+    result = reverse_dcf_model.compute(_dataset(points, price=10.0))
+
+    assert result["market_cap_proxy"] == pytest.approx(1000.0)
+    assert result["enterprise_value_proxy"] == pytest.approx(1300.0)
+    assert result["market_cap_proxy"] != pytest.approx(1200.0)
+    assert result["assumption_provenance"]["target_value"]["share_count_source"] == "shares_outstanding"
+    assert result["input_quality"]["share_count_proxied"] is False
+
+
+def test_reverse_dcf_marks_diluted_share_fallback_as_proxy(monkeypatch):
+    monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "revenue": 1000,
+                "operating_income": 180,
+                "free_cash_flow": 100,
+                "cash_and_short_term_investments": 100,
+                "current_debt": 100,
+                "long_term_debt": 300,
+                "shares_outstanding": None,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "revenue": 960,
+                "operating_income": 168,
+                "free_cash_flow": 96,
+                "cash_and_short_term_investments": 90,
+                "current_debt": 90,
+                "long_term_debt": 280,
+                "shares_outstanding": None,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+    ]
+
+    result = reverse_dcf_model.compute(_dataset(points, price=10.0))
+
+    assert result["model_status"] == "proxy"
+    assert result["market_cap_proxy"] == pytest.approx(1200.0)
+    assert result["assumption_provenance"]["target_value"]["share_count_source"] == "weighted_average_diluted_shares"
+    assert result["input_quality"]["share_count_proxied"] is True
+
+
 def test_reverse_dcf_fcf_proxy_uses_operating_cash_flow_less_capex(monkeypatch):
     monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
     points = _base_points()
@@ -942,6 +1021,87 @@ def test_roic_reinvestment_rate_normalizes_negative_capex_outflow(monkeypatch):
     assert result["reinvestment_rate"] == pytest.approx(0.4, abs=1e-9)
     assert result["reinvestment_rate"] > 0
     assert result["trend"][-1]["reinvestment_rate"] == pytest.approx(0.4, abs=1e-9)
+
+
+def test_roic_missing_cash_uses_gross_capital_as_proxy_and_marks_missing_field(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "pretax_income": 100,
+                "income_tax_expense": 20,
+                "stockholders_equity": 500,
+                "current_debt": 50,
+                "long_term_debt": 150,
+                "cash_and_short_term_investments": None,
+                "capex": 40,
+                "operating_cash_flow": 200,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "pretax_income": 90,
+                "income_tax_expense": 18,
+                "stockholders_equity": 450,
+                "current_debt": 40,
+                "long_term_debt": 140,
+                "cash_and_short_term_investments": None,
+                "capex": 35,
+                "operating_cash_flow": 180,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["model_status"] == "proxy"
+    assert result["roic"] == pytest.approx(160.0 / 700.0, abs=1e-9)
+    assert "cash_and_short_term_investments" in result["missing_required_fields_last_3y"]
+    assert "stockholders_equity" not in result["missing_required_fields_last_3y"]
+    assert "current_debt" not in result["missing_required_fields_last_3y"]
+    assert "long_term_debt" not in result["missing_required_fields_last_3y"]
+
+
+def test_roic_missing_field_list_only_includes_truly_missing_capital_inputs(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "income_tax_expense": 20,
+                "stockholders_equity": 400,
+                "current_debt": None,
+                "long_term_debt": None,
+                "cash_and_short_term_investments": 50,
+                "capex": 20,
+                "operating_cash_flow": 100,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "income_tax_expense": 18,
+                "stockholders_equity": 380,
+                "current_debt": 40,
+                "long_term_debt": 80,
+                "cash_and_short_term_investments": 40,
+                "capex": 18,
+                "operating_cash_flow": 95,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert "stockholders_equity" not in result["missing_required_fields_last_3y"]
+    assert "current_debt" in result["missing_required_fields_last_3y"]
+    assert "long_term_debt" in result["missing_required_fields_last_3y"]
 
 
 def test_roic_incremental_roic_changes_with_capital_deployed(monkeypatch):
@@ -1188,7 +1348,10 @@ def test_roic_status_variants(monkeypatch):
     partial_points = _base_points()
     partial_points[0].data["stockholders_equity"] = None
     partial_result = roic_model.compute(_dataset(partial_points))
-    assert partial_result["model_status"] in {"partial", "proxy"}
+    assert partial_result["model_status"] in {"supported", "partial", "proxy"}
+    assert "stockholders_equity" in partial_result["missing_required_fields_last_3y"]
+    assert "current_debt" not in partial_result["missing_required_fields_last_3y"]
+    assert "long_term_debt" not in partial_result["missing_required_fields_last_3y"]
 
     insufficient_points = [
         _point(

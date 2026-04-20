@@ -35,10 +35,11 @@ REQUIRED_FIELDS = [
 def compute(dataset: CompanyDataset) -> dict[str, object]:
     applicability = valuation_applicability(dataset)
     risk_free = get_latest_risk_free_rate(dataset.as_of_date)
-    coe = risk_free.rate_used + EQUITY_RISK_PREMIUM + FINANCIAL_FIRM_ADDITIONAL_RISK
 
     # Applicability: RI is *preferred* for financials, but works for all sectors
     is_financial = not applicability["is_supported"]   # DCF rejects these ↔ RI prefers them
+    financial_firm_additional_risk = FINANCIAL_FIRM_ADDITIONAL_RISK if is_financial else 0.0
+    coe = risk_free.rate_used + EQUITY_RISK_PREMIUM + financial_firm_additional_risk
 
     annuals = annual_series(dataset, limit=5)
     if not annuals:
@@ -217,7 +218,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "rate_used": json_number(risk_free.rate_used),
             },
             "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
-            "financial_firm_additional_risk": json_number(FINANCIAL_FIRM_ADDITIONAL_RISK),
+            "financial_firm_additional_risk": json_number(financial_firm_additional_risk),
             "cost_of_equity": json_number(coe),
         },
         "trust_summary": trust_summary(missing_fields=missing_fields_list, proxy_used=used_proxy),

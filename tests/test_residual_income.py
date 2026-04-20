@@ -112,6 +112,36 @@ def test_residual_income_not_primary_for_tech(monkeypatch):
     assert result.get("primary_for_sector") is False
 
 
+def test_residual_income_non_financial_excludes_financial_firm_premium(monkeypatch):
+    monkeypatch.setattr(ri_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    ordered = tuple(
+        sorted(
+            [
+                _point(2025, {"total_assets": 500_000, "total_liabilities": 200_000, "net_income": 50_000, "shares_outstanding": 1_000}),
+            ],
+            key=lambda item: item.period_end,
+            reverse=True,
+        )
+    )
+    dataset = CompanyDataset(
+        company_id=2,
+        ticker="TECH",
+        name="Tech Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+        market_snapshot=MarketSnapshot(latest_price=50.0, price_date=date(2026, 3, 21), price_source="test"),
+        financials=ordered,
+    )
+
+    result = ri_model.compute(dataset)
+
+    assert result["primary_for_sector"] is False
+    assert result["inputs"]["cost_of_equity"] == pytest.approx(0.092, abs=1e-9)
+    assert result["assumption_provenance"]["financial_firm_additional_risk"] == pytest.approx(0.0, abs=1e-12)
+
+
 # ---------------------------------------------------------------------------
 # Insufficient data paths
 # ---------------------------------------------------------------------------

@@ -74,7 +74,14 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             if used_fcf_margin_proxy:
                 fcf_margin_source = "operating_cash_flow_less_capex"
 
-    shares = latest_non_null(dataset, "weighted_average_diluted_shares") or latest_non_null(dataset, "shares_outstanding")
+    shares = latest_non_null(dataset, "shares_outstanding")
+    share_count_proxied = False
+    share_count_source = "shares_outstanding"
+    if shares is None:
+        shares = latest_non_null(dataset, "weighted_average_diluted_shares")
+        share_count_proxied = shares is not None
+        if share_count_proxied:
+            share_count_source = "weighted_average_diluted_shares"
 
     market_snapshot = dataset.market_snapshot
     price = market_snapshot.latest_price if market_snapshot is not None else None
@@ -145,7 +152,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "price_snapshot": _price_snapshot_payload(dataset),
         }
 
-    proxy_used = used_fcf_margin_proxy or capital_structure_proxied
+    proxy_used = used_fcf_margin_proxy or capital_structure_proxied or share_count_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
@@ -206,6 +213,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "target_value": {
                 "basis": target_value_basis,
                 "equity_value": json_number(equity_value),
+                "share_count": json_number(shares),
+                "share_count_source": share_count_source,
                 "cash": json_number(cash_balance),
                 "total_debt": json_number(total_debt),
                 "net_debt": json_number(net_debt),
@@ -228,6 +237,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "starting_fcf_margin_proxied": used_fcf_margin_proxy,
             "capital_structure_proxied": capital_structure_proxied,
             "cash_balance_proxied": cash_balance_proxied,
+            "share_count_proxied": share_count_proxied,
         },
     }
 

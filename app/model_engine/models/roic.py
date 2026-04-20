@@ -58,13 +58,26 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             missing_fields.add("operating_income")
 
         invested_capital = None
-        if data.get("stockholders_equity") is not None and (data.get("current_debt") is not None or data.get("long_term_debt") is not None):
-            invested_capital = float(data.get("stockholders_equity")) + float(data.get("current_debt") or 0) + float(data.get("long_term_debt") or 0)
+        equity = data.get("stockholders_equity")
+        current_debt = data.get("current_debt")
+        long_term_debt = data.get("long_term_debt")
+        if equity is not None and (current_debt is not None or long_term_debt is not None):
+            invested_capital = float(equity) + float(current_debt or 0) + float(long_term_debt or 0)
             cash = data.get("cash_and_short_term_investments")
             if cash is not None:
                 invested_capital -= float(cash)
+            else:
+                # Keep the gross-capital denominator as a proxy when excess cash is missing,
+                # but surface the missing input and downgrade confidence accordingly.
+                proxy_used = True
+                missing_fields.add("cash_and_short_term_investments")
         else:
-            missing_fields.update({"stockholders_equity", "current_debt", "long_term_debt"})
+            if equity is None:
+                missing_fields.add("stockholders_equity")
+            if current_debt is None:
+                missing_fields.add("current_debt")
+            if long_term_debt is None:
+                missing_fields.add("long_term_debt")
 
         roic = safe_divide(nopat, invested_capital)
         if roic is not None:
