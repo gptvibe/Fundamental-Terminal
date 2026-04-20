@@ -3,11 +3,13 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.dialects.postgresql import insert
 
 from app.models import DerivedMetricPoint
 
+from app.services.derived_metrics import build_metrics_timeseries
 from app.services.derived_metrics_mart import (
     DERIVED_METRIC_UPSERT_BATCH_SIZE,
     METRIC_REGISTRY,
@@ -135,6 +137,55 @@ def test_build_derived_metric_points_outputs_provenance_and_quality_flags():
     assert point["metric_value"] is not None
     assert point["provenance"]["formula_version"] == "sec_metrics_mart_v1"
     assert "quality_flags" in point
+
+
+def test_build_derived_metric_points_annualizes_quarterly_yields_and_working_capital_days():
+    statements = [
+        _statement(1, date(2025, 1, 1), date(2025, 3, 31), "10-Q", _build_quarter(100.0, 100.0)),
+        _statement(2, date(2025, 4, 1), date(2025, 6, 30), "10-Q", _build_quarter(100.0, 100.0)),
+        _statement(3, date(2025, 7, 1), date(2025, 9, 30), "10-Q", _build_quarter(100.0, 100.0)),
+        _statement(4, date(2025, 10, 1), date(2025, 12, 31), "10-Q", _build_quarter(100.0, 100.0)),
+    ]
+    prices = [_price(date(2025, 12, 31), 50.0)]
+
+    main_series = build_metrics_timeseries(statements, prices)
+    main_quarterly = [point for point in main_series if point["cadence"] == "quarterly"][-1]
+    main_ttm = [point for point in main_series if point["cadence"] == "ttm"][-1]
+
+    mart_points = build_derived_metric_points(statements, prices)
+
+    def mart_value(period_type: str, metric_key: str) -> float:
+        return next(
+            item["metric_value"]
+            for item in mart_points
+            if item["period_type"] == period_type
+            and item["metric_key"] == metric_key
+            and item["period_end"] == date(2025, 12, 31)
+        )
+
+    expected_buyback_yield = main_quarterly["metrics"]["buyback_yield"]
+    expected_dividend_yield = main_quarterly["metrics"]["dividend_yield"]
+    expected_dso_days = (100.0 * 0.2) / (100.0 * 4.0) * 365.0
+    expected_dio_days = (100.0 * 0.1) / ((100.0 - (100.0 * 0.42)) * 4.0) * 365.0
+    expected_dpo_days = (100.0 * 0.12) / ((100.0 - (100.0 * 0.42)) * 4.0) * 365.0
+    expected_ccc_days = expected_dso_days + expected_dio_days - expected_dpo_days
+
+    assert mart_value("quarterly", "buyback_yield_proxy") == pytest.approx(expected_buyback_yield, rel=1e-9)
+    assert mart_value("ttm", "buyback_yield_proxy") == pytest.approx(expected_buyback_yield, rel=1e-9)
+    assert mart_value("quarterly", "dividend_yield_proxy") == pytest.approx(expected_dividend_yield, rel=1e-9)
+    assert mart_value("ttm", "dividend_yield_proxy") == pytest.approx(expected_dividend_yield, rel=1e-9)
+    assert mart_value("quarterly", "shareholder_yield") == pytest.approx(expected_buyback_yield + expected_dividend_yield, rel=1e-9)
+    assert mart_value("ttm", "shareholder_yield") == pytest.approx(expected_buyback_yield + expected_dividend_yield, rel=1e-9)
+    assert mart_value("quarterly", "dso_days") == pytest.approx(expected_dso_days, rel=1e-9)
+    assert mart_value("ttm", "dso_days") == pytest.approx(expected_dso_days, rel=1e-9)
+    assert mart_value("quarterly", "dio_days") == pytest.approx(expected_dio_days, rel=1e-9)
+    assert mart_value("ttm", "dio_days") == pytest.approx(expected_dio_days, rel=1e-9)
+    assert mart_value("quarterly", "dpo_days") == pytest.approx(expected_dpo_days, rel=1e-9)
+    assert mart_value("ttm", "dpo_days") == pytest.approx(expected_dpo_days, rel=1e-9)
+    assert mart_value("quarterly", "cash_conversion_cycle_days") == pytest.approx(expected_ccc_days, rel=1e-9)
+    assert mart_value("ttm", "cash_conversion_cycle_days") == pytest.approx(expected_ccc_days, rel=1e-9)
+    assert main_ttm["metrics"]["buyback_yield"] == pytest.approx(expected_buyback_yield, rel=1e-9)
+    assert main_ttm["metrics"]["dividend_yield"] == pytest.approx(expected_dividend_yield, rel=1e-9)
 
 
 def test_build_derived_metric_points_handles_missing_and_partial_segment_data():

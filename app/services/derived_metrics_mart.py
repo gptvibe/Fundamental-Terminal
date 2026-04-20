@@ -624,12 +624,20 @@ def _market_cap(context: MetricContext) -> float | None:
     return price * shares
 
 
+def _quarterly_annualization_scale(context: MetricContext) -> float:
+    return 4.0 if context.period_type == "quarterly" else 1.0
+
+
+def _working_capital_days_scale(context: MetricContext) -> float:
+    return 365.0 / _quarterly_annualization_scale(context)
+
+
 def _dividend_yield_proxy(context: MetricContext) -> tuple[float | None, bool, list[str]]:
     market_cap = _market_cap(context)
     dividends = _num(context, "dividends")
     if dividends is not None and dividends < 0:
         dividends = abs(dividends)
-    value = _safe_div(dividends, market_cap)
+    value = _safe_div(dividends, market_cap, scale=_quarterly_annualization_scale(context))
     flags = ["missing_price_context"] if market_cap is None else []
     return value, True, flags
 
@@ -639,7 +647,7 @@ def _buyback_yield_proxy(context: MetricContext) -> tuple[float | None, bool, li
     buybacks = _num(context, "share_buybacks")
     if buybacks is not None and buybacks < 0:
         buybacks = abs(buybacks)
-    value = _safe_div(buybacks, market_cap)
+    value = _safe_div(buybacks, market_cap, scale=_quarterly_annualization_scale(context))
     flags = ["missing_price_context"] if market_cap is None else []
     return value, True, flags
 
@@ -651,7 +659,11 @@ def _shareholder_yield(context: MetricContext) -> tuple[float | None, bool, list
 
 
 def _dso(context: MetricContext) -> tuple[float | None, bool, list[str]]:
-    return _safe_div(_num(context, "accounts_receivable"), _num(context, "revenue"), scale=365.0), True, []
+    return _safe_div(
+        _num(context, "accounts_receivable"),
+        _num(context, "revenue"),
+        scale=_working_capital_days_scale(context),
+    ), True, []
 
 
 def _cost_of_revenue(context: MetricContext) -> float | None:
@@ -659,11 +671,19 @@ def _cost_of_revenue(context: MetricContext) -> float | None:
 
 
 def _dio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
-    return _safe_div(_num(context, "inventory"), _cost_of_revenue(context), scale=365.0), True, []
+    return _safe_div(
+        _num(context, "inventory"),
+        _cost_of_revenue(context),
+        scale=_working_capital_days_scale(context),
+    ), True, []
 
 
 def _dpo(context: MetricContext) -> tuple[float | None, bool, list[str]]:
-    return _safe_div(_num(context, "accounts_payable"), _cost_of_revenue(context), scale=365.0), True, []
+    return _safe_div(
+        _num(context, "accounts_payable"),
+        _cost_of_revenue(context),
+        scale=_working_capital_days_scale(context),
+    ), True, []
 
 
 def _ccc(context: MetricContext) -> tuple[float | None, bool, list[str]]:
@@ -738,7 +758,7 @@ def _roatce(context: MetricContext) -> tuple[float | None, bool, list[str]]:
     net_income = _num(context, "net_income")
     if net_income is None or average_tce == 0:
         return None, True, ["roatce_inputs_missing"]
-    annualization = 4.0 if context.period_type == "quarterly" else 1.0
+    annualization = _quarterly_annualization_scale(context)
     return (net_income * annualization) / average_tce, True, ([] if previous_tce is not None else ["roatce_average_equity_proxy"])
 
 

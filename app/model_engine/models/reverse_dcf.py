@@ -17,7 +17,7 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "reverse_dcf"
-MODEL_VERSION = "1.2.0"
+MODEL_VERSION = "1.3.0"
 
 PROJECTION_YEARS = 5
 MIN_SOLVE_GROWTH = -0.35
@@ -101,9 +101,6 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "capex",
             "shares_outstanding",
             "weighted_average_diluted_shares",
-            "cash_and_short_term_investments",
-            "current_debt",
-            "long_term_debt",
         ],
         years=3,
     )
@@ -127,19 +124,15 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     long_term_debt = latest_non_null(dataset, "long_term_debt")
     total_debt: float | None = None
     net_debt: float | None = None
-    capital_structure_proxied = cash_balance_proxied
-    target_value_basis = "enterprise_value"
-    target_enterprise_value = equity_value
+    capital_structure_proxied = False
+    target_value_basis = "equity_value"
+    target_equity_value = equity_value
 
     if current_debt is not None and long_term_debt is not None:
         total_debt = float(current_debt) + float(long_term_debt)
 
     if total_debt is not None and cash_balance is not None:
         net_debt = total_debt - float(cash_balance)
-        target_enterprise_value = equity_value + net_debt
-    else:
-        capital_structure_proxied = True
-        target_value_basis = "equity_value_fallback"
 
     implied_fcf_margin = fcf_margin
     if implied_fcf_margin is None:
@@ -152,16 +145,16 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "price_snapshot": _price_snapshot_payload(dataset),
         }
 
-    proxy_used = used_fcf_margin_proxy or capital_structure_proxied or share_count_proxied
+    proxy_used = used_fcf_margin_proxy or share_count_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
-        can_compute_directional=target_enterprise_value > 0,
+        can_compute_directional=target_equity_value > 0,
     )
 
     starting_fcf = float(revenue) * float(implied_fcf_margin)
     solved_growth, solve_metadata = _solve_implied_growth(
-        target_enterprise_value=target_enterprise_value,
+        target_equity_value=target_equity_value,
         starting_fcf=starting_fcf,
         discount_rate=discount_rate,
         terminal_growth=terminal_growth,
@@ -173,13 +166,13 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         for margin_shift in HEATMAP_SHIFTS:
             growth = solved_growth + growth_shift
             margin = float(implied_fcf_margin) + margin_shift
-            implied_enterprise_value = _enterprise_value_from_growth(
+            implied_equity_value = _equity_value_from_growth(
                 growth=growth,
                 starting_fcf=float(revenue) * margin,
                 discount_rate=discount_rate,
                 terminal_growth=terminal_growth,
             )
-            value_gap = safe_divide(implied_enterprise_value - target_enterprise_value, target_enterprise_value)
+            value_gap = safe_divide(implied_equity_value - target_equity_value, target_equity_value)
             grid.append(
                 {
                     "growth": json_number(growth),
@@ -199,7 +192,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "implied_margin": json_number(implied_fcf_margin),
         "current_operating_margin": json_number(operating_margin),
         "market_cap_proxy": json_number(equity_value),
-        "enterprise_value_proxy": json_number(target_enterprise_value),
+        "enterprise_value_proxy": None,
         "net_debt": json_number(net_debt),
         "solve_metadata": solve_metadata,
         "assumption_provenance": {
@@ -218,7 +211,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "cash": json_number(cash_balance),
                 "total_debt": json_number(total_debt),
                 "net_debt": json_number(net_debt),
-                "enterprise_value": json_number(target_enterprise_value),
+                "enterprise_value": None,
             },
             "discount_rate_inputs": {
                 "discount_rate": json_number(discount_rate),
@@ -229,6 +222,12 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "margin": json_number(implied_fcf_margin),
                 "operating_cash_flow": json_number(latest.data.get("operating_cash_flow")),
                 "capex": json_number(latest.data.get("capex")),
+            },
+            "valuation_framework": {
+                "cash_flow_basis": "free_cash_flow_to_equity_proxy",
+                "discount_rate_basis": "cost_of_equity_proxy",
+                "target_value_basis": "equity_value",
+                "net_debt_bridge_applied": False,
             },
         },
         "heatmap": grid,
@@ -271,7 +270,7 @@ def _cash_balance(dataset: CompanyDataset) -> tuple[float | None, bool]:
     return None, False
 
 
-def _enterprise_value_from_growth(
+def _equity_value_from_growth(
     *,
     growth: float,
     starting_fcf: float,
@@ -297,18 +296,18 @@ def _enterprise_value_from_growth(
 
 def _solve_implied_growth(
     *,
-    target_enterprise_value: float,
+    target_equity_value: float,
     starting_fcf: float,
     discount_rate: float,
     terminal_growth: float,
 ) -> tuple[float, dict[str, Any]]:
     def error(growth: float) -> float:
-        return _enterprise_value_from_growth(
+        return _equity_value_from_growth(
             growth=growth,
             starting_fcf=starting_fcf,
             discount_rate=discount_rate,
             terminal_growth=terminal_growth,
-        ) - target_enterprise_value
+        ) - target_equity_value
 
     low = MIN_SOLVE_GROWTH
     high = MAX_SOLVE_GROWTH
@@ -338,7 +337,7 @@ def _solve_implied_growth(
     for iteration in range(SOLVE_ITERATIONS):
         mid = (low + high) / 2
         mid_error = error(mid)
-        if abs(mid_error) <= max(target_enterprise_value * 1e-6, 1e-6):
+        if abs(mid_error) <= max(target_equity_value * 1e-6, 1e-6):
             return mid, {
                 "method": "bisection",
                 "iterations": iteration + 1,

@@ -634,6 +634,7 @@ async def company_financials(
         view=requested_view,
     )
     hot_key = f"financials:{normalized_ticker}:view={normalized_view}:asof={normalized_as_of}"
+    legacy_hot_key = f"financials:{normalized_ticker}:asof={normalized_as_of}" if normalized_view == "full" else None
     hot_tags = _build_hot_cache_tags(
         ticker=normalized_ticker,
         datasets=("financials", "prices"),
@@ -642,6 +643,8 @@ async def company_financials(
     )
     async with _session_scope() as session:
         cached_hot = await _get_hot_cached_payload(hot_key)
+        if cached_hot is None and legacy_hot_key is not None:
+            cached_hot = await _get_hot_cached_payload(legacy_hot_key)
         if cached_hot is not None:
             if cached_hot.is_fresh:
                 return _hot_cache_json_response(request, http_response, cached_hot)
@@ -5940,7 +5943,10 @@ def _read_singleton_query_param_or_400(
     try:
         if request is not None:
             return read_singleton_query_param(request, name)
-        normalized = (fallback or "").strip()
+        fallback_value = fallback
+        if fallback_value is not None and not isinstance(fallback_value, str):
+            fallback_value = getattr(fallback_value, "default", None)
+        normalized = fallback_value.strip() if isinstance(fallback_value, str) else ""
         return normalized or None
     except DuplicateSingletonQueryParamError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

@@ -17,7 +17,7 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "2.2.1"
+MODEL_VERSION = "2.3.0"
 
 EQUITY_RISK_PREMIUM = 0.05
 BASE_COMPANY_RISK_PREMIUM = 0.01
@@ -54,9 +54,6 @@ def _sector_risk_premium(dataset: CompanyDataset) -> float:
 
 REQUIRED_VALUATION_FIELDS = [
     "free_cash_flow",
-    "cash_and_short_term_investments",
-    "current_debt",
-    "long_term_debt",
     "shares_outstanding",
     "weighted_average_diluted_shares",
 ]
@@ -198,27 +195,24 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     terminal_value = terminal_cash_flow / (discount_rate - terminal_growth_rate)
     terminal_present_value = terminal_value / ((1 + discount_rate) ** PROJECTION_YEARS)
 
-    enterprise_value = present_value_sum + terminal_present_value
+    equity_value = present_value_sum + terminal_present_value
     cash, cash_balance_proxied = _cash_balance(dataset)
 
     current_debt = latest_non_null(dataset, "current_debt")
     long_term_debt = latest_non_null(dataset, "long_term_debt")
     net_debt: float | None = None
-    capital_structure_incomplete = any(item is None for item in (cash, current_debt, long_term_debt))
-    capital_structure_proxied = cash_balance_proxied or capital_structure_incomplete
     if cash is not None and current_debt is not None and long_term_debt is not None:
         net_debt = (current_debt + long_term_debt) - cash
-
-    equity_value = enterprise_value - net_debt if net_debt is not None else enterprise_value
 
     shares_outstanding = latest_non_null(dataset, "shares_outstanding") or latest_non_null(dataset, "weighted_average_diluted_shares")
     fair_value_per_share = safe_divide(equity_value, shares_outstanding)
 
-    proxy_used = starting_cash_flow_proxied or capital_structure_proxied
+    capital_structure_proxied = False
+    proxy_used = starting_cash_flow_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
-        can_compute_directional=enterprise_value > 0,
+        can_compute_directional=equity_value > 0,
     )
 
     confidence = trust_summary(missing_fields=missing_fields, proxy_used=proxy_used)
@@ -267,12 +261,18 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "terminal_growth_rate": json_number(terminal_growth_rate),
                 "projection_years": PROJECTION_YEARS,
             },
+            "valuation_framework": {
+                "cash_flow_basis": "free_cash_flow_to_equity_proxy",
+                "discount_rate_basis": "cost_of_equity_proxy",
+                "output_value_basis": "equity_value",
+                "net_debt_bridge_applied": False,
+            },
         },
         "projected_free_cash_flow": projected_cash_flows,
         "present_value_of_cash_flows": json_number(present_value_sum),
         "terminal_value_present_value": json_number(terminal_present_value),
-        "enterprise_value": json_number(enterprise_value),
-        "enterprise_value_proxy": json_number(enterprise_value),
+        "enterprise_value": None,
+        "enterprise_value_proxy": None,
         "net_debt": json_number(net_debt),
         "equity_value": json_number(equity_value),
         "fair_value_per_share": json_number(fair_value_per_share),
@@ -280,6 +280,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "input_quality": {
             "starting_cash_flow_proxied": starting_cash_flow_proxied,
             "capital_structure_proxied": capital_structure_proxied,
+            "cash_balance_proxied": cash_balance_proxied,
         },
     }
 

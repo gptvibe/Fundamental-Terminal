@@ -427,7 +427,7 @@ def test_dcf_prefers_point_in_time_shares_outstanding_for_per_share_value(monkey
     assert result["fair_value_per_share"] != pytest.approx(result["equity_value"] / 100, rel=1e-9)
 
 
-def test_dcf_cash_fallback_marks_capital_structure_proxy_without_company_risk_premium(monkeypatch):
+def test_dcf_cash_fallback_no_longer_changes_equity_value_framework(monkeypatch):
     monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
     points = _base_points()
@@ -445,7 +445,33 @@ def test_dcf_cash_fallback_marks_capital_structure_proxy_without_company_risk_pr
     assert result["assumptions"]["discount_rate"] == pytest.approx(expected_discount_rate, rel=1e-9)
     assert result["assumption_provenance"]["discount_rate_inputs"]["company_risk_premium"] == pytest.approx(0.0, abs=1e-12)
     assert result["input_quality"]["starting_cash_flow_proxied"] is False
-    assert result["input_quality"]["capital_structure_proxied"] is True
+    assert result["input_quality"]["capital_structure_proxied"] is False
+
+
+def test_dcf_does_not_subtract_net_debt_from_discounted_equity_cash_flow(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points_with_net_debt = _base_points()
+    points_without_net_debt = _base_points()
+    for point in points_with_net_debt:
+        point.data["cash_and_short_term_investments"] = 100
+        point.data["current_debt"] = 100
+        point.data["long_term_debt"] = 300
+    for point in points_without_net_debt:
+        point.data["cash_and_short_term_investments"] = 0
+        point.data["current_debt"] = 0
+        point.data["long_term_debt"] = 0
+
+    result_with_net_debt = dcf_model.compute(_dataset(points_with_net_debt, sector="Healthcare"))
+    result_without_net_debt = dcf_model.compute(_dataset(points_without_net_debt, sector="Healthcare"))
+
+    assert result_with_net_debt["net_debt"] == pytest.approx(300.0)
+    assert result_without_net_debt["net_debt"] == pytest.approx(0.0)
+    assert result_with_net_debt["equity_value"] == pytest.approx(result_without_net_debt["equity_value"], rel=1e-9)
+    assert result_with_net_debt["fair_value_per_share"] == pytest.approx(
+        result_without_net_debt["fair_value_per_share"],
+        rel=1e-9,
+    )
 
 
 def test_dcf_starting_cash_flow_proxy_flag_only_tracks_fcf_proxying(monkeypatch):
@@ -741,7 +767,7 @@ def test_ratios_capex_intensity_uses_abs_capex_for_negative_outflow():
     assert result["values"]["capex_intensity"] > 0
 
 
-def test_reverse_dcf_uses_enterprise_value_target_when_capital_structure_available(monkeypatch):
+def test_reverse_dcf_uses_equity_value_target_when_capital_structure_available(monkeypatch):
     monkeypatch.setattr(reverse_dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
     points = [
         _point(
@@ -789,17 +815,17 @@ def test_reverse_dcf_uses_enterprise_value_target_when_capital_structure_availab
     discount_rate = _mock_risk_free().rate_used + 0.055
     terminal_growth = min(0.03, max(0.005, _mock_risk_free().rate_used * 0.6))
     expected_growth = _solve_growth_for_target_value(
-        target_value=1300.0,
+        target_value=1000.0,
         starting_fcf=100.0,
         discount_rate=discount_rate,
         terminal_growth=terminal_growth,
     )
 
     assert result["market_cap_proxy"] == pytest.approx(1000.0)
-    assert result["enterprise_value_proxy"] == pytest.approx(1300.0)
+    assert result["enterprise_value_proxy"] is None
     assert result["net_debt"] == pytest.approx(300.0)
     assert result["implied_growth"] == pytest.approx(expected_growth, abs=1e-6)
-    assert result["assumption_provenance"]["target_value"]["basis"] == "enterprise_value"
+    assert result["assumption_provenance"]["target_value"]["basis"] == "equity_value"
 
 
 def test_reverse_dcf_prefers_point_in_time_shares_outstanding_for_market_cap(monkeypatch):
@@ -836,7 +862,7 @@ def test_reverse_dcf_prefers_point_in_time_shares_outstanding_for_market_cap(mon
     result = reverse_dcf_model.compute(_dataset(points, price=10.0))
 
     assert result["market_cap_proxy"] == pytest.approx(1000.0)
-    assert result["enterprise_value_proxy"] == pytest.approx(1300.0)
+    assert result["enterprise_value_proxy"] is None
     assert result["market_cap_proxy"] != pytest.approx(1200.0)
     assert result["assumption_provenance"]["target_value"]["share_count_source"] == "shares_outstanding"
     assert result["input_quality"]["share_count_proxied"] is False
