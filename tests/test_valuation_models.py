@@ -8,6 +8,7 @@ import pytest
 import app.model_engine.models.altman_z as altman_z_model
 import app.model_engine.models.capital_allocation as capital_allocation_model
 import app.model_engine.models.dcf as dcf_model
+import app.model_engine.models.dupont as dupont_model
 import app.model_engine.models.piotroski as piotroski_model
 import app.model_engine.models.ratios as ratios_model
 import app.model_engine.models.reverse_dcf as reverse_dcf_model
@@ -44,6 +45,18 @@ def _quarterly_point(year: int, quarter_end: date, data: dict[str, float | int |
         statement_id=int(quarter_end.strftime("%Y%m%d")),
         filing_type="10-Q",
         period_start=date(year, quarter_start_month, 1),
+        period_end=quarter_end,
+        source="sec",
+        last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
+        data=data,
+    )
+
+
+def _ytd_quarterly_point(year: int, quarter_end: date, data: dict[str, float | int | None]) -> FinancialPoint:
+    return FinancialPoint(
+        statement_id=int(quarter_end.strftime("%Y%m%d")),
+        filing_type="10-Q",
+        period_start=date(year, 1, 1),
         period_end=quarter_end,
         source="sec",
         last_updated=datetime(2026, 3, 21, tzinfo=timezone.utc),
@@ -459,6 +472,21 @@ def test_dcf_starting_cash_flow_proxy_flag_only_tracks_fcf_proxying(monkeypatch)
     )
     assert result["input_quality"]["starting_cash_flow_proxied"] is True
     assert result["input_quality"]["capital_structure_proxied"] is False
+
+
+def test_dcf_growth_rate_handles_negative_and_sign_flip_fcf_history(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    points[0].data["free_cash_flow"] = 50
+    points[1].data["free_cash_flow"] = -50
+    points[2].data["free_cash_flow"] = -100
+
+    result = dcf_model.compute(_dataset(points))
+
+    assert result["assumptions"]["starting_growth_rate"] == pytest.approx(dcf_model.MAX_GROWTH_RATE, abs=1e-9)
+    assert result["assumptions"]["starting_growth_rate"] > 0
+    assert result["projected_free_cash_flow"][0]["free_cash_flow"] > 50
 
 
 def test_reverse_dcf_status_variants(monkeypatch):
@@ -878,6 +906,44 @@ def test_roic_uses_pretax_income_for_tax_rate_when_available(monkeypatch):
     assert result["roic"] != pytest.approx((200.0 * (1.0 - 0.10)) / 500.0, abs=1e-9)
 
 
+def test_roic_reinvestment_rate_normalizes_negative_capex_outflow(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "income_tax_expense": 40,
+                "stockholders_equity": 500,
+                "current_debt": 80,
+                "long_term_debt": 120,
+                "cash_and_short_term_investments": 50,
+                "capex": -120,
+                "operating_cash_flow": 300,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "income_tax_expense": 36,
+                "stockholders_equity": 470,
+                "current_debt": 75,
+                "long_term_debt": 115,
+                "cash_and_short_term_investments": 45,
+                "capex": -100,
+                "operating_cash_flow": 250,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["reinvestment_rate"] == pytest.approx(0.4, abs=1e-9)
+    assert result["reinvestment_rate"] > 0
+    assert result["trend"][-1]["reinvestment_rate"] == pytest.approx(0.4, abs=1e-9)
+
+
 def test_roic_incremental_roic_changes_with_capital_deployed(monkeypatch):
     monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
     low_capital_delta_points = [
@@ -1018,6 +1084,83 @@ def test_roic_zero_capital_delta_returns_none(monkeypatch):
     result = roic_model.compute(_dataset(points))
 
     assert result["incremental_roic"] is None
+
+
+def test_dupont_ttm_uses_annual_plus_ytd_bridge_for_latest_10q():
+    points = [
+        _ytd_quarterly_point(
+            2025,
+            date(2025, 9, 30),
+            {
+                "revenue": 270,
+                "net_income": 54,
+                "total_assets": 1150,
+                "total_liabilities": 460,
+            },
+        ),
+        _ytd_quarterly_point(
+            2025,
+            date(2025, 6, 30),
+            {
+                "revenue": 170,
+                "net_income": 20,
+                "total_assets": 1100,
+                "total_liabilities": 440,
+            },
+        ),
+        _ytd_quarterly_point(
+            2025,
+            date(2025, 3, 31),
+            {
+                "revenue": 80,
+                "net_income": 8,
+                "total_assets": 1070,
+                "total_liabilities": 430,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "revenue": 330,
+                "net_income": 33,
+                "total_assets": 1000,
+                "total_liabilities": 400,
+            },
+        ),
+        _ytd_quarterly_point(
+            2024,
+            date(2024, 9, 30),
+            {
+                "revenue": 210,
+                "net_income": 21,
+                "total_assets": 950,
+                "total_liabilities": 380,
+            },
+        ),
+    ]
+
+    token = dupont_model.set_mode_override("ttm")
+    try:
+        result = dupont_model.compute(_dataset(points))
+    finally:
+        dupont_model.reset_mode_override(token)
+
+    bridged_revenue = 330 + 270 - 210
+    bridged_net_income = 33 + 54 - 21
+    bridged_average_assets = (1150 + 950) / 2
+    bridged_average_equity = ((1150 - 460) + (950 - 380)) / 2
+    wrong_four_quarter_turnover = (270 + 170 + 80 + 210) / ((1150 + 1100 + 1070 + 950) / 4)
+
+    assert result["model_status"] == "supported"
+    assert result["basis"] == "ttm"
+    assert result["filing_type"] == "10-Q"
+    assert result["period_end"] == "2025-09-30"
+    assert result["average_assets"] == pytest.approx(bridged_average_assets, abs=1e-9)
+    assert result["average_equity"] == pytest.approx(bridged_average_equity, abs=1e-9)
+    assert result["net_profit_margin"] == pytest.approx(bridged_net_income / bridged_revenue, abs=1e-9)
+    assert result["asset_turnover"] == pytest.approx(bridged_revenue / bridged_average_assets, abs=1e-9)
+    assert result["asset_turnover"] != pytest.approx(wrong_four_quarter_turnover, abs=1e-9)
+    assert result["return_on_equity"] == pytest.approx(bridged_net_income / bridged_average_equity, abs=1e-9)
 
 
 def test_dcf_and_reverse_dcf_mark_financial_sector_unsupported(monkeypatch):

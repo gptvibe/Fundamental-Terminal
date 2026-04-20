@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import (
     annual_series,
+    growth_rate,
     json_number,
     latest_non_null,
     missing_fields_last_n_years,
@@ -16,7 +17,7 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "2.2.0"
+MODEL_VERSION = "2.2.1"
 
 EQUITY_RISK_PREMIUM = 0.05
 BASE_COMPANY_RISK_PREMIUM = 0.01
@@ -59,6 +60,23 @@ REQUIRED_VALUATION_FIELDS = [
     "shares_outstanding",
     "weighted_average_diluted_shares",
 ]
+
+
+def _historical_fcf_growth_rates(historical_fcfs: list[float]) -> list[float]:
+    """Return growth rates that stay directionally correct across negative FCF periods.
+
+    ``growth_rate()`` normalizes by ``abs(previous)`` so the direction remains intuitive
+    when free cash flow is negative or flips sign. A move from -100 to -50 is positive
+    growth, and a move from -50 to 50 remains a positive sign-flip improvement. Periods
+    with a zero prior base are skipped because percentage growth is undefined there.
+    """
+
+    growth_rates: list[float] = []
+    for index in range(1, len(historical_fcfs)):
+        normalized_growth = growth_rate(historical_fcfs[index], historical_fcfs[index - 1])
+        if normalized_growth is not None:
+            growth_rates.append(normalized_growth)
+    return growth_rates
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -137,13 +155,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
 
     starting_fcf = historical_fcfs[-1]
 
-    growth_rates: list[float] = []
-    for index in range(1, len(historical_fcfs)):
-        previous = historical_fcfs[index - 1]
-        current = historical_fcfs[index]
-        if previous != 0:
-            growth_rates.append((current - previous) / previous)
-
+    growth_rates = _historical_fcf_growth_rates(historical_fcfs)
     assumed_growth = sum(growth_rates) / len(growth_rates) if growth_rates else 0.03
     assumed_growth = max(MIN_GROWTH_RATE, min(MAX_GROWTH_RATE, assumed_growth))
 

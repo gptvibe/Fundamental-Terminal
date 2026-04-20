@@ -12,9 +12,19 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "roic"
-MODEL_VERSION = "1.2.0"
+MODEL_VERSION = "1.2.1"
 
 MIN_INVESTED_CAPITAL_DELTA = 1e-6
+
+
+def _reinvestment_rate(data: dict[str, object]) -> float | None:
+    """Return reinvestment as positive capex outflow magnitude over operating cash flow."""
+
+    operating_cash_flow = data.get("operating_cash_flow")
+    capex = data.get("capex")
+    if capex is None:
+        return None
+    return safe_divide(abs(float(capex)), operating_cash_flow)
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -67,7 +77,9 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 }
             )
 
-        reinvestment = safe_divide(data.get("capex"), data.get("operating_cash_flow"))
+        # Capex is typically stored as a signed cash-flow outflow, so normalize it to an
+        # outflow magnitude before computing the public ``reinvestment_rate`` field.
+        reinvestment = _reinvestment_rate(data)
         if reinvestment is not None:
             reinvestment_values.append(float(reinvestment))
         else:
