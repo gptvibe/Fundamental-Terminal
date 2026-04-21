@@ -1,20 +1,21 @@
 # Screenshot Assets
 
-These screenshots are generated from the current local app using the March 2026 workspace layout.
+These images are the README-ready screenshots for the current April 2026 product layout.
 
 Current files:
 
-- `home-search.png` - home research launcher with the compact command bar, live updates panel, and direct company/model handoff
-- `company-overview.png` - `/company/INTC` overview with grouped navigation, price-versus-operating performance, and side-rail actions
-- `company-models.png` - `/company/INTC/models` models workspace with valuation summary, data status, and live updates rail
-- `mobile-company.png` - phone-sized `/company/INTC` view showing the section picker and stacked actions
-- `watchlist.png` - `/watchlist` browser-local triage workspace for saved companies, alerts, and local notes
+- `home-search.png` - home launcher with search, macro backdrop, data health, recent companies, and saved-name context
+- `company-overview.png` - company research brief with summary cards, risk rail, and quick actions into deeper workspaces
+- `charts-dashboard.png` - charts workspace with reported versus projected series and scenario framing
+- `company-models.png` - valuation models workspace with refresh state, model status, and export actions
+- `watchlist.png` - watchlist triage workspace with local notes, valuation gaps, status, and calendar items
+- `data-sources.png` - transparency workspace with source tiers, health panels, and strict-official-mode disclosure
+- `mobile-company.png` - phone-sized company workspace with compact section picker and stacked next-step actions
 
 Capture notes:
 
 - Use PNG for UI screenshots.
 - Keep browser zoom at 100% when possible.
-- Use `AAPL` or `Apple` for the home launcher and a clean demo ticker such as `INTC` for company workspace screens.
-- Prefer the current dark theme so README screenshots stay visually consistent.
-- Avoid including personal browser data, bookmarks, or private account details in the frame.
-- If capturing the watchlist, keep it empty or anonymize any local notes before saving the frame.
+- Prefer neutral demo tickers such as `AAPL`, `MSFT`, or `INTC`.
+- Avoid including personal browser data, bookmarks, or private notes in the frame.
+- If capturing watchlist screens, anonymize any local notes before saving the image.

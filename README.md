@@ -1,621 +1,246 @@
 # Fundamental Terminal
 
-**Official-source-first U.S. equity research for investors.**  
-Fundamental Terminal turns SEC filings and other public datasets into a fast, visual research workflow for understanding businesses, tracking what changed, evaluating quality, and making better investment decisions.
+Fundamental Terminal is an official-source-first research workspace for U.S. public equities. It turns SEC filings, XBRL companyfacts, and selected public macro datasets into a faster workflow for building a company view, comparing businesses, screening for ideas, and monitoring what changed.
 
-Instead of burying investors in raw filings or scattered dashboards, Fundamental Terminal organizes official data into a coherent company workspace: financials, valuation, ownership, capital structure, governance, filing events, and monitoring — with transparent provenance and point-in-time support built in.
+The product is built around a simple idea: public market research should be easier to trust. Core company views stay anchored to official disclosures, fallback market context is labeled when it appears, and the app keeps freshness, provenance, and background refresh state visible instead of hiding it behind a black box.
 
-This project is built around a simple idea: **free public data should be easier to use well.**  
-SEC filings, regulatory disclosures, and official macro/sector data already contain a huge amount of investable information. Fundamental Terminal exists to make that information easier to search, compare, visualize, and trust.
+## What Is In The App Today
 
-## Why Fundamental Terminal
+- Research launcher with ticker, company, and CIK search, live refresh status, macro backdrop, data-health summary, recent companies, and local watchlist context.
+- Company workspace with a research brief, financials, charts, models, peers, earnings, filings, events, capital markets, governance, ownership and stakes, insiders, and SEC feed sections.
+- Official Screener for official/public-only cross-sectional discovery with saved browser-local presets, ranking-aware sorts, and quality filters.
+- Compare workspace for side-by-side statements, derived operating metrics, and model outputs across up to five tickers.
+- Watchlist workspace for browser-local triage, thesis notes, valuation gaps, alerts, and upcoming filing or reporting dates.
+- Data Sources workspace for source registry visibility, strict official mode behavior, recent source errors, and shared hot-cache diagnostics.
+- Point-in-time research support on major company endpoints through `as_of` so historical workflows avoid lookahead leakage.
 
-- **SEC-native research workflow** — built around filings, XBRL facts, and regulatory disclosures rather than vendor black boxes
-- **Official-source-first data policy** — fundamentals and analytics come from official public sources whenever possible
-- **Visual investor workflows** — not just raw tables, but research surfaces for financial quality, valuation, ownership, governance, and capital structure
-- **Point-in-time aware** — supports historical “as known then” research without lookahead leakage
-- **Transparent provenance** — visible source, freshness, fallback, and confidence diagnostics
-- **Free and open** — designed to make public data easier to digest, not hide it behind a paywall
+## Why It Is Different
 
-## What it covers
+- Official-source-first fundamentals from the SEC and other public agencies.
+- Transparent provenance with freshness, source mix, fallback disclosures, and confidence flags.
+- Cache-first request paths with background refreshes instead of live-fetching every page view.
+- Local-first saved companies, notes, and watchlist behavior without requiring an account.
+- Published Docker images for quick setup, with local-source builds available for maintainers.
 
-Fundamental Terminal is focused on **U.S. public equities**, with deep support for SEC-based company research and selective official data layers that add decision-making context.
+## Source Policy
 
-Current coverage includes:
+Fundamental Terminal is official-source-first, not official-source-only at all costs.
 
-- **Company research** — overview, financials, derived metrics, peers, valuation models, filings, events, governance, ownership, insider activity, and capital markets
-- **Regulated financial institutions** — official bank and bank holding company paths using FDIC financials and optional Federal Reserve FR Y-9C data
-- **Official macro and sector context** — selected company-relevant inputs from sources such as Census, BEA, BLS, EIA, and other official datasets
-- **Monitoring and workflow tools** — activity feeds, alerts, saved companies, notes, and point-in-time research mode
-
-## Source policy
-
-Fundamental Terminal is **official-source-first**.
-
-- **Fundamentals, filing analytics, ownership, governance, and core research views** are built from official public sources such as the SEC and other regulators/agencies.
-- **Fallback market context** may be used only where official sources do not provide practical coverage, and it is labeled clearly in the product.
-- **Strict official mode** removes those fallbacks entirely.
-
-The goal is not to pretend every useful data point comes from the government. The goal is to make source quality explicit, keep the core research stack grounded in official evidence, and use fallbacks only where necessary.
-
-## Product philosophy
-
-Fundamental Terminal is not trying to be a generic “everything terminal.”
-
-It is designed to be a **research workstation for investors**:
-- understand the business
-- see what changed
-- assess quality and capital allocation
-- evaluate dilution, financing, and governance risk
-- compare, value, and monitor
-
-The product should feel less like “many useful pages” and more like **one coherent investor workflow built on public evidence**.
+- Core fundamentals, filings, ownership, governance, and most research views are built from official public sources.
+- Derived views are labeled as internal outputs built on top of those official inputs.
+- Commercial fallbacks stay narrow, explicit, and are used for non-core market context where official coverage is not practical.
+- `STRICT_OFFICIAL_MODE=true` removes those fallback-backed surfaces entirely.
 
 ## Screenshots
 
-Captured from the local app using demo company data.
+### Home Launcher
 
-### Research Launcher
+![Home launcher with macro and data-health panels](docs/screenshots/home-search.png)
 
-![Home research launcher with compact command bar](docs/screenshots/home-search.png)
+Search is the entry point, but the launcher now keeps macro context, source health, recent companies, saved names, and background refresh activity in the same workspace.
 
-The home launcher now combines search, live refresh status, and direct handoff into either the company workspace or valuation models from a single search.
+### Research Brief
 
-### Company Overview
+![Company research brief for Apple](docs/screenshots/company-overview.png)
 
-![Company overview workspace for INTC](docs/screenshots/company-overview.png)
+The default company page is now a research brief: snapshot first, plain-English framing, risk signals, filing context, and quick paths into deeper workspaces.
 
-The overview workspace keeps grouped core views and research feeds under one header, pairs price-versus-operating performance with side-rail actions, and surfaces local-save state without leaving the page.
+### Charts Dashboard
+
+![Charts dashboard for Apple](docs/screenshots/charts-dashboard.png)
+
+The charts workspace separates reported history from projected scenarios and gives each chart a clear modeling context instead of treating it like a generic chart gallery.
 
 ### Valuation Models
 
-![Valuation models workspace for INTC](docs/screenshots/company-models.png)
+![Valuation models workspace for Intel](docs/screenshots/company-models.png)
 
-The models workspace now focuses on valuation conclusion, confidence, and scenario context, with background-first refresh controls, export support, and supporting model diagnostics.
+Models stay connected to source freshness, assumption provenance, and background refresh controls so valuation work is visible and debuggable.
 
 ### Watchlist Workspace
 
-![Browser-local watchlist workspace](docs/screenshots/watchlist.png)
+![Watchlist workspace with cross-company triage](docs/screenshots/watchlist.png)
 
-The watchlist workspace rolls saved companies, alert severity, freshness, valuation gaps, and note coverage into one browser-local triage surface.
+Saved companies, local notes, valuation gaps, status, and calendar items roll up into a browser-local triage surface for follow-up work.
+
+### Data Sources
+
+![Data sources workspace with source registry and health panels](docs/screenshots/data-sources.png)
+
+The transparency view exposes source tiers, strict official mode behavior, cache coverage, recent source errors, and hot-cache visibility in one place.
 
 ### Mobile Company View
 
-![Mobile company workspace for INTC](docs/screenshots/mobile-company.png)
+![Mobile company workspace](docs/screenshots/mobile-company.png)
 
-The mobile layout swaps the desktop tab rail for a compact section picker and stacked next-step actions so the company workspace stays usable on phones.
+On phones, the company workspace shifts to a compact section picker and stacked next-step actions so research stays usable on smaller screens.
 
-## Roadmap
+## Quick Start With Docker
 
-- See [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md) for the phased SEC dataset expansion plan, including backend models, API contracts, frontend visualizations, and sprint ordering.
-- See [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md) for the task-by-task execution checklist.
-- See [docs/cache-layers-architecture.md](docs/cache-layers-architecture.md) for the cache-first request-path and refresh orchestration rules.
-- See [docs/backend-architecture-boundaries.md](docs/backend-architecture-boundaries.md) for router, schema, `app.main`, and service-layer ownership rules.
-- See [docs/data-provenance.md](docs/data-provenance.md) for upstream source policy and diagnostics semantics.
-- See [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md) for performance, freshness, and benchmark notes.
-- See [docs/model-evaluation-harness.md](docs/model-evaluation-harness.md) for historical backtesting, persisted evaluation runs, and CI gate rules.
-
-## Canonical metrics
-
-- `revenue`
-- `gross_profit`
-- `operating_income`
-- `net_income`
-- `total_assets`
-- `total_liabilities`
-- `cash_and_cash_equivalents`
-- `short_term_investments`
-- `cash_and_short_term_investments`
-- `current_debt`
-- `stockholders_equity`
-- `accounts_payable`
-- `depreciation_and_amortization`
-- `operating_cash_flow`
-- `free_cash_flow`
-
-## Bank canonical metrics
-
-- `net_interest_income`
-- `provision_for_credit_losses`
-- `deposits_total`
-- `core_deposits`
-- `uninsured_deposits`
-- `loans_net`
-- `net_interest_margin`
-- `nonperforming_assets_ratio`
-- `common_equity_tier1_ratio`
-- `tier1_risk_weighted_ratio`
-- `total_risk_based_capital_ratio`
-- `tangible_common_equity`
-
-## Setup
-
-1. Install dependencies:
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. Set the database URL and SEC contact:
-
-   ```bash
-   set DATABASE_URL=postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals
-   set REDIS_URL=redis://localhost:6379/0
-   set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
-   ```
-
-  `REDIS_URL` is used for the shared hot-response cache. If Redis is unavailable, the app falls back to an in-process local cache automatically. That keeps reads working, but weakens cross-instance hot-cache reuse and shared singleflight coordination because cache entries stay inside a single backend process.
-
-   Optional regulated-bank source configuration:
-
-   ```bash
-   set FDIC_API_BASE_URL=https://api.fdic.gov
-   set FEDERAL_RESERVE_Y9C_JSON_URL=
-   set FEDERAL_RESERVE_Y9C_JSON_PATH=
-   ```
-
-   `FEDERAL_RESERVE_Y9C_JSON_URL` or `FEDERAL_RESERVE_Y9C_JSON_PATH` can point to an official FR Y-9C JSON export when bank holding company coverage is needed.
-
-   Optional macro source configuration:
-
-   ```bash
-   set CENSUS_API_BASE_URL=https://api.census.gov/data/timeseries/eits
-   set CENSUS_API_KEY=
-   set BLS_API_BASE_URL=https://api.bls.gov/publicAPI/v2/timeseries/data/
-   set BLS_API_KEY=
-   set EIA_API_BASE_URL=https://api.eia.gov/v2
-   set EIA_API_KEY=
-   set BEA_API_BASE_URL=https://apps.bea.gov/api/data
-   set BEA_API_KEY=
-   ```
-
-   Get a BEA API key from https://apps.bea.gov/api/signup/, a BLS API key from https://data.bls.gov/registrationEngine/, and an EIA API key from https://www.eia.gov/opendata/register.php.
-   `BEA_API_KEY` is required for official BEA PCE and GDP-by-industry pulls, `BLS_API_KEY` is used for official BLS v2 series requests, and `EIA_API_KEY` powers the official energy and power sector plug-in.
-
-3. Run migrations:
-
-   ```bash
-   alembic upgrade head
-   ```
-
-Developer migration workflow:
+The default compose file pulls the published images from Docker Hub.
 
 ```bash
-alembic revision --autogenerate -m "describe_change"
-alembic upgrade head
+cp .env.example .env
+docker compose pull
+docker compose up -d
 ```
 
-- Keep schema changes reviewable and paired with route/model tests.
-- Prefer one migration per feature slice rather than mixing unrelated schema edits.
-- If a migration changes persisted research payloads, update backend/frontend contracts and any hot-endpoint tests in the same change.
+After startup:
 
-## Run as FastAPI
+- Frontend: `http://127.0.0.1:3000`
+- Backend API: `http://127.0.0.1:8000`
+- API docs: `http://127.0.0.1:8000/docs`
 
-```bash
-uvicorn app.main:app --reload
-```
+The default images are:
 
-Hot-cache backend visibility:
+- `gptvibe/fundamentalterminal:backend-latest`
+- `gptvibe/fundamentalterminal:frontend-latest`
 
-- Check startup logs for `shared_hot_cache.backend` to confirm whether the app is using Redis or the local in-process fallback.
-- Check runtime logs for `shared_hot_cache.local_fallback` if Redis operations start failing after boot.
-- Check `/api/internal/cache-metrics` for `hot_cache_backend`, `hot_cache_backend_mode`, `hot_cache_status`, and `hot_cache_operator_summary`.
-- If `hot_cache_backend_mode` is `local_memory_fallback`, verify `REDIS_URL`, Redis reachability, and that all app instances can reach the same Redis deployment.
-
-Sample cache-metrics response fields:
-
-```json
-{
-  "hot_cache_backend": "local",
-  "hot_cache_backend_mode": "local_memory_fallback",
-  "hot_cache_status": "fallback",
-  "hot_cache_scope": "process-local",
-  "hot_cache_cross_instance_reuse": "disabled",
-  "hot_cache_operator_summary": "Redis was configured, but the app is currently using process-local hot-cache fallback."
-}
-```
-
-Sample startup/runtime log lines:
-
-```json
-{"event":"shared_hot_cache.backend","backend":"local","backend_mode":"local_memory_fallback","status":"fallback","summary":"Redis was configured, but the app is currently using process-local hot-cache fallback.","operational_impact":"Cross-instance cache reuse and shared singleflight coordination are weaker because each backend process keeps its own hot cache.","startup_reason":"redis_connect_failed"}
-{"event":"shared_hot_cache.local_fallback","backend":"redis","backend_mode":"redis_with_local_fallbacks","status":"degraded","operation":"read","summary":"Redis is configured as the shared hot-cache backend, but one or more operations fell back to process-local memory.","operational_impact":"Cross-instance cache reuse and shared singleflight coordination may be partial until Redis recovers.","fallback_reason":"redis_read_failed"}
-```
-
-API composition notes:
-
-- Public routes still mount from `app.main:app`, but route registration now happens through domain routers under `app/api/routers/`.
-- Shared response/request models live under `app/api/schemas/`; importing from `app.main` remains compatible for existing tests and consumers.
-- Route URLs and response payload shapes are unchanged by this refactor.
-- Routers stay registration-only; refresh orchestration and dataset jobs live under `app/services/`, with `app.main` acting as the compatibility bridge.
-- Run `python scripts/check_architecture_boundaries.py` to verify routers and services still respect the documented import boundaries.
-- Pull requests and pushes to `main` also run `.github/workflows/ci.yml`, which checks the import boundaries and the targeted backend/frontend compatibility tests.
-- The same CI workflow also runs a deterministic historical model-evaluation gate against `scripts/model_evaluation_baseline.json`; intentional model changes should update that baseline in the same change.
-- CI also runs a deterministic backend performance regression gate against `scripts/performance_regression_baseline.json`; intentional hot-route or company-brief latency changes should update that baseline in the same change.
-
-## Run the Next.js frontend
-
-```bash
-cd frontend
-set BACKEND_API_BASE_URL=http://127.0.0.1:8000
-npm install
-npm run dev
-```
-
-The frontend proxies backend requests through `/backend/*` and exposes:
-
-- `/` for the research launcher, SEC-backed resolution, and direct company/model handoff
-- `/watchlist` — browser-local watchlist workspace for saved companies, note coverage, freshness, and triage filters
-- `/company/[ticker]` — company overview workspace with grouped core views, research feeds, priority alerts, and quick peer context
-- `/company/[ticker]/charts` — Growth Outlook dashboard with persisted historical snapshots, explicitly labeled forecast series, factor badges, and a screenshot-first chart-card layout
-- `/company/[ticker]/financials` — dedicated financial workspace with synchronized cadence/range/comparison state across statements, annual comparison tables, filing-based charts, derived metrics, provenance/quality diagnostics, explicit annual-fallback messaging where needed, and a bank-specific regulated-financial view for banks and bank holding companies
-- `/company/[ticker]/peers` — dedicated peer-comparison workspace with fair-value gap, ROIC, implied growth, shareholder yield, and valuation-band percentile comparisons
-- `/company/[ticker]/earnings` — earnings workspace with release trends, guidance and capital-return signals, and linked filing context
-- `/company/[ticker]/filings` — filing timeline and parser insights with integrated filing-event views
-- `/company/[ticker]/insiders` — Form 4 insider analytics plus Form 144 planned sale filings
-- `/company/[ticker]/models` — valuation workbench with trust-aware DCF, reverse DCF heatmap, ROIC trend, capital-allocation stack, and assumption provenance
-- `/company/[ticker]/models` now also includes a company-relevant official macro demand-and-cost panel built from Census M3/retail, BEA, and BLS data
-- Model payloads now normalize `model_status` to `supported`, `partial`, `proxy`, `insufficient_data`, or `unsupported`, and each response includes `confidence_score`, `confidence_reasons`, `fields_used`, `proxy_usage`, `stale_inputs`, `sector_suitability`, and `misleading_reasons`.
-- `/company/[ticker]/governance` — proxy filings, board & meeting history, vote outcomes panel, executive pay table, and pay trend chart
-- `/company/[ticker]/ownership-changes` — beneficial ownership (SC 13D/G) with stake-change timeline, owner table, and activist signals
-- `/company/[ticker]/ownership` — institutional holdings analytics and manager activity trends
-- `/company/[ticker]/stakes` — legacy path redirected to `/company/[ticker]/ownership-changes`
-- `/company/[ticker]/capital-markets` — registration statements, prospectuses, and late-filer notices
-- `/company/[ticker]/events` — 8-K events classified by item code with category chart
-- `/company/[ticker]/sec-feed` — unified SEC activity feed across all filing types
-
-Personal workspace behavior:
-
-- The `/watchlist` route, watchlist saves, and private notes are stored in browser-local `LocalUserData` only (no account and no backend persistence).
-- Users can export/import this local data as JSON from the saved-companies panel and clear all local saves.
-- Import is merge-by-default (with an explicit replace option), and clear-all requires confirmation.
-
-Search accepts a ticker, company name, or CIK and shows SEC-backed resolution and autocomplete feedback. Invalid searches stay in the input, turn the field red, and raise a red toast that clears automatically after 3 seconds.
-
-On phones, the `/company/[ticker]` view uses a compact section picker, stacked next-step actions, and hides the large top chrome to preserve space for charts and tables.
-
-Real-time refresh progress streams over Server-Sent Events at `/api/jobs/{job_id}/events` and is rendered in the company console panels.
-
-Frontend data-loading/performance strategy:
-
-- Read endpoints use stale-while-revalidate with request dedupe in `frontend/lib/api.ts` instead of blanket `no-store` fetch behavior.
-- Refresh queue and mutation endpoints remain uncached.
-- Company route loading/error boundaries provide lightweight transitions while preserving deep-linkable routes.
-- Heavy tables use row virtualization and chart-heavy sections are loaded as deferred client islands.
-
-Model evaluation harness:
-
-- `scripts/run_model_evaluation.py` backtests DCF, reverse DCF, residual income, ROIC, and earnings signals using historical snapshots only.
-- Completed runs can be stored in PostgreSQL via `model_evaluation_runs` and surfaced through `/api/model-evaluations/latest`.
-- The models workspace now includes the latest persisted evaluation summary with provenance, `as_of`, `last_refreshed_at`, and confidence metadata.
-
-Reliability and diagnostics additions:
-
-- Hot company payloads expose a `diagnostics` block with coverage, fallback, stale, parser-confidence, and missing-field metadata.
-- Refresh jobs, model runs, and SSE events now share traceable job metadata (`job_id`, `trace_id`, `ticker`, `kind`).
-- Golden parser fixtures and hot-endpoint contract tests help catch regressions before they reach persisted routes.
-- Default-mode price and market-profile surfaces show a visible `commercial_fallback` disclosure whenever Yahoo-backed context is present, while strict official mode removes those fallbacks entirely.
-
-Point-in-time research mode:
-
-- Company research routes accept an optional `as_of` query parameter so financials, derived metrics, models, and peers can be rendered without lookahead leakage.
-- Supported research routes include `/api/companies/{ticker}/financials`, `/metrics-timeseries`, `/metrics`, `/metrics/summary`, `/models`, and `/peers`.
-- Date-only values are treated as end-of-day UTC. Full ISO-8601 timestamps are also accepted.
-- The frontend automatically forwards `?as_of=...` from the current page URL when it calls these research endpoints.
-- `/api/companies/{ticker}/models` now omits bulky `input_periods` from the default response so the initial models workspace stays lighter; use `expand=input_periods` for export/debug flows that need the full model input payload.
-
-Financial restatement tracking:
-
-- `/api/companies/{ticker}/financial-restatements` summarizes persisted 10-K/A and 10-Q/A amendment chains, normalized field deltas, and companyfacts revisions already observed in SEC XBRL.
-- Each restatement row includes changed metric keys, fact-level before/after context when available, and a confidence impact severity derived from the scope of the revision.
-- The route also accepts `as_of` so amendment summaries can be reviewed without including later-known SEC corrections.
-
-Changes since last filing:
-
-- `/api/companies/{ticker}/changes-since-last-filing` compares the latest canonical filing against the prior comparable filing of the same form family.
-- The payload highlights metric deltas, newly added filing-derived risk indicators, segment mix shifts, share-count changes, capital-structure changes, and amended prior values sourced from persisted restatements.
-- The company overview page now includes a card for this comparison, and the route accepts `as_of` for point-in-time review.
-
-## Docker Compose
-
-1. Copy `.env.example` to `.env` and adjust secrets or ports as needed.
-2. Start the full stack:
-
-   ```bash
-   docker compose pull
-   docker compose up -d
-   ```
-
-   This compose file pulls the published Docker Hub images and does not build locally:
-
-   - `gptvibe/fundamentalterminal:backend-latest`
-   - `gptvibe/fundamentalterminal:frontend-latest`
-
-   For local development from the checked-out source, keep `docker-compose.yml` as the pull-based default and opt into local builds with `docker-compose.build.yml`:
-
-   ```bash
-   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
-   ```
-
-   That override builds these local images instead of pulling published ones:
-
-   - `fundamental-terminal/backend:local`
-   - `fundamental-terminal/frontend:local`
-
-   To refresh to the newest published tags manually:
-
-   ```bash
-   docker compose pull
-   docker compose up -d
-   ```
-
-3. Services on the compose network:
-   - `backend` -> FastAPI on port `8000`
-   - `data-fetcher` -> periodic refresh worker using `WORKER_IDENTIFIERS`
-   - `sp500-prewarm` -> optional one-shot S&P 500 warm-up job (profile: `prewarm`)
-   - `frontend` -> Next.js on port `3000`
-   - `postgres` -> PostgreSQL on port `5432`
-   - `redis` -> short-term cache on port `6379`
-
-   Local compose defaults are intentionally conservative for small Docker hosts:
-
-   - backend and worker DB pools default to `DB_POOL_SIZE=5` and `DB_MAX_OVERFLOW=5`
-   - the worker polls the refresh queue every `5` seconds by default
-   - the worker waits `45` seconds before startup work and does not auto-enqueue its seed ticker set unless you opt back in
-
-   Those defaults reduce startup contention and make the browser-facing Next.js proxy less likely to see `socket hang up` errors while the stack is still warming.
-
-The stack uses environment variables for database and cache connectivity via `DATABASE_URL` and `REDIS_URL`, and all services communicate over the `fundamental-terminal-net` compose network.
-
-Health endpoints:
-
-- `GET /health` is the backward-compatible liveness check
-- `GET /readyz` is the DB-aware readiness check used by Docker Compose before it routes traffic to dependent services
-
-API endpoints:
-
-```bash
-GET  /api/companies/search?query=intel
-GET  /api/companies/search?ticker=AAPL
-GET  /api/companies/resolve?query=INTC
-GET  /api/companies/AAPL/financials
-GET  /api/companies/AAPL/financials?as_of=2025-02-01
-GET  /api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=24
-GET  /api/companies/AAPL/metrics-timeseries?cadence=ttm&max_points=24&as_of=2025-02-01T21:00:00Z
-GET  /api/companies/AAPL/metrics?period_type=ttm&as_of=2025-02-01
-GET  /api/companies/AAPL/metrics/summary?period_type=ttm&as_of=2025-02-01
-GET  /api/companies/AAPL/financial-history
-GET  /api/companies/AAPL/changes-since-last-filing
-GET  /api/companies/AAPL/changes-since-last-filing?as_of=2026-03-20
-GET  /api/companies/AAPL/financial-restatements
-GET  /api/companies/AAPL/financial-restatements?as_of=2026-03-20
-GET  /api/companies/AAPL/filings
-GET  /api/companies/AAPL/filings/view
-GET  /api/companies/AAPL/filing-insights
-GET  /api/companies/AAPL/insider-trades
-GET  /api/companies/AAPL/form-144-filings
-GET  /api/companies/AAPL/institutional-holdings
-GET  /api/companies/AAPL/institutional-holdings/summary
-GET  /api/companies/AAPL/beneficial-ownership
-GET  /api/companies/AAPL/beneficial-ownership/summary
-GET  /api/companies/AAPL/governance
-GET  /api/companies/AAPL/governance/summary
-GET  /api/companies/AAPL/capital-markets
-GET  /api/companies/AAPL/capital-markets/summary
-GET  /api/companies/AAPL/events
-GET  /api/companies/AAPL/filing-events
-GET  /api/companies/AAPL/filing-events/summary
-GET  /api/companies/AAPL/executive-compensation
-GET  /api/companies/AAPL/peers
-GET  /api/companies/AAPL/peers?peers=MSFT,NVDA&as_of=2025-02-01
-GET  /api/companies/AAPL/activity-feed
-GET  /api/companies/AAPL/alerts
-GET  /api/companies/AAPL/activity-overview
-GET  /api/companies/AAPL/models?model=dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios
-GET  /api/companies/AAPL/models?model=dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios&as_of=2025-02-01
-GET  /api/jobs/{job_id}/events
-GET  /api/insiders/AAPL
-GET  /api/ownership/AAPL
-GET  /api/filings/AAPL
-GET  /api/search_filings?form=8-K&ticker=AAPL
-POST /api/companies/AAPL/refresh
-```
-
-Cache-first request-path policy:
-
-- Company research surfaces backed by persisted tables are cache-first and do not perform live SEC fetches on the request path.
-- This includes governance, beneficial ownership, filing events, capital markets, activity feed, alerts, and watchlist summary.
-- If cached data is missing or stale, the API returns the cached (or empty) payload and queues refresh in the background.
-- Explicit live SEC utility routes remain available for direct SEC use cases, including `/api/companies/{ticker}/financial-history`, `/api/filings/{ticker}`, `/api/search_filings`, and `/api/companies/{ticker}/filings/view`.
-
-Queue a background refresh manually:
-
-```bash
-curl -X POST "http://127.0.0.1:8000/api/companies/AAPL/refresh"
-```
-
-Run targeted reliability checks:
-
-```bash
-python -m pytest tests/test_hot_endpoint_contracts.py tests/test_parser_goldens.py tests/test_observability.py tests/test_benchmark_infrastructure.py
-python scripts/benchmark_hot_endpoints.py --base-url http://127.0.0.1:8000 --ticker AAPL --rounds 20
-python scripts/benchmark_model_computation.py --models dcf,reverse_dcf,roic,ratios --rounds 10
-python scripts/run_performance_regression_gate.py --baseline-file scripts/performance_regression_baseline.json --fail-on-regression --json-out artifacts/performance/backend-performance-summary.json --markdown-out artifacts/performance/backend-performance-summary.md
-```
-
-Run the one-shot Docker prewarm job after the stack is up:
-
-```bash
-docker compose --profile prewarm up sp500-prewarm
-```
-
-Optional environment variables for the prewarm job:
-
-- `SP500_PREWARM_MODE=core` to warm company metadata, financials, prices, and core models only
-- `SP500_PREWARM_MODE=seed` to seed only company metadata
-- `SP500_PREWARM_FORCE=true` to bypass the freshness window
-- `SP500_PREWARM_LIMIT=100` and `SP500_PREWARM_START_AT=201` to resume in batches
-
-Additional environment variables:
-
-- `SEC_TICKER_CACHE_TTL_SECONDS=86400` to cache SEC ticker mappings
-- `SEC_13F_HISTORY_QUARTERS=4` to control how many distinct 13F reporting quarters are retained per manager/company pair
-- `SEC_13F_UNIVERSE_MODE=curated` keeps manager coverage on the curated list (default), while `expanded` allows controlled extras
-- `SEC_13F_EXTRA_MANAGERS="Manager One,Manager Two"` provides optional manager names used only when `SEC_13F_UNIVERSE_MODE=expanded`
-- `SEC_MAX_RETRIES=3` and `SEC_RETRY_BACKOFF_SECONDS=0.5` for SEC request retries
-- `MARKET_MAX_RETRIES=3` and `MARKET_RETRY_BACKOFF_SECONDS=0.5` for market data retries
-- `STRICT_OFFICIAL_MODE=true` to disable Yahoo-backed price/profile fetches entirely, switch market classification to SEC SIC mapping, and hide price-dependent UI features that lack an official source
-- `TREASURY_YIELD_CURVE_CSV_URL` for no-key U.S. Treasury 10-year risk-free rate input
-- `TREASURY_HQM_CSV_URLS` (optional) comma-separated fallback URLs for Treasury HQM corporate bond yields; defaults to official Treasury paths
-- `TREASURY_MAX_RETRIES=3` and `TREASURY_RETRY_BACKOFF_SECONDS=0.5` for Treasury fetch retries
-- `VALUATION_WORKBENCH_ENABLED=true` to enable reverse DCF/ROIC/capital-allocation model surfaces
-- `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, and `DB_POOL_TIMEOUT_SECONDS` to tune SQLAlchemy connection pool pressure for constrained deployments
-- `REFRESH_QUEUE_POLL_SECONDS` to slow the background worker poll loop on small hosts
-- `DATA_FETCHER_STARTUP_DELAY_SECONDS` to defer background fetcher startup after the API becomes ready
-- `DATA_FETCHER_ENQUEUE_ON_STARTUP=false` to keep the worker focused on user-triggered refreshes instead of immediately seeding the queue
-- `DATA_FETCHER_RUN_MACRO_WORKER=false` to disable the separate macro refresh loop when you want the smallest local footprint
-
-To pin a specific release, change these in `.env`:
+To pin a specific release, set these in `.env`:
 
 ```bash
 BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.3
 FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.3
 ```
 
-Quick start after cloning the repo:
+To build from your checked-out source instead of pulling published images:
 
 ```bash
-cp .env.example .env
-docker compose pull
-docker compose up -d
-```
-
-Local source build after cloning the repo:
-
-```bash
-cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
 
-Quick start without cloning the repo:
+## Local Development
+
+Install backend dependencies:
 
 ```bash
-curl -L -o docker-compose.yml https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/docker-compose.yml
-curl -L -o .env https://raw.githubusercontent.com/gptvibe/Fundamental-Terminal/main/.env.example
-docker compose pull
-docker compose up -d
+pip install -r requirements.txt
 ```
 
-Notes:
+Install frontend dependencies:
 
-- `docker-compose.yml` stays image-first for GitHub users who should pull published images.
-- `docker-compose.build.yml` is the opt-in override for maintainers who want to test local code before publishing new images.
+```bash
+cd frontend
+npm install
+```
 
-## Publish images to Docker Hub
+Start local infrastructure:
 
-The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes prebuilt images to Docker Hub.
+```bash
+docker compose up -d postgres redis
+```
 
-- Push to `main` updates the `backend-latest` and `frontend-latest` tags.
+Run migrations:
+
+```bash
+alembic upgrade head
+```
+
+Set local environment variables and start the backend:
+
+```bash
+set DATABASE_URL=postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals
+set REDIS_URL=redis://localhost:6379/0
+set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
+uvicorn app.main:app --reload
+```
+
+Start the frontend in another shell:
+
+```bash
+cd frontend
+set BACKEND_API_BASE_URL=http://127.0.0.1:8000
+npm run dev
+```
+
+Useful optional environment variables live in [.env.example](.env.example).
+
+## Key Workspaces
+
+- `/` - research launcher with search, macro backdrop, data health, recent companies, saved names, and recent change feed.
+- `/screener` - official/public-only screener with saved local presets and ranking-aware sorting.
+- `/watchlist` - browser-local triage board for saved names, notes, alerts, valuation gaps, and calendar items.
+- `/compare?tickers=AAPL,MSFT` - side-by-side company comparison for statements, metrics, and model outputs.
+- `/data-sources` - source registry, cache coverage, source health, and strict official mode visibility.
+- `/company/[ticker]` - research brief workspace.
+- `/company/[ticker]/financials` - dedicated statements, derived metrics, charts, provenance, and bank-specific regulated-financial view.
+- `/company/[ticker]/charts` - reported-versus-forecast chart dashboard with scenario framing.
+- `/company/[ticker]/models` - valuation workbench with DCF, reverse DCF, ROIC, and assumption context.
+- `/company/[ticker]/peers` - peer comparison workspace.
+- `/company/[ticker]/oil` - oil scenario overlay for supported companies.
+
+## Key API Examples
+
+```bash
+GET  /health
+GET  /readyz
+GET  /api/companies/search?query=intel
+GET  /api/companies/resolve?query=INTC
+GET  /api/companies/AAPL/financials
+GET  /api/companies/AAPL/financials?as_of=2025-02-01
+GET  /api/companies/AAPL/models?model=dcf,reverse_dcf,roic,ratios
+GET  /api/companies/AAPL/peers?peers=MSFT,NVDA&as_of=2025-02-01
+GET  /api/companies/AAPL/changes-since-last-filing
+GET  /api/companies/AAPL/financial-restatements
+GET  /api/jobs/{job_id}/events
+POST /api/companies/AAPL/refresh
+```
+
+Useful diagnostics endpoints:
+
+- `/api/source-registry`
+- `/api/internal/cache-metrics`
+- `/api/model-evaluations/latest`
+
+## Testing And Diagnostics
+
+Backend tests:
+
+```bash
+python -m pytest
+```
+
+Frontend tests:
+
+```bash
+cd frontend
+npm test
+```
+
+Targeted performance and reliability checks:
+
+```bash
+python scripts/benchmark_hot_endpoints.py --base-url http://127.0.0.1:8000 --ticker AAPL --rounds 20
+python scripts/run_performance_regression_gate.py --baseline-file scripts/performance_regression_baseline.json --fail-on-regression --json-out artifacts/performance/backend-performance-summary.json --markdown-out artifacts/performance/backend-performance-summary.md
+python scripts/run_model_evaluation.py
+```
+
+## Architecture Notes
+
+- Public routes still mount from `app.main:app`, while domain routers live under `app/api/routers/`.
+- Shared request and response models live under `app/api/schemas/`.
+- Cache-first persisted views queue background refreshes when data is missing or stale instead of performing live SEC fetches on the hot request path.
+- Frontend read endpoints use stale-while-revalidate and request dedupe in `frontend/lib/api.ts`.
+- Refresh progress streams over Server-Sent Events from `/api/jobs/{job_id}/events`.
+
+## Further Reading
+
+- [docs/backend-architecture-boundaries.md](docs/backend-architecture-boundaries.md)
+- [docs/cache-layers-architecture.md](docs/cache-layers-architecture.md)
+- [docs/data-provenance.md](docs/data-provenance.md)
+- [docs/model-evaluation-harness.md](docs/model-evaluation-harness.md)
+- [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md)
+- [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md)
+- [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md)
+
+## Docker Image Publishing
+
+The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes Docker images:
+
+- Push to `main` updates `backend-latest` and `frontend-latest`.
 - Push a version tag like `v1.0.3` publishes `backend-v1.0.3` and `frontend-v1.0.3`.
 
-Example first release:
-
-```bash
-git tag v1.0.3
-git push origin v1.0.3
-```
-
-Add these GitHub repository secrets before using the workflow:
+Required repository secrets:
 
 - `DOCKERHUB_USERNAME`
 - `DOCKERHUB_TOKEN`
-
-The workflow pushes to these Docker Hub tags:
-
-- `gptvibe/fundamentalterminal:backend-latest`
-- `gptvibe/fundamentalterminal:frontend-latest`
-
-## Run as a worker
-
-```bash
-python -m app.worker AAPL MSFT
-```
-
-Use `--force` to bypass the 24-hour freshness window.
-
-Prewarm the bundled S&P 500 universe:
-
-```bash
-python -m app.prewarm_sp500 --mode refresh
-```
-
-For a much faster first pass that skips insider trades and institutional holdings:
-
-```bash
-python -m app.prewarm_sp500 --mode core
-```
-
-Useful options:
-
-- `--mode seed` to only seed `companies` rows for faster search bootstrapping
-- `--mode core` to warm `companies`, financial statements, prices, and core models only
-- `--tickers AAPL MSFT` to prewarm an explicit ticker set instead of the bundled S&P 500 list
-- `--tickers AAPL,MSFT,BRK.B` to pass comma-separated groups in the same invocation
-- `--force` to refresh even if the cache is still fresh
-- `--limit 50 --start-at 101` to process the list in resumable batches
-
-Charts dashboard API and warm path:
-
-```bash
-GET /api/companies/AAPL/charts
-GET /api/companies/AAPL/charts?as_of=2025-12-31
-
-python -m app.prewarm_sp500 --mode refresh --tickers AAPL MSFT
-python -m app.prewarm_sp500 --mode refresh --tickers NVDA --force
-```
-
-The charts route persists a frontend-ready `company_charts_dashboard_snapshots` payload in PostgreSQL, fronts repeat reads with the shared hot-response cache, and keeps reported versus forecast series explicitly separated in the API contract.
-
-## Model engine
-
-- Core `ratios` are precomputed automatically whenever canonical financial data is saved.
-- Cached model results are stored in PostgreSQL with `model_version` and reused until financial inputs change.
-- DCF v2.2.0 adds per-sector risk premium adjustments (e.g., Utilities −1%, Technology +1.5%) layered on the base equity risk premium.
-- `residual_income` v1.0.0 is the primary model for financial sector companies (banks, REITs, insurers) where asset-level cash-flow DCF is unsupported. Formula: RI = (ROE − CoE) × Book Equity, with ROE fading toward CoE over a 5-year projection horizon and a Gordon Growth terminal value.
-- DCF/reverse-DCF/ROIC assumptions include Treasury-direct 10-year risk-free input with 24-hour cache and provenance metadata.
-
-Run model computations from cached PostgreSQL data only:
-
-```bash
-python -m app.model_engine.worker AAPL --models dcf,reverse_dcf,roic,capital_allocation,dupont,piotroski,altman_z,ratios
-```
-
-## Macro (Market Context)
-
-The terminal persists macro indicator data in PostgreSQL with a DB-first fetch path. Live fetches are only triggered on cache miss or staleness. Data is grouped into three sections returned by the API:
-
-- `rates_credit` — Treasury par yield curve tenors, HQM 30-year corporate benchmark, and BAA corporate spread
-- `inflation_labor` — CPI (Urban All Items), Core CPI, PPI (Final Demand), Unemployment Rate, and Nonfarm Payrolls
-- `growth_activity` — Real GDP, Personal Income, PCE, and Corporate Profits (via FRED)
-
-Official data sources:
-
-| Source | Series | Env var required |
-|--------|--------|-----------------|
-| U.S. Treasury (CSV) | Daily par yield curve | `TREASURY_YIELD_CURVE_CSV_URL` |
-| U.S. Treasury HQM | 30-year corporate bond yield | `TREASURY_HQM_CSV_URLS` (optional, comma-separated fallback chain) |
-| BLS Public API v2 | CPI, Core CPI, PPI, Unemployment, Payrolls | `BLS_API_KEY` |
-| EIA Retail Electricity Sales | U.S. and industrial electricity sales and pricing | `EIA_API_KEY` |
-| FRED (BEA proxy) | Real GDP, Personal Income, PCE, Corporate Profits | `FRED_API_KEY` |
-
-When `STRICT_OFFICIAL_MODE=true`, company pages stay official-only: SEC SIC replaces Yahoo market-profile enrichment, commercial equity price fetches are disabled, and price-dependent product surfaces explicitly explain why they are unavailable.
-
-Company pages display a `MacroStrip` with the most relevant indicators filtered by sector exposure. The home dashboard groups indicators under the "Macro" heading.
-
-API endpoints:
-
-```bash
-GET /api/market-context               # global macro snapshot (DB-first)
-GET /api/companies/AAPL/market-context  # company-specific enriched context
-```
-
