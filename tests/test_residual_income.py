@@ -69,12 +69,25 @@ def test_residual_income_ok_status(monkeypatch):
         _point(2023, {"total_assets": 900_000, "total_liabilities": 760_000, "net_income": 16_000, "shares_outstanding": 1_000}),
     ]
     result = ri_model.compute(_dataset(pts))
-    assert result["status"] in ("ok", "partial", "proxy")
+    assert result["status"] in ("supported", "partial", "proxy")
     assert result["intrinsic_value"]["intrinsic_value_per_share"] is not None
     assert result["intrinsic_value"]["intrinsic_value_per_share"] > 0
     assert result["inputs"]["book_equity"] == pytest.approx(200_000.0)
     assert result["inputs"]["roe"] == pytest.approx(0.10, abs=0.001)
     assert result["intrinsic_value"]["terminal_value_per_share"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_residual_income_supported_status_matches_model_status(monkeypatch):
+    monkeypatch.setattr(ri_model, "get_latest_risk_free_rate", _mock_risk_free)
+    pts = [
+        _point(2025, {"total_assets": 1_000_000, "total_liabilities": 800_000, "net_income": 20_000, "shares_outstanding": 1_000}),
+        _point(2024, {"total_assets": 950_000, "total_liabilities": 780_000, "net_income": 18_000, "shares_outstanding": 1_000}),
+    ]
+
+    result = ri_model.compute(_dataset(pts))
+
+    assert result["model_status"] == "supported"
+    assert result["status"] == "supported"
 
 
 def test_residual_income_includes_cost_of_equity(monkeypatch):
@@ -202,6 +215,19 @@ def test_residual_income_terminal_value_zero_when_roe_fades_to_cost_of_equity(mo
     assert final_projection["roe"] == pytest.approx(cost_of_equity, abs=1e-9)
     assert final_projection["residual_income"] == pytest.approx(0.0, abs=1e-9)
     assert result["intrinsic_value"]["terminal_value_per_share"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_residual_income_average_roe_includes_zero_income_years(monkeypatch):
+    monkeypatch.setattr(ri_model, "get_latest_risk_free_rate", _mock_risk_free)
+    pts = [
+        _point(2025, {"total_assets": 1_000, "total_liabilities": 800, "net_income": 40, "shares_outstanding": 10}),
+        _point(2024, {"total_assets": 1_000, "total_liabilities": 800, "net_income": 0, "shares_outstanding": 10}),
+    ]
+
+    result = ri_model.compute(_dataset(pts))
+
+    assert result["inputs"]["roe"] == pytest.approx(0.20, abs=1e-9)
+    assert result["inputs"]["avg_roe_5y"] == pytest.approx(0.10, abs=1e-9)
 
 
 # ---------------------------------------------------------------------------

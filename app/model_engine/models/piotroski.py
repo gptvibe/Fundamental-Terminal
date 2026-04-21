@@ -72,7 +72,11 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     available = [value for value in criteria.values() if value is not None]
     score = sum(1 for value in available if value)
     available_criteria = len(available)
-    normalized_score = float(score) if available_criteria == 9 else None
+    score_on_9_point_scale = None
+    normalized_score_ratio = None
+    if available_criteria > 0:
+        score_on_9_point_scale = float(score) * 9.0 / float(available_criteria)
+        normalized_score_ratio = score_on_9_point_scale / 9.0
 
     status = "supported" if available_criteria == 9 else "partial"
     return {
@@ -83,7 +87,9 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "score": score,
         "score_max": 9,
         "available_criteria": available_criteria,
-        "normalized_score_9": json_number(normalized_score),
+        "score_on_9_point_scale": json_number(score_on_9_point_scale),
+        "normalized_score_9": json_number(score_on_9_point_scale),
+        "normalized_score_ratio": json_number(normalized_score_ratio),
         "criteria": criteria,
         "unavailable_criteria": [key for key, value in criteria.items() if value is None],
         "equity_proxy": json_number(book_equity(current)),

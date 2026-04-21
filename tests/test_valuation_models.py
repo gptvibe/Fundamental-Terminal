@@ -414,6 +414,65 @@ def test_piotroski_lower_leverage_is_unavailable_without_long_term_debt():
     assert "lower_leverage" in result["unavailable_criteria"]
 
 
+def test_piotroski_exposes_explicit_comparable_score_outputs():
+    points = [
+        _point(
+            2025,
+            {
+                "net_income": 120,
+                "total_assets": 1000,
+                "current_assets": 420,
+                "current_liabilities": 220,
+                "operating_cash_flow": 150,
+                "shares_outstanding": 100,
+                "long_term_debt": 180,
+                "total_liabilities": 720,
+                "gross_profit": 500,
+                "revenue": 900,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "net_income": 100,
+                "total_assets": 950,
+                "current_assets": 380,
+                "current_liabilities": 240,
+                "operating_cash_flow": 120,
+                "shares_outstanding": 100,
+                "long_term_debt": None,
+                "total_liabilities": 650,
+                "gross_profit": 460,
+                "revenue": 840,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "net_income": 90,
+                "total_assets": 900,
+                "current_assets": 360,
+                "current_liabilities": 235,
+                "operating_cash_flow": 110,
+                "shares_outstanding": 101,
+                "long_term_debt": None,
+                "total_liabilities": 620,
+                "gross_profit": 430,
+                "revenue": 800,
+            },
+        ),
+    ]
+
+    result = piotroski_model.compute(_dataset(points))
+
+    assert result["model_status"] == "partial"
+    assert result["available_criteria"] == 8
+    assert result["score"] == 8
+    assert result["score_on_9_point_scale"] == pytest.approx(9.0, abs=1e-9)
+    assert result["normalized_score_9"] == pytest.approx(9.0, abs=1e-9)
+    assert result["normalized_score_ratio"] == pytest.approx(1.0, abs=1e-9)
+
+
 def test_dcf_prefers_point_in_time_shares_outstanding_for_per_share_value(monkeypatch):
     monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
@@ -765,6 +824,21 @@ def test_ratios_capex_intensity_uses_abs_capex_for_negative_outflow():
     assert result["model_status"] == "supported"
     assert result["values"]["capex_intensity"] == pytest.approx(0.25, rel=1e-9)
     assert result["values"]["capex_intensity"] > 0
+
+
+def test_ratios_without_any_computable_values_return_insufficient_data():
+    points = [
+        _point(
+            2025,
+            {
+                "revenue": None,
+            },
+        ),
+    ]
+
+    result = ratios_model.compute(_dataset(points))
+
+    assert result["model_status"] == "insufficient_data"
 
 
 def test_reverse_dcf_uses_equity_value_target_when_capital_structure_available(monkeypatch):

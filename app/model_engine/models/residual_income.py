@@ -117,8 +117,10 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         if bv_pt is None:
             bv_pt_raw = statement_value(point, "stockholders_equity")
             bv_pt = float(bv_pt_raw) if bv_pt_raw is not None else None
-        ni_pt = statement_value(point, "net_income") or statement_value(point, "net_income_loss")
-        if bv_pt and ni_pt and bv_pt > 0:
+        ni_pt = statement_value(point, "net_income")
+        if ni_pt is None:
+            ni_pt = statement_value(point, "net_income_loss")
+        if bv_pt is not None and ni_pt is not None and bv_pt > 0:
             historical_roes.append(float(ni_pt) / float(bv_pt))
 
     # Use average ROE if available, else single year
@@ -181,7 +183,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         upside = (intrinsic_value_per_share - float(price_snap["latest_price"])) / float(price_snap["latest_price"])
 
     return {
-        "status": "ok" if status == "supported" else status,
+        "status": status,
         "model_status": status,
         "explanation": status_explanation(status),
         "applicability": applicability,

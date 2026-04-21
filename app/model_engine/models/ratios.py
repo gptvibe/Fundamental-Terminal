@@ -77,7 +77,11 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     }
 
     missing_fields = sorted(key for key, value in ratios.items() if value is None)
-    status = status_from_data_quality(missing_fields=missing_fields, proxy_used=False, can_compute_directional=bool(ratios))
+    status = status_from_data_quality(
+        missing_fields=missing_fields,
+        proxy_used=False,
+        can_compute_directional=any(value is not None for value in ratios.values()),
+    )
 
     return {
         "status": status,

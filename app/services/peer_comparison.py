@@ -605,7 +605,9 @@ def _growth_rate(current: float | None, previous: float | None) -> float | None:
 
 
 def _resolve_piotroski_score(result: dict[str, Any], available_criteria: float | None, score_max: float) -> float | None:
-    normalized_score = _as_float(result.get("normalized_score_9"))
+    normalized_score = _as_float(result.get("score_on_9_point_scale"))
+    if normalized_score is None:
+        normalized_score = _as_float(result.get("normalized_score_9"))
     if normalized_score is not None:
         return normalized_score
 
