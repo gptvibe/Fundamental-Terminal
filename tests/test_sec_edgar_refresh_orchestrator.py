@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 from datetime import date
 from types import SimpleNamespace
@@ -70,13 +71,14 @@ def _make_service() -> sec_edgar.EdgarIngestionService:
     return service
 
 
-def _settings(strict_official_mode: bool = False) -> SimpleNamespace:
+def _settings(strict_official_mode: bool = False, *, refresh_aux_io_max_workers: int = 1) -> SimpleNamespace:
     return SimpleNamespace(
         sec_cache_prune_max_entries=0,
         sec_cache_prune_interval_seconds=3600,
         freshness_window_hours=24,
         market_history_overlap_days=7,
         strict_official_mode=strict_official_mode,
+        refresh_aux_io_max_workers=refresh_aux_io_max_workers,
     )
 
 
@@ -1008,6 +1010,7 @@ def test_refresh_prices_fetches_only_the_incremental_tail_after_initial_backfill
         ],
         raising=False,
     )
+    monkeypatch.setattr(sec_edgar, "get_company_price_history_tail", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: 2)
     monkeypatch.setattr(sec_edgar, "touch_company_price_history", lambda _session, company_id, timestamp, **_kwargs: touched.append((company_id, timestamp)))
 
@@ -1022,6 +1025,210 @@ def test_refresh_prices_fetches_only_the_incremental_tail_after_initial_backfill
     assert captured == {"ticker": "MSFT", "start_date": date(2026, 4, 3)}
     assert touched == [(company.id, checked_at)]
     assert reporter.steps[0] == ("market", "Fetching price history tail...")
+
+
+def test_refresh_prices_skips_tail_rewrite_when_incremental_window_is_unchanged(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+    company = _company()
+    checked_at = datetime.now(timezone.utc)
+    touched: list[tuple[int, datetime, dict[str, object]]] = []
+
+    fetched_tail = [
+        SimpleNamespace(trade_date=date(2026, 4, 10), close=100.0, volume=10),
+        SimpleNamespace(trade_date=date(2026, 4, 11), close=101.0, volume=20),
+    ]
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_company_latest_trade_date", lambda *_args, **_kwargs: date(2026, 4, 10))
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service.market_data, "get_price_history", lambda *_args, **_kwargs: fetched_tail, raising=False)
+    monkeypatch.setattr(sec_edgar, "get_company_price_history_tail", lambda *_args, **_kwargs: list(fetched_tail))
+    monkeypatch.setattr(sec_edgar, "upsert_price_history", lambda **_kwargs: pytest.fail("price upsert should not run when the fetched tail is unchanged"))
+    monkeypatch.setattr(
+        sec_edgar,
+        "touch_company_price_history",
+        lambda _session, company_id, timestamp, **kwargs: touched.append((company_id, timestamp, kwargs)),
+    )
+
+    written = service.refresh_prices(
+        session=SimpleNamespace(),
+        company=company,
+        checked_at=checked_at,
+        reporter=reporter,
+    )
+
+    assert written == 0
+    assert touched == [
+        (
+            company.id,
+            checked_at,
+            {
+                "payload_version_hash": sec_edgar.build_price_history_payload_hash(fetched_tail),
+                "touch_rows": False,
+                "invalidate_hot_cache": False,
+            },
+        )
+    ]
+    assert reporter.steps[-1] == (
+        "market",
+        "Price history tail unchanged; marking prices checked without rewriting bars.",
+    )
+
+
+def test_refresh_prices_rewrites_tail_when_incremental_window_changes(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+    company = _company()
+    checked_at = datetime.now(timezone.utc)
+    upsert_calls: list[dict[str, object]] = []
+    touched: list[tuple[int, datetime, dict[str, object]]] = []
+
+    fetched_tail = [
+        SimpleNamespace(trade_date=date(2026, 4, 10), close=100.0, volume=10),
+        SimpleNamespace(trade_date=date(2026, 4, 11), close=102.0, volume=20),
+    ]
+    stored_tail = [
+        SimpleNamespace(trade_date=date(2026, 4, 10), close=100.0, volume=10),
+        SimpleNamespace(trade_date=date(2026, 4, 11), close=101.0, volume=20),
+    ]
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings())
+    monkeypatch.setattr(sec_edgar, "get_company_latest_trade_date", lambda *_args, **_kwargs: date(2026, 4, 10))
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service.market_data, "get_price_history", lambda *_args, **_kwargs: fetched_tail, raising=False)
+    monkeypatch.setattr(sec_edgar, "get_company_price_history_tail", lambda *_args, **_kwargs: stored_tail)
+    monkeypatch.setattr(
+        sec_edgar,
+        "upsert_price_history",
+        lambda **kwargs: upsert_calls.append(kwargs) or len(kwargs["price_bars"]),
+    )
+    monkeypatch.setattr(
+        sec_edgar,
+        "touch_company_price_history",
+        lambda _session, company_id, timestamp, **kwargs: touched.append((company_id, timestamp, kwargs)),
+    )
+
+    written = service.refresh_prices(
+        session=SimpleNamespace(),
+        company=company,
+        checked_at=checked_at,
+        reporter=reporter,
+    )
+
+    assert written == 2
+    assert len(upsert_calls) == 1
+    assert upsert_calls[0]["price_bars"] == fetched_tail
+    assert touched == [
+        (
+            company.id,
+            checked_at,
+            {
+                "payload_version_hash": sec_edgar.build_price_history_payload_hash(fetched_tail),
+            },
+        )
+    ]
+    assert reporter.steps[-1] == ("database", "Saving price history to database...")
+
+
+def test_load_refresh_bootstrap_inputs_prefetches_market_profile_when_aux_io_enabled(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+    market_profile_started = threading.Event()
+    allow_market_profile_finish = threading.Event()
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings(refresh_aux_io_max_workers=2))
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda identifier: sec_edgar.CompanyIdentity(cik="0000789019", ticker=identifier, name="Microsoft", sector="Technology"),
+        raising=False,
+    )
+
+    def _get_submissions(_cik: str):
+        assert market_profile_started.wait(timeout=1.0)
+        return {
+            "sic": "3571",
+            "sicDescription": "Technology",
+            "tickers": ["MSFT"],
+            "name": "Microsoft",
+            "exchanges": ["NASDAQ"],
+        }
+
+    monkeypatch.setattr(service.client, "get_submissions", _get_submissions, raising=False)
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {}, raising=False)
+    monkeypatch.setattr(service.client, "get_companyfacts", lambda *_args, **_kwargs: {"facts": {"us-gaap": {}}}, raising=False)
+    monkeypatch.setattr(sec_edgar, "_build_financials_refresh_fingerprint", lambda *_args, **_kwargs: "financials-fingerprint")
+    monkeypatch.setattr(
+        sec_edgar,
+        "resolve_sec_sic_profile",
+        lambda *_args, **_kwargs: SimpleNamespace(market_sector="Tech", market_industry="Software"),
+    )
+
+    def _get_market_profile(_ticker: str):
+        market_profile_started.set()
+        assert allow_market_profile_finish.wait(timeout=1.0)
+        return sec_edgar.MarketProfile(sector="Technology", industry="Software")
+
+    monkeypatch.setattr(service.market_data, "get_market_profile", _get_market_profile, raising=False)
+
+    allow_market_profile_finish.set()
+    bootstrap = service._load_refresh_bootstrap_inputs("MSFT", reporter)
+
+    assert bootstrap.company_identity.ticker == "MSFT"
+    assert bootstrap.financials_fingerprint == "financials-fingerprint"
+    assert bootstrap.market_profile == sec_edgar.MarketProfile(sector="Technology", industry="Software")
+    assert reporter.steps == [("filing", "Fetching 10-K...")]
+
+
+def test_load_refresh_bootstrap_inputs_falls_back_when_market_profile_prefetch_fails(monkeypatch):
+    service = _make_service()
+    reporter = _Reporter()
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings(refresh_aux_io_max_workers=2))
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda identifier: sec_edgar.CompanyIdentity(cik="0000789019", ticker=identifier, name="Microsoft", sector="Technology"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda _cik: {
+            "sic": "3571",
+            "sicDescription": "Technology",
+            "tickers": ["MSFT"],
+            "name": "Microsoft",
+            "exchanges": ["NASDAQ"],
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {}, raising=False)
+    monkeypatch.setattr(service.client, "get_companyfacts", lambda *_args, **_kwargs: {"facts": {"us-gaap": {}}}, raising=False)
+    monkeypatch.setattr(sec_edgar, "_build_financials_refresh_fingerprint", lambda *_args, **_kwargs: "financials-fingerprint")
+    monkeypatch.setattr(
+        sec_edgar,
+        "resolve_sec_sic_profile",
+        lambda *_args, **_kwargs: SimpleNamespace(market_sector="Fallback sector", market_industry="Fallback industry"),
+    )
+    monkeypatch.setattr(
+        service.market_data,
+        "get_market_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("yahoo boom")),
+        raising=False,
+    )
+
+    bootstrap = service._load_refresh_bootstrap_inputs("MSFT", reporter)
+
+    assert bootstrap.market_profile == sec_edgar.MarketProfile(
+        sector="Fallback sector",
+        industry="Fallback industry",
+    )
+    assert reporter.steps == [
+        ("filing", "Fetching 10-K..."),
+        ("market", "Market profile lookup failed: yahoo boom"),
+    ]
 
 
 @pytest.mark.parametrize(

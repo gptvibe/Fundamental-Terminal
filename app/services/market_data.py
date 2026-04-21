@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time as datetime_time, timezone
+from threading import Lock
 import time
 from typing import Any
 
@@ -17,6 +18,9 @@ from app.services.refresh_state import build_payload_version_hash, cache_state_f
 
 PRICE_SOURCE = "yahoo_finance_chart"
 PRICE_HISTORY_PAYLOAD_VERSION = "price-history-v1"
+DEFAULT_MARKET_PROFILE_CACHE_TTL_SECONDS = 21600
+_market_profile_cache: dict[str, tuple[float, MarketProfile]] = {}
+_market_profile_cache_lock = Lock()
 
 
 class MarketDataUnavailableError(RuntimeError):
@@ -118,6 +122,10 @@ class MarketDataClient:
             return MarketProfile(sector=None, industry=None)
 
         symbol = _normalize_market_symbol(ticker)
+        cached = _get_cached_market_profile(symbol)
+        if cached is not None:
+            return cached
+
         response = _request_with_retries(
             self._http,
             "https://query1.finance.yahoo.com/v1/finance/search",
@@ -154,10 +162,12 @@ class MarketDataClient:
         if exact_match is None:
             return MarketProfile(sector=None, industry=None)
 
-        return MarketProfile(
+        profile = MarketProfile(
             sector=_string_or_none(exact_match.get("sectorDisp") or exact_match.get("sector")),
             industry=_string_or_none(exact_match.get("industryDisp") or exact_match.get("industry")),
         )
+        _store_cached_market_profile(symbol, profile)
+        return profile
 
 
 def get_company_price_history(session: Session, company_id: int) -> list[PriceHistory]:
@@ -184,6 +194,27 @@ def get_company_price_last_checked(session: Session, company_id: int) -> datetim
 def get_company_latest_trade_date(session: Session, company_id: int) -> date | None:
     statement = select(func.max(PriceHistory.trade_date)).where(PriceHistory.company_id == company_id)
     return session.execute(statement).scalar_one_or_none()
+
+
+def get_company_price_history_tail(
+    session: Session,
+    company_id: int,
+    *,
+    start_date: date,
+) -> list[PriceBar]:
+    statement: Select[tuple[PriceHistory]] = (
+        select(PriceHistory)
+        .where(
+            PriceHistory.company_id == company_id,
+            PriceHistory.source == PRICE_SOURCE,
+            PriceHistory.trade_date >= start_date,
+        )
+        .order_by(PriceHistory.trade_date.asc())
+    )
+    return [
+        PriceBar(trade_date=row.trade_date, close=row.close, volume=row.volume)
+        for row in session.execute(statement).scalars()
+    ]
 
 
 def upsert_price_history(
@@ -261,13 +292,16 @@ def touch_company_price_history(
     checked_at: datetime,
     *,
     payload_version_hash: str | None = None,
+    touch_rows: bool = True,
+    invalidate_hot_cache: bool = True,
 ) -> None:
-    statement = (
-        update(PriceHistory)
-        .where(PriceHistory.company_id == company_id)
-        .values(last_checked=checked_at)
-    )
-    session.execute(statement)
+    if touch_rows:
+        statement = (
+            update(PriceHistory)
+            .where(PriceHistory.company_id == company_id)
+            .values(last_checked=checked_at)
+        )
+        session.execute(statement)
     mark_dataset_checked(
         session,
         company_id,
@@ -275,8 +309,62 @@ def touch_company_price_history(
         checked_at=checked_at,
         success=True,
         payload_version_hash=payload_version_hash,
-        invalidate_hot_cache=True,
+        invalidate_hot_cache=invalidate_hot_cache,
     )
+
+
+def price_bar_windows_match(expected: list[PriceBar], observed: list[PriceBar]) -> bool:
+    if len(expected) != len(observed):
+        return False
+    return all(
+        expected_bar.trade_date == observed_bar.trade_date
+        and expected_bar.close == observed_bar.close
+        and expected_bar.volume == observed_bar.volume
+        for expected_bar, observed_bar in zip(expected, observed, strict=True)
+    )
+
+
+def _get_market_profile_cache_ttl_seconds() -> int:
+    ttl_seconds = int(getattr(settings, "market_profile_cache_ttl_seconds", DEFAULT_MARKET_PROFILE_CACHE_TTL_SECONDS))
+    return max(0, ttl_seconds)
+
+
+def _get_cached_market_profile(symbol: str) -> MarketProfile | None:
+    ttl_seconds = _get_market_profile_cache_ttl_seconds()
+    if ttl_seconds <= 0:
+        return None
+
+    try:
+        cached = None
+        now = time.monotonic()
+        with _market_profile_cache_lock:
+            cached = _market_profile_cache.get(symbol)
+            if cached is None:
+                return None
+            expires_at, profile = cached
+            if not isinstance(expires_at, (int, float)) or expires_at <= now or not isinstance(profile, MarketProfile):
+                _market_profile_cache.pop(symbol, None)
+                return None
+            return profile
+    except Exception:
+        return None
+
+
+def _store_cached_market_profile(symbol: str, profile: MarketProfile) -> None:
+    ttl_seconds = _get_market_profile_cache_ttl_seconds()
+    if ttl_seconds <= 0 or not (profile.sector or profile.industry):
+        return
+
+    try:
+        with _market_profile_cache_lock:
+            _market_profile_cache[symbol] = (time.monotonic() + ttl_seconds, profile)
+    except Exception:
+        return
+
+
+def _clear_market_profile_cache() -> None:
+    with _market_profile_cache_lock:
+        _market_profile_cache.clear()
 
 
 def _normalize_market_symbol(ticker: str) -> str:

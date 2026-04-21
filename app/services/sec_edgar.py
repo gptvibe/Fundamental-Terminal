@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import Future, ThreadPoolExecutor
 import hashlib
 import json
 import logging
@@ -38,6 +39,8 @@ from app.services.market_data import (
     MarketProfile,
     get_company_latest_trade_date,
     get_company_price_last_checked,
+    get_company_price_history_tail,
+    price_bar_windows_match,
     touch_company_price_history,
     upsert_price_history,
 )
@@ -954,6 +957,16 @@ class StatementAccumulator:
     instant_period_ends: list[date] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class RefreshBootstrapInputs:
+    company_identity: CompanyIdentity
+    submissions: dict[str, Any]
+    filing_index: dict[str, FilingMetadata]
+    companyfacts: dict[str, Any]
+    financials_fingerprint: str
+    market_profile: MarketProfile
+
+
 class EdgarClient:
     def __init__(self) -> None:
         self._client_config = build_sec_client_config(settings)
@@ -1687,6 +1700,73 @@ class EdgarIngestionService:
         self.client.close()
         self.market_data.close()
 
+    def _load_refresh_bootstrap_inputs(
+        self,
+        identifier: str,
+        reporter: JobReporter,
+    ) -> RefreshBootstrapInputs:
+        company_identity = self.client.resolve_company(identifier)
+        market_profile_executor: ThreadPoolExecutor | None = None
+        market_profile_future: Future[MarketProfile] | None = None
+
+        if not settings.strict_official_mode and getattr(settings, "refresh_aux_io_max_workers", 1) > 1:
+            market_profile_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="refresh-market")
+            market_profile_future = market_profile_executor.submit(self.market_data.get_market_profile, company_identity.ticker)
+
+        try:
+            submissions = self.client.get_submissions(company_identity.cik)
+            reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
+            filing_index = self.client.build_filing_index(submissions)
+            companyfacts = self.client.get_companyfacts(company_identity.cik)
+            financials_fingerprint = _build_financials_refresh_fingerprint(companyfacts, filing_index)
+            sec_market_profile = resolve_sec_sic_profile(
+                submissions.get("sic"),
+                submissions.get("sicDescription") or company_identity.sector,
+            )
+            market_profile = self._resolve_market_profile(
+                company_identity=company_identity,
+                sec_market_profile=sec_market_profile,
+                reporter=reporter,
+                prefetched_market_profile=market_profile_future,
+            )
+            return RefreshBootstrapInputs(
+                company_identity=company_identity,
+                submissions=submissions,
+                filing_index=filing_index,
+                companyfacts=companyfacts,
+                financials_fingerprint=financials_fingerprint,
+                market_profile=market_profile,
+            )
+        finally:
+            if market_profile_executor is not None:
+                market_profile_executor.shutdown(wait=True)
+
+    def _resolve_market_profile(
+        self,
+        *,
+        company_identity: CompanyIdentity,
+        sec_market_profile,
+        reporter: JobReporter,
+        prefetched_market_profile: Future[MarketProfile] | None = None,
+    ) -> MarketProfile:
+        try:
+            if settings.strict_official_mode:
+                reporter.step("market", "Using SEC SIC classification for market sector and industry.")
+                return MarketProfile(
+                    sector=sec_market_profile.market_sector,
+                    industry=sec_market_profile.market_industry,
+                )
+            if prefetched_market_profile is not None:
+                return prefetched_market_profile.result()
+            return self.market_data.get_market_profile(company_identity.ticker)
+        except Exception as exc:
+            logger.exception("Market profile lookup failed for %s", company_identity.ticker)
+            reporter.step("market", f"Market profile lookup failed: {exc}")
+            return MarketProfile(
+                sector=sec_market_profile.market_sector,
+                industry=sec_market_profile.market_industry,
+            )
+
     def _populate_segment_breakdowns(
         self,
         normalized_statements: list[NormalizedStatement],
@@ -2033,6 +2113,25 @@ class EdgarIngestionService:
             )
             return 0
 
+        payload_version_hash = build_price_history_payload_hash(price_bars)
+        if incremental_start_date is not None:
+            stored_tail = get_company_price_history_tail(
+                session,
+                company.id,
+                start_date=incremental_start_date,
+            )
+            if price_bar_windows_match(price_bars, stored_tail):
+                reporter.step("market", "Price history tail unchanged; marking prices checked without rewriting bars.")
+                touch_company_price_history(
+                    session,
+                    company.id,
+                    checked_at,
+                    payload_version_hash=payload_version_hash,
+                    touch_rows=False,
+                    invalidate_hot_cache=False,
+                )
+                return 0
+
         reporter.step("database", "Saving price history to database...")
         price_points_written = upsert_price_history(
             session=session,
@@ -2044,7 +2143,7 @@ class EdgarIngestionService:
             session,
             company.id,
             checked_at,
-            payload_version_hash=build_price_history_payload_hash(price_bars),
+            payload_version_hash=payload_version_hash,
         )
         return price_points_written
 
@@ -2720,29 +2819,13 @@ class EdgarIngestionService:
         policy: RefreshPolicy,
     ) -> IngestionResult:
         reporter.step("sec", "Checking SEC for new filings...")
-        company_identity = self.client.resolve_company(identifier)
-        submissions = self.client.get_submissions(company_identity.cik)
-        reporter.step("filing", f"Fetching {_primary_supported_form(submissions)}...")
-        filing_index = self.client.build_filing_index(submissions)
-        companyfacts = self.client.get_companyfacts(company_identity.cik)
-        financials_fingerprint = _build_financials_refresh_fingerprint(companyfacts, filing_index)
-        sec_market_profile = resolve_sec_sic_profile(submissions.get("sic"), submissions.get("sicDescription") or company_identity.sector)
-        try:
-            if settings.strict_official_mode:
-                market_profile = MarketProfile(
-                    sector=sec_market_profile.market_sector,
-                    industry=sec_market_profile.market_industry,
-                )
-                reporter.step("market", "Using SEC SIC classification for market sector and industry.")
-            else:
-                market_profile = self.market_data.get_market_profile(company_identity.ticker)
-        except Exception as exc:
-            logger.exception("Market profile lookup failed for %s", company_identity.ticker)
-            reporter.step("market", f"Market profile lookup failed: {exc}")
-            market_profile = MarketProfile(
-                sector=sec_market_profile.market_sector,
-                industry=sec_market_profile.market_industry,
-            )
+        bootstrap = self._load_refresh_bootstrap_inputs(identifier, reporter)
+        company_identity = bootstrap.company_identity
+        submissions = bootstrap.submissions
+        filing_index = bootstrap.filing_index
+        companyfacts = bootstrap.companyfacts
+        financials_fingerprint = bootstrap.financials_fingerprint
+        market_profile = bootstrap.market_profile
 
         enriched_identity = CompanyIdentity(
             cik=company_identity.cik,
@@ -3118,8 +3201,10 @@ def run_refresh_job(
     job_id: str | None = None,
     *,
     claim_token: str | None = None,
+    service: EdgarIngestionService | None = None,
 ) -> dict[str, Any]:
-    service = EdgarIngestionService()
+    active_service = service or EdgarIngestionService()
+    owns_service = service is None
     reporter = JobReporter(job_id, claim_token=claim_token)
     emit_structured_log(
         logger,
@@ -3130,7 +3215,7 @@ def run_refresh_job(
         trace_id=job_id,
     )
     try:
-        result = service.refresh_company(identifier=identifier, force=force, reporter=reporter)
+        result = active_service.refresh_company(identifier=identifier, force=force, reporter=reporter)
         get_engine()
         with SessionLocal() as session:
             company = _find_local_company(session, identifier)
@@ -3190,7 +3275,8 @@ def run_refresh_job(
         reporter.fail(str(exc))
         raise
     finally:
-        service.close()
+        if owns_service:
+            active_service.close()
 
 
 def _dataset_payload_hash(session: Session, company_id: int, dataset: str) -> str | None:

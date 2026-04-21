@@ -102,6 +102,7 @@ class Settings:
     market_max_retries: int = _int_env("MARKET_MAX_RETRIES", 3, minimum=1)
     market_retry_backoff_seconds: float = _float_env("MARKET_RETRY_BACKOFF_SECONDS", 0.5)
     market_history_overlap_days: int = _int_env("MARKET_HISTORY_OVERLAP_DAYS", 7, minimum=1)
+    market_profile_cache_ttl_seconds: int = _int_env("MARKET_PROFILE_CACHE_TTL_SECONDS", 21600, minimum=0)
     treasury_yield_curve_csv_url: str = os.getenv(
         "TREASURY_YIELD_CURVE_CSV_URL",
         "https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/all/all?type=daily_treasury_yield_curve&page&_format=csv",
@@ -127,6 +128,7 @@ class Settings:
     refresh_queue_block_seconds: float = _float_env("REFRESH_QUEUE_BLOCK_SECONDS", 15.0, minimum=1.0)
     refresh_recovery_interval_seconds: float = _float_env("REFRESH_RECOVERY_INTERVAL_SECONDS", 30.0, minimum=5.0)
     refresh_status_poll_seconds: float = _float_env("REFRESH_STATUS_POLL_SECONDS", 5.0, minimum=0.1)
+    refresh_aux_io_max_workers: int = _int_env("REFRESH_AUX_IO_MAX_WORKERS", 2, minimum=1)
     hot_response_cache_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1)
     hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
     hot_response_cache_namespace: str = os.getenv("HOT_RESPONSE_CACHE_NAMESPACE", "ft:hot-cache").strip() or "ft:hot-cache"

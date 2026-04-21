@@ -241,10 +241,12 @@ class SharedStatusBroker:
         *,
         subscriber_queue_size: int = 200,
         poll_interval_seconds: float = settings.refresh_status_poll_seconds,
+        recovery_interval_seconds: float = settings.refresh_recovery_interval_seconds,
         recovery_batch_size: int = 10,
     ) -> None:
         self._subscriber_queue_size = subscriber_queue_size
         self._poll_interval_seconds = poll_interval_seconds
+        self._recovery_interval_seconds = max(poll_interval_seconds, recovery_interval_seconds)
         self._recovery_batch_size = recovery_batch_size
         self._lease_duration = timedelta(seconds=settings.refresh_lock_timeout_seconds)
         self._redis = self._build_sync_redis_client()
@@ -638,6 +640,8 @@ class SharedStatusBroker:
 
         pubsub = self._redis_async.pubsub()
         channel = self._event_channel(job_id)
+        loop = asyncio.get_running_loop()
+        next_recovery_at = loop.time() + self._recovery_interval_seconds
         try:
             await pubsub.subscribe(channel)
             while not stop_event.is_set():
@@ -648,22 +652,42 @@ class SharedStatusBroker:
                     return
 
                 event = _job_event_from_pubsub(message)
-                if event is not None and event.sequence > last_sequence:
-                    last_sequence = event.sequence
-                    _safe_put_nowait(queue, event)
-                    if event.status in TERMINAL_JOB_STATES:
-                        return
+                if event is not None:
+                    if event.sequence > last_sequence + 1:
+                        last_sequence, saw_terminal = await self._emit_async_events_since(
+                            job_id,
+                            queue,
+                            after_sequence=last_sequence,
+                        )
+                        if saw_terminal:
+                            return
+
+                    if event.sequence > last_sequence:
+                        last_sequence = event.sequence
+                        _safe_put_nowait(queue, event)
+                        if event.status in TERMINAL_JOB_STATES:
+                            return
+
+                    next_recovery_at = loop.time() + self._recovery_interval_seconds
                     continue
 
+                if loop.time() < next_recovery_at:
+                    continue
+
+                next_recovery_at = loop.time() + self._recovery_interval_seconds
                 snapshot = await self._async_job_snapshot(job_id)
                 if snapshot is None:
                     return
 
                 status, event_sequence = snapshot
                 if event_sequence > last_sequence:
-                    for missed_event in await self.async_list_events(job_id, after_sequence=last_sequence):
-                        last_sequence = missed_event.sequence
-                        _safe_put_nowait(queue, missed_event)
+                    last_sequence, saw_terminal = await self._emit_async_events_since(
+                        job_id,
+                        queue,
+                        after_sequence=last_sequence,
+                    )
+                    if saw_terminal:
+                        return
                 if status in TERMINAL_JOB_STATES and last_sequence >= event_sequence:
                     return
         except asyncio.CancelledError:
@@ -710,6 +734,25 @@ class SharedStatusBroker:
             return await self._run_async(lambda session: self._job_snapshot_in_session(session, job_id))
         except SQLAlchemyError:
             return None
+
+    async def _emit_async_events_since(
+        self,
+        job_id: str,
+        queue: asyncio.Queue[JobEvent],
+        *,
+        after_sequence: int,
+    ) -> tuple[int, bool]:
+        last_sequence = after_sequence
+        events = await self.async_list_events(job_id, after_sequence=after_sequence)
+        for event in events:
+            if event.sequence <= last_sequence:
+                continue
+            last_sequence = event.sequence
+            _safe_put_nowait(queue, event)
+            if event.status in TERMINAL_JOB_STATES:
+                return last_sequence, True
+
+        return last_sequence, False
 
     def _record_event(
         self,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from scripts.benchmark_refresh_bootstrap_parallelism import benchmark_refresh_bootstrap_parallelism
+from scripts.benchmark_incremental_price_refresh import benchmark_incremental_price_refresh
 from scripts.benchmark_hot_endpoints import build_cases
+from scripts.benchmark_market_profile_cache import benchmark_market_profile_cache
 from scripts.benchmark_model_computation import benchmark_models, build_benchmark_dataset
+from scripts.benchmark_refresh_service_reuse import benchmark_refresh_service_reuse
 from scripts.run_performance_regression_gate import build_baseline_payload, evaluate_summary_against_baseline
 
 
@@ -28,6 +32,59 @@ def test_model_benchmark_returns_latency_summary_and_status() -> None:
         assert result["latency_ms"]["min"] >= 0
         assert result["latency_ms"]["p50"] >= 0
         assert result["model_status"] in {"supported", "partial", "proxy", "insufficient_data", "unsupported"}
+
+
+def test_incremental_price_refresh_benchmark_reports_noop_and_write_paths() -> None:
+    payload = benchmark_incremental_price_refresh(rounds=2, bar_count=4)
+
+    assert payload["rounds"] == 2
+    assert payload["bar_count"] == 4
+    assert {result["name"] for result in payload["results"]} == {
+        "always_write_unchanged_tail",
+        "no_op_unchanged_tail",
+        "changed_tail_write",
+    }
+    for result in payload["results"]:
+        assert result["latency_ms"]["avg"] >= 0
+        assert result["execute_count"]["min"] >= 1
+
+
+def test_market_profile_cache_benchmark_reports_request_reduction() -> None:
+    payload = benchmark_market_profile_cache(rounds=5, ttl_seconds=3600)
+
+    assert payload["rounds"] == 5
+    assert payload["ttl_seconds"] == 3600
+    assert {result["name"] for result in payload["results"]} == {"uncached", "cached"}
+    result_by_name = {result["name"]: result for result in payload["results"]}
+    assert result_by_name["uncached"]["request_count"] == 5
+    assert result_by_name["cached"]["request_count"] == 1
+    assert result_by_name["cached"]["request_reduction_percent"] > 0
+
+
+def test_refresh_service_reuse_benchmark_reports_construction_reduction() -> None:
+    payload = benchmark_refresh_service_reuse(rounds=5)
+
+    assert payload["rounds"] == 5
+    assert {result["name"] for result in payload["results"]} == {
+        "fresh_service_per_job",
+        "reused_service_for_burst",
+    }
+    result_by_name = {result["name"]: result for result in payload["results"]}
+    assert result_by_name["fresh_service_per_job"]["service_constructions"] == 5
+    assert result_by_name["reused_service_for_burst"]["service_constructions"] == 1
+    assert result_by_name["reused_service_for_burst"]["latency_ms_per_job_equivalent"] >= 0
+
+
+def test_refresh_bootstrap_parallelism_benchmark_reports_serial_and_parallel_paths() -> None:
+    payload = benchmark_refresh_bootstrap_parallelism(rounds=2)
+
+    assert payload["rounds"] == 2
+    assert {result["name"] for result in payload["results"]} == {
+        "serial_market_profile_lookup",
+        "parallel_market_profile_prefetch",
+    }
+    for result in payload["results"]:
+        assert result["latency_ms"]["avg"] >= 0
 
 
 def test_performance_regression_baseline_builder_tracks_hot_routes_and_brief_budget() -> None:
