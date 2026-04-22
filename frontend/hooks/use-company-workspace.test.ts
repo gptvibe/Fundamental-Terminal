@@ -106,6 +106,10 @@ function buildResearchBriefResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildApiError(status: number, statusText = "Error") {
+  return new Error(`API request failed: ${status} ${statusText}`);
+}
+
 describe("useCompanyWorkspace", () => {
   beforeEach(() => {
     mockUseJobStream.mockReturnValue({
@@ -113,7 +117,7 @@ describe("useCompanyWorkspace", () => {
       connectionState: "open",
       lastEvent: null,
     });
-    vi.mocked(getCompanyWorkspaceBootstrap).mockRejectedValue(new Error("bootstrap unavailable"));
+    vi.mocked(getCompanyWorkspaceBootstrap).mockRejectedValue(buildApiError(404, "Not Found"));
   });
 
   afterEach(() => {
@@ -165,6 +169,145 @@ describe("useCompanyWorkspace", () => {
     expect(fetchOverview).not.toHaveBeenCalled();
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
+  });
+
+  it("falls back to overview for expected bootstrap compatibility errors", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchOverview.mockResolvedValue({
+      financials: buildFinancialsResponse({
+        company: {
+          ticker: "RKLB",
+          name: "Rocket Lab Corp",
+          sector: "Space",
+          market_sector: "Space",
+          last_checked: "2026-03-31T00:00:00Z",
+          cache_state: "fresh",
+        },
+      }),
+      brief: buildResearchBriefResponse(),
+    } as never);
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchOverview).toHaveBeenCalledWith("RKLB", { financialsView: "core_segments" });
+    expect(fetchFinancials).not.toHaveBeenCalled();
+    expect(result.current.error).toBeNull();
+    expect(result.current.briefData?.company?.ticker).toBe("RKLB");
+  });
+
+  it("does not fall back on transient bootstrap backend errors", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(buildApiError(500, "Internal Server Error"));
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchOverview).not.toHaveBeenCalled();
+    expect(fetchFinancials).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("API request failed: 500 Internal Server Error");
+  });
+
+  it("does not fall back on bootstrap timeout or network errors", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(new Error("net::ERR_TIMED_OUT"));
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchOverview).not.toHaveBeenCalled();
+    expect(fetchFinancials).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("net::ERR_TIMED_OUT");
+  });
+
+  it("falls back from overview to financials only for expected compatibility errors", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchOverview.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchFinancials.mockResolvedValue(
+      buildFinancialsResponse({
+        company: {
+          ticker: "RKLB",
+          name: "Rocket Lab Corp",
+          sector: "Space",
+          market_sector: "Space",
+          last_checked: "2026-03-31T00:00:00Z",
+          cache_state: "fresh",
+        },
+        refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
+      }) as never
+    );
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchOverview).toHaveBeenCalledWith("RKLB", { financialsView: "core_segments" });
+    expect(fetchFinancials).toHaveBeenCalledWith("RKLB", { view: "core_segments" });
+    expect(result.current.error).toBeNull();
+    expect(result.current.briefData).toBeNull();
+  });
+
+  it("does not fall back from overview to financials on transient legacy errors", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchOverview.mockRejectedValue(buildApiError(500, "Internal Server Error"));
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchFinancials).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("API request failed: 500 Internal Server Error");
   });
 
   it("invalidates ticker read cache before reloading after a terminal job event", async () => {

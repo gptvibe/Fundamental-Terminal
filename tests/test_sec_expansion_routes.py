@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from app.services.proxy_parser import ExecCompRow
 
@@ -31,6 +32,36 @@ def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
         market_industry="Consumer Electronics",
     )
     return SimpleNamespace(company=company, cache_state="fresh", last_checked=datetime.now(timezone.utc))
+
+
+def _company_payload(snapshot) -> CompanyPayload:
+    return CompanyPayload(
+        ticker=snapshot.company.ticker,
+        cik=snapshot.company.cik,
+        name=snapshot.company.name,
+        sector=snapshot.company.sector,
+        market_sector=snapshot.company.market_sector,
+        market_industry=snapshot.company.market_industry,
+        cache_state=snapshot.cache_state,
+        last_checked=snapshot.last_checked,
+    )
+
+
+def _financials_payload(snapshot) -> CompanyFinancialsResponse:
+    return CompanyFinancialsResponse(
+        company=_company_payload(snapshot),
+        financials=[],
+        price_history=[],
+        refresh=RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None),
+        diagnostics=DataQualityDiagnosticsPayload(),
+    )
+
+
+def _brief_payload(snapshot):
+    return main_module._empty_company_brief_response(
+        refresh=RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None),
+        as_of=None,
+    ).model_copy(update={"company": _company_payload(snapshot)})
 
 
 class _FakeEdgarClient:
@@ -447,6 +478,154 @@ def test_financials_route_serves_raw_cached_json_on_fresh_hit(monkeypatch):
     assert response.status_code == 200
     assert response.content == expected_bytes
     assert response.headers["content-type"].startswith("application/json")
+
+
+def test_company_overview_route_populates_hot_cache_on_cold_miss_and_reuses_it_when_warm(monkeypatch):
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    shared_hot_response_cache.clear_sync()
+    snapshot = _snapshot()
+    build_calls = {"financials": 0, "brief": 0}
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+
+    def _build_financials(*_args, **_kwargs):
+        build_calls["financials"] += 1
+        return _financials_payload(snapshot)
+
+    def _build_brief(*_args, **_kwargs):
+        build_calls["brief"] += 1
+        return _brief_payload(snapshot)
+
+    monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
+    monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/overview?financials_view=core_segments")
+    assert first.status_code == 200
+
+    def _raise_model_validate(_cls, *_args, **_kwargs):
+        raise AssertionError("fresh overview cache hits should bypass model validation")
+
+    monkeypatch.setattr(main_module.CompanyOverviewResponse, "model_validate", classmethod(_raise_model_validate))
+    second = client.get("/api/companies/AAPL/overview?financials_view=core_segments")
+
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert build_calls == {"financials": 1, "brief": 1}
+
+
+def test_company_overview_route_ignores_stale_hot_cache_and_rebuilds_payload(monkeypatch):
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    shared_hot_response_cache.clear_sync()
+    snapshot = _snapshot()
+    build_calls = {"financials": 0, "brief": 0}
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(
+        main_module,
+        "_build_company_financials_response",
+        lambda *_args, **_kwargs: build_calls.__setitem__("financials", build_calls["financials"] + 1) or _financials_payload(snapshot),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_build_company_research_brief_response",
+        lambda *_args, **_kwargs: build_calls.__setitem__("brief", build_calls["brief"] + 1) or _brief_payload(snapshot),
+    )
+
+    stale_payload = main_module.CompanyOverviewResponse(
+        company=CompanyPayload(
+            ticker="AAPL",
+            cik="0000320193",
+            name="Cached Apple Inc.",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Consumer Electronics",
+            cache_state="fresh",
+            last_checked=datetime(2026, 3, 27, 18, 0, tzinfo=timezone.utc),
+        ),
+        financials=_financials_payload(snapshot),
+        brief=_brief_payload(snapshot),
+    )
+    shared_hot_response_cache.store_sync(
+        "overview:AAPL:view=core_segments:asof=latest",
+        route="overview",
+        payload=stale_payload.model_dump(mode="json"),
+        tags=main_module._build_hot_cache_tags(
+            ticker="AAPL",
+            datasets=("financials", "prices", "company_research_brief"),
+            schema_versions=(main_module.HOT_CACHE_SCHEMA_VERSIONS["overview"],),
+            as_of="latest",
+        ),
+    )
+    entry = shared_hot_response_cache._local_entries["overview:AAPL:view=core_segments:asof=latest"]
+    entry.fresh_until = time.time() - 1
+    entry.stale_until = time.time() + 60
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/overview?financials_view=core_segments")
+
+    assert response.status_code == 200
+    assert response.json()["company"]["name"] == "Apple Inc."
+    assert build_calls == {"financials": 1, "brief": 1}
+
+
+def test_company_workspace_bootstrap_route_populates_hot_cache_on_cold_miss_and_reuses_it_when_warm(monkeypatch):
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    shared_hot_response_cache.clear_sync()
+    snapshot = _snapshot()
+    build_calls = {"financials": 0, "brief": 0}
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+
+    def _build_financials(*_args, **_kwargs):
+        build_calls["financials"] += 1
+        return _financials_payload(snapshot)
+
+    def _build_brief(*_args, **_kwargs):
+        build_calls["brief"] += 1
+        return _brief_payload(snapshot)
+
+    monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
+    monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
+    assert first.status_code == 200
+
+    def _raise_model_validate(_cls, *_args, **_kwargs):
+        raise AssertionError("fresh workspace bootstrap cache hits should bypass model validation")
+
+    monkeypatch.setattr(main_module.CompanyWorkspaceBootstrapResponse, "model_validate", classmethod(_raise_model_validate))
+    second = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
+
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert build_calls == {"financials": 1, "brief": 1}
+
+
+def test_company_workspace_bootstrap_route_keeps_schema_compatible_when_served_from_hot_cache(monkeypatch):
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    shared_hot_response_cache.clear_sync()
+    snapshot = _snapshot()
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(main_module, "_build_company_financials_response", lambda *_args, **_kwargs: _financials_payload(snapshot))
+    monkeypatch.setattr(main_module, "_build_company_research_brief_response", lambda *_args, **_kwargs: _brief_payload(snapshot))
+
+    client = TestClient(app)
+    first = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
+    second = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert list(second.json()) == [
+        "company",
+        "financials",
+        "brief",
+        "earnings_summary",
+        "insider_trades",
+        "institutional_holdings",
+        "errors",
+    ]
 
 
 def test_peers_route_passes_explicit_peer_overrides(monkeypatch):

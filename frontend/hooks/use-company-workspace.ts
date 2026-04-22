@@ -52,6 +52,8 @@ interface LoadCompanyWorkspaceDataResult {
   activeJobId: string | null;
 }
 
+const COMPATIBILITY_FALLBACK_STATUSES = new Set([404, 405, 501]);
+
 export function useCompanyWorkspace(
   ticker: string,
   {
@@ -369,8 +371,10 @@ async function loadCompanyWorkspaceData(
       includeEarningsSummary: options.includeEarningsSummary,
     });
     return mapBootstrapToWorkspaceResult(bootstrap);
-  } catch {
-    // Fall back to existing multi-request behavior to preserve compatibility during rollout.
+  } catch (error) {
+    if (!shouldUseCompatibilityFallback(error)) {
+      throw error;
+    }
   }
 
   return loadCompanyWorkspaceDataLegacy(ticker, options, financialsView);
@@ -407,7 +411,10 @@ async function loadCompanyWorkspaceDataLegacy(
       const overviewData = await getCompanyOverview(ticker, { financialsView });
       financialData = overviewData.financials;
       briefData = overviewData.brief;
-    } catch {
+    } catch (error) {
+      if (!shouldUseCompatibilityFallback(error)) {
+        throw error;
+      }
       financialData = await getCompanyFinancials(ticker, { view: financialsView });
     }
   } else {
@@ -458,4 +465,23 @@ async function loadCompanyWorkspaceDataLegacy(
 
 function asErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function shouldUseCompatibilityFallback(error: unknown): boolean {
+  const status = getApiErrorStatus(error);
+  return status != null && COMPATIBILITY_FALLBACK_STATUSES.has(status);
+}
+
+function getApiErrorStatus(error: unknown): number | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+
+  const match = /^API request failed: (\d{3})\b/.exec(error.message);
+  if (!match) {
+    return null;
+  }
+
+  const status = Number.parseInt(match[1], 10);
+  return Number.isFinite(status) ? status : null;
 }

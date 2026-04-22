@@ -81,8 +81,10 @@ The default compose file pulls the published images from Docker Hub.
 
 ```bash
 cp .env.example .env
+# Set APP_IMAGE_TAG to one published release tag, for example v1.0.3.
 docker compose pull
 docker compose up -d
+python scripts/verify_deployment_compat.py --backend-url http://127.0.0.1:8000 --frontend-url http://127.0.0.1:3000 --ticker AAPL
 ```
 
 After startup:
@@ -91,16 +93,15 @@ After startup:
 - Backend API: `http://127.0.0.1:8000`
 - API docs: `http://127.0.0.1:8000/docs`
 
-The default images are:
+The deploy-time image pattern is:
 
-- `gptvibe/fundamentalterminal:backend-latest`
-- `gptvibe/fundamentalterminal:frontend-latest`
+- `gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG}`
+- `gptvibe/fundamentalterminal:frontend-${APP_IMAGE_TAG}`
 
-To pin a specific release, set these in `.env`:
+Use one shared tag suffix in `.env` to keep frontend, backend, and the data-fetcher on the same published revision:
 
 ```bash
-BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.3
-FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.3
+APP_IMAGE_TAG=v1.0.3
 ```
 
 To build from your checked-out source instead of pulling published images:
@@ -108,6 +109,27 @@ To build from your checked-out source instead of pulling published images:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
+
+For deployments around 1 GB RAM, add the dedicated small-host override so the worker competes less aggressively with API traffic:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.small-host.yml up -d
+```
+
+For local source builds:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.small-host.yml up --build -d
+```
+
+The small-host override keeps the main compose defaults unchanged for larger machines, but applies these safer worker settings on constrained hosts:
+
+- backend and worker DB pools pinned to `5` with `5` overflow
+- idle queue polling relaxed to `5s`
+- worker startup delayed by `120s`
+- scheduled refresh scope narrowed to `AAPL MSFT`
+- worker-driven macro refresh disabled
+- optional S&P 500 prewarm capped to `core` mode with a `25` ticker limit
 
 ## Local Development
 
@@ -230,6 +252,7 @@ python scripts/run_model_evaluation.py
 - [docs/data-provenance.md](docs/data-provenance.md)
 - [docs/model-evaluation-harness.md](docs/model-evaluation-harness.md)
 - [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md)
+- [docs/release-process.md](docs/release-process.md)
 - [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md)
 - [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md)
 
@@ -237,8 +260,9 @@ python scripts/run_model_evaluation.py
 
 The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes Docker images:
 
-- Push to `main` updates `backend-latest` and `frontend-latest`.
+- Push to `main` publishes commit-pinned images `backend-sha-<gitsha>` and `frontend-sha-<gitsha>`.
 - Push a version tag like `v1.0.3` publishes `backend-v1.0.3` and `frontend-v1.0.3`.
+- The publish workflow now runs a compatibility smoke check against the published frontend/backend image pair, including `/api/companies/{ticker}/workspace-bootstrap`.
 
 Required repository secrets:
 

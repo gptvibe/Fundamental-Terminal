@@ -503,8 +503,10 @@ def test_company_route_hot_cache_keys_include_financials_view_when_requested():
     )
 
     assert main_module._company_route_hot_cache_keys(financials_request) == ["financials:AAPL:view=core:asof=latest"]
-    assert main_module._company_route_hot_cache_keys(overview_request) == ["financials:AAPL:view=core_segments:asof=latest"]
-    assert main_module._company_route_hot_cache_keys(bootstrap_request) == ["financials:AAPL:view=core_segments:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(overview_request) == ["overview:AAPL:view=core_segments:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(bootstrap_request) == [
+        "workspace_bootstrap:AAPL:view=core_segments:asof=latest:overview=1:insiders=0:institutional=0:earnings=0"
+    ]
 
 
 def test_company_route_hot_cache_keys_bypass_invalid_as_of():

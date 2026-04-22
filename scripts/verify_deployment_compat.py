@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from dataclasses import dataclass
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
+
+@dataclass(frozen=True)
+class JsonCheck:
+    label: str
+    url: str
+    required_keys: tuple[str, ...]
+    nested_required_keys: dict[str, tuple[str, ...]]
+
+
+def _http_get(url: str, *, timeout: float) -> tuple[int, bytes, str | None]:
+    request = Request(url=url, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type")
+            return int(response.status), body, content_type
+    except HTTPError as exc:
+        return int(exc.code), exc.read(), exc.headers.get("Content-Type")
+
+
+def _load_json(url: str, *, timeout: float) -> tuple[int, Any]:
+    status, body, _content_type = _http_get(url, timeout=timeout)
+    payload = json.loads(body.decode("utf-8"))
+    return status, payload
+
+
+def _wait_for_json(url: str, *, timeout: float, ready: callable[[Any], bool]) -> None:
+    deadline = time.time() + timeout
+    last_error: str | None = None
+    while time.time() < deadline:
+        try:
+            status, payload = _load_json(url, timeout=min(15.0, timeout))
+            if status == 200 and ready(payload):
+                return
+            last_error = f"unexpected response {status}: {payload!r}"
+        except (URLError, ValueError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+        time.sleep(2.0)
+    raise RuntimeError(f"Timed out waiting for {url}. Last error: {last_error}")
+
+
+def _wait_for_frontend(url: str, *, timeout: float) -> None:
+    deadline = time.time() + timeout
+    last_error: str | None = None
+    while time.time() < deadline:
+        try:
+            status, body, content_type = _http_get(url, timeout=min(15.0, timeout))
+            if status == 200 and body and (content_type or "").startswith("text/html"):
+                return
+            last_error = f"unexpected response {status} content-type={content_type!r}"
+        except URLError as exc:
+            last_error = str(exc)
+        time.sleep(2.0)
+    raise RuntimeError(f"Timed out waiting for {url}. Last error: {last_error}")
+
+
+def _assert_keys(label: str, payload: Any, required_keys: tuple[str, ...], nested_required_keys: dict[str, tuple[str, ...]]) -> None:
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{label} did not return a JSON object")
+
+    missing = [key for key in required_keys if key not in payload]
+    if missing:
+        raise RuntimeError(f"{label} missing top-level keys: {', '.join(missing)}")
+
+    for key, nested_keys in nested_required_keys.items():
+        nested_payload = payload.get(key)
+        if not isinstance(nested_payload, dict):
+            raise RuntimeError(f"{label} expected {key!r} to be an object")
+        nested_missing = [nested_key for nested_key in nested_keys if nested_key not in nested_payload]
+        if nested_missing:
+            raise RuntimeError(f"{label} missing nested keys under {key!r}: {', '.join(nested_missing)}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify deployed frontend/backend image compatibility")
+    parser.add_argument("--backend-url", default="http://127.0.0.1:8000", help="Backend base URL")
+    parser.add_argument("--frontend-url", default="http://127.0.0.1:3000", help="Frontend base URL")
+    parser.add_argument("--ticker", default="AAPL", help="Ticker symbol used for compatibility probes")
+    parser.add_argument("--timeout", type=float, default=30.0, help="Per-request timeout in seconds")
+    parser.add_argument("--wait-timeout", type=float, default=180.0, help="Startup wait timeout in seconds")
+    parser.add_argument("--skip-frontend", action="store_true", help="Skip frontend HTML reachability check")
+    args = parser.parse_args()
+
+    backend_url = args.backend_url.rstrip("/")
+    frontend_url = args.frontend_url.rstrip("/")
+    ticker = args.ticker.upper().strip()
+
+    _wait_for_json(
+        f"{backend_url}/health",
+        timeout=args.wait_timeout,
+        ready=lambda payload: isinstance(payload, dict) and payload.get("status") == "ok",
+    )
+
+    if not args.skip_frontend:
+        _wait_for_frontend(f"{frontend_url}/company/{ticker}", timeout=args.wait_timeout)
+
+    checks = [
+        JsonCheck(
+            label="company overview",
+            url=f"{backend_url}/api/companies/{ticker}/overview",
+            required_keys=("company", "financials", "brief"),
+            nested_required_keys={"financials": ("company", "financials", "price_history", "refresh")},
+        ),
+        JsonCheck(
+            label="workspace bootstrap",
+            url=(
+                f"{backend_url}/api/companies/{ticker}/workspace-bootstrap?"
+                + urlencode(
+                    {
+                        "include_overview_brief": "true",
+                        "include_earnings_summary": "true",
+                        "include_insiders": "true",
+                        "include_institutional": "true",
+                    }
+                )
+            ),
+            required_keys=(
+                "company",
+                "financials",
+                "brief",
+                "earnings_summary",
+                "insider_trades",
+                "institutional_holdings",
+                "errors",
+            ),
+            nested_required_keys={"financials": ("company", "financials", "price_history", "refresh"), "errors": ()},
+        ),
+        JsonCheck(
+            label="research brief",
+            url=f"{backend_url}/api/companies/{ticker}/brief",
+            required_keys=(
+                "company",
+                "refresh",
+                "build_state",
+                "build_status",
+                "snapshot",
+                "what_changed",
+                "business_quality",
+                "capital_and_risk",
+                "valuation",
+                "monitor",
+            ),
+            nested_required_keys={"refresh": ("job_id", "triggered", "reason", "ticker")},
+        ),
+    ]
+
+    for check in checks:
+        status, payload = _load_json(check.url, timeout=args.timeout)
+        if status != 200:
+            raise RuntimeError(f"{check.label} returned HTTP {status}")
+        _assert_keys(check.label, payload, check.required_keys, check.nested_required_keys)
+
+    if not args.skip_frontend:
+        status, _body, content_type = _http_get(f"{frontend_url}/company/{ticker}", timeout=args.timeout)
+        if status != 200:
+            raise RuntimeError(f"frontend company page returned HTTP {status}")
+        if not (content_type or "").startswith("text/html"):
+            raise RuntimeError(f"frontend company page returned unexpected content type {content_type!r}")
+
+    print(
+        json.dumps(
+            {
+                "backend_url": backend_url,
+                "frontend_url": None if args.skip_frontend else frontend_url,
+                "ticker": ticker,
+                "status": "ok",
+                "verified_routes": [check.url for check in checks],
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

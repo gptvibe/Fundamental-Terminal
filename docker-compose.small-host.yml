@@ -1,0 +1,24 @@
+services:
+  backend:
+    environment:
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 5
+      DB_POOL_TIMEOUT_SECONDS: 30
+
+  data-fetcher:
+    environment:
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 5
+      DB_POOL_TIMEOUT_SECONDS: 30
+      REFRESH_QUEUE_POLL_SECONDS: 5
+      DATA_FETCHER_STARTUP_DELAY_SECONDS: 120
+      WORKER_IDENTIFIERS: AAPL MSFT
+      DATA_FETCHER_RUN_MACRO_WORKER: "false"
+
+  sp500-prewarm:
+    environment:
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 5
+      DB_POOL_TIMEOUT_SECONDS: 30
+      SP500_PREWARM_MODE: core
+      SP500_PREWARM_LIMIT: 25

@@ -37,7 +37,7 @@ services:
       - fundamental-terminal-net
 
   backend:
-    image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
+    image: gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG:-__set_APP_IMAGE_TAG__}
     container_name: fundamental-terminal-backend
     pull_policy: always
     init: true
@@ -73,7 +73,7 @@ services:
       - fundamental-terminal-net
 
   data-fetcher:
-    image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
+    image: gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG:-__set_APP_IMAGE_TAG__}
     container_name: fundamental-terminal-data-fetcher
     pull_policy: always
     init: true
@@ -103,7 +103,7 @@ services:
       - fundamental-terminal-net
 
   sp500-prewarm:
-    image: ${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}
+    image: gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG:-__set_APP_IMAGE_TAG__}
     container_name: fundamental-terminal-sp500-prewarm
     pull_policy: always
     command: ["/bin/sh", "/app/docker/backend/start-prewarm.sh"]
@@ -131,7 +131,7 @@ services:
       - fundamental-terminal-net
 
   frontend:
-    image: ${FRONTEND_IMAGE:-gptvibe/fundamentalterminal:frontend-latest}
+    image: gptvibe/fundamentalterminal:frontend-${APP_IMAGE_TAG:-__set_APP_IMAGE_TAG__}
     container_name: fundamental-terminal-frontend
     pull_policy: always
     restart: unless-stopped

@@ -242,6 +242,16 @@ def _resolved_company_financials_controls(
     return {"as_of": normalized_as_of, "view": normalized_view}, True
 
 
+def _normalized_company_flag(request: Request, name: str) -> tuple[bool | None, bool]:
+    try:
+        raw_value = read_singleton_query_param(request, name)
+    except DuplicateSingletonQueryParamError:
+        return None, False
+    if raw_value is None:
+        return False, True
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}, True
+
+
 def _company_route_hot_cache_keys(request: Request) -> list[str]:
     path = request.url.path
     if not path.startswith("/api/companies/"):
@@ -271,13 +281,41 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
         financial_controls, controls_are_valid = _resolved_company_financials_controls(request, view_param_name="financials_view")
         if not controls_are_valid or financial_controls is None:
             return []
-        return [f"financials:{normalized_ticker}:view={financial_controls['view']}:asof={financial_controls['as_of']}"]
+        build_overview_key = globals().get("_company_overview_hot_key")
+        if callable(build_overview_key):
+            return [
+                build_overview_key(
+                    normalized_ticker,
+                    financials_view=financial_controls["view"],
+                    as_of=financial_controls["as_of"],
+                )
+            ]
+        return []
 
     if route_name == "workspace-bootstrap":
         financial_controls, controls_are_valid = _resolved_company_financials_controls(request, view_param_name="financials_view")
         if not controls_are_valid or financial_controls is None:
             return []
-        return [f"financials:{normalized_ticker}:view={financial_controls['view']}:asof={financial_controls['as_of']}"]
+        include_overview_brief, overview_is_valid = _normalized_company_flag(request, "include_overview_brief")
+        include_insiders, insiders_are_valid = _normalized_company_flag(request, "include_insiders")
+        include_institutional, institutional_is_valid = _normalized_company_flag(request, "include_institutional")
+        include_earnings_summary, earnings_is_valid = _normalized_company_flag(request, "include_earnings_summary")
+        if not all((overview_is_valid, insiders_are_valid, institutional_is_valid, earnings_is_valid)):
+            return []
+        build_workspace_key = globals().get("_company_workspace_bootstrap_hot_key")
+        if callable(build_workspace_key):
+            return [
+                build_workspace_key(
+                    normalized_ticker,
+                    financials_view=financial_controls["view"],
+                    as_of=financial_controls["as_of"],
+                    include_overview_brief=bool(include_overview_brief),
+                    include_insiders=bool(include_insiders),
+                    include_institutional=bool(include_institutional),
+                    include_earnings_summary=bool(include_earnings_summary),
+                )
+            ]
+        return []
 
     if route_name == "brief":
         return [f"financials:{normalized_ticker}:view=full:asof={normalized_as_of}"]

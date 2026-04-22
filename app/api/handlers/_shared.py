@@ -237,6 +237,8 @@ HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
     "resolve": "resolve-response-v1",
     "charts": "company-charts-dashboard-response-v1",
     "financials": "financials-response-v1",
+    "overview": "overview-response-v1",
+    "workspace_bootstrap": "workspace-bootstrap-response-v1",
     "capital_structure": "capital-structure-response-v1",
     "models": "models-response-v1",
     "oil_scenario_overlay": "oil-scenario-overlay-response-v1",
@@ -703,6 +705,7 @@ def company_overview(
     ticker: str,
     background_tasks: BackgroundTasks,
     request: Request = None,
+    http_response: Response = None,
     financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -710,10 +713,19 @@ def company_overview(
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     requested_financials_view = _read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
-    parsed_as_of, normalized_financials_view, _normalized_as_of = _normalize_company_financials_query_controls(
+    parsed_as_of, normalized_financials_view, normalized_as_of = _normalize_company_financials_query_controls(
         requested_as_of=requested_as_of,
         view=requested_financials_view,
     )
+    hot_key = _company_overview_hot_key(
+        normalized_ticker,
+        financials_view=normalized_financials_view,
+        as_of=normalized_as_of,
+    )
+    cached_hot = shared_hot_response_cache.get_sync(hot_key, route="overview") if request is not None and http_response is not None else None
+    if cached_hot is not None and cached_hot.is_fresh:
+        return _hot_cache_json_response(request, http_response, cached_hot)
+
     snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
     financials = _build_company_financials_response(
         session,
@@ -732,11 +744,22 @@ def company_overview(
         parsed_as_of=parsed_as_of,
         snapshot=snapshot,
     )
-    return CompanyOverviewResponse(
+    response = CompanyOverviewResponse(
         company=financials.company or brief.company,
         financials=financials,
         brief=brief,
     )
+    _store_hot_cached_payload_sync(
+        hot_key,
+        response,
+        tags=_build_hot_cache_tags(
+            ticker=normalized_ticker,
+            datasets=("financials", "prices", "company_research_brief"),
+            schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["overview"],),
+            as_of=normalized_as_of,
+        ),
+    )
+    return response
 
 
 @app.get("/api/companies/{ticker}/workspace-bootstrap", response_model=CompanyWorkspaceBootstrapResponse)
@@ -744,6 +767,7 @@ def company_workspace_bootstrap(
     ticker: str,
     background_tasks: BackgroundTasks,
     request: Request = None,
+    http_response: Response = None,
     include_overview_brief: bool = Query(default=False),
     include_insiders: bool = Query(default=False),
     include_institutional: bool = Query(default=False),
@@ -755,10 +779,26 @@ def company_workspace_bootstrap(
     normalized_ticker = _normalize_ticker(ticker)
     requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     requested_financials_view = _read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
-    parsed_as_of, normalized_financials_view, _normalized_as_of = _normalize_company_financials_query_controls(
+    parsed_as_of, normalized_financials_view, normalized_as_of = _normalize_company_financials_query_controls(
         requested_as_of=requested_as_of,
         view=requested_financials_view,
     )
+    hot_key = _company_workspace_bootstrap_hot_key(
+        normalized_ticker,
+        financials_view=normalized_financials_view,
+        as_of=normalized_as_of,
+        include_overview_brief=include_overview_brief,
+        include_insiders=include_insiders,
+        include_institutional=include_institutional,
+        include_earnings_summary=include_earnings_summary,
+    )
+    cached_hot = (
+        shared_hot_response_cache.get_sync(hot_key, route="workspace_bootstrap")
+        if request is not None and http_response is not None
+        else None
+    )
+    if cached_hot is not None and cached_hot.is_fresh:
+        return _hot_cache_json_response(request, http_response, cached_hot)
 
     brief: CompanyResearchBriefResponse | None = None
     errors = CompanyWorkspaceBootstrapErrorsPayload()
@@ -828,7 +868,7 @@ def company_workspace_bootstrap(
         except Exception as exc:
             errors.earnings_summary = str(exc) if str(exc) else "Unable to load earnings summary"
 
-    return CompanyWorkspaceBootstrapResponse(
+    response = CompanyWorkspaceBootstrapResponse(
         company=financials.company or brief.company if brief is not None else financials.company,
         financials=financials,
         brief=brief,
@@ -837,6 +877,26 @@ def company_workspace_bootstrap(
         institutional_holdings=institutional_holdings,
         errors=errors,
     )
+    workspace_datasets = ["financials", "prices"]
+    if include_overview_brief:
+        workspace_datasets.append("company_research_brief")
+    if include_insiders:
+        workspace_datasets.append("insiders")
+    if include_institutional:
+        workspace_datasets.append("institutional")
+    if include_earnings_summary:
+        workspace_datasets.append("earnings")
+    _store_hot_cached_payload_sync(
+        hot_key,
+        response,
+        tags=_build_hot_cache_tags(
+            ticker=normalized_ticker,
+            datasets=tuple(workspace_datasets),
+            schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["workspace_bootstrap"],),
+            as_of=normalized_as_of,
+        ),
+    )
+    return response
 
 
 @app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
@@ -5323,6 +5383,14 @@ async def _get_hot_cached_payload(key: str) -> HotCacheLookup | None:
     return await shared_hot_response_cache.get(key)
 
 
+def _store_hot_cached_payload_sync(key: str, payload: BaseModel, *, tags: tuple[str, ...] = ()) -> None:
+    serialized = payload.model_dump(mode="json")
+    if _is_company_missing_payload(serialized):
+        return
+
+    shared_hot_response_cache.store_sync(key, route=_hot_cache_route_name(key), payload=serialized, tags=tags)
+
+
 async def _store_hot_cached_payload(key: str, payload: BaseModel, *, tags: tuple[str, ...] = ()) -> None:
     serialized = payload.model_dump(mode="json")
     if _is_company_missing_payload(serialized):
@@ -5504,6 +5572,34 @@ async def _serialize_hot_cache_fill(fill: Any) -> tuple[dict[str, Any], bool]:
 def _hot_cache_route_name(key: str) -> str:
     prefix, _, _rest = key.partition(":")
     return prefix or "hot"
+
+
+def _company_overview_hot_key(
+    normalized_ticker: str,
+    *,
+    financials_view: str,
+    as_of: str,
+) -> str:
+    return f"overview:{normalized_ticker}:view={financials_view}:asof={as_of}"
+
+
+def _company_workspace_bootstrap_hot_key(
+    normalized_ticker: str,
+    *,
+    financials_view: str,
+    as_of: str,
+    include_overview_brief: bool,
+    include_insiders: bool,
+    include_institutional: bool,
+    include_earnings_summary: bool,
+) -> str:
+    return (
+        f"workspace_bootstrap:{normalized_ticker}:view={financials_view}:asof={as_of}"
+        f":overview={1 if include_overview_brief else 0}"
+        f":insiders={1 if include_insiders else 0}"
+        f":institutional={1 if include_institutional else 0}"
+        f":earnings={1 if include_earnings_summary else 0}"
+    )
 
 
 def _build_hot_cache_tags(

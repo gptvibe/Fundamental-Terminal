@@ -41,6 +41,7 @@ jobs:
           tests/test_sec_edgar_refresh_orchestrator.py
           tests/test_fetch_trigger_dedupe.py
           tests/test_api_route_inventory.py
+          tests/test_deployment_release_lock.py
           tests/test_model_evaluation_harness.py
           tests/test_benchmark_infrastructure.py
           tests/test_hot_endpoint_contracts.py

@@ -1,0 +1,464 @@
+{
+  "generatedAt": "2026-04-22T01:38:10.334Z",
+  "repoRoot": "C:\\Users\\fungk\\Desktop\\GitHub\\Fundamental-Terminal",
+  "note": "Current repo source-built Docker stack benchmarked from existing fundamental-terminal compose project. Public deployment could not be benchmarked because no authoritative live URL was discoverable from the repo.",
+  "normal": {
+    "endpoints": {
+      "financials": {
+        "cold": {
+          "status": 200,
+          "ms": 403.14,
+          "bytes": 1034897
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 14.75,
+            "p50": 19.11,
+            "p95": 23.95,
+            "max": 23.95,
+            "avg": 19.62
+          },
+          "bytesAvg": 1034897,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "overview": {
+        "cold": {
+          "status": 200,
+          "ms": 196.54,
+          "bytes": 1540177
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 228.73,
+            "p50": 8052.89,
+            "p95": 12662.46,
+            "max": 12662.46,
+            "avg": 7867.67
+          },
+          "bytesAvg": 1540177,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "workspace_bootstrap": {
+        "cold": {
+          "status": 200,
+          "ms": 10045.47,
+          "bytes": 1540324
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 7689.72,
+            "p50": 8594.57,
+            "p95": 10896.56,
+            "max": 10896.56,
+            "avg": 9063.55
+          },
+          "bytesAvg": 1540324,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "models": {
+        "cold": {
+          "status": 200,
+          "ms": 4003.03,
+          "bytes": 32042
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 3455.47,
+            "p50": 4019.04,
+            "p95": 5071.71,
+            "max": 5071.71,
+            "avg": 4313.06
+          },
+          "bytesAvg": 32042,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "brief": {
+        "cold": {
+          "status": 200,
+          "ms": 6807.94,
+          "bytes": 504526
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 4583.89,
+            "p50": 5290.2,
+            "p95": 6043.44,
+            "max": 6043.44,
+            "avg": 5339.37
+          },
+          "bytesAvg": 504526,
+          "statuses": [
+            200
+          ]
+        }
+      }
+    },
+    "frontend": {
+      "cold": {
+        "status": 200,
+        "wallMs": 21395.9,
+        "navTimingMs": {
+          "ttfb": 122.3,
+          "responseEnd": 129.1,
+          "domContentLoaded": 187.3,
+          "load": 396
+        }
+      },
+      "warm": {
+        "wallMs": {
+          "count": 3,
+          "min": 21549.99,
+          "p50": 21860.14,
+          "p95": 22574.69,
+          "max": 22574.69,
+          "avg": 21994.94
+        },
+        "ttfbMs": {
+          "count": 3,
+          "min": 20.8,
+          "p50": 23.3,
+          "p95": 311.8,
+          "max": 311.8,
+          "avg": 118.63
+        },
+        "domContentLoadedMs": {
+          "count": 3,
+          "min": 56.9,
+          "p50": 66.2,
+          "p95": 364.8,
+          "max": 364.8,
+          "avg": 162.63
+        },
+        "loadMs": {
+          "count": 3,
+          "min": 57.1,
+          "p50": 66.8,
+          "p95": 365.1,
+          "max": 365.1,
+          "avg": 163
+        },
+        "statuses": [
+          200
+        ]
+      }
+    },
+    "resources": {
+      "containers": {
+        "fundamental-terminal-backend": {
+          "cpuPercentPeak": 23.28,
+          "memUsedBytesPeak": 155294106,
+          "memPercentPeak": 0.94,
+          "swapBytesPeak": 0,
+          "pidsPeak": 8
+        },
+        "fundamental-terminal-frontend": {
+          "cpuPercentPeak": 28.54,
+          "memUsedBytesPeak": 68608328,
+          "memPercentPeak": 0.42,
+          "swapBytesPeak": 0,
+          "pidsPeak": 22
+        },
+        "fundamental-terminal-postgres": {
+          "cpuPercentPeak": 6.23,
+          "memUsedBytesPeak": 38325453,
+          "memPercentPeak": 0.23,
+          "swapBytesPeak": 0,
+          "pidsPeak": 9
+        },
+        "fundamental-terminal-redis": {
+          "cpuPercentPeak": 1.98,
+          "memUsedBytesPeak": 7745831,
+          "memPercentPeak": 0.05,
+          "swapBytesPeak": 0,
+          "pidsPeak": 6
+        },
+        "fundamental-terminal-data-fetcher": {
+          "cpuPercentPeak": 15.97,
+          "memUsedBytesPeak": 158230118,
+          "memPercentPeak": 0.96,
+          "swapBytesPeak": 0,
+          "pidsPeak": 4
+        }
+      },
+      "dbConnections": {
+        "total": 3,
+        "active": 0,
+        "waiting": 3
+      }
+    },
+    "containerLimits": {
+      "fundamental-terminal-backend": {
+        "nanoCpus": 0,
+        "memoryBytes": 0,
+        "memorySwapBytes": 0
+      },
+      "fundamental-terminal-frontend": {
+        "nanoCpus": 0,
+        "memoryBytes": 0,
+        "memorySwapBytes": 0
+      },
+      "fundamental-terminal-postgres": {
+        "nanoCpus": 0,
+        "memoryBytes": 0,
+        "memorySwapBytes": 0
+      },
+      "fundamental-terminal-redis": {
+        "nanoCpus": 0,
+        "memoryBytes": 0,
+        "memorySwapBytes": 0
+      },
+      "fundamental-terminal-data-fetcher": {
+        "nanoCpus": 0,
+        "memoryBytes": 0,
+        "memorySwapBytes": 0
+      }
+    }
+  },
+  "smallHost": {
+    "endpoints": {
+      "financials": {
+        "cold": {
+          "status": 200,
+          "ms": 420.24,
+          "bytes": 1034897
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 13.4,
+            "p50": 15.97,
+            "p95": 31.46,
+            "max": 31.46,
+            "avg": 19.42
+          },
+          "bytesAvg": 1034897,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "overview": {
+        "cold": {
+          "status": 200,
+          "ms": 216.88,
+          "bytes": 1540177
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 4425.35,
+            "p50": 7643.29,
+            "p95": 9452.39,
+            "max": 9452.39,
+            "avg": 7201.65
+          },
+          "bytesAvg": 1540177,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "workspace_bootstrap": {
+        "cold": {
+          "status": 200,
+          "ms": 7040.7,
+          "bytes": 1540324
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 7501.65,
+            "p50": 8042.76,
+            "p95": 9122.2,
+            "max": 9122.2,
+            "avg": 8201.28
+          },
+          "bytesAvg": 1540324,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "models": {
+        "cold": {
+          "status": 200,
+          "ms": 5042.82,
+          "bytes": 32042
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 3228.5,
+            "p50": 4031.89,
+            "p95": 5172.98,
+            "max": 5172.98,
+            "avg": 4264.36
+          },
+          "bytesAvg": 32042,
+          "statuses": [
+            200
+          ]
+        }
+      },
+      "brief": {
+        "cold": {
+          "status": 200,
+          "ms": 5512.96,
+          "bytes": 504526
+        },
+        "warm": {
+          "latencyMs": {
+            "count": 7,
+            "min": 3695.8,
+            "p50": 6026.23,
+            "p95": 6106.03,
+            "max": 6106.03,
+            "avg": 5462.29
+          },
+          "bytesAvg": 504526,
+          "statuses": [
+            200
+          ]
+        }
+      }
+    },
+    "frontend": {
+      "cold": {
+        "status": 200,
+        "wallMs": 23160.57,
+        "navTimingMs": {
+          "ttfb": 148.1,
+          "responseEnd": 154.6,
+          "domContentLoaded": 251.2,
+          "load": 377.8
+        }
+      },
+      "warm": {
+        "wallMs": {
+          "count": 3,
+          "min": 21151.77,
+          "p50": 22742.85,
+          "p95": 26079.71,
+          "max": 26079.71,
+          "avg": 23324.78
+        },
+        "ttfbMs": {
+          "count": 3,
+          "min": 25.2,
+          "p50": 83.5,
+          "p95": 1982.8,
+          "max": 1982.8,
+          "avg": 697.17
+        },
+        "domContentLoadedMs": {
+          "count": 3,
+          "min": 69.8,
+          "p50": 119.7,
+          "p95": 2019.4,
+          "max": 2019.4,
+          "avg": 736.3
+        },
+        "loadMs": {
+          "count": 3,
+          "min": 70,
+          "p50": 119.9,
+          "p95": 2019.6,
+          "max": 2019.6,
+          "avg": 736.5
+        },
+        "statuses": [
+          200
+        ]
+      }
+    },
+    "resources": {
+      "containers": {
+        "fundamental-terminal-backend": {
+          "cpuPercentPeak": 18.71,
+          "memUsedBytesPeak": 131072000,
+          "memPercentPeak": 12.21,
+          "swapBytesPeak": 0,
+          "pidsPeak": 7
+        },
+        "fundamental-terminal-frontend": {
+          "cpuPercentPeak": 7.15,
+          "memUsedBytesPeak": 62295900,
+          "memPercentPeak": 11.6,
+          "swapBytesPeak": 0,
+          "pidsPeak": 22
+        },
+        "fundamental-terminal-postgres": {
+          "cpuPercentPeak": 2.28,
+          "memUsedBytesPeak": 35987128,
+          "memPercentPeak": 3.35,
+          "swapBytesPeak": 0,
+          "pidsPeak": 14
+        },
+        "fundamental-terminal-redis": {
+          "cpuPercentPeak": 2.05,
+          "memUsedBytesPeak": 6918504,
+          "memPercentPeak": 2.58,
+          "swapBytesPeak": 0,
+          "pidsPeak": 6
+        },
+        "fundamental-terminal-data-fetcher": {
+          "cpuPercentPeak": 13.67,
+          "memUsedBytesPeak": 156028109,
+          "memPercentPeak": 38.74,
+          "swapBytesPeak": 0,
+          "pidsPeak": 4
+        }
+      },
+      "dbConnections": {
+        "total": 3,
+        "active": 0,
+        "waiting": 3
+      }
+    },
+    "containerLimits": {
+      "fundamental-terminal-backend": {
+        "nanoCpus": 750000000,
+        "memoryBytes": 1073741824,
+        "memorySwapBytes": 1073741824
+      },
+      "fundamental-terminal-frontend": {
+        "nanoCpus": 500000000,
+        "memoryBytes": 536870912,
+        "memorySwapBytes": 536870912
+      },
+      "fundamental-terminal-postgres": {
+        "nanoCpus": 750000000,
+        "memoryBytes": 1073741824,
+        "memorySwapBytes": 1073741824
+      },
+      "fundamental-terminal-redis": {
+        "nanoCpus": 250000000,
+        "memoryBytes": 268435456,
+        "memorySwapBytes": 268435456
+      },
+      "fundamental-terminal-data-fetcher": {
+        "nanoCpus": 250000000,
+        "memoryBytes": 402653184,
+        "memorySwapBytes": 402653184
+      }
+    },
+    "feasible": true
+  }
+}
