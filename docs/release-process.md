@@ -2,29 +2,33 @@
 
 ## Why This Exists
 
-Published deploys used to accept separate `BACKEND_IMAGE` and `FRONTEND_IMAGE` values, and the default compose file pointed at floating `backend-latest` and `frontend-latest` tags. That meant an operator could deploy:
+Published deploys need the frontend and backend to stay compatible. The frontend company workspace calls `/api/companies/{ticker}/workspace-bootstrap`, and that route only exists from commit `0ec767b` onward. A newer frontend paired with an older backend would hit a real API incompatibility on the company page.
 
-- a newer frontend with an older backend
-- a newer backend with an older frontend
-- a backend and data-fetcher from one image tag while the frontend came from another
+The default compose file now uses the latest published pair from Docker Hub:
 
-That mismatch was not theoretical. The current frontend company workspace calls `/api/companies/{ticker}/workspace-bootstrap`, and that route only exists from commit `0ec767b` onward. A frontend built after that change paired with an older backend would hit a real API incompatibility on the company page.
+- backend and worker services: `gptvibe/fundamentalterminal:backend-latest`
+- frontend: `gptvibe/fundamentalterminal:frontend-latest`
 
-## Deployment Guarantee
+If you want a pinned deploy instead of the moving latest tags, set both `BACKEND_IMAGE` and `FRONTEND_IMAGE` to matching release tags in `.env`.
 
-Published Docker deploys are now locked by one shared image tag suffix:
+## Deployment Pattern
 
-- backend: `gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG}`
-- data-fetcher: `gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG}`
-- frontend: `gptvibe/fundamentalterminal:frontend-${APP_IMAGE_TAG}`
+Published Docker deploys use:
 
-Use release tags such as `v1.0.3` for production deploys. Commit-pinned tags such as `sha-<gitsha>` are available for smoke verification and rollback-safe staging.
+- backend: `${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}`
+- data-fetcher: `${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}`
+- frontend: `${FRONTEND_IMAGE:-gptvibe/fundamentalterminal:frontend-latest}`
+
+To pin a production release, use matching tags such as:
+
+- `BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.3`
+- `FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.3`
 
 ## Release Steps
 
 1. Create and push a version tag such as `v1.0.3`.
 2. Wait for `.github/workflows/publish-images.yml` to publish both images and run the compatibility smoke check.
-3. Set `APP_IMAGE_TAG=v1.0.3` in the deploy environment.
+3. Optional: set matching `BACKEND_IMAGE` and `FRONTEND_IMAGE` values in the deploy environment if you want to pin that release instead of using `latest`.
 4. Run `docker compose pull`.
 5. Run `docker compose up -d`.
 6. Run the post-deploy verification command:

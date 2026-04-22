@@ -81,7 +81,6 @@ The default compose file pulls the published images from Docker Hub.
 
 ```bash
 cp .env.example .env
-# Set APP_IMAGE_TAG to one published release tag, for example v1.0.3.
 docker compose pull
 docker compose up -d
 python scripts/verify_deployment_compat.py --backend-url http://127.0.0.1:8000 --frontend-url http://127.0.0.1:3000 --ticker AAPL
@@ -93,15 +92,16 @@ After startup:
 - Backend API: `http://127.0.0.1:8000`
 - API docs: `http://127.0.0.1:8000/docs`
 
-The deploy-time image pattern is:
+By default, the published deploy uses:
 
-- `gptvibe/fundamentalterminal:backend-${APP_IMAGE_TAG}`
-- `gptvibe/fundamentalterminal:frontend-${APP_IMAGE_TAG}`
+- `gptvibe/fundamentalterminal:backend-latest`
+- `gptvibe/fundamentalterminal:frontend-latest`
 
-Use one shared tag suffix in `.env` to keep frontend, backend, and the data-fetcher on the same published revision:
+To pin a matched release instead of `latest`, set both image references in `.env`:
 
 ```bash
-APP_IMAGE_TAG=v1.0.3
+BACKEND_IMAGE=gptvibe/fundamentalterminal:backend-v1.0.3
+FRONTEND_IMAGE=gptvibe/fundamentalterminal:frontend-v1.0.3
 ```
 
 To build from your checked-out source instead of pulling published images:
@@ -260,7 +260,7 @@ python scripts/run_model_evaluation.py
 
 The GitHub Actions workflow at `.github/workflows/publish-images.yml` publishes Docker images:
 
-- Push to `main` publishes commit-pinned images `backend-sha-<gitsha>` and `frontend-sha-<gitsha>`.
+- Push to `main` publishes `backend-latest` and `frontend-latest`.
 - Push a version tag like `v1.0.3` publishes `backend-v1.0.3` and `frontend-v1.0.3`.
 - The publish workflow now runs a compatibility smoke check against the published frontend/backend image pair, including `/api/companies/{ticker}/workspace-bootstrap`.
 
