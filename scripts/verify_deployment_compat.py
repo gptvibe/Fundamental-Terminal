@@ -45,7 +45,7 @@ def _wait_for_json(url: str, *, timeout: float, ready: callable[[Any], bool]) ->
             if status == 200 and ready(payload):
                 return
             last_error = f"unexpected response {status}: {payload!r}"
-        except (URLError, ValueError, json.JSONDecodeError) as exc:
+        except (URLError, OSError, ValueError, json.JSONDecodeError) as exc:
             last_error = str(exc)
         time.sleep(2.0)
     raise RuntimeError(f"Timed out waiting for {url}. Last error: {last_error}")
@@ -60,7 +60,7 @@ def _wait_for_frontend(url: str, *, timeout: float) -> None:
             if status == 200 and body and (content_type or "").startswith("text/html"):
                 return
             last_error = f"unexpected response {status} content-type={content_type!r}"
-        except URLError as exc:
+        except (URLError, OSError) as exc:
             last_error = str(exc)
         time.sleep(2.0)
     raise RuntimeError(f"Timed out waiting for {url}. Last error: {last_error}")

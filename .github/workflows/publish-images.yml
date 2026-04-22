@@ -140,9 +140,35 @@ jobs:
             -e POSTGRES_DB=fundamentals \
             -e POSTGRES_USER=fundamental \
             -e POSTGRES_PASSWORD=fundamental \
+            --health-cmd "pg_isready -U fundamental -d fundamentals" \
+            --health-interval 5s \
+            --health-timeout 5s \
+            --health-retries 12 \
             postgres:16-alpine
           docker run -d --name ft-verify-redis --network ft-release-verify \
+            --health-cmd "redis-cli ping" \
+            --health-interval 5s \
+            --health-timeout 5s \
+            --health-retries 12 \
             redis:7-alpine redis-server --save "" --appendonly no
+
+          for container in ft-verify-postgres ft-verify-redis; do
+            for _ in $(seq 1 30); do
+              health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
+              if [[ "$health" == "healthy" ]]; then
+                break
+              fi
+              sleep 2
+            done
+
+            health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container")"
+            if [[ "$health" != "healthy" ]]; then
+              echo "::error::$container failed to become healthy (status=$health)"
+              docker logs "$container" || true
+              exit 1
+            fi
+          done
+
           docker run -d --name ft-verify-backend --network ft-release-verify \
             -p 8000:8000 \
             -e DATABASE_URL=postgresql+psycopg://fundamental:fundamental@ft-verify-postgres:5432/fundamentals \
@@ -159,6 +185,15 @@ jobs:
 
       - name: Verify deployed compatibility
         run: python scripts/verify_deployment_compat.py --backend-url http://127.0.0.1:8000 --frontend-url http://127.0.0.1:3000 --ticker AAPL --wait-timeout 240
+
+      - name: Dump verification container logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          for container in ft-verify-postgres ft-verify-redis ft-verify-backend ft-verify-frontend; do
+            echo "===== ${container} ====="
+            docker logs "$container" 2>&1 || true
+          done
 
       - name: Tear down verification stack
         if: always()
