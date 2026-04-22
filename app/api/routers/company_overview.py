@@ -4,7 +4,12 @@ from fastapi import APIRouter
 
 from app.api.handlers import market_context as handlers
 from app.api.source_contracts import add_user_visible_route
-from app.api.schemas.company_overview import CompanyOverviewResponse, CompanyPeersResponse, CompanyResearchBriefResponse
+from app.api.schemas.company_overview import (
+    CompanyOverviewResponse,
+    CompanyPeersResponse,
+    CompanyResearchBriefResponse,
+    CompanyWorkspaceBootstrapResponse,
+)
 
 
 def build_router() -> APIRouter:
@@ -29,5 +34,12 @@ def build_router() -> APIRouter:
         handlers.company_overview,
         methods=["GET"],
         response_model=CompanyOverviewResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/workspace-bootstrap",
+        handlers.company_workspace_bootstrap,
+        methods=["GET"],
+        response_model=CompanyWorkspaceBootstrapResponse,
     )
     return router

@@ -739,6 +739,106 @@ def company_overview(
     )
 
 
+@app.get("/api/companies/{ticker}/workspace-bootstrap", response_model=CompanyWorkspaceBootstrapResponse)
+def company_workspace_bootstrap(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    request: Request = None,
+    include_overview_brief: bool = Query(default=False),
+    include_insiders: bool = Query(default=False),
+    include_institutional: bool = Query(default=False),
+    include_earnings_summary: bool = Query(default=False),
+    financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyWorkspaceBootstrapResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    requested_financials_view = _read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
+    parsed_as_of, normalized_financials_view, _normalized_as_of = _normalize_company_financials_query_controls(
+        requested_as_of=requested_as_of,
+        view=requested_financials_view,
+    )
+
+    brief: CompanyResearchBriefResponse | None = None
+    errors = CompanyWorkspaceBootstrapErrorsPayload()
+
+    if include_overview_brief and not include_insiders and not include_institutional:
+        try:
+            overview = company_overview(
+                ticker=normalized_ticker,
+                background_tasks=background_tasks,
+                request=request,
+                financials_view=normalized_financials_view,
+                as_of=requested_as_of,
+                session=session,
+            )
+            financials = overview.financials
+            brief = overview.brief
+        except Exception:
+            financials = _build_company_financials_response(
+                session,
+                normalized_ticker,
+                background_tasks,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
+                view=normalized_financials_view,
+            )
+    else:
+        financials = _build_company_financials_response(
+            session,
+            normalized_ticker,
+            background_tasks,
+            requested_as_of=requested_as_of,
+            parsed_as_of=parsed_as_of,
+            view=normalized_financials_view,
+        )
+
+    insider_trades: CompanyInsiderTradesResponse | None = None
+    institutional_holdings: CompanyInstitutionalHoldingsResponse | None = None
+    earnings_summary: CompanyEarningsSummaryResponse | None = None
+
+    if include_insiders:
+        try:
+            insider_trades = company_insider_trades(
+                ticker=normalized_ticker,
+                background_tasks=background_tasks,
+                session=session,
+            )
+        except Exception as exc:
+            errors.insider = str(exc) if str(exc) else "Unable to load insider trades"
+
+    if include_institutional:
+        try:
+            institutional_holdings = company_institutional_holdings(
+                ticker=normalized_ticker,
+                background_tasks=background_tasks,
+                session=session,
+            )
+        except Exception as exc:
+            errors.institutional = str(exc) if str(exc) else "Unable to load institutional holdings"
+
+    if include_earnings_summary:
+        try:
+            earnings_summary = company_earnings_summary(
+                ticker=normalized_ticker,
+                background_tasks=background_tasks,
+                session=session,
+            )
+        except Exception as exc:
+            errors.earnings_summary = str(exc) if str(exc) else "Unable to load earnings summary"
+
+    return CompanyWorkspaceBootstrapResponse(
+        company=financials.company or brief.company if brief is not None else financials.company,
+        financials=financials,
+        brief=brief,
+        earnings_summary=earnings_summary,
+        insider_trades=insider_trades,
+        institutional_holdings=institutional_holdings,
+        errors=errors,
+    )
+
+
 @app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
 def company_segment_history(
     ticker: str,

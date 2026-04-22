@@ -1231,6 +1231,100 @@ def test_load_refresh_bootstrap_inputs_falls_back_when_market_profile_prefetch_f
     ]
 
 
+def test_refresh_company_prefetches_price_history_during_full_sec_refresh(monkeypatch):
+    service = _make_service()
+    session = _FakeSession()
+    company = _company()
+    reporter = _Reporter()
+    price_fetch_started = threading.Event()
+    allow_price_fetch_finish = threading.Event()
+    prefetched_inputs: list[sec_edgar.PriceHistoryPrefetchResult | None] = []
+
+    monkeypatch.setattr(sec_edgar, "settings", _settings(refresh_aux_io_max_workers=2))
+    monkeypatch.setattr(sec_edgar, "get_engine", lambda: None)
+    monkeypatch.setattr(sec_edgar, "SessionLocal", _SessionFactory(session))
+    monkeypatch.setattr(sec_edgar, "_find_local_company", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        service.client,
+        "resolve_company",
+        lambda identifier: SimpleNamespace(
+            cik=company.cik,
+            ticker=identifier,
+            name=company.name,
+            exchange=company.exchange,
+            sector=company.sector,
+            sic=company.sic,
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        service.client,
+        "get_submissions",
+        lambda *_args, **_kwargs: {
+            "tickers": [company.ticker],
+            "name": company.name,
+            "exchanges": [company.exchange],
+            "sicDescription": company.sector,
+            "sic": company.sic,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(service.client, "build_filing_index", lambda *_args, **_kwargs: {}, raising=False)
+    monkeypatch.setattr(service.client, "get_companyfacts", lambda *_args, **_kwargs: {}, raising=False)
+    monkeypatch.setattr(service.filing_parser, "parse_financial_insights", lambda *_args, **_kwargs: [], raising=False)
+    monkeypatch.setattr(sec_edgar, "_build_financials_refresh_fingerprint", lambda *_args, **_kwargs: "financials-fingerprint")
+    monkeypatch.setattr(sec_edgar, "get_company_latest_trade_date", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "get_dataset_state", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_upsert_company", lambda *_args, **_kwargs: company)
+    monkeypatch.setattr(
+        service.market_data,
+        "get_market_profile",
+        lambda *_args, **_kwargs: sec_edgar.MarketProfile(sector="Technology", industry="Software"),
+        raising=False,
+    )
+
+    def _get_price_history(*_args, **_kwargs):
+        price_fetch_started.set()
+        assert allow_price_fetch_finish.wait(timeout=5.0)
+        return []
+
+    monkeypatch.setattr(service.market_data, "get_price_history", _get_price_history, raising=False)
+
+    def _refresh_statements(**_kwargs):
+        allow_price_fetch_finish.set()
+        return 1
+
+    monkeypatch.setattr(service, "refresh_statements", _refresh_statements)
+    monkeypatch.setattr(service, "refresh_insiders", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_form144", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_institutional", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_beneficial_ownership", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_earnings", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_events", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_capital_markets", lambda **_kwargs: 0)
+    monkeypatch.setattr(service, "refresh_comment_letters", lambda **_kwargs: 0)
+    monkeypatch.setattr(
+        service,
+        "refresh_prices",
+        lambda **kwargs: prefetched_inputs.append(kwargs.get("prefetched_price_history")) or 0,
+    )
+    monkeypatch.setattr(sec_edgar, "_refresh_derived_metrics_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_capital_structure_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_oil_scenario_overlay_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_earnings_model_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_research_brief_cache", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(sec_edgar, "_refresh_company_charts_dashboard_cache", lambda *_args, **_kwargs: None)
+
+    result = service.refresh_company("MSFT", force=True, reporter=reporter)
+
+    assert result.status == "fetched"
+    assert price_fetch_started.is_set()
+    assert len(prefetched_inputs) == 1
+    assert prefetched_inputs[0] is not None
+    assert prefetched_inputs[0].error is None
+    assert prefetched_inputs[0].price_bars == []
+
+
 @pytest.mark.parametrize(
     ("builder_name", "helper_name", "dataset", "recompute_name", "expected_stage"),
     [

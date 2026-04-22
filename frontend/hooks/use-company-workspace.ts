@@ -6,6 +6,7 @@ import { useCompanyLayoutContext } from "@/components/layout/company-layout-cont
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import {
+  getCompanyWorkspaceBootstrap,
   getCompanyFinancials,
   getCompanyEarningsSummary,
   getCompanyOverview,
@@ -22,6 +23,7 @@ import type {
   CompanyInsiderTradesResponse,
   CompanyInstitutionalHoldingsResponse,
   CompanyResearchBriefResponse,
+  CompanyWorkspaceBootstrapResponse,
   ConsoleEntry,
   FundamentalsTrendPoint
 } from "@/lib/types";
@@ -358,6 +360,45 @@ async function loadCompanyWorkspaceData(
   options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary" | "financialsView">
 ): Promise<LoadCompanyWorkspaceDataResult> {
   const financialsView = options.financialsView ?? (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional ? "core_segments" : "full");
+  try {
+    const bootstrap = await getCompanyWorkspaceBootstrap(ticker, {
+      financialsView,
+      includeOverviewBrief: options.includeOverviewBrief,
+      includeInsiders: options.includeInsiders,
+      includeInstitutional: options.includeInstitutional,
+      includeEarningsSummary: options.includeEarningsSummary,
+    });
+    return mapBootstrapToWorkspaceResult(bootstrap);
+  } catch {
+    // Fall back to existing multi-request behavior to preserve compatibility during rollout.
+  }
+
+  return loadCompanyWorkspaceDataLegacy(ticker, options, financialsView);
+}
+
+function mapBootstrapToWorkspaceResult(bootstrap: CompanyWorkspaceBootstrapResponse): LoadCompanyWorkspaceDataResult {
+  let activeJobId = bootstrap.financials.refresh.job_id ?? bootstrap.brief?.refresh.job_id ?? null;
+  activeJobId = activeJobId ?? bootstrap.institutional_holdings?.refresh.job_id ?? null;
+  activeJobId = activeJobId ?? bootstrap.insider_trades?.refresh.job_id ?? null;
+  activeJobId = activeJobId ?? bootstrap.earnings_summary?.refresh.job_id ?? null;
+
+  return {
+    financialData: bootstrap.financials,
+    briefData: bootstrap.brief,
+    earningsSummaryData: bootstrap.earnings_summary,
+    insiderData: bootstrap.insider_trades,
+    institutionalData: bootstrap.institutional_holdings,
+    insiderError: bootstrap.errors.insider,
+    institutionalError: bootstrap.errors.institutional,
+    activeJobId,
+  };
+}
+
+async function loadCompanyWorkspaceDataLegacy(
+  ticker: string,
+  options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary" | "financialsView">,
+  financialsView: "full" | "core_segments" | "core"
+): Promise<LoadCompanyWorkspaceDataResult> {
   let financialData: CompanyFinancialsResponse;
   let briefData: CompanyResearchBriefResponse | null = null;
   let earningsSummaryData: CompanyEarningsSummaryResponse | null = null;

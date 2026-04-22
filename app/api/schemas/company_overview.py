@@ -12,7 +12,11 @@ from app.api.schemas.filings import FilingTimelineItemPayload
 from app.api.schemas.financials import CompanyCapitalStructureResponse, CompanyChangesSinceLastFilingResponse, CompanyFinancialsResponse
 from app.api.schemas.governance import CompanyGovernanceSummaryResponse
 from app.api.schemas.models import CompanyModelsResponse
-from app.api.schemas.ownership import CompanyBeneficialOwnershipSummaryResponse
+from app.api.schemas.ownership import (
+    CompanyBeneficialOwnershipSummaryResponse,
+    CompanyInsiderTradesResponse,
+    CompanyInstitutionalHoldingsResponse,
+)
 from app.api.schemas.workspace import CompanyEarningsSummaryResponse
 
 
@@ -164,3 +168,19 @@ class CompanyOverviewResponse(BaseModel):
     company: CompanyPayload | None
     financials: CompanyFinancialsResponse
     brief: CompanyResearchBriefResponse
+
+
+class CompanyWorkspaceBootstrapErrorsPayload(BaseModel):
+    insider: str | None = None
+    institutional: str | None = None
+    earnings_summary: str | None = None
+
+
+class CompanyWorkspaceBootstrapResponse(BaseModel):
+    company: CompanyPayload | None
+    financials: CompanyFinancialsResponse
+    brief: CompanyResearchBriefResponse | None = None
+    earnings_summary: CompanyEarningsSummaryResponse | None = None
+    insider_trades: CompanyInsiderTradesResponse | None = None
+    institutional_holdings: CompanyInstitutionalHoldingsResponse | None = None
+    errors: CompanyWorkspaceBootstrapErrorsPayload = Field(default_factory=CompanyWorkspaceBootstrapErrorsPayload)

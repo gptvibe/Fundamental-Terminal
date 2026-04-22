@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import {
+  getCompanyWorkspaceBootstrap,
   getCompanyFinancials,
   getCompanyOverview,
   getCompanyInsiderTrades,
@@ -28,6 +29,7 @@ vi.mock("@/lib/recent-companies", () => ({
 
 vi.mock("@/lib/api", () => ({
   getCompanyFinancials: vi.fn(),
+  getCompanyWorkspaceBootstrap: vi.fn(),
   getCompanyOverview: vi.fn(),
   getCompanyInsiderTrades: vi.fn(),
   getCompanyInstitutionalHoldings: vi.fn(),
@@ -111,17 +113,19 @@ describe("useCompanyWorkspace", () => {
       connectionState: "open",
       lastEvent: null,
     });
+    vi.mocked(getCompanyWorkspaceBootstrap).mockRejectedValue(new Error("bootstrap unavailable"));
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("uses the aggregate overview payload for the overview workspace", async () => {
+  it("uses the bootstrap payload for the overview workspace", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
     const fetchOverview = vi.mocked(getCompanyOverview);
     const fetchFinancials = vi.mocked(getCompanyFinancials);
 
-    fetchOverview.mockResolvedValue({
+    fetchBootstrap.mockResolvedValue({
       company: { ticker: "RKLB", name: "Rocket Lab Corp", cache_state: "fresh" },
       financials: buildFinancialsResponse({
         company: {
@@ -135,6 +139,10 @@ describe("useCompanyWorkspace", () => {
         refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
       }),
       brief: buildResearchBriefResponse(),
+      earnings_summary: null,
+      insider_trades: null,
+      institutional_holdings: null,
+      errors: { insider: null, institutional: null, earnings_summary: null },
     } as never);
 
     const { result } = renderHook(() =>
@@ -147,7 +155,14 @@ describe("useCompanyWorkspace", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(fetchOverview).toHaveBeenCalledWith("RKLB", { financialsView: "core_segments" });
+    expect(fetchBootstrap).toHaveBeenCalledWith("RKLB", {
+      financialsView: "core_segments",
+      includeOverviewBrief: true,
+      includeInsiders: false,
+      includeInstitutional: false,
+      includeEarningsSummary: false,
+    });
+    expect(fetchOverview).not.toHaveBeenCalled();
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
   });

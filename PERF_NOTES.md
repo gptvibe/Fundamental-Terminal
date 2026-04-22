@@ -52,3 +52,7 @@ Current gate status: pass, with zero regressions against the repo budget thresho
 
 - The default JSON response path now uses a plain custom `Response` with `orjson` rendering, which removes the prior FastAPI `ORJSONResponse` deprecation warning without changing payload behavior.
 - Tracked bytecode artifacts were restored before the final validation pass so the working tree stays focused on intentional source, test, and benchmark changes.
+- Refresh orchestration now overlaps one bounded Yahoo fetch (price history) with SEC normalization when `refresh_aux_io_max_workers > 1`; writes remain sequential and SEC dataset jobs remain serialized.
+- Synthetic timing note for this overlap: if statement normalization takes ~150ms and Yahoo fetch takes ~150ms, end-to-end wall time is expected to move from roughly ~300ms (sequential) toward ~150-180ms (overlapped plus coordination overhead).
+- Upstream cache validation now uses `Last-Modified` revalidation only for `www.sec.gov/files/company_tickers.json`, because sampled SEC submissions/companyfacts endpoints did not emit reliable validators and Yahoo search/chart responses exposed explicit short `max-age` windows but no stable validators.
+- Yahoo market profile and chart fetches now use a short shared parsed-result cache plus singleflight keyed by symbol/request shape, which cuts duplicate network calls and repeated upstream JSON parsing across concurrent requests and workers without serving stale data beyond the upstream-declared `max-age` window.

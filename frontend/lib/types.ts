@@ -2891,6 +2891,22 @@ export interface CompanyOverviewResponse {
   brief: CompanyResearchBriefResponse;
 }
 
+export interface CompanyWorkspaceBootstrapErrorsPayload {
+  insider: string | null;
+  institutional: string | null;
+  earnings_summary: string | null;
+}
+
+export interface CompanyWorkspaceBootstrapResponse {
+  company: CompanyPayload | null;
+  financials: CompanyFinancialsResponse;
+  brief: CompanyResearchBriefResponse | null;
+  earnings_summary: CompanyEarningsSummaryResponse | null;
+  insider_trades: CompanyInsiderTradesResponse | null;
+  institutional_holdings: CompanyInstitutionalHoldingsResponse | null;
+  errors: CompanyWorkspaceBootstrapErrorsPayload;
+}
+
 export interface RefreshQueuedResponse {
   status: "queued";
   ticker: string;

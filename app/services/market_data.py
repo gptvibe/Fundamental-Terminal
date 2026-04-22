@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time as datetime_time, timezone
 from threading import Lock
+import re
 import time
 from typing import Any
 
@@ -14,11 +15,13 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Company, PriceHistory
 from app.services.refresh_state import build_payload_version_hash, cache_state_for_dataset, mark_dataset_checked
+from app.services.shared_upstream_cache import shared_upstream_cache
 
 
 PRICE_SOURCE = "yahoo_finance_chart"
 PRICE_HISTORY_PAYLOAD_VERSION = "price-history-v1"
 DEFAULT_MARKET_PROFILE_CACHE_TTL_SECONDS = 21600
+DEFAULT_PRICE_HISTORY_SHARED_CACHE_BUCKET_SECONDS = 10
 _market_profile_cache: dict[str, tuple[float, MarketProfile]] = {}
 _market_profile_cache_lock = Lock()
 
@@ -66,6 +69,72 @@ class MarketDataClient:
         if start_date is not None:
             period_start = max(0, int(datetime.combine(start_date, datetime_time.min, tzinfo=timezone.utc).timestamp()))
         period_end = int(time.time())
+        cache_key = _price_history_shared_cache_key(
+            symbol,
+            start_date=start_date,
+            period_end=period_end,
+        )
+
+        payload = shared_upstream_cache.fill_json(
+            cache_key,
+            fill=lambda: self._fetch_price_history_payload(
+                symbol,
+                period_start=period_start,
+                period_end=period_end,
+            ),
+        )
+        return _deserialize_price_history_payload(payload)
+
+    def get_market_profile(self, ticker: str) -> MarketProfile:
+        if settings.strict_official_mode:
+            return MarketProfile(sector=None, industry=None)
+
+        symbol = _normalize_market_symbol(ticker)
+        cached = _get_cached_market_profile(symbol)
+        if cached is not None:
+            return cached
+
+        shared_payload = shared_upstream_cache.fill_json(
+            _market_profile_shared_cache_key(symbol),
+            fill=lambda: self._fetch_market_profile_payload(symbol),
+        )
+        profile = _deserialize_market_profile_payload(shared_payload)
+        _store_cached_market_profile(symbol, profile)
+        return profile
+
+    def _fetch_market_profile_payload(self, symbol: str) -> tuple[dict[str, Any], float]:
+        response = _request_with_retries(
+            self._http,
+            "https://query1.finance.yahoo.com/v1/finance/search",
+            params={
+                "q": symbol,
+                "quotesCount": 12,
+                "newsCount": 0,
+                "listsCount": 0,
+                "enableFuzzyQuery": "false",
+            },
+        )
+        payload = response.json()
+        profile = _market_profile_from_search_payload(symbol, payload)
+        ttl_seconds = _shared_cache_ttl_from_response(
+            response,
+            maximum_seconds=_get_market_profile_cache_ttl_seconds(),
+        )
+        return (
+            {
+                "sector": profile.sector,
+                "industry": profile.industry,
+            },
+            ttl_seconds if profile.sector or profile.industry else 0.0,
+        )
+
+    def _fetch_price_history_payload(
+        self,
+        symbol: str,
+        *,
+        period_start: int,
+        period_end: int,
+    ) -> tuple[dict[str, Any], float]:
         try:
             response = _request_with_retries(
                 self._http,
@@ -82,92 +151,20 @@ class MarketDataClient:
                 raise MarketDataUnavailableError(symbol, f"Yahoo Finance has no chart history for {symbol}.") from exc
             raise
 
-        payload = response.json()
-        chart_root = payload.get("chart", {})
-        if chart_root.get("error"):
-            error_payload = chart_root["error"]
-            if isinstance(error_payload, dict):
-                description = _string_or_none(error_payload.get("description")) or _string_or_none(error_payload.get("code"))
-                if description and any(token in description.lower() for token in ("not found", "no data", "no price")):
-                    raise MarketDataUnavailableError(symbol, f"Yahoo Finance has no chart history for {symbol}.")
-            raise ValueError(str(error_payload))
-
-        results = chart_root.get("result") or []
-        if not results:
-            return []
-
-        result = results[0]
-        timestamps = result.get("timestamp") or []
-        indicators = result.get("indicators") or {}
-        quote = ((indicators.get("quote") or [{}])[0]) if isinstance(indicators.get("quote"), list) else {}
-        adjclose_root = ((indicators.get("adjclose") or [{}])[0]) if isinstance(indicators.get("adjclose"), list) else {}
-        close_values = adjclose_root.get("adjclose") or quote.get("close") or []
-        volume_values = quote.get("volume") or []
-
-        bars: list[PriceBar] = []
-        for index, timestamp in enumerate(timestamps):
-            close = _coerce_float(_value_at(close_values, index))
-            if close is None:
-                continue
-
-            trade_date = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).date()
-            volume = _coerce_int(_value_at(volume_values, index))
-            bars.append(PriceBar(trade_date=trade_date, close=close, volume=volume))
-
-        bars.sort(key=lambda bar: bar.trade_date)
-        return bars
-
-    def get_market_profile(self, ticker: str) -> MarketProfile:
-        if settings.strict_official_mode:
-            return MarketProfile(sector=None, industry=None)
-
-        symbol = _normalize_market_symbol(ticker)
-        cached = _get_cached_market_profile(symbol)
-        if cached is not None:
-            return cached
-
-        response = _request_with_retries(
-            self._http,
-            "https://query1.finance.yahoo.com/v1/finance/search",
-            params={
-                "q": symbol,
-                "quotesCount": 12,
-                "newsCount": 0,
-                "listsCount": 0,
-                "enableFuzzyQuery": "false",
+        price_bars = _parse_price_history_payload(symbol, response.json())
+        return (
+            {
+                "bars": [
+                    {
+                        "trade_date": bar.trade_date.isoformat(),
+                        "close": bar.close,
+                        "volume": bar.volume,
+                    }
+                    for bar in price_bars
+                ]
             },
+            _shared_cache_ttl_from_response(response),
         )
-        payload = response.json()
-        quotes = payload.get("quotes") or []
-        exact_match = next(
-            (
-                item
-                for item in quotes
-                if isinstance(item, dict)
-                and str(item.get("symbol", "")).upper() == symbol
-                and str(item.get("quoteType", "")).upper() == "EQUITY"
-            ),
-            None,
-        )
-        if exact_match is None:
-            exact_match = next(
-                (
-                    item
-                    for item in quotes
-                    if isinstance(item, dict) and str(item.get("quoteType", "")).upper() == "EQUITY"
-                ),
-                None,
-            )
-
-        if exact_match is None:
-            return MarketProfile(sector=None, industry=None)
-
-        profile = MarketProfile(
-            sector=_string_or_none(exact_match.get("sectorDisp") or exact_match.get("sector")),
-            industry=_string_or_none(exact_match.get("industryDisp") or exact_match.get("industry")),
-        )
-        _store_cached_market_profile(symbol, profile)
-        return profile
 
 
 def get_company_price_history(session: Session, company_id: int) -> list[PriceHistory]:
@@ -367,8 +364,148 @@ def _clear_market_profile_cache() -> None:
         _market_profile_cache.clear()
 
 
+def _clear_market_shared_cache() -> None:
+    shared_upstream_cache.clear_local()
+
+
 def _normalize_market_symbol(ticker: str) -> str:
     return ticker.strip().upper().replace(".", "-").replace("/", "-")
+
+
+def _market_profile_shared_cache_key(symbol: str) -> str:
+    return f"market-profile:{symbol}"
+
+
+def _price_history_shared_cache_key(symbol: str, *, start_date: date | None, period_end: int) -> str:
+    start_token = start_date.isoformat() if start_date is not None else "full"
+    bucket = _bucket_price_history_period_end(period_end)
+    return f"price-history:{symbol}:{start_token}:{bucket}"
+
+
+def _bucket_price_history_period_end(period_end: int) -> int:
+    bucket_seconds = DEFAULT_PRICE_HISTORY_SHARED_CACHE_BUCKET_SECONDS
+    if bucket_seconds <= 1:
+        return period_end
+    return period_end - (period_end % bucket_seconds)
+
+
+def _deserialize_market_profile_payload(payload: Any) -> MarketProfile:
+    if not isinstance(payload, dict):
+        return MarketProfile(sector=None, industry=None)
+    return MarketProfile(
+        sector=_string_or_none(payload.get("sector")),
+        industry=_string_or_none(payload.get("industry")),
+    )
+
+
+def _deserialize_price_history_payload(payload: Any) -> list[PriceBar]:
+    if not isinstance(payload, dict):
+        return []
+    bars = payload.get("bars")
+    if not isinstance(bars, list):
+        return []
+    parsed: list[PriceBar] = []
+    for item in bars:
+        if not isinstance(item, dict):
+            continue
+        trade_date_text = _string_or_none(item.get("trade_date"))
+        if trade_date_text is None:
+            continue
+        try:
+            trade_date = date.fromisoformat(trade_date_text)
+        except ValueError:
+            continue
+        close = _coerce_float(item.get("close"))
+        if close is None:
+            continue
+        parsed.append(
+            PriceBar(
+                trade_date=trade_date,
+                close=close,
+                volume=_coerce_int(item.get("volume")),
+            )
+        )
+    parsed.sort(key=lambda bar: bar.trade_date)
+    return parsed
+
+
+def _market_profile_from_search_payload(symbol: str, payload: dict[str, Any]) -> MarketProfile:
+    quotes = payload.get("quotes") or []
+    exact_match = next(
+        (
+            item
+            for item in quotes
+            if isinstance(item, dict)
+            and str(item.get("symbol", "")).upper() == symbol
+            and str(item.get("quoteType", "")).upper() == "EQUITY"
+        ),
+        None,
+    )
+    if exact_match is None:
+        exact_match = next(
+            (
+                item
+                for item in quotes
+                if isinstance(item, dict) and str(item.get("quoteType", "")).upper() == "EQUITY"
+            ),
+            None,
+        )
+
+    if exact_match is None:
+        return MarketProfile(sector=None, industry=None)
+
+    return MarketProfile(
+        sector=_string_or_none(exact_match.get("sectorDisp") or exact_match.get("sector")),
+        industry=_string_or_none(exact_match.get("industryDisp") or exact_match.get("industry")),
+    )
+
+
+def _parse_price_history_payload(symbol: str, payload: dict[str, Any]) -> list[PriceBar]:
+    chart_root = payload.get("chart", {})
+    if chart_root.get("error"):
+        error_payload = chart_root["error"]
+        if isinstance(error_payload, dict):
+            description = _string_or_none(error_payload.get("description")) or _string_or_none(error_payload.get("code"))
+            if description and any(token in description.lower() for token in ("not found", "no data", "no price")):
+                raise MarketDataUnavailableError(symbol, f"Yahoo Finance has no chart history for {symbol}.")
+        raise ValueError(str(error_payload))
+
+    results = chart_root.get("result") or []
+    if not results:
+        return []
+
+    result = results[0]
+    timestamps = result.get("timestamp") or []
+    indicators = result.get("indicators") or {}
+    quote = ((indicators.get("quote") or [{}])[0]) if isinstance(indicators.get("quote"), list) else {}
+    adjclose_root = ((indicators.get("adjclose") or [{}])[0]) if isinstance(indicators.get("adjclose"), list) else {}
+    close_values = adjclose_root.get("adjclose") or quote.get("close") or []
+    volume_values = quote.get("volume") or []
+
+    bars: list[PriceBar] = []
+    for index, timestamp in enumerate(timestamps):
+        close = _coerce_float(_value_at(close_values, index))
+        if close is None:
+            continue
+
+        trade_date = datetime.fromtimestamp(int(timestamp), tz=timezone.utc).date()
+        volume = _coerce_int(_value_at(volume_values, index))
+        bars.append(PriceBar(trade_date=trade_date, close=close, volume=volume))
+
+    bars.sort(key=lambda bar: bar.trade_date)
+    return bars
+
+
+def _shared_cache_ttl_from_response(response: httpx.Response, *, maximum_seconds: int | None = None) -> float:
+    response_headers = getattr(response, "headers", {}) or {}
+    cache_control = str(response_headers.get("cache-control") or "")
+    match = re.search(r"(?:^|,)\s*max-age\s*=\s*(\d+)\s*(?:,|$)", cache_control, flags=re.IGNORECASE)
+    if match is None:
+        return 0.0
+    ttl_seconds = float(int(match.group(1)))
+    if maximum_seconds is not None:
+        ttl_seconds = min(ttl_seconds, float(maximum_seconds))
+    return max(0.0, ttl_seconds)
 
 
 def _value_at(values: list[Any] | None, index: int) -> Any:

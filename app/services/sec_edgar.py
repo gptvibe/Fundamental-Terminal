@@ -37,6 +37,7 @@ from app.services.market_data import (
     MarketDataClient,
     MarketDataUnavailableError,
     MarketProfile,
+    PriceBar,
     get_company_latest_trade_date,
     get_company_price_last_checked,
     get_company_price_history_tail,
@@ -50,6 +51,7 @@ from app.services.earnings_intelligence import recompute_and_persist_company_ear
 from app.services.oil_scenario_overlay import refresh_company_oil_scenario_overlay
 from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, collect_regulated_financial_statements
 from app.services.sec_cache import prune_sec_cache_periodic, sec_http_cache
+from app.services.shared_upstream_cache import shared_upstream_cache
 from app.services.sec_sic import resolve_sec_sic_profile
 from app.services.refresh_state import build_payload_version_hash, cache_state_for_dataset, get_dataset_state, mark_dataset_checked, release_refresh_lock, release_refresh_lock_failed
 from app.services.status_stream import JobReporter
@@ -967,6 +969,14 @@ class RefreshBootstrapInputs:
     market_profile: MarketProfile
 
 
+@dataclass(slots=True)
+class PriceHistoryPrefetchResult:
+    incremental_start_date: date | None
+    existing_payload_hash: str | None
+    price_bars: list[PriceBar] | None = None
+    error: Exception | None = None
+
+
 class EdgarClient:
     def __init__(self) -> None:
         self._client_config = build_sec_client_config(settings)
@@ -984,27 +994,57 @@ class EdgarClient:
 
     def _request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         params = kwargs.get("params")
-        headers = kwargs.get("headers")
+        headers = dict(kwargs.get("headers") or {})
         cached_response = sec_http_cache.get(method, url, params=params, headers=headers)
         if cached_response is not None:
             return cached_response
 
-        max_retries = self._client_config.max_retries
-        attempt = 0
-        while True:
-            self._throttle()
-            response = self._http.request(method, url, **kwargs)
-            self._last_request_monotonic = time.monotonic()
-            if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
-                retry_after = response.headers.get("retry-after")
-                wait = _retry_wait(retry_after, self._client_config, attempt)
-                response.close()
-                time.sleep(wait)
-                attempt += 1
-                continue
-            response.raise_for_status()
-            sec_http_cache.put(method, url, response, params=params, headers=headers)
-            return response
+        def _fetch_response() -> httpx.Response:
+            stale_entry = sec_http_cache.get_stale(method, url, params=params, headers=headers)
+            request_kwargs = dict(kwargs)
+            conditional_headers = None
+            if stale_entry is not None:
+                conditional_headers = sec_http_cache.build_conditional_headers(stale_entry, headers=headers)
+            if conditional_headers is not None:
+                request_kwargs["headers"] = conditional_headers
+            elif headers:
+                request_kwargs["headers"] = headers
+
+            max_retries = self._client_config.max_retries
+            attempt = 0
+            while True:
+                self._throttle()
+                response = self._http.request(method, url, **request_kwargs)
+                self._last_request_monotonic = time.monotonic()
+                if response.status_code == 304 and stale_entry is not None:
+                    response.read()
+                    return sec_http_cache.revalidate(
+                        method,
+                        url,
+                        stale_entry,
+                        response,
+                        params=params,
+                        headers=headers,
+                    )
+                if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries - 1:
+                    retry_after = response.headers.get("retry-after")
+                    wait = _retry_wait(retry_after, self._client_config, attempt)
+                    response.close()
+                    time.sleep(wait)
+                    attempt += 1
+                    continue
+                response.raise_for_status()
+                sec_http_cache.put(method, url, response, params=params, headers=headers)
+                return response
+
+        cache_key = sec_http_cache.cache_key(method, url, params=params)
+        if cache_key is None:
+            return _fetch_response()
+        return shared_upstream_cache.run_singleflight(
+            f"sec:{method.upper()}:{cache_key}",
+            wait_for=lambda: sec_http_cache.get(method, url, params=params, headers=headers),
+            fill=_fetch_response,
+        )
 
     def close(self) -> None:
         self._http.close()
@@ -1016,7 +1056,11 @@ class EdgarClient:
             time.sleep(wait_for)
 
     def _get_json(self, url: str) -> dict[str, Any]:
-        return self._request("GET", url).json()
+        response = self._request("GET", url)
+        cached_json = response.extensions.get("cached_json_payload")
+        if isinstance(cached_json, dict):
+            return cached_json
+        return response.json()
 
     def _get_text(self, url: str) -> str:
         return self._request("GET", url).text
@@ -2059,6 +2103,7 @@ class EdgarIngestionService:
         reporter: JobReporter,
         refresh_profile: bool = False,
         strict_message: str = "Strict official mode enabled; Yahoo price refresh skipped.",
+        prefetched_price_history: PriceHistoryPrefetchResult | None = None,
     ) -> int:
         if settings.strict_official_mode:
             if refresh_profile:
@@ -2077,31 +2122,52 @@ class EdgarIngestionService:
             if market_profile.industry:
                 company.market_industry = market_profile.industry
 
-        try:
-            latest_trade_date = get_company_latest_trade_date(session, company.id)
-        except AttributeError:
-            latest_trade_date = None
-        incremental_start_date = None
-        if latest_trade_date is not None:
-            incremental_start_date = latest_trade_date - timedelta(days=settings.market_history_overlap_days)
-
-        reporter.step(
-            "market",
-            "Fetching price history tail..." if incremental_start_date is not None else "Fetching full price history...",
-        )
-        existing_state = get_dataset_state(session, company.id, "prices")
-        existing_payload_hash = existing_state.payload_version_hash if existing_state is not None else None
-        try:
-            price_bars = self.market_data.get_price_history(company.ticker, start_date=incremental_start_date)
-        except MarketDataUnavailableError as exc:
-            reporter.step("market", f"{exc} Marking prices checked without cached bars.")
-            touch_company_price_history(
-                session,
-                company.id,
-                checked_at,
-                payload_version_hash=existing_payload_hash,
+        if prefetched_price_history is not None:
+            incremental_start_date = prefetched_price_history.incremental_start_date
+            existing_payload_hash = prefetched_price_history.existing_payload_hash
+            reporter.step(
+                "market",
+                "Using prefetched price history tail..." if incremental_start_date is not None else "Using prefetched full price history...",
             )
-            return 0
+            prefetch_error = prefetched_price_history.error
+            if isinstance(prefetch_error, MarketDataUnavailableError):
+                reporter.step("market", f"{prefetch_error} Marking prices checked without cached bars.")
+                touch_company_price_history(
+                    session,
+                    company.id,
+                    checked_at,
+                    payload_version_hash=existing_payload_hash,
+                )
+                return 0
+            if prefetch_error is not None:
+                raise prefetch_error
+            price_bars = prefetched_price_history.price_bars or []
+        else:
+            try:
+                latest_trade_date = get_company_latest_trade_date(session, company.id)
+            except AttributeError:
+                latest_trade_date = None
+            incremental_start_date = None
+            if latest_trade_date is not None:
+                incremental_start_date = latest_trade_date - timedelta(days=settings.market_history_overlap_days)
+
+            reporter.step(
+                "market",
+                "Fetching price history tail..." if incremental_start_date is not None else "Fetching full price history...",
+            )
+            existing_state = get_dataset_state(session, company.id, "prices")
+            existing_payload_hash = existing_state.payload_version_hash if existing_state is not None else None
+            try:
+                price_bars = self.market_data.get_price_history(company.ticker, start_date=incremental_start_date)
+            except MarketDataUnavailableError as exc:
+                reporter.step("market", f"{exc} Marking prices checked without cached bars.")
+                touch_company_price_history(
+                    session,
+                    company.id,
+                    checked_at,
+                    payload_version_hash=existing_payload_hash,
+                )
+                return 0
 
         if not price_bars:
             reporter.step("market", f"No Yahoo price history returned for {company.ticker}; marking prices checked without cached bars.")
@@ -2146,6 +2212,47 @@ class EdgarIngestionService:
             payload_version_hash=payload_version_hash,
         )
         return price_points_written
+
+    def _prefetch_price_history(
+        self,
+        *,
+        ticker: str,
+        incremental_start_date: date | None,
+        existing_payload_hash: str | None,
+    ) -> PriceHistoryPrefetchResult:
+        try:
+            price_bars = self.market_data.get_price_history(ticker, start_date=incremental_start_date)
+            return PriceHistoryPrefetchResult(
+                incremental_start_date=incremental_start_date,
+                existing_payload_hash=existing_payload_hash,
+                price_bars=price_bars,
+            )
+        except Exception as exc:
+            return PriceHistoryPrefetchResult(
+                incremental_start_date=incremental_start_date,
+                existing_payload_hash=existing_payload_hash,
+                error=exc,
+            )
+
+    def refresh_beneficial_ownership(
+        self,
+        session: Session,
+        company: Company,
+        *,
+        filing_index: dict[str, FilingMetadata],
+        checked_at: datetime,
+        reporter: JobReporter,
+        announce: bool = True,
+    ) -> int:
+        if announce:
+            reporter.step("beneficial", "Caching beneficial ownership filings...")
+        from app.services.beneficial_ownership import (  # local import avoids circular dependency
+            collect_beneficial_ownership_reports,
+            upsert_beneficial_ownership_reports,
+        )
+
+        reports = collect_beneficial_ownership_reports(company.cik, filing_index, client=self.client)
+        return upsert_beneficial_ownership_reports(session, company, reports, checked_at=checked_at)
 
     def refresh_insiders(
         self,
@@ -2201,26 +2308,6 @@ class EdgarIngestionService:
             reporter=reporter,
             force=force,
         )
-
-    def refresh_beneficial_ownership(
-        self,
-        session: Session,
-        company: Company,
-        *,
-        filing_index: dict[str, FilingMetadata],
-        checked_at: datetime,
-        reporter: JobReporter,
-        announce: bool = True,
-    ) -> int:
-        if announce:
-            reporter.step("beneficial", "Caching beneficial ownership filings...")
-        from app.services.beneficial_ownership import (  # local import avoids circular dependency
-            collect_beneficial_ownership_reports,
-            upsert_beneficial_ownership_reports,
-        )
-
-        reports = collect_beneficial_ownership_reports(company.cik, filing_index, client=self.client)
-        return upsert_beneficial_ownership_reports(session, company, reports, checked_at=checked_at)
 
     def refresh_earnings(
         self,
@@ -2841,6 +2928,31 @@ class EdgarIngestionService:
         get_engine()
         with SessionLocal() as session:
             company = _upsert_company(session, enriched_identity)
+            price_prefetch_executor: ThreadPoolExecutor | None = None
+            price_prefetch_future: Future[PriceHistoryPrefetchResult] | None = None
+            prefetched_price_history: PriceHistoryPrefetchResult | None = None
+            if (
+                not settings.strict_official_mode
+                and (policy.force or not policy.prices_fresh)
+                and getattr(settings, "refresh_aux_io_max_workers", 1) > 1
+            ):
+                try:
+                    latest_trade_date = get_company_latest_trade_date(session, company.id)
+                except AttributeError:
+                    latest_trade_date = None
+                incremental_start_date = None
+                if latest_trade_date is not None:
+                    incremental_start_date = latest_trade_date - timedelta(days=settings.market_history_overlap_days)
+                existing_state = get_dataset_state(session, company.id, "prices")
+                existing_payload_hash = existing_state.payload_version_hash if existing_state is not None else None
+                price_prefetch_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="refresh-price")
+                price_prefetch_future = price_prefetch_executor.submit(
+                    self._prefetch_price_history,
+                    ticker=company.ticker,
+                    incremental_start_date=incremental_start_date,
+                    existing_payload_hash=existing_payload_hash,
+                )
+
             statements_written = 0
             financials_state = get_dataset_state(session, company.id, "financials")
             can_reuse_financials = (
@@ -3010,6 +3122,8 @@ class EdgarIngestionService:
 
             price_outcome = DatasetRefreshOutcome()
             if policy.force or not policy.prices_fresh:
+                if price_prefetch_future is not None:
+                    prefetched_price_history = price_prefetch_future.result()
                 price_outcome = self._run_dataset_job(
                     session,
                     company,
@@ -3021,6 +3135,7 @@ class EdgarIngestionService:
                         company=company,
                         checked_at=checked_at,
                         reporter=reporter,
+                        prefetched_price_history=prefetched_price_history,
                     ),
                 )
 
@@ -3120,6 +3235,9 @@ class EdgarIngestionService:
                     price_outcome.error or f"Cached {price_outcome.written} daily price bars"
                 )
 
+            if price_prefetch_executor is not None:
+                price_prefetch_executor.shutdown(wait=True)
+
             return IngestionResult(
                 identifier=identifier,
                 company_id=company.id,
@@ -3137,6 +3255,7 @@ class EdgarIngestionService:
                 last_checked=checked_at,
                 detail="; ".join(detail_parts),
             )
+        
 
     def refresh_company(
         self,

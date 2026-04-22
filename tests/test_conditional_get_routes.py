@@ -497,9 +497,14 @@ def test_company_route_hot_cache_keys_use_latest_when_as_of_absent():
 def test_company_route_hot_cache_keys_include_financials_view_when_requested():
     financials_request = _request_with_query_string("view=core", path="/api/companies/AAPL/financials")
     overview_request = _request_with_query_string("financials_view=core_segments", path="/api/companies/AAPL/overview")
+    bootstrap_request = _request_with_query_string(
+        "financials_view=core_segments&include_overview_brief=true",
+        path="/api/companies/AAPL/workspace-bootstrap",
+    )
 
     assert main_module._company_route_hot_cache_keys(financials_request) == ["financials:AAPL:view=core:asof=latest"]
     assert main_module._company_route_hot_cache_keys(overview_request) == ["financials:AAPL:view=core_segments:asof=latest"]
+    assert main_module._company_route_hot_cache_keys(bootstrap_request) == ["financials:AAPL:view=core_segments:asof=latest"]
 
 
 def test_company_route_hot_cache_keys_bypass_invalid_as_of():

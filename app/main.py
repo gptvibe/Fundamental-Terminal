@@ -49,6 +49,14 @@ def _canonicalize_company_query_string(request: Request) -> str:
         singleton_names.add("view")
     elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/overview"):
         singleton_names.add("financials_view")
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/workspace-bootstrap"):
+        singleton_names.update({
+            "financials_view",
+            "include_overview_brief",
+            "include_insiders",
+            "include_institutional",
+            "include_earnings_summary",
+        })
     elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/models"):
         singleton_names.update({"expand", "dupont_mode"})
 
@@ -93,6 +101,27 @@ def _canonicalize_company_query_string(request: Request) -> str:
             )
             singleton_values["as_of"] = None if normalized_as_of == "latest" else normalized_as_of
             singleton_values["financials_view"] = None if normalized_view == "full" else normalized_view
+    elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/workspace-bootstrap"):
+        normalize_financials_controls = globals().get("_normalize_company_financials_query_controls")
+        if callable(normalize_financials_controls):
+            _parsed_as_of, normalized_view, normalized_as_of = normalize_financials_controls(
+                requested_as_of=singleton_values.get("as_of"),
+                view=singleton_values.get("financials_view"),
+            )
+            singleton_values["as_of"] = None if normalized_as_of == "latest" else normalized_as_of
+            singleton_values["financials_view"] = None if normalized_view == "full" else normalized_view
+
+        for flag_name in (
+            "include_overview_brief",
+            "include_insiders",
+            "include_institutional",
+            "include_earnings_summary",
+        ):
+            raw_value = singleton_values.get(flag_name)
+            if raw_value is None:
+                continue
+            normalized = raw_value.strip().lower()
+            singleton_values[flag_name] = "true" if normalized in {"1", "true", "yes", "on"} else None
 
     query_items = sorted(
         [
@@ -239,6 +268,12 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
         return [f"financials:{normalized_ticker}:view={financial_controls['view']}:asof={financial_controls['as_of']}"]
 
     if route_name == "overview":
+        financial_controls, controls_are_valid = _resolved_company_financials_controls(request, view_param_name="financials_view")
+        if not controls_are_valid or financial_controls is None:
+            return []
+        return [f"financials:{normalized_ticker}:view={financial_controls['view']}:asof={financial_controls['as_of']}"]
+
+    if route_name == "workspace-bootstrap":
         financial_controls, controls_are_valid = _resolved_company_financials_controls(request, view_param_name="financials_view")
         if not controls_are_valid or financial_controls is None:
             return []

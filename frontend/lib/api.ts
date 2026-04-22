@@ -41,6 +41,7 @@ import {
   CompanySectorContextResponse,
   CompanyMetricsTimeseriesResponse,
   CompanyOverviewResponse,
+  CompanyWorkspaceBootstrapResponse,
   CompanyResolutionResponse,
   CompanyPeersResponse,
   CompanySearchResponse,
@@ -86,6 +87,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/screener\/filters(?:\?|$)/, policy: { ttlMs: 300_000, staleMs: 900_000 } },
   { pattern: /^\/companies\/[^/]+\/financials(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/overview(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
+  { pattern: /^\/companies\/[^/]+\/workspace-bootstrap(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/segment-history(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/charts(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -643,6 +645,66 @@ export function getCompanyOverview(
   const normalizedTicker = encodeURIComponent(ticker);
   return fetchJson<CompanyOverviewResponse>(`/companies/${normalizedTicker}/overview${suffix}`, { signal: options?.signal }).then((payload) => {
     shareReadCacheValue(`/companies/${normalizedTicker}/financials${financialsSuffix}`, payload.financials);
+    return payload;
+  });
+}
+
+export function getCompanyWorkspaceBootstrap(
+  ticker: string,
+  options?: {
+    asOf?: string | null;
+    financialsView?: "full" | "core_segments" | "core";
+    includeOverviewBrief?: boolean;
+    includeInsiders?: boolean;
+    includeInstitutional?: boolean;
+    includeEarningsSummary?: boolean;
+    signal?: AbortSignal;
+  }
+): Promise<CompanyWorkspaceBootstrapResponse> {
+  const params = new URLSearchParams();
+  if (options?.financialsView && options.financialsView !== "full") {
+    params.set("financials_view", options.financialsView);
+  }
+  if (options?.includeOverviewBrief) {
+    params.set("include_overview_brief", "true");
+  }
+  if (options?.includeInsiders) {
+    params.set("include_insiders", "true");
+  }
+  if (options?.includeInstitutional) {
+    params.set("include_institutional", "true");
+  }
+  if (options?.includeEarningsSummary) {
+    params.set("include_earnings_summary", "true");
+  }
+  appendAsOf(params, options?.asOf);
+
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const normalizedTicker = encodeURIComponent(ticker);
+  const financialsParams = new URLSearchParams();
+  if (options?.financialsView && options.financialsView !== "full") {
+    financialsParams.set("view", options.financialsView);
+  }
+  appendAsOf(financialsParams, options?.asOf);
+  const financialsSuffix = financialsParams.toString() ? `?${financialsParams.toString()}` : "";
+
+  return fetchJson<CompanyWorkspaceBootstrapResponse>(`/companies/${normalizedTicker}/workspace-bootstrap${suffix}`, {
+    signal: options?.signal,
+  }).then((payload) => {
+    shareReadCacheValue(`/companies/${normalizedTicker}/financials${financialsSuffix}`, payload.financials);
+    if (payload.brief) {
+      const overviewParams = new URLSearchParams();
+      if (options?.financialsView && options.financialsView !== "full") {
+        overviewParams.set("financials_view", options.financialsView);
+      }
+      appendAsOf(overviewParams, options?.asOf);
+      const overviewSuffix = overviewParams.toString() ? `?${overviewParams.toString()}` : "";
+      shareReadCacheValue(`/companies/${normalizedTicker}/overview${overviewSuffix}`, {
+        company: payload.company,
+        financials: payload.financials,
+        brief: payload.brief,
+      });
+    }
     return payload;
   });
 }
