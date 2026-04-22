@@ -11,6 +11,24 @@ type JobStreamState = {
   connectionState: ConnectionState;
 };
 
+type JobStreamListener = () => void;
+
+type SharedJobStreamRecord = {
+  source: EventSource;
+  state: JobStreamState;
+  listeners: Map<JobStreamListener, number>;
+  subscriptionCount: number;
+  notifyScheduled: boolean;
+  closed: boolean;
+};
+
+const INITIAL_JOB_STREAM_STATE: JobStreamState = {
+  events: [],
+  connectionState: "connecting",
+};
+
+const sharedJobStreams = new Map<string, SharedJobStreamRecord>();
+
 function normalizeJobIds(jobIds: readonly (string | null | undefined)[]): string[] {
   return [...new Set(jobIds.filter((jobId): jobId is string => Boolean(jobId)))].sort();
 }
@@ -27,80 +45,165 @@ function appendEvent(current: JobStatusEvent[], payload: JobStatusEvent): JobSta
   return [...current, payload];
 }
 
-export function useJobStreams(jobIds: readonly (string | null | undefined)[]) {
-  const normalizedJobIds = normalizeJobIds(jobIds);
-  const jobIdsKey = normalizedJobIds.join("|");
-  const [stateByJobId, setStateByJobId] = useState<Record<string, JobStreamState>>({});
+function areStatesEqual(left: JobStreamState, right: JobStreamState): boolean {
+  return left.connectionState === right.connectionState && left.events === right.events;
+}
 
-  useEffect(() => {
-    if (!normalizedJobIds.length) {
-      setStateByJobId({});
+function notifyListeners(record: SharedJobStreamRecord): void {
+  if (record.notifyScheduled) {
+    return;
+  }
+
+  record.notifyScheduled = true;
+  queueMicrotask(() => {
+    record.notifyScheduled = false;
+    for (const listener of record.listeners.keys()) {
+      listener();
+    }
+  });
+}
+
+function updateSharedJobStream(jobId: string, updater: (current: JobStreamState) => JobStreamState): void {
+  const record = sharedJobStreams.get(jobId);
+  if (!record) {
+    return;
+  }
+
+  const nextState = updater(record.state);
+  if (areStatesEqual(record.state, nextState)) {
+    return;
+  }
+
+  record.state = nextState;
+  notifyListeners(record);
+}
+
+function closeSharedJobStream(jobId: string): void {
+  const record = sharedJobStreams.get(jobId);
+  if (!record) {
+    return;
+  }
+
+  record.closed = true;
+  record.source.close();
+}
+
+function createSharedJobStream(jobId: string): SharedJobStreamRecord {
+  const source = new EventSource(`/backend/api/jobs/${encodeURIComponent(jobId)}/events`);
+  const record: SharedJobStreamRecord = {
+    source,
+    state: INITIAL_JOB_STREAM_STATE,
+    listeners: new Map<JobStreamListener, number>(),
+    subscriptionCount: 0,
+    notifyScheduled: false,
+    closed: false,
+  };
+
+  source.addEventListener("status", ((event: MessageEvent<string>) => {
+    const payload = JSON.parse(event.data) as JobStatusEvent;
+    updateSharedJobStream(jobId, (current) => ({
+      events: appendEvent(current.events, payload),
+      connectionState: isTerminalEvent(payload) ? "closed" : "open",
+    }));
+
+    if (isTerminalEvent(payload)) {
+      closeSharedJobStream(jobId);
+    }
+  }) as EventListener);
+
+  source.onopen = () => {
+    updateSharedJobStream(jobId, (current) => ({
+      events: current.events,
+      connectionState: "open",
+    }));
+  };
+
+  source.onerror = () => {
+    const activeRecord = sharedJobStreams.get(jobId);
+    if (!activeRecord || activeRecord.closed) {
       return;
     }
 
-    setStateByJobId((current) =>
-      Object.fromEntries(
-        normalizedJobIds.map((jobId) => [jobId, current[jobId] ?? { events: [], connectionState: "connecting" as ConnectionState }])
-      )
-    );
+    updateSharedJobStream(jobId, (current) => ({
+      events: current.events,
+      connectionState: "error",
+    }));
+  };
 
-    const cleanups = normalizedJobIds.map((jobId) => {
-      let closed = false;
-      const source = new EventSource(`/backend/api/jobs/${encodeURIComponent(jobId)}/events`);
+  return record;
+}
 
-      const onStatus = (event: MessageEvent<string>) => {
-        const payload = JSON.parse(event.data) as JobStatusEvent;
-        setStateByJobId((current) => {
-          const existing = current[jobId] ?? { events: [], connectionState: "connecting" as ConnectionState };
-          return {
-            ...current,
-            [jobId]: {
-              events: appendEvent(existing.events, payload),
-              connectionState: isTerminalEvent(payload) ? "closed" : "open",
-            },
-          };
-        });
+function ensureSharedJobStream(jobId: string): SharedJobStreamRecord {
+  const existing = sharedJobStreams.get(jobId);
+  if (existing) {
+    return existing;
+  }
 
-        if (isTerminalEvent(payload)) {
-          closed = true;
-          source.close();
-        }
-      };
+  const created = createSharedJobStream(jobId);
+  sharedJobStreams.set(jobId, created);
+  return created;
+}
 
-      source.addEventListener("status", onStatus as EventListener);
-      source.onopen = () => {
-        setStateByJobId((current) => ({
-          ...current,
-          [jobId]: {
-            events: current[jobId]?.events ?? [],
-            connectionState: "open",
-          },
-        }));
-      };
-      source.onerror = () => {
-        if (closed) {
-          return;
-        }
+function subscribeToJobStream(jobId: string, listener: JobStreamListener): () => void {
+  const record = ensureSharedJobStream(jobId);
+  record.subscriptionCount += 1;
+  record.listeners.set(listener, (record.listeners.get(listener) ?? 0) + 1);
 
-        setStateByJobId((current) => ({
-          ...current,
-          [jobId]: {
-            events: current[jobId]?.events ?? [],
-            connectionState: "error",
-          },
-        }));
-      };
+  return () => {
+    const activeRecord = sharedJobStreams.get(jobId);
+    if (!activeRecord) {
+      return;
+    }
 
-      return () => {
-        closed = true;
-        source.removeEventListener("status", onStatus as EventListener);
-        source.close();
-      };
+    activeRecord.subscriptionCount = Math.max(0, activeRecord.subscriptionCount - 1);
+
+    const remainingListenerCount = (activeRecord.listeners.get(listener) ?? 0) - 1;
+    if (remainingListenerCount > 0) {
+      activeRecord.listeners.set(listener, remainingListenerCount);
+    } else {
+      activeRecord.listeners.delete(listener);
+    }
+
+    if (activeRecord.subscriptionCount > 0) {
+      return;
+    }
+
+    activeRecord.closed = true;
+    activeRecord.source.close();
+    sharedJobStreams.delete(jobId);
+  };
+}
+
+function subscribeToJobStreams(jobIds: readonly string[], listener: JobStreamListener): () => void {
+  const cleanups = jobIds.map((jobId) => subscribeToJobStream(jobId, listener));
+  return () => {
+    cleanups.forEach((cleanup) => cleanup());
+  };
+}
+
+function getJobStreamState(jobId: string): JobStreamState {
+  return sharedJobStreams.get(jobId)?.state ?? INITIAL_JOB_STREAM_STATE;
+}
+
+function getJobStreamSnapshot(jobIds: readonly string[]): Record<string, JobStreamState> {
+  return Object.fromEntries(jobIds.map((jobId) => [jobId, getJobStreamState(jobId)]));
+}
+
+export function useJobStreams(jobIds: readonly (string | null | undefined)[]) {
+  const normalizedJobIds = useMemo(() => normalizeJobIds(jobIds), [jobIds]);
+  const jobIdsKey = normalizedJobIds.join("|");
+  const [stateByJobId, setStateByJobId] = useState<Record<string, JobStreamState>>(() => getJobStreamSnapshot(normalizedJobIds));
+
+  useEffect(() => {
+    setStateByJobId(getJobStreamSnapshot(normalizedJobIds));
+
+    if (!normalizedJobIds.length) {
+      return;
+    }
+
+    return subscribeToJobStreams(normalizedJobIds, () => {
+      setStateByJobId(getJobStreamSnapshot(normalizedJobIds));
     });
-
-    return () => {
-      cleanups.forEach((cleanup) => cleanup());
-    };
   }, [jobIdsKey]);
 
   const eventsByJobId = useMemo(
@@ -169,4 +272,12 @@ export function useJobStream(jobId: string | null | undefined) {
     connectionState,
     lastEvent,
   };
+}
+
+export function __resetJobStreamStoreForTests(): void {
+  for (const [jobId, record] of sharedJobStreams.entries()) {
+    record.closed = true;
+    record.source.close();
+    sharedJobStreams.delete(jobId);
+  }
 }

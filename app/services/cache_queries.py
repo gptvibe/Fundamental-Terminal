@@ -607,7 +607,12 @@ def get_company_price_cache_status(session: Session, company_id: int) -> tuple[d
     if cache_state != "missing":
         return last_checked, cache_state
 
-    statement = select(func.max(PriceHistory.last_checked)).where(PriceHistory.company_id == company_id)
+    statement = (
+        select(PriceHistory.last_checked)
+        .where(PriceHistory.company_id == company_id)
+        .order_by(PriceHistory.last_checked.desc())
+        .limit(1)
+    )
     scanned = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if scanned is not None:
         mark_dataset_checked(session, company_id, "prices", checked_at=scanned, success=True)

@@ -181,7 +181,12 @@ def get_company_price_last_checked(session: Session, company_id: int) -> datetim
     if state_cache != "missing":
         return state_last_checked
 
-    statement = select(func.max(PriceHistory.last_checked)).where(PriceHistory.company_id == company_id)
+    statement = (
+        select(PriceHistory.last_checked)
+        .where(PriceHistory.company_id == company_id)
+        .order_by(PriceHistory.last_checked.desc())
+        .limit(1)
+    )
     scanned = session.execute(statement).scalar_one_or_none()
     if scanned is not None:
         mark_dataset_checked(session, company_id, "prices", checked_at=scanned, success=True)
@@ -189,7 +194,12 @@ def get_company_price_last_checked(session: Session, company_id: int) -> datetim
 
 
 def get_company_latest_trade_date(session: Session, company_id: int) -> date | None:
-    statement = select(func.max(PriceHistory.trade_date)).where(PriceHistory.company_id == company_id)
+    statement = (
+        select(PriceHistory.trade_date)
+        .where(PriceHistory.company_id == company_id)
+        .order_by(PriceHistory.trade_date.desc())
+        .limit(1)
+    )
     return session.execute(statement).scalar_one_or_none()
 
 
@@ -199,8 +209,8 @@ def get_company_price_history_tail(
     *,
     start_date: date,
 ) -> list[PriceBar]:
-    statement: Select[tuple[PriceHistory]] = (
-        select(PriceHistory)
+    statement = (
+        select(PriceHistory.trade_date, PriceHistory.close, PriceHistory.volume)
         .where(
             PriceHistory.company_id == company_id,
             PriceHistory.source == PRICE_SOURCE,
@@ -209,8 +219,8 @@ def get_company_price_history_tail(
         .order_by(PriceHistory.trade_date.asc())
     )
     return [
-        PriceBar(trade_date=row.trade_date, close=row.close, volume=row.volume)
-        for row in session.execute(statement).scalars()
+        PriceBar(trade_date=trade_date, close=close, volume=volume)
+        for trade_date, close, volume in session.execute(statement)
     ]
 
 

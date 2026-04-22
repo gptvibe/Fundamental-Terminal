@@ -2137,6 +2137,7 @@ class EdgarIngestionService:
                     company.id,
                     checked_at,
                     payload_version_hash=existing_payload_hash,
+                    touch_rows=False,
                 )
                 return 0
             if prefetch_error is not None:
@@ -2166,6 +2167,7 @@ class EdgarIngestionService:
                     company.id,
                     checked_at,
                     payload_version_hash=existing_payload_hash,
+                    touch_rows=False,
                 )
                 return 0
 
@@ -2176,6 +2178,7 @@ class EdgarIngestionService:
                 company.id,
                 checked_at,
                 payload_version_hash=existing_payload_hash,
+                touch_rows=False,
             )
             return 0
 

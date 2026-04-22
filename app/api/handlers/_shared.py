@@ -342,10 +342,10 @@ def reset_performance_audit() -> dict[str, Any]:
 
 @app.get("/api/jobs/{job_id}/events")
 async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
-    if not await status_broker.async_has_job(job_id):
+    try:
+        backlog, queue, unsubscribe = await status_broker.async_subscribe(job_id)
+    except KeyError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown job ID")
-
-    backlog, queue, unsubscribe = await status_broker.async_subscribe(job_id)
 
     async def event_generator():
         try:
