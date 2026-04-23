@@ -1,14 +1,24 @@
-"use client";
-
-import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { headers } from "next/headers";
 
 import { CompanyChartsDashboard } from "@/components/company/charts-dashboard";
 import { ProjectionStudio } from "@/components/company/projection-studio";
-import { getCompanyCharts } from "@/lib/api";
 import type { CompanyChartsDashboardResponse } from "@/lib/types";
 
+import { ChartsRetryButton } from "./charts-retry-button";
+
 type DashboardMode = "outlook" | "studio";
+
+type QueryParamValue = string | string[] | undefined;
+
+type CompanyChartsPageProps = {
+  params: { ticker: string } | Promise<{ ticker: string }>;
+  searchParams?:
+    | Record<string, QueryParamValue>
+    | Promise<Record<string, QueryParamValue> | undefined>
+    | undefined;
+};
+
+type ChartsLoadFailure = "not_found" | "service_error" | "temporary_error";
 
 function resolveDashboardMode(rawMode: string | null, hasProjectionStudio: boolean): DashboardMode {
   if (rawMode === "studio" && hasProjectionStudio) {
@@ -17,81 +27,20 @@ function resolveDashboardMode(rawMode: string | null, hasProjectionStudio: boole
   return "outlook";
 }
 
-export default function CompanyChartsPage() {
-  const params = useParams<{ ticker: string }>();
-  const searchParams = useSearchParams();
-  const ticker = decodeURIComponent(params.ticker).toUpperCase();
-  const requestedAsOf = searchParams?.get("as_of") ?? null;
-  const [data, setData] = useState<CompanyChartsDashboardResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export default async function CompanyChartsPage({ params, searchParams }: CompanyChartsPageProps) {
+  const resolvedParams = await params;
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const ticker = normalizeTicker(resolvedParams.ticker);
+  const requestedAsOf = readQueryParam(resolvedSearchParams.as_of);
+  const requestedMode = readQueryParam(resolvedSearchParams.mode);
+  const chartsResult = await loadCompanyCharts(ticker, requestedAsOf);
 
-  // Determine requested mode from URL; default to outlook
-  const requestedMode = searchParams?.get("mode") ?? null;
-  const mode = resolveDashboardMode(requestedMode, Boolean(data?.projection_studio));
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const payload = await getCompanyCharts(ticker, requestedAsOf ? { asOf: requestedAsOf } : undefined);
-        if (!cancelled) {
-          setData(payload);
-        }
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : "Unable to load charts");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [requestedAsOf, ticker]);
-
-  if (loading && !data) {
-    return (
-      <div className="charts-page-shell charts-page-shell-loading" aria-label="Charts loading state">
-        <div className="charts-loading-hero" />
-        <div className="charts-loading-dashboard-grid">
-          <div className="charts-loading-panel charts-loading-summary-panel" />
-          {Array.from({ length: 6 }, (_, index) => (
-            <div key={index} className="charts-loading-card charts-loading-card-compact" />
-          ))}
-        </div>
-        <div className="charts-loading-card-grid">
-          {Array.from({ length: 3 }, (_, index) => (
-            <div key={index} className="charts-loading-card" />
-          ))}
-        </div>
-      </div>
-    );
+  if (!chartsResult.ok) {
+    return <ChartsErrorState failure={chartsResult.failure} />;
   }
 
-  if (error && !data) {
-    return (
-      <div className="charts-page-shell">
-        <section className="charts-error-state">
-          <div className="charts-page-chip">Charts</div>
-          <h1 className="charts-page-title">Growth Outlook</h1>
-          <p className="charts-summary-thesis">{error}</p>
-        </section>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return null;
-  }
+  const data = chartsResult.data;
+  const mode = resolveDashboardMode(requestedMode, Boolean(data.projection_studio));
 
   return (
     <>
@@ -102,4 +51,100 @@ export default function CompanyChartsPage() {
       )}
     </>
   );
+}
+
+function normalizeTicker(rawTicker: string): string {
+  try {
+    return decodeURIComponent(rawTicker).trim().toUpperCase();
+  } catch {
+    return rawTicker.trim().toUpperCase();
+  }
+}
+
+function readQueryParam(value: QueryParamValue): string | null {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+  return value ?? null;
+}
+
+async function loadCompanyCharts(
+  ticker: string,
+  asOf: string | null
+): Promise<{ ok: true; data: CompanyChartsDashboardResponse } | { ok: false; failure: ChartsLoadFailure }> {
+  const params = new URLSearchParams();
+  if (asOf?.trim()) {
+    params.set("as_of", asOf.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const baseUrl = resolveServerBaseUrl();
+
+  try {
+    const response = await fetch(`${baseUrl}/backend/api/companies/${encodeURIComponent(ticker)}/charts${suffix}`, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        return { ok: false, failure: "not_found" };
+      }
+      if (response.status >= 500) {
+        return { ok: false, failure: "service_error" };
+      }
+      return { ok: false, failure: "temporary_error" };
+    }
+
+    const payload = (await response.json()) as CompanyChartsDashboardResponse;
+    return { ok: true, data: payload };
+  } catch {
+    return { ok: false, failure: "temporary_error" };
+  }
+}
+
+function resolveServerBaseUrl(): string {
+  const headerStore = headers();
+  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host");
+  const protocol = headerStore.get("x-forwarded-proto") ?? "http";
+
+  if (!host) {
+    throw new Error("Missing host header while loading charts route");
+  }
+
+  return `${protocol}://${host}`;
+}
+
+function ChartsErrorState({ failure }: { failure: ChartsLoadFailure }) {
+  const copy = getChartsErrorCopy(failure);
+
+  return (
+    <div className="charts-page-shell">
+      <section className="charts-error-state" role="status" aria-live="polite">
+        <div className="charts-page-chip">Charts</div>
+        <h1 className="charts-page-title">Growth Outlook</h1>
+        <p className="charts-summary-thesis">{copy.body}</p>
+        <ChartsRetryButton />
+      </section>
+    </div>
+  );
+}
+
+function getChartsErrorCopy(failure: ChartsLoadFailure): { body: string } {
+  if (failure === "not_found") {
+    return {
+      body: "Charts for this company are unavailable or not yet prepared.",
+    };
+  }
+
+  if (failure === "service_error") {
+    return {
+      body: "We are having a service problem loading charts. Please try again.",
+    };
+  }
+
+  return {
+    body: "We hit a temporary loading problem. Please try again.",
+  };
 }

@@ -25,7 +25,7 @@ export function useForecastAccuracy(
   const [loading, setLoading] = useState(Boolean(options.enabled ?? true));
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     if (!(options.enabled ?? true)) {
       setLoading(false);
       return;
@@ -36,9 +36,13 @@ export function useForecastAccuracy(
     try {
       const payload = await getCompanyChartsForecastAccuracy(ticker, {
         asOf: options.asOf,
+        signal,
       });
       setData(payload);
     } catch (nextError) {
+      if (isAbortError(nextError)) {
+        return;
+      }
       setData(null);
       const message =
         nextError instanceof Error
@@ -51,7 +55,7 @@ export function useForecastAccuracy(
   }, [options.asOf, options.enabled, ticker]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     async function run() {
       if (!(options.enabled ?? true)) {
@@ -64,12 +68,13 @@ export function useForecastAccuracy(
       try {
         const payload = await getCompanyChartsForecastAccuracy(ticker, {
           asOf: options.asOf,
+          signal: controller.signal,
         });
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setData(payload);
         }
       } catch (nextError) {
-        if (!cancelled) {
+        if (!isAbortError(nextError) && !controller.signal.aborted) {
           setData(null);
           const message =
             nextError instanceof Error
@@ -78,7 +83,7 @@ export function useForecastAccuracy(
           setError(message || "Unable to load forecast accuracy.");
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
@@ -87,7 +92,7 @@ export function useForecastAccuracy(
     void run();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [options.asOf, options.enabled, ticker]);
 
@@ -95,6 +100,13 @@ export function useForecastAccuracy(
     data,
     loading,
     error,
-    reload: load,
+    reload: () => load(),
   };
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
 }

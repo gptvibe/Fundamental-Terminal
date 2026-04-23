@@ -75,6 +75,8 @@ type ReadCachePolicy = {
 type CacheEntry = {
   data: unknown;
   updatedAt: number;
+  approxSizeBytes: number;
+  lastAccessedAt: number;
 };
 
 const DEFAULT_READ_POLICY: ReadCachePolicy = {
@@ -106,13 +108,35 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/watchlist\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
 ];
 
-const CACHE_STORAGE_PREFIX = "ft:api-cache:v3:";
+const CACHE_STORAGE_PREFIX = "ft:api-cache:v4:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
+const CACHE_INVALIDATION_STORAGE_KEY = `${CACHE_STORAGE_PREFIX}invalidation`;
 const AUDIT_RECORDED_ERROR = Symbol("auditRecordedError");
+
+const MEMORY_CACHE_MAX_ENTRIES = 160;
+const MEMORY_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+const PERSISTED_CACHE_MAX_ENTRIES = 240;
+const PERSISTED_CACHE_MAX_BYTES = 32 * 1024 * 1024;
+const PERSISTED_CACHE_MAX_ENTRY_BYTES = 2 * 1024 * 1024;
+
+const IDB_DATABASE_NAME = "ft-api-cache";
+const IDB_DATABASE_VERSION = 1;
+const IDB_STORE_NAME = "entries";
+
+type PersistedCacheEntry = {
+  cacheKey: string;
+  data: unknown;
+  updatedAt: number;
+  approxSizeBytes: number;
+  lastAccessedAt: number;
+};
 
 const readCache = new Map<string, CacheEntry>();
 const inflightRequests = new Map<string, Promise<unknown>>();
 let cacheSyncInitialized = false;
+let memoryCacheApproxBytes = 0;
+let broadcastChannel: BroadcastChannel | null = null;
+let idbDatabasePromise: Promise<IDBDatabase | null> | null = null;
 
 function resolveReadPolicy(path: string): ReadCachePolicy {
   return READ_POLICY_BY_PATH.find((entry) => entry.pattern.test(path))?.policy ?? DEFAULT_READ_POLICY;
@@ -140,50 +164,266 @@ function cacheStorageKey(cacheKey: string): string {
   return `${CACHE_STORAGE_PREFIX}${cacheKey}`;
 }
 
-function tryReadPersistentCache(cacheKey: string): CacheEntry | null {
-  if (typeof window === "undefined") {
+function estimateMemoryEntryBytes(value: unknown): number {
+  if (value == null) {
+    return 64;
+  }
+
+  if (typeof value === "string") {
+    return Math.min(512 * 1024, Math.max(128, value.length * 2));
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return 64;
+  }
+
+  if (Array.isArray(value)) {
+    return Math.min(512 * 1024, Math.max(256, value.length * 64));
+  }
+
+  if (typeof value === "object") {
+    return 2_048;
+  }
+
+  return 256;
+}
+
+function estimateSerializedBytes(value: unknown): number | null {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized == null) {
+      return null;
+    }
+
+    if (typeof TextEncoder !== "undefined") {
+      return new TextEncoder().encode(serialized).length;
+    }
+
+    return serialized.length * 2;
+  } catch {
+    return null;
+  }
+}
+
+function upsertMemoryCacheEntry(cacheKey: string, entry: CacheEntry): void {
+  const previous = readCache.get(cacheKey);
+  if (previous) {
+    memoryCacheApproxBytes -= previous.approxSizeBytes;
+  }
+
+  readCache.set(cacheKey, entry);
+  memoryCacheApproxBytes += entry.approxSizeBytes;
+  evictMemoryCacheIfNeeded();
+}
+
+function deleteMemoryCacheEntry(cacheKey: string): void {
+  const previous = readCache.get(cacheKey);
+  if (!previous) {
+    return;
+  }
+
+  memoryCacheApproxBytes -= previous.approxSizeBytes;
+  if (memoryCacheApproxBytes < 0) {
+    memoryCacheApproxBytes = 0;
+  }
+  readCache.delete(cacheKey);
+}
+
+function evictMemoryCacheIfNeeded(): void {
+  if (readCache.size <= MEMORY_CACHE_MAX_ENTRIES && memoryCacheApproxBytes <= MEMORY_CACHE_MAX_BYTES) {
+    return;
+  }
+
+  const entriesByAge = [...readCache.entries()].sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt);
+  for (const [cacheKey] of entriesByAge) {
+    if (readCache.size <= MEMORY_CACHE_MAX_ENTRIES && memoryCacheApproxBytes <= MEMORY_CACHE_MAX_BYTES) {
+      break;
+    }
+    deleteMemoryCacheEntry(cacheKey);
+  }
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
+  });
+}
+
+function openIndexedDb(): Promise<IDBDatabase | null> {
+  if (typeof window === "undefined" || typeof indexedDB === "undefined") {
+    return Promise.resolve(null);
+  }
+
+  if (idbDatabasePromise) {
+    return idbDatabasePromise;
+  }
+
+  idbDatabasePromise = new Promise((resolve) => {
+    try {
+      const request = indexedDB.open(IDB_DATABASE_NAME, IDB_DATABASE_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+          db.createObjectStore(IDB_STORE_NAME, { keyPath: "cacheKey" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+
+  return idbDatabasePromise;
+}
+
+async function withIndexedDbStore<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => Promise<T>): Promise<T | null> {
+  const db = await openIndexedDb();
+  if (!db) {
     return null;
   }
 
   try {
-    const raw = window.localStorage.getItem(cacheStorageKey(cacheKey));
+    const transaction = db.transaction(IDB_STORE_NAME, mode);
+    const store = transaction.objectStore(IDB_STORE_NAME);
+    const result = await operation(store);
+
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+      transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    });
+
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function readPersistentCache(cacheKey: string): Promise<CacheEntry | null> {
+  const persisted = await withIndexedDbStore("readwrite", async (store) => {
+    const raw = await requestToPromise(store.get(cacheStorageKey(cacheKey)) as IDBRequest<PersistedCacheEntry | undefined>);
     if (!raw) {
       return null;
     }
-    const parsed = JSON.parse(raw) as CacheEntry;
-    if (!parsed || typeof parsed.updatedAt !== "number") {
-      removePersistentCache(cacheKey);
-      return null;
-    }
-    return parsed;
-  } catch {
-    removePersistentCache(cacheKey);
+
+    raw.lastAccessedAt = Date.now();
+    store.put(raw);
+    return raw;
+  });
+
+  if (!persisted || typeof persisted.updatedAt !== "number") {
     return null;
   }
+
+  return {
+    data: persisted.data,
+    updatedAt: persisted.updatedAt,
+    approxSizeBytes: typeof persisted.approxSizeBytes === "number" && persisted.approxSizeBytes > 0 ? persisted.approxSizeBytes : estimateMemoryEntryBytes(persisted.data),
+    lastAccessedAt: typeof persisted.lastAccessedAt === "number" && persisted.lastAccessedAt > 0 ? persisted.lastAccessedAt : Date.now(),
+  };
 }
 
-function writePersistentCache(cacheKey: string, entry: CacheEntry): void {
-  if (typeof window === "undefined") {
+async function writePersistentCache(cacheKey: string, entry: CacheEntry): Promise<void> {
+  const approxSizeBytes = estimateSerializedBytes(entry.data);
+  if (approxSizeBytes == null || approxSizeBytes > PERSISTED_CACHE_MAX_ENTRY_BYTES) {
+    await removePersistentCache(cacheKey);
     return;
   }
 
-  try {
-    window.localStorage.setItem(cacheStorageKey(cacheKey), JSON.stringify(entry));
-  } catch {
-    // Ignore storage quota and serialization errors. Memory cache still works.
-  }
+  await withIndexedDbStore("readwrite", async (store) => {
+    const persisted: PersistedCacheEntry = {
+      cacheKey: cacheStorageKey(cacheKey),
+      data: entry.data,
+      updatedAt: entry.updatedAt,
+      approxSizeBytes,
+      lastAccessedAt: entry.lastAccessedAt,
+    };
+    store.put(persisted);
+    return null;
+  });
+
+  await evictPersistentCacheIfNeeded();
 }
 
-function removePersistentCache(cacheKey: string): void {
-  if (typeof window === "undefined") {
-    return;
-  }
+async function removePersistentCache(cacheKey: string): Promise<void> {
+  await withIndexedDbStore("readwrite", async (store) => {
+    store.delete(cacheStorageKey(cacheKey));
+    return null;
+  });
+}
 
-  try {
-    window.localStorage.removeItem(cacheStorageKey(cacheKey));
-  } catch {
-    // Ignore storage errors.
-  }
+async function removePersistentCacheByPrefix(prefix: string): Promise<void> {
+  await withIndexedDbStore("readwrite", async (store) => {
+    if (!prefix) {
+      store.clear();
+      return null;
+    }
+
+    const range = IDBKeyRange.bound(cacheStorageKey(prefix), cacheStorageKey(`${prefix}\uffff`));
+    await new Promise<void>((resolve, reject) => {
+      const request = store.openCursor(range);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+        cursor.delete();
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    });
+    return null;
+  });
+}
+
+async function evictPersistentCacheIfNeeded(): Promise<void> {
+  await withIndexedDbStore("readwrite", async (store) => {
+    let entryCount = 0;
+    let totalBytes = 0;
+    const entries: Array<{ key: string; approxSizeBytes: number; lastAccessedAt: number }> = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const request = store.openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve();
+          return;
+        }
+
+        const value = cursor.value as PersistedCacheEntry;
+        const approxSizeBytes = typeof value?.approxSizeBytes === "number" && value.approxSizeBytes > 0 ? value.approxSizeBytes : 0;
+        const lastAccessedAt = typeof value?.lastAccessedAt === "number" && value.lastAccessedAt > 0 ? value.lastAccessedAt : 0;
+        entryCount += 1;
+        totalBytes += approxSizeBytes;
+        entries.push({ key: String(cursor.key), approxSizeBytes, lastAccessedAt });
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    });
+
+    if (entryCount <= PERSISTED_CACHE_MAX_ENTRIES && totalBytes <= PERSISTED_CACHE_MAX_BYTES) {
+      return null;
+    }
+
+    const sorted = entries.sort((a, b) => a.lastAccessedAt - b.lastAccessedAt);
+    let remainingCount = entryCount;
+    let remainingBytes = totalBytes;
+    for (const entry of sorted) {
+      if (remainingCount <= PERSISTED_CACHE_MAX_ENTRIES && remainingBytes <= PERSISTED_CACHE_MAX_BYTES) {
+        break;
+      }
+      store.delete(entry.key);
+      remainingCount -= 1;
+      remainingBytes -= entry.approxSizeBytes;
+    }
+
+    return null;
+  });
 }
 
 function setupCrossTabCacheSync(): void {
@@ -193,29 +433,21 @@ function setupCrossTabCacheSync(): void {
 
   cacheSyncInitialized = true;
   window.addEventListener("storage", (event) => {
-    if (!event.key?.startsWith(CACHE_STORAGE_PREFIX)) {
-      return;
-    }
-
-    const cacheKey = event.key.slice(CACHE_STORAGE_PREFIX.length);
-    if (event.newValue == null) {
-      readCache.delete(cacheKey);
+    if (event.key !== CACHE_INVALIDATION_STORAGE_KEY || !event.newValue) {
       return;
     }
 
     try {
-      const parsed = JSON.parse(event.newValue) as CacheEntry;
-      if (parsed && typeof parsed.updatedAt === "number") {
-        readCache.set(cacheKey, parsed);
-      }
+      const parsed = JSON.parse(event.newValue) as { prefix?: string };
+      invalidateApiReadCache(typeof parsed.prefix === "string" ? parsed.prefix : "", { emitCrossTab: false });
     } catch {
-      // Ignore malformed external cache writes.
+      // Ignore malformed external invalidation metadata.
     }
   });
 
   if (typeof BroadcastChannel !== "undefined") {
-    const channel = new BroadcastChannel(CACHE_BROADCAST_CHANNEL);
-    channel.onmessage = (event: MessageEvent<{ type: "invalidate"; prefix: string }>) => {
+    broadcastChannel = new BroadcastChannel(CACHE_BROADCAST_CHANNEL);
+    broadcastChannel.onmessage = (event: MessageEvent<{ type: "invalidate"; prefix: string }>) => {
       const payload = event.data;
       if (payload?.type !== "invalidate") {
         return;
@@ -230,39 +462,48 @@ function emitInvalidation(prefix: string): void {
     return;
   }
 
-  if (typeof BroadcastChannel === "undefined") {
-    return;
+  if (broadcastChannel) {
+    broadcastChannel.postMessage({ type: "invalidate", prefix });
   }
 
-  const channel = new BroadcastChannel(CACHE_BROADCAST_CHANNEL);
-  channel.postMessage({ type: "invalidate", prefix });
-  channel.close();
+  try {
+    window.localStorage.setItem(CACHE_INVALIDATION_STORAGE_KEY, JSON.stringify({ prefix, ts: Date.now() }));
+  } catch {
+    // Ignore metadata storage errors.
+  }
 }
 
-function readCachedValue<T>(cacheKey: string, path: string): { data: T; stale: boolean } | null {
+async function readCachedValue<T>(cacheKey: string, path: string): Promise<{ data: T; stale: boolean } | null> {
   setupCrossTabCacheSync();
   const now = Date.now();
   const policy = resolveReadPolicy(path);
   const inMemory = readCache.get(cacheKey);
-  const entry = inMemory ?? tryReadPersistentCache(cacheKey);
+  const entry = inMemory ?? (await readPersistentCache(cacheKey));
   if (!entry) {
     return null;
   }
 
   if (!inMemory) {
-    readCache.set(cacheKey, entry);
+    upsertMemoryCacheEntry(cacheKey, entry);
+  } else {
+    inMemory.lastAccessedAt = now;
   }
 
   if (!isCompatibleCachedPayload(path, entry.data)) {
-    readCache.delete(cacheKey);
-    removePersistentCache(cacheKey);
+    deleteMemoryCacheEntry(cacheKey);
+    void removePersistentCache(cacheKey);
     return null;
   }
 
   if (now - entry.updatedAt > policy.staleMs) {
-    readCache.delete(cacheKey);
-    removePersistentCache(cacheKey);
+    deleteMemoryCacheEntry(cacheKey);
+    void removePersistentCache(cacheKey);
     return null;
+  }
+
+  entry.lastAccessedAt = now;
+  if (!inMemory) {
+    void writePersistentCache(cacheKey, entry);
   }
 
   return {
@@ -272,12 +513,17 @@ function readCachedValue<T>(cacheKey: string, path: string): { data: T; stale: b
 }
 
 function cacheValue(cacheKey: string, data: unknown): void {
+  const now = Date.now();
   const entry: CacheEntry = {
     data,
-    updatedAt: Date.now(),
+    updatedAt: now,
+    approxSizeBytes: estimateMemoryEntryBytes(data),
+    lastAccessedAt: now,
   };
-  readCache.set(cacheKey, entry);
-  writePersistentCache(cacheKey, entry);
+  upsertMemoryCacheEntry(cacheKey, entry);
+  queueMicrotask(() => {
+    void writePersistentCache(cacheKey, entry);
+  });
 }
 
 function shareReadCacheValue(cacheKey: string, sourceData: unknown): void {
@@ -369,7 +615,7 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
 
   const cacheKey = path;
   const requestKey = requestKeyForPath(path);
-  const cached = readCachedValue<T>(cacheKey, path);
+  const cached = await readCachedValue<T>(cacheKey, path);
   if (cached && !cached.stale) {
     recordCachedAudit(path, "GET", "fresh-cache-hit", auditContext);
     return cached.data;
@@ -387,6 +633,8 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
       cacheDisposition: "network",
       backgroundRevalidate: true,
       context: auditContext,
+    }).catch(() => {
+      // Preserve stale serving behavior; background failures should not escape as unhandled rejections.
     });
     return cached.data;
   }
@@ -432,11 +680,12 @@ async function fetchAndParseWithAudit<T>(
       }
     | undefined
 ): Promise<T> {
+  const auditEnabled = isPerformanceAuditEnabled();
   const startedAt = new Date().toISOString();
-  const startedPerf = isPerformanceAuditEnabled() ? performance.now() : 0;
+  const startedPerf = auditEnabled ? performance.now() : 0;
   const method = init?.method?.toUpperCase() ?? "GET";
 
-  if (isPerformanceAuditEnabled()) {
+  if (auditEnabled) {
     beginPerformanceAuditNetworkRequest();
   }
 
@@ -452,10 +701,8 @@ async function fetchAndParseWithAudit<T>(
         signal: init?.signal
       });
 
-      const shouldMeasureBytes = isPerformanceAuditEnabled();
-      const textPayload = shouldMeasureBytes ? await response.text() : null;
-      const responseBytes = textPayload != null ? new TextEncoder().encode(textPayload).length : null;
-      const durationMs = shouldMeasureBytes ? performance.now() - startedPerf : 0;
+      const responseBytes = auditEnabled ? resolveResponseBytes(response) : null;
+      const durationMs = auditEnabled ? performance.now() - startedPerf : 0;
 
       if (!response.ok) {
         const requestError = new Error(`API request failed: ${response.status} ${response.statusText}`) as Error & { [AUDIT_RECORDED_ERROR]?: boolean };
@@ -476,11 +723,9 @@ async function fetchAndParseWithAudit<T>(
         throw requestError;
       }
 
-      const payload = textPayload != null
-        ? ((textPayload ? JSON.parse(textPayload) : null) as T)
-        : ((await response.json()) as T);
+      const payload = await parseJsonResponse<T>(response);
 
-      if (shouldMeasureBytes) {
+      if (auditEnabled) {
         recordPerformanceAuditRequest({
           context: audit?.context ?? null,
           startedAt,
@@ -501,7 +746,7 @@ async function fetchAndParseWithAudit<T>(
       const isAbortError = typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError";
       const isAborted = init?.signal?.aborted || isAbortError;
       const alreadyRecorded = typeof error === "object" && error !== null && AUDIT_RECORDED_ERROR in error;
-      if (isPerformanceAuditEnabled() && !alreadyRecorded) {
+      if (auditEnabled && !alreadyRecorded) {
         recordPerformanceAuditRequest({
           context: audit?.context ?? null,
           startedAt,
@@ -519,10 +764,37 @@ async function fetchAndParseWithAudit<T>(
       throw error;
     }
   } finally {
-    if (isPerformanceAuditEnabled()) {
+    if (auditEnabled) {
       endPerformanceAuditNetworkRequest();
     }
   }
+}
+
+async function parseJsonResponse<T>(response: Response): Promise<T> {
+  if (response.status === 204 || response.status === 205 || response.status === 304) {
+    return null as T;
+  }
+
+  const responseBytes = resolveResponseBytes(response);
+  if (responseBytes === 0) {
+    return null as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+function resolveResponseBytes(response: Response): number | null {
+  const headerValue = response.headers?.get("content-length") ?? null;
+  if (!headerValue) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(headerValue, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
 }
 
 function recordCachedAudit(
@@ -552,10 +824,11 @@ function recordCachedAudit(
 export function invalidateApiReadCache(prefix = "", options?: { emitCrossTab?: boolean }): void {
   for (const key of [...readCache.keys()]) {
     if (!prefix || key.startsWith(prefix)) {
-      readCache.delete(key);
-      removePersistentCache(key);
+      deleteMemoryCacheEntry(key);
     }
   }
+
+  void removePersistentCacheByPrefix(prefix);
 
   if (options?.emitCrossTab !== false) {
     emitInvalidation(prefix);
@@ -567,9 +840,10 @@ export function invalidateApiReadCacheForTicker(ticker: string): void {
   invalidateApiReadCache(`/companies/${normalized}/`);
 }
 
-export function __resetApiClientCacheForTests(): void {
+export async function __resetApiClientCacheForTests(): Promise<void> {
   invalidateApiReadCache("", { emitCrossTab: false });
   inflightRequests.clear();
+  await removePersistentCacheByPrefix("");
 }
 
 export function searchCompanies(
@@ -921,8 +1195,11 @@ export function getCompanyEarnings(ticker: string): Promise<CompanyEarningsRespo
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/earnings`);
 }
 
-export function getCompanyEarningsSummary(ticker: string): Promise<CompanyEarningsSummaryResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/earnings/summary`);
+export function getCompanyEarningsSummary(
+  ticker: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyEarningsSummaryResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/earnings/summary`, { signal: options?.signal });
 }
 
 export function getCompanyEarningsWorkspace(ticker: string): Promise<CompanyEarningsWorkspaceResponse> {
@@ -951,16 +1228,22 @@ export function getCompanyFilingInsights(ticker: string): Promise<CompanyFilingI
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/filing-insights`);
 }
 
-export function getCompanyInsiderTrades(ticker: string): Promise<CompanyInsiderTradesResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/insider-trades`);
+export function getCompanyInsiderTrades(
+  ticker: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyInsiderTradesResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/insider-trades`, { signal: options?.signal });
 }
 
 export function getCompanyForm144Filings(ticker: string): Promise<CompanyForm144Response> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/form-144-filings`);
 }
 
-export function getCompanyInstitutionalHoldings(ticker: string): Promise<CompanyInstitutionalHoldingsResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/institutional-holdings`);
+export function getCompanyInstitutionalHoldings(
+  ticker: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyInstitutionalHoldingsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/institutional-holdings`, { signal: options?.signal });
 }
 
 export function getCompanyInstitutionalHoldingsSummary(ticker: string): Promise<CompanyInstitutionalHoldingsSummaryResponse> {
@@ -970,7 +1253,7 @@ export function getCompanyInstitutionalHoldingsSummary(ticker: string): Promise<
 export function getCompanyModels(
   ticker: string,
   modelNames?: string[],
-  options?: { dupontMode?: "auto" | "annual" | "ttm"; asOf?: string | null; expandInputPeriods?: boolean }
+  options?: { dupontMode?: "auto" | "annual" | "ttm"; asOf?: string | null; expandInputPeriods?: boolean; signal?: AbortSignal }
 ): Promise<CompanyModelsResponse> {
   const params = new URLSearchParams();
   if (modelNames?.length) {
@@ -984,7 +1267,7 @@ export function getCompanyModels(
   }
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`);
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/models${suffix}`, { signal: options?.signal });
 }
 
 export function getCompanyOilScenarioOverlay(
@@ -1004,21 +1287,30 @@ export function getCompanyOilScenario(
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/oil-scenario${suffix}`, { signal: options?.signal });
 }
 
-export function getLatestModelEvaluation(suiteKey?: string | null): Promise<ModelEvaluationResponse> {
+export function getLatestModelEvaluation(
+  suiteKey?: string | null,
+  options?: { signal?: AbortSignal }
+): Promise<ModelEvaluationResponse> {
   const params = new URLSearchParams();
   if (suiteKey) {
     params.set("suite_key", suiteKey);
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
-  return fetchJson(`/model-evaluations/latest${suffix}`);
+  return fetchJson(`/model-evaluations/latest${suffix}`, { signal: options?.signal });
 }
 
-export function getCompanyMarketContext(ticker: string): Promise<CompanyMarketContextResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/market-context`);
+export function getCompanyMarketContext(
+  ticker: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyMarketContextResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/market-context`, { signal: options?.signal });
 }
 
-export function getCompanySectorContext(ticker: string): Promise<CompanySectorContextResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/sector-context`);
+export function getCompanySectorContext(
+  ticker: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanySectorContextResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/sector-context`, { signal: options?.signal });
 }
 
 export function getGlobalMarketContext(): Promise<CompanyMarketContextResponse> {

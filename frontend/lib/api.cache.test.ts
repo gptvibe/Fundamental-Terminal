@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   __resetApiClientCacheForTests,
@@ -13,8 +13,12 @@ import {
 } from "@/lib/api";
 
 describe("api read cache", () => {
-  afterEach(() => {
-    __resetApiClientCacheForTests();
+  beforeEach(async () => {
+    await __resetApiClientCacheForTests();
+  });
+
+  afterEach(async () => {
+    await __resetApiClientCacheForTests();
     vi.restoreAllMocks();
   });
 
@@ -41,6 +45,41 @@ describe("api read cache", () => {
     );
   });
 
+  it("uses response.json in success path even when performance audit is enabled", async () => {
+    const previousAuditFlag = process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED;
+    process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED = "true";
+
+    try {
+      const responseJson = vi.fn().mockResolvedValue({
+        company: null,
+        financials: [],
+        price_history: [],
+        refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null },
+      });
+      const responseText = vi.fn().mockResolvedValue("{}");
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers([["content-length", "128"]]),
+        json: responseJson,
+        text: responseText,
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+
+      await getCompanyFinancials("AAPL");
+
+      expect(responseJson).toHaveBeenCalledTimes(1);
+      expect(responseText).not.toHaveBeenCalled();
+    } finally {
+      if (previousAuditFlag == null) {
+        delete process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED;
+      } else {
+        process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED = previousAuditFlag;
+      }
+    }
+  });
+
   it("returns the same promise for concurrent reads to the same URL", async () => {
     let resolveFetch: ((value: unknown) => void) | null = null;
     const fetchMock = vi.fn().mockImplementation(
@@ -55,7 +94,9 @@ describe("api read cache", () => {
     const firstRequest = getCompanyChangesSinceLastFiling("AAPL");
     const secondRequest = getCompanyChangesSinceLastFiling("AAPL");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/changes-since-last-filing",
       expect.objectContaining({ cache: "no-store" })
@@ -277,10 +318,13 @@ describe("api read cache", () => {
 
     const firstRequest = getCompanyChangesSinceLastFiling("AAPL");
     const secondRequest = getCompanyChangesSinceLastFiling("AAPL");
+    const settledRequests = Promise.allSettled([firstRequest, secondRequest]);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
 
-    const [firstError, secondError] = await Promise.allSettled([firstRequest, secondRequest]);
+    const [firstError, secondError] = await settledRequests;
 
     expect(firstError.status).toBe("rejected");
     expect(secondError.status).toBe("rejected");
@@ -311,7 +355,7 @@ describe("api read cache", () => {
     );
   });
 
-  it("ignores malformed persisted brief cache entries and refetches from the network", async () => {
+  it("ignores legacy localStorage payload entries and does not persist new payloads to localStorage", async () => {
     window.localStorage.setItem(
       "ft:api-cache:v3:/companies/AAPL/brief",
       JSON.stringify({
@@ -352,6 +396,6 @@ describe("api read cache", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(brief.schema_version).toBe("company_research_brief_v1");
-    expect(window.localStorage.getItem("ft:api-cache:v3:/companies/AAPL/brief")).toContain("schema_version");
+    expect(window.localStorage.getItem("ft:api-cache:v4:/companies/AAPL/brief")).toBeNull();
   });
 });

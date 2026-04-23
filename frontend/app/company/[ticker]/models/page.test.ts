@@ -472,7 +472,131 @@ describe("CompanyModelsPage", () => {
     expect(screen.getByTestId("forecast-trust-cue")).toBeTruthy();
     expect(screen.getByText("User Scenario")).toBeTruthy();
     expect(screen.getByText("MAPE 12.00%")).toBeTruthy();
+    expect(screen.getByText("Current DCF fair value per share (model-derived)")).toBeTruthy();
+    expect(screen.getByText("Scenario impact signal (heuristic, no model rerun)")).toBeTruthy();
+    expect(screen.getByText("Strong Upside Signal")).toBeTruthy();
+    expect(screen.getByText("Heuristic band: approximately +10% to +30% directional impact")).toBeTruthy();
+    expect(screen.getByText(/Trust boundary:/i)).toBeTruthy();
+    expect(screen.queryByText("Directional fair value with forecast handoff")).toBeNull();
     expect(screen.getByRole("link", { name: "Reset to Standard Models View" }).getAttribute("href")).toBe("/company/ACME/models");
+  });
+
+  it("shows unavailable heuristic signal when forecast deltas cannot be compared", async () => {
+    const handoffPayload: ForecastHandoffPayload = {
+      version: 1,
+      ticker: "ACME",
+      asOf: "2025-12-31",
+      forecastYear: 2026,
+      source: "sec_base_forecast",
+      scenarioName: null,
+      overrideCount: 0,
+      metrics: [{ key: "revenue", label: "Revenue", unit: "usd", base: 0, scenario: 1350 }],
+      createdAt: "2026-04-19T00:00:00Z",
+    };
+    mockedSearchParams = new URLSearchParams({ [FORECAST_HANDOFF_QUERY_PARAM]: encodeForecastHandoffPayload(handoffPayload) });
+
+    vi.mocked(getCompanyModels).mockResolvedValue({
+      company: null,
+      requested_models: MODEL_NAMES,
+      models: [
+        {
+          schema_version: "2.0",
+          model_name: "dcf",
+          model_version: "2.2.0",
+          created_at: "2026-03-22T00:00:00Z",
+          input_periods: {},
+          result: { model_status: "supported", fair_value_per_share: 90.4 },
+        },
+      ],
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyFinancials).mockResolvedValue({
+      company: null,
+      financials: [],
+      price_history: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue(undefined as never);
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      curve_points: [],
+      slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null },
+      slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null },
+      fred_series: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      provenance_details: {},
+      fetched_at: "2026-03-22T00:00:00Z",
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      rates_credit: [],
+      inflation_labor: [],
+      growth_activity: [],
+      cyclical_demand: [],
+      cyclical_costs: [],
+      relevant_series: [],
+      relevant_indicators: [],
+      sector_exposure: [],
+      hqm_snapshot: null,
+    });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      matched_plugin_ids: [],
+      plugins: [],
+      fetched_at: "2026-03-22T00:00:00Z",
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
+      company: null,
+      latest: null,
+      history: [],
+      last_capital_structure_check: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({
+      run: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false },
+      confidence_flags: [],
+    });
+
+    render(React.createElement(CompanyModelsPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("Forecast-backed Valuation Impact")).toBeTruthy();
+    });
+
+    expect(screen.getByText("Signal unavailable")).toBeTruthy();
+    expect(screen.getByText("Heuristic band: not enough comparable deltas")).toBeTruthy();
   });
 
   it("includes forecast source-state and accuracy metadata in JSON exports", async () => {
@@ -781,14 +905,14 @@ describe("CompanyModelsPage", () => {
     render(React.createElement(CompanyModelsPage));
 
     await waitFor(() => {
-      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, { dupontMode: "auto" });
+      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, expect.objectContaining({ dupontMode: "auto", signal: expect.anything() }));
     });
 
     expect(screen.getByText("Investment Summary")).toBeTruthy();
     expect(screen.getByText("Model Analytics")).toBeTruthy();
-    expect(screen.queryByText("Macro Exposure Context")).toBeNull();
+    expect(screen.getByText("Macro Exposure Context")).toBeTruthy();
     expect(screen.queryByText("market-context-panel")).toBeNull();
-    expect(screen.queryByText(/API request failed: 500/i)).toBeNull();
+    expect(screen.getByText(/Macro exposure context failed to load: API request failed: 500/i)).toBeTruthy();
   });
 
   it("renders registry-backed source freshness metadata for model outputs", async () => {
@@ -1052,14 +1176,14 @@ describe("CompanyModelsPage", () => {
     render(React.createElement(CompanyModelsPage));
 
     await waitFor(() => {
-      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, { dupontMode: "auto" });
+      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, expect.objectContaining({ dupontMode: "auto", signal: expect.anything() }));
     });
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
     expect(screen.getByText("Model Evaluation Harness")).toBeTruthy();
-    expect(screen.queryByText("Macro Exposure Context")).toBeNull();
-    expect(screen.queryByText("Capital Structure Intelligence")).toBeNull();
-    expect(screen.queryByText("Sector Exposure Context")).toBeNull();
+    expect(screen.getByText("Macro Exposure Context")).toBeTruthy();
+    expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
+    expect(screen.getByText("Sector Exposure Context")).toBeTruthy();
     expect(screen.queryByText("market-context-panel")).toBeNull();
     expect(screen.getByText(/Suite historical_fixture_v1/i)).toBeTruthy();
     expect(screen.getAllByText("Fundamental Terminal Model Engine").length).toBeGreaterThan(0);
@@ -1256,10 +1380,10 @@ describe("CompanyModelsPage", () => {
     render(React.createElement(CompanyModelsPage));
 
     await waitFor(() => {
-      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, { dupontMode: "auto" });
+      expect(getCompanyModels).toHaveBeenCalledWith("ACME", MODEL_NAMES, expect.objectContaining({ dupontMode: "auto", signal: expect.anything() }));
     });
 
-    expect(getCompanyMarketContext).toHaveBeenCalledWith("ACME");
+    expect(getCompanyMarketContext).toHaveBeenCalledWith("ACME", expect.objectContaining({ signal: expect.anything() }));
 
     expect(screen.getByText(/Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured\./i)).toBeTruthy();
     expect(screen.getByLabelText("Data sources and freshness").textContent).toContain("Price Layer");
@@ -1362,7 +1486,7 @@ describe("CompanyModelsPage", () => {
     render(React.createElement(CompanyModelsPage));
 
     await waitFor(() => {
-      expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME");
+      expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME", expect.objectContaining({ signal: expect.anything() }));
     });
 
     expect(screen.getByText("Oil Workspace")).toBeTruthy();
@@ -1467,9 +1591,10 @@ describe("CompanyModelsPage", () => {
     render(React.createElement(CompanyModelsPage));
 
     await waitFor(() => {
-      expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME");
+      expect(getCompanyOilScenarioOverlay).toHaveBeenCalledWith("ACME", expect.objectContaining({ signal: expect.anything() }));
     });
 
-    expect(screen.getByText(/Oil scenario overlay unavailable: v1 does not model midstream or pipeline oil economics yet\./i)).toBeTruthy();
+    expect(screen.getByText("Oil Workspace")).toBeTruthy();
+    expect(screen.getByText(/Oil workspace is disabled: v1 does not model midstream or pipeline oil economics yet\./i)).toBeTruthy();
   });
 });

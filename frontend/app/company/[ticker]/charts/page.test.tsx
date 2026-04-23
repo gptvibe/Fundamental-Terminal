@@ -1,18 +1,20 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import CompanyChartsPage from "./page";
 
-const getCompanyCharts = vi.fn();
-const useParams = vi.fn();
-const useSearchParams = vi.fn();
-const usePathname = vi.fn();
+const headersMock = vi.fn();
+const fetchMock = vi.fn();
 
-vi.mock("@/lib/api", () => ({
-  getCompanyCharts: (...args: unknown[]) => getCompanyCharts(...args),
+vi.mock("next/headers", () => ({
+  headers: () => headersMock(),
+}));
+
+vi.mock("./charts-retry-button", () => ({
+  ChartsRetryButton: () => <button type="button">Try again</button>,
 }));
 
 vi.mock("@/components/company/charts-dashboard", () => ({
@@ -25,20 +27,6 @@ vi.mock("@/components/company/charts-dashboard", () => ({
 
 vi.mock("@/components/company/projection-studio", () => ({
   ProjectionStudio: () => <div data-testid="projection-studio">Projection Studio</div>,
-}));
-
-vi.mock("next/navigation", () => ({
-  useParams: () => useParams(),
-  useSearchParams: () => useSearchParams(),
-  usePathname: () => usePathname(),
-}));
-
-vi.mock("next/link", () => ({
-  default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
 }));
 
 function buildPayload(overrides: Record<string, unknown> = {}) {
@@ -133,49 +121,94 @@ function buildPayload(overrides: Record<string, unknown> = {}) {
 
 describe("CompanyChartsPage", () => {
   beforeEach(() => {
-    getCompanyCharts.mockReset();
-    useParams.mockReturnValue({ ticker: "acme" });
-    usePathname.mockReturnValue("/company/acme/charts");
-    useSearchParams.mockReturnValue({ get: () => null });
-  });
-
-  it("renders Growth Outlook by default", async () => {
-    getCompanyCharts.mockResolvedValue(buildPayload());
-
-    render(React.createElement(CompanyChartsPage));
-
-    await waitFor(() => {
-      expect(getCompanyCharts).toHaveBeenCalledWith("ACME", undefined);
-    });
-    expect(screen.getByTestId("charts-dashboard").textContent).toBe("dashboard:outlook:disabled");
-  });
-
-  it("renders Projection Studio when URL mode is studio and payload exists", async () => {
-    useSearchParams.mockReturnValue({ get: (key: string) => (key === "mode" ? "studio" : null) });
-    getCompanyCharts.mockResolvedValue(
-      buildPayload({
-        projection_studio: {
-          methodology: null,
-          schedule_sections: [],
-          drivers_used: [],
-          scenarios_comparison: [],
-          sensitivity_matrix: [],
-        },
-      })
+    fetchMock.mockReset();
+    headersMock.mockReset();
+    headersMock.mockReturnValue(
+      new Headers([
+        ["host", "localhost:3000"],
+        ["x-forwarded-proto", "http"],
+      ])
     );
-
-    render(React.createElement(CompanyChartsPage));
-
-    expect(await screen.findByTestId("projection-studio")).toBeTruthy();
+    vi.stubGlobal("fetch", fetchMock);
   });
 
-  it("falls back to Growth Outlook when studio mode is requested without payload", async () => {
-    useSearchParams.mockReturnValue({ get: (key: string) => (key === "mode" ? "studio" : null) });
-    getCompanyCharts.mockResolvedValue(buildPayload());
+  it("renders Growth Outlook by default from server data", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => buildPayload(),
+    });
 
-    render(React.createElement(CompanyChartsPage));
+    const jsx = await CompanyChartsPage({
+      params: { ticker: "acme" },
+      searchParams: { as_of: "2026-04-17" },
+    });
+    render(jsx);
 
-    expect(await screen.findByTestId("charts-dashboard")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3000/backend/api/companies/ACME/charts?as_of=2026-04-17",
+      expect.objectContaining({ cache: "no-store" })
+    );
     expect(screen.getByTestId("charts-dashboard").textContent).toBe("dashboard:outlook:disabled");
+  });
+
+  it("renders Projection Studio when mode is studio and payload includes studio", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () =>
+        buildPayload({
+          projection_studio: {
+            methodology: null,
+            schedule_sections: [],
+            drivers_used: [],
+            scenarios_comparison: [],
+            sensitivity_matrix: [],
+          },
+        }),
+    });
+
+    const jsx = await CompanyChartsPage({
+      params: { ticker: "acme" },
+      searchParams: { mode: "studio" },
+    });
+    render(jsx);
+
+    expect(screen.getByTestId("projection-studio")).toBeTruthy();
+  });
+
+  it("falls back to Growth Outlook when studio mode is requested without studio payload", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => buildPayload(),
+    });
+
+    const jsx = await CompanyChartsPage({
+      params: { ticker: "acme" },
+      searchParams: { mode: "studio" },
+    });
+    render(jsx);
+
+    expect(screen.getByTestId("charts-dashboard").textContent).toBe("dashboard:outlook:disabled");
+  });
+
+  it("maps 404 failures to product copy and never renders raw transport text", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      json: async () => ({}),
+    });
+
+    const jsx = await CompanyChartsPage({
+      params: { ticker: "acme" },
+      searchParams: {},
+    });
+    render(jsx);
+
+    expect(screen.getByText("Charts for this company are unavailable or not yet prepared.")).toBeTruthy();
+    expect(screen.queryByText(/API request failed:/i)).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 });

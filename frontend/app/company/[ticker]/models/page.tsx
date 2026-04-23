@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -35,17 +35,32 @@ import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { CompanyCapitalStructureResponse, CompanyChartsForecastAccuracyResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
 
-interface ModelsWorkspaceData {
+interface ModelsCoreData {
   modelData: CompanyModelsResponse;
   financialData: CompanyFinancialsResponse;
-  marketContextData: CompanyMarketContextResponse | null;
-  sectorContextData: CompanySectorContextResponse | null;
-  capitalStructureData: CompanyCapitalStructureResponse | null;
-  oilScenarioOverlayData: CompanyOilScenarioResponse | null;
-  evaluationData: ModelEvaluationResponse | null;
-  oilOverlayEvaluationData: ModelEvaluationResponse | null;
   activeJobId: string | null;
 }
+
+type OptionalPanelState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "unavailable" }
+  | { status: "failed"; error: string }
+  | { status: "disabled" };
+
+type OptionalPanelKey = "marketContext" | "sectorContext" | "capitalStructure" | "modelEvaluation" | "oilScenarioOverlay" | "oilOverlayEvaluation";
+
+type OptionalPanelStates = {
+  marketContext: OptionalPanelState<CompanyMarketContextResponse>;
+  sectorContext: OptionalPanelState<CompanySectorContextResponse>;
+  capitalStructure: OptionalPanelState<CompanyCapitalStructureResponse>;
+  modelEvaluation: OptionalPanelState<ModelEvaluationResponse>;
+  oilScenarioOverlay: OptionalPanelState<CompanyOilScenarioResponse>;
+  oilOverlayEvaluation: OptionalPanelState<ModelEvaluationResponse>;
+};
+
+type OptionalPanelActivation = Record<OptionalPanelKey, boolean>;
 
 const OIL_OVERLAY_EVALUATION_SUITE_KEY = "oil_overlay_point_in_time_v1";
 
@@ -72,6 +87,26 @@ const DenseGrid = dynamic(
 
 type DupontMode = "auto" | "annual" | "ttm";
 
+const INITIAL_OPTIONAL_ACTIVATION: OptionalPanelActivation = {
+  marketContext: false,
+  sectorContext: false,
+  capitalStructure: false,
+  modelEvaluation: false,
+  oilScenarioOverlay: false,
+  oilOverlayEvaluation: false,
+};
+
+function createInitialOptionalPanelStates(oilPanelEnabled: boolean): OptionalPanelStates {
+  return {
+    marketContext: { status: "idle" },
+    sectorContext: { status: "idle" },
+    capitalStructure: { status: "idle" },
+    modelEvaluation: { status: "idle" },
+    oilScenarioOverlay: oilPanelEnabled ? { status: "idle" } : { status: "disabled" },
+    oilOverlayEvaluation: oilPanelEnabled ? { status: "idle" } : { status: "disabled" },
+  };
+}
+
 export default function CompanyModelsPage() {
   const params = useParams<{ ticker: string }>();
   const searchParams = useSearchParams();
@@ -79,12 +114,8 @@ export default function CompanyModelsPage() {
   const companyLayout = useCompanyLayoutContext();
   const [data, setData] = useState<CompanyModelsResponse | null>(null);
   const [financialData, setFinancialData] = useState<CompanyFinancialsResponse | null>(null);
-  const [marketContextData, setMarketContextData] = useState<CompanyMarketContextResponse | null>(null);
-  const [sectorContextData, setSectorContextData] = useState<CompanySectorContextResponse | null>(null);
-  const [capitalStructureData, setCapitalStructureData] = useState<CompanyCapitalStructureResponse | null>(null);
-  const [oilScenarioOverlayData, setOilScenarioOverlayData] = useState<CompanyOilScenarioResponse | null>(null);
-  const [evaluationData, setEvaluationData] = useState<ModelEvaluationResponse | null>(null);
-  const [oilOverlayEvaluationData, setOilOverlayEvaluationData] = useState<ModelEvaluationResponse | null>(null);
+  const [optionalPanelStates, setOptionalPanelStates] = useState<OptionalPanelStates>(() => createInitialOptionalPanelStates(true));
+  const [optionalPanelActivation, setOptionalPanelActivation] = useState<OptionalPanelActivation>(INITIAL_OPTIONAL_ACTIVATION);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -93,13 +124,17 @@ export default function CompanyModelsPage() {
   const [dupontMode, setDupontMode] = useState<DupontMode>("auto");
   const [showModeInfo, setShowModeInfo] = useState(false);
   const [exportingModelOutputs, setExportingModelOutputs] = useState(false);
+  const optionalPanelControllersRef = useRef<Partial<Record<OptionalPanelKey, AbortController>>>({});
   const { consoleEntries, connectionState, lastEvent } = useJobStream(activeJobId);
   const models = useMemo(() => data?.models ?? [], [data?.models]);
   const hasModels = models.length > 0;
+  const marketContextData = optionalPanelStates.marketContext.status === "ready" ? optionalPanelStates.marketContext.data : null;
+  const sectorContextData = optionalPanelStates.sectorContext.status === "ready" ? optionalPanelStates.sectorContext.data : null;
+  const capitalStructureData = optionalPanelStates.capitalStructure.status === "ready" ? optionalPanelStates.capitalStructure.data : null;
+  const oilScenarioOverlayData = optionalPanelStates.oilScenarioOverlay.status === "ready" ? optionalPanelStates.oilScenarioOverlay.data : null;
+  const evaluationData = optionalPanelStates.modelEvaluation.status === "ready" ? optionalPanelStates.modelEvaluation.data : null;
+  const oilOverlayEvaluationData = optionalPanelStates.oilOverlayEvaluation.status === "ready" ? optionalPanelStates.oilOverlayEvaluation.data : null;
   const strictOfficialMode = Boolean(data?.company?.strict_official_mode ?? financialData?.company?.strict_official_mode);
-  const showMarketContext = hasMeaningfulMarketContext(marketContextData);
-  const showSectorContext = Boolean((sectorContextData?.plugins ?? []).length);
-  const showCapitalStructure = Boolean(capitalStructureData?.latest);
   const oilSupportStatus = data?.company?.oil_support_status ?? financialData?.company?.oil_support_status ?? "unsupported";
   const oilSupportReasons = data?.company?.oil_support_reasons ?? financialData?.company?.oil_support_reasons ?? [];
   const showOilScenarioOverlay = supportsOilWorkspace(oilSupportStatus);
@@ -133,39 +168,59 @@ export default function CompanyModelsPage() {
     companyLayout?.setCompany(sharedCompany);
   }, [companyLayout, sharedCompany]);
 
+  const activateOptionalPanel = useCallback((panel: OptionalPanelKey) => {
+    setOptionalPanelActivation((current) => {
+      if (current[panel]) {
+        return current;
+      }
+      return {
+        ...current,
+        [panel]: true,
+      };
+    });
+  }, []);
+
+  const abortOptionalPanelRequests = useCallback((panels?: OptionalPanelKey[]) => {
+    const targets = panels ?? (Object.keys(optionalPanelControllersRef.current) as OptionalPanelKey[]);
+    targets.forEach((panel) => {
+      optionalPanelControllersRef.current[panel]?.abort();
+      delete optionalPanelControllersRef.current[panel];
+    });
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    abortOptionalPanelRequests();
 
     async function load() {
       try {
         setLoading(true);
         setError(null);
         setSettledJobIds([]);
+        setOptionalPanelActivation(INITIAL_OPTIONAL_ACTIVATION);
         const workspaceData = await withPerformanceAuditSource(
           {
             pageRoute: "/company/[ticker]/models",
             scenario: "models_page",
             source: "models:workspace-load",
           },
-          () => loadModelsWorkspaceData(ticker, dupontMode)
+          () => loadModelsCoreData(ticker, dupontMode, controller.signal)
         );
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setData(workspaceData.modelData);
           setFinancialData(workspaceData.financialData);
-          setMarketContextData(workspaceData.marketContextData);
-          setSectorContextData(workspaceData.sectorContextData);
-          setCapitalStructureData(workspaceData.capitalStructureData);
-          setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
-          setEvaluationData(workspaceData.evaluationData);
-          setOilOverlayEvaluationData(workspaceData.oilOverlayEvaluationData);
+          const oilPanelEnabled = supportsOilWorkspace(
+            workspaceData.modelData.company?.oil_support_status ?? workspaceData.financialData.company?.oil_support_status ?? "unsupported"
+          );
+          setOptionalPanelStates(createInitialOptionalPanelStates(oilPanelEnabled));
           setActiveJobId(workspaceData.activeJobId);
         }
       } catch (nextError) {
-        if (!cancelled) {
+        if (!isAbortError(nextError)) {
           setError(nextError instanceof Error ? nextError.message : "Unable to load models");
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
@@ -173,9 +228,9 @@ export default function CompanyModelsPage() {
 
     void load();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [ticker, dupontMode]);
+  }, [abortOptionalPanelRequests, ticker, dupontMode]);
 
   useEffect(() => {
     if (!activeJobId || !lastEvent) {
@@ -187,9 +242,10 @@ export default function CompanyModelsPage() {
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
     invalidateApiReadCacheForTicker(ticker);
+    abortOptionalPanelRequests();
 
     void withPerformanceAuditSource(
       {
@@ -197,33 +253,32 @@ export default function CompanyModelsPage() {
         scenario: "models_page",
         source: "models:reload-after-refresh",
       },
-      () => loadModelsWorkspaceData(ticker, dupontMode)
+      () => loadModelsCoreData(ticker, dupontMode, controller.signal)
     )
       .then((workspaceData) => {
-        if (cancelled) {
+        if (controller.signal.aborted) {
           return;
         }
         setError(null);
         setData(workspaceData.modelData);
         setFinancialData(workspaceData.financialData);
-        setMarketContextData(workspaceData.marketContextData);
-        setSectorContextData(workspaceData.sectorContextData);
-        setCapitalStructureData(workspaceData.capitalStructureData);
-        setOilScenarioOverlayData(workspaceData.oilScenarioOverlayData);
-        setEvaluationData(workspaceData.evaluationData);
-        setOilOverlayEvaluationData(workspaceData.oilOverlayEvaluationData);
+        const oilPanelEnabled = supportsOilWorkspace(
+          workspaceData.modelData.company?.oil_support_status ?? workspaceData.financialData.company?.oil_support_status ?? "unsupported"
+        );
+        setOptionalPanelStates(createInitialOptionalPanelStates(oilPanelEnabled));
+        setOptionalPanelActivation(INITIAL_OPTIONAL_ACTIVATION);
         setActiveJobId(workspaceData.activeJobId);
       })
       .catch((nextError) => {
-        if (!cancelled) {
+        if (!isAbortError(nextError)) {
           setError(nextError instanceof Error ? nextError.message : "Unable to reload models");
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [activeJobId, lastEvent, settledJobIds, ticker, dupontMode]);
+  }, [abortOptionalPanelRequests, activeJobId, lastEvent, settledJobIds, ticker, dupontMode]);
 
   useEffect(() => {
     if (!activeJobId) {
@@ -232,6 +287,258 @@ export default function CompanyModelsPage() {
 
     rememberActiveJob(activeJobId, ticker);
   }, [activeJobId, ticker]);
+
+  useEffect(() => {
+    if (!data || !financialData) {
+      return;
+    }
+
+    const requests: Array<() => void> = [];
+
+    if (optionalPanelActivation.marketContext && optionalPanelStates.marketContext.status === "idle") {
+      requests.push(() => {
+        const controller = new AbortController();
+        optionalPanelControllersRef.current.marketContext = controller;
+        setOptionalPanelStates((current) => ({ ...current, marketContext: { status: "loading" } }));
+        void withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]/models",
+            scenario: "models_page",
+            source: "models:load-market-context",
+          },
+          () => getCompanyMarketContext(ticker, { signal: controller.signal })
+        )
+          .then((payload) => {
+            if (controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              marketContext: hasMeaningfulMarketContext(payload) ? { status: "ready", data: payload } : { status: "unavailable" },
+            }));
+          })
+          .catch((nextError) => {
+            if (isAbortError(nextError) || controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              marketContext: { status: "failed", error: formatPanelError(nextError, "Unable to load macro exposure context.") },
+            }));
+          })
+          .finally(() => {
+            if (optionalPanelControllersRef.current.marketContext === controller) {
+              delete optionalPanelControllersRef.current.marketContext;
+            }
+          });
+      });
+    }
+
+    if (optionalPanelActivation.sectorContext && optionalPanelStates.sectorContext.status === "idle") {
+      requests.push(() => {
+        const controller = new AbortController();
+        optionalPanelControllersRef.current.sectorContext = controller;
+        setOptionalPanelStates((current) => ({ ...current, sectorContext: { status: "loading" } }));
+        void withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]/models",
+            scenario: "models_page",
+            source: "models:load-sector-context",
+          },
+          () => getCompanySectorContext(ticker, { signal: controller.signal })
+        )
+          .then((payload) => {
+            if (controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              sectorContext: (payload.plugins ?? []).length ? { status: "ready", data: payload } : { status: "unavailable" },
+            }));
+          })
+          .catch((nextError) => {
+            if (isAbortError(nextError) || controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              sectorContext: { status: "failed", error: formatPanelError(nextError, "Unable to load sector exposure context.") },
+            }));
+          })
+          .finally(() => {
+            if (optionalPanelControllersRef.current.sectorContext === controller) {
+              delete optionalPanelControllersRef.current.sectorContext;
+            }
+          });
+      });
+    }
+
+    if (optionalPanelActivation.capitalStructure && optionalPanelStates.capitalStructure.status === "idle") {
+      requests.push(() => {
+        const controller = new AbortController();
+        optionalPanelControllersRef.current.capitalStructure = controller;
+        setOptionalPanelStates((current) => ({ ...current, capitalStructure: { status: "loading" } }));
+        void withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]/models",
+            scenario: "models_page",
+            source: "models:load-capital-structure",
+          },
+          () => getCompanyCapitalStructure(ticker, { maxPeriods: 6, signal: controller.signal })
+        )
+          .then((payload) => {
+            if (controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              capitalStructure: payload.latest ? { status: "ready", data: payload } : { status: "unavailable" },
+            }));
+          })
+          .catch((nextError) => {
+            if (isAbortError(nextError) || controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              capitalStructure: { status: "failed", error: formatPanelError(nextError, "Unable to load capital structure intelligence.") },
+            }));
+          })
+          .finally(() => {
+            if (optionalPanelControllersRef.current.capitalStructure === controller) {
+              delete optionalPanelControllersRef.current.capitalStructure;
+            }
+          });
+      });
+    }
+
+    if (optionalPanelActivation.modelEvaluation && optionalPanelStates.modelEvaluation.status === "idle") {
+      requests.push(() => {
+        const controller = new AbortController();
+        optionalPanelControllersRef.current.modelEvaluation = controller;
+        setOptionalPanelStates((current) => ({ ...current, modelEvaluation: { status: "loading" } }));
+        void withPerformanceAuditSource(
+          {
+            pageRoute: "/company/[ticker]/models",
+            scenario: "models_page",
+            source: "models:load-model-evaluation",
+          },
+          () => getLatestModelEvaluation(undefined, { signal: controller.signal })
+        )
+          .then((payload) => {
+            if (controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({ ...current, modelEvaluation: { status: "ready", data: payload } }));
+          })
+          .catch((nextError) => {
+            if (isAbortError(nextError) || controller.signal.aborted) {
+              return;
+            }
+            setOptionalPanelStates((current) => ({
+              ...current,
+              modelEvaluation: { status: "failed", error: formatPanelError(nextError, "Unable to load the model evaluation harness.") },
+            }));
+          })
+          .finally(() => {
+            if (optionalPanelControllersRef.current.modelEvaluation === controller) {
+              delete optionalPanelControllersRef.current.modelEvaluation;
+            }
+          });
+      });
+    }
+
+    const oilEnabled = supportsOilWorkspace(data.company?.oil_support_status ?? financialData.company?.oil_support_status ?? "unsupported");
+    if (!oilEnabled) {
+      if (optionalPanelStates.oilScenarioOverlay.status !== "disabled" || optionalPanelStates.oilOverlayEvaluation.status !== "disabled") {
+        setOptionalPanelStates((current) => ({
+          ...current,
+          oilScenarioOverlay: { status: "disabled" },
+          oilOverlayEvaluation: { status: "disabled" },
+        }));
+      }
+    } else {
+      if (optionalPanelActivation.oilScenarioOverlay && optionalPanelStates.oilScenarioOverlay.status === "idle") {
+        requests.push(() => {
+          const controller = new AbortController();
+          optionalPanelControllersRef.current.oilScenarioOverlay = controller;
+          setOptionalPanelStates((current) => ({ ...current, oilScenarioOverlay: { status: "loading" } }));
+          void withPerformanceAuditSource(
+            {
+              pageRoute: "/company/[ticker]/models",
+              scenario: "models_page",
+              source: "models:load-oil-overlay",
+            },
+            () => getCompanyOilScenarioOverlay(ticker, { signal: controller.signal })
+          )
+            .then((payload) => {
+              if (controller.signal.aborted) {
+                return;
+              }
+              setOptionalPanelStates((current) => ({ ...current, oilScenarioOverlay: { status: "ready", data: payload } }));
+            })
+            .catch((nextError) => {
+              if (isAbortError(nextError) || controller.signal.aborted) {
+                return;
+              }
+              setOptionalPanelStates((current) => ({
+                ...current,
+                oilScenarioOverlay: { status: "failed", error: formatPanelError(nextError, "Unable to load oil workspace overlay inputs.") },
+              }));
+            })
+            .finally(() => {
+              if (optionalPanelControllersRef.current.oilScenarioOverlay === controller) {
+                delete optionalPanelControllersRef.current.oilScenarioOverlay;
+              }
+            });
+        });
+      }
+
+      if (optionalPanelActivation.oilOverlayEvaluation && optionalPanelStates.oilOverlayEvaluation.status === "idle") {
+        requests.push(() => {
+          const controller = new AbortController();
+          optionalPanelControllersRef.current.oilOverlayEvaluation = controller;
+          setOptionalPanelStates((current) => ({ ...current, oilOverlayEvaluation: { status: "loading" } }));
+          void withPerformanceAuditSource(
+            {
+              pageRoute: "/company/[ticker]/models",
+              scenario: "models_page",
+              source: "models:load-oil-evaluation",
+            },
+            () => getLatestModelEvaluation(OIL_OVERLAY_EVALUATION_SUITE_KEY, { signal: controller.signal })
+          )
+            .then((payload) => {
+              if (controller.signal.aborted) {
+                return;
+              }
+              setOptionalPanelStates((current) => ({ ...current, oilOverlayEvaluation: { status: "ready", data: payload } }));
+            })
+            .catch((nextError) => {
+              if (isAbortError(nextError) || controller.signal.aborted) {
+                return;
+              }
+              setOptionalPanelStates((current) => ({
+                ...current,
+                oilOverlayEvaluation: { status: "failed", error: formatPanelError(nextError, "Unable to load oil overlay evaluation context.") },
+              }));
+            })
+            .finally(() => {
+              if (optionalPanelControllersRef.current.oilOverlayEvaluation === controller) {
+                delete optionalPanelControllersRef.current.oilOverlayEvaluation;
+              }
+            });
+        });
+      }
+    }
+
+    requests.forEach((startRequest) => startRequest());
+  }, [data, financialData, optionalPanelActivation, optionalPanelStates, ticker]);
+
+  useEffect(() => {
+    return () => {
+      abortOptionalPanelRequests();
+    };
+  }, [abortOptionalPanelRequests]);
 
   const columns = useMemo<ColDef<ModelPayload>[]>(
     () => [
@@ -555,60 +862,80 @@ export default function CompanyModelsPage() {
         </DeferredClientSection>
       </Panel>
 
-      {showOilScenarioOverlay ? (
-        <Panel
-          title="Oil Workspace"
-          subtitle={strictOfficialMode ? "Dedicated oil workspace with official benchmark curves, strict-mode-safe manual price input, and historical overlay evaluation context" : "Dedicated oil workspace with official benchmark curves, evaluation context, and an interactive overlay workbench"}
-          className="models-page-span-full"
-          variant="subtle"
-        >
+      <Panel
+        title="Oil Workspace"
+        subtitle={strictOfficialMode ? "Dedicated oil workspace with official benchmark curves, strict-mode-safe manual price input, and historical overlay evaluation context" : "Dedicated oil workspace with official benchmark curves, evaluation context, and an interactive overlay workbench"}
+        className="models-page-span-full"
+        variant="subtle"
+      >
+        <DeferredClientSection placeholder={<div className="text-muted">Oil workspace context loads when this panel enters view.</div>}>
+          <OptionalPanelActivationMarker
+            onVisible={() => {
+              activateOptionalPanel("oilScenarioOverlay");
+              activateOptionalPanel("oilOverlayEvaluation");
+            }}
+          />
           <div className="workspace-card-stack workspace-card-stack-tight">
             <div className="text-muted">
               Oil moved into its own workspace so the interactive overlay, provenance, and extension controls do not compete with the broader valuation stack on this page.
             </div>
-            <div className="workspace-pill-row">
-              <span className="pill">Support {titleCase(oilSupportStatus)}</span>
-              <span className="pill">Official Curve {(oilScenarioOverlayData?.official_base_curve?.points?.length ?? 0) > 0 ? "Ready" : "Blocked"}</span>
-              <span className="pill">Sensitivity {oilScenarioOverlayData?.sensitivity_source?.kind ? titleCase(String(oilScenarioOverlayData.sensitivity_source.kind).replaceAll("_", " ")) : "Pending"}</span>
-              {oilWorkspaceEvaluationSummary ? <span className="pill">Eval Samples {oilWorkspaceEvaluationSummary.sampleCount ?? "—"}</span> : null}
-            </div>
-            <div className="text-muted">
-              {oilSupportStatus === "partial"
-                ? (oilSupportReasons[0] ? describeOilSupportReason(oilSupportReasons[0]) : "Oil support is partial for this company.")
-                : "Use the dedicated workspace for the official benchmark curve, direct SEC evidence, realized-spread settings, downstream offsets, and historical PIT evaluation context."}
-            </div>
-            {oilWorkspaceEvaluationSummary ? (
-              <div className="filing-link-card workspace-card-stack-tight">
-                <div className="metric-label">Latest Oil Overlay Evaluation</div>
+            {optionalPanelStates.oilScenarioOverlay.status === "disabled" ? (
+              <div className="text-muted">Oil workspace is disabled: {describeOilOverlayAvailability(oilSupportReasons)}</div>
+            ) : optionalPanelStates.oilScenarioOverlay.status === "idle" ? (
+              <div className="text-muted">Oil workspace context will load when this section becomes active.</div>
+            ) : optionalPanelStates.oilScenarioOverlay.status === "loading" ? (
+              <div className="text-muted">Loading oil workspace context...</div>
+            ) : optionalPanelStates.oilScenarioOverlay.status === "failed" ? (
+              <div className="workspace-error-state text-muted">Oil workspace context failed to load: {optionalPanelStates.oilScenarioOverlay.error}</div>
+            ) : optionalPanelStates.oilScenarioOverlay.status === "unavailable" ? (
+              <div className="text-muted">Oil workspace context is currently unavailable for this company.</div>
+            ) : (
+              <>
                 <div className="workspace-pill-row">
-                  <span className="pill">Samples {oilWorkspaceEvaluationSummary.sampleCount ?? "—"}</span>
-                  <span className="pill">MAE Lift {formatSigned(oilWorkspaceEvaluationSummary.maeLift)}</span>
-                  <span className="pill">Improvement Rate {formatPercent(oilWorkspaceEvaluationSummary.improvementRate)}</span>
-                  <span className="pill">As Of {oilWorkspaceEvaluationSummary.asOf ?? "—"}</span>
+                  <span className="pill">Support {titleCase(oilSupportStatus)}</span>
+                  <span className="pill">Official Curve {(optionalPanelStates.oilScenarioOverlay.data.official_base_curve?.points?.length ?? 0) > 0 ? "Ready" : "Blocked"}</span>
+                  <span className="pill">Sensitivity {optionalPanelStates.oilScenarioOverlay.data.sensitivity_source?.kind ? titleCase(String(optionalPanelStates.oilScenarioOverlay.data.sensitivity_source.kind).replaceAll("_", " ")) : "Pending"}</span>
+                  {oilWorkspaceEvaluationSummary ? <span className="pill">Eval Samples {oilWorkspaceEvaluationSummary.sampleCount ?? "—"}</span> : null}
                 </div>
-                <div className="text-muted">{oilWorkspaceEvaluationSummary.description}</div>
-              </div>
-            ) : null}
-            <div>
-              <Link href={`/company/${encodeURIComponent(ticker)}/oil`} className="ticker-button utility-action-button utility-action-button-primary utility-action-link-button">
-                Open Oil Workspace
-              </Link>
-            </div>
-            <SourceFreshnessSummary
-              provenance={oilScenarioOverlayData?.provenance}
-              asOf={oilScenarioOverlayData?.as_of}
-              lastRefreshedAt={oilScenarioOverlayData?.last_refreshed_at}
-              sourceMix={oilScenarioOverlayData?.source_mix}
-              confidenceFlags={oilScenarioOverlayData?.confidence_flags}
-              emptyMessage="Oil workspace provenance will appear after the official oil overlay dataset is available."
-            />
+                <div className="text-muted">
+                  {oilSupportStatus === "partial"
+                    ? (oilSupportReasons[0] ? describeOilSupportReason(oilSupportReasons[0]) : "Oil support is partial for this company.")
+                    : "Use the dedicated workspace for the official benchmark curve, direct SEC evidence, realized-spread settings, downstream offsets, and historical PIT evaluation context."}
+                </div>
+                {optionalPanelStates.oilOverlayEvaluation.status === "failed" ? (
+                  <div className="workspace-error-state text-muted">Oil overlay evaluation failed to load: {optionalPanelStates.oilOverlayEvaluation.error}</div>
+                ) : oilWorkspaceEvaluationSummary ? (
+                  <div className="filing-link-card workspace-card-stack-tight">
+                    <div className="metric-label">Latest Oil Overlay Evaluation</div>
+                    <div className="workspace-pill-row">
+                      <span className="pill">Samples {oilWorkspaceEvaluationSummary.sampleCount ?? "—"}</span>
+                      <span className="pill">MAE Lift {formatSigned(oilWorkspaceEvaluationSummary.maeLift)}</span>
+                      <span className="pill">Improvement Rate {formatPercent(oilWorkspaceEvaluationSummary.improvementRate)}</span>
+                      <span className="pill">As Of {oilWorkspaceEvaluationSummary.asOf ?? "—"}</span>
+                    </div>
+                    <div className="text-muted">{oilWorkspaceEvaluationSummary.description}</div>
+                  </div>
+                ) : optionalPanelStates.oilOverlayEvaluation.status === "loading" ? (
+                  <div className="text-muted">Loading oil overlay evaluation context...</div>
+                ) : null}
+                <div>
+                  <Link href={`/company/${encodeURIComponent(ticker)}/oil`} className="ticker-button utility-action-button utility-action-button-primary utility-action-link-button">
+                    Open Oil Workspace
+                  </Link>
+                </div>
+                <SourceFreshnessSummary
+                  provenance={optionalPanelStates.oilScenarioOverlay.data.provenance}
+                  asOf={optionalPanelStates.oilScenarioOverlay.data.as_of}
+                  lastRefreshedAt={optionalPanelStates.oilScenarioOverlay.data.last_refreshed_at}
+                  sourceMix={optionalPanelStates.oilScenarioOverlay.data.source_mix}
+                  confidenceFlags={optionalPanelStates.oilScenarioOverlay.data.confidence_flags}
+                  emptyMessage="Oil workspace provenance will appear after the official oil overlay dataset is available."
+                />
+              </>
+            )}
           </div>
-        </Panel>
-      ) : (
-        <div className="models-page-span-full text-muted">
-          Oil scenario overlay unavailable: {describeOilOverlayAvailability(oilSupportReasons)}
-        </div>
-      )}
+        </DeferredClientSection>
+      </Panel>
 
       <Panel title="Model Analytics" subtitle={loading ? "Loading..." : "Charts and number tables for DCF, DuPont, Piotroski, Altman Z, and ratios"} className="models-page-span-full" variant="subtle">
         {hasModels ? (
@@ -624,45 +951,99 @@ export default function CompanyModelsPage() {
         subtitle="Latest persisted backtest run for calibration, stability, and error drift across the valuation stack"
         className="models-page-span-full"
       >
-        <ModelEvaluationPanel evaluation={evaluationData} />
+        <DeferredClientSection placeholder={<div className="text-muted">Model evaluation context loads when this panel enters view.</div>}>
+          <OptionalPanelActivationMarker onVisible={() => activateOptionalPanel("modelEvaluation")} />
+          {optionalPanelStates.modelEvaluation.status === "idle" ? (
+            <div className="text-muted">Model evaluation context will load when this section becomes active.</div>
+          ) : optionalPanelStates.modelEvaluation.status === "loading" ? (
+            <div className="text-muted">Loading model evaluation harness...</div>
+          ) : optionalPanelStates.modelEvaluation.status === "failed" ? (
+            <div className="workspace-error-state text-muted">Model evaluation harness failed to load: {optionalPanelStates.modelEvaluation.error}</div>
+          ) : optionalPanelStates.modelEvaluation.status === "disabled" ? (
+            <div className="text-muted">Model evaluation harness is disabled.</div>
+          ) : optionalPanelStates.modelEvaluation.status === "unavailable" ? (
+            <div className="text-muted">Model evaluation harness is unavailable.</div>
+          ) : (
+            <ModelEvaluationPanel evaluation={optionalPanelStates.modelEvaluation.data} />
+          )}
+        </DeferredClientSection>
       </Panel>
 
-      {showMarketContext ? (
-        <Panel
-          variant="subtle"
-          title="Macro Exposure Context"
-          subtitle="Official indicators selected from the company's mapped demand, cost, inventory, and rate exposures"
-          className="models-page-span-full"
-        >
-          <MarketContextPanel context={marketContextData} />
-        </Panel>
-      ) : null}
+      <Panel
+        variant="subtle"
+        title="Macro Exposure Context"
+        subtitle="Official indicators selected from the company's mapped demand, cost, inventory, and rate exposures"
+        className="models-page-span-full"
+      >
+        <DeferredClientSection placeholder={<div className="text-muted">Macro context loads when this panel enters view.</div>}>
+          <OptionalPanelActivationMarker onVisible={() => activateOptionalPanel("marketContext")} />
+          {optionalPanelStates.marketContext.status === "idle" ? (
+            <div className="text-muted">Macro context will load when this section becomes active.</div>
+          ) : optionalPanelStates.marketContext.status === "loading" ? (
+            <div className="text-muted">Loading macro exposure context...</div>
+          ) : optionalPanelStates.marketContext.status === "failed" ? (
+            <div className="workspace-error-state text-muted">Macro exposure context failed to load: {optionalPanelStates.marketContext.error}</div>
+          ) : optionalPanelStates.marketContext.status === "disabled" ? (
+            <div className="text-muted">Macro exposure context is disabled.</div>
+          ) : optionalPanelStates.marketContext.status === "unavailable" ? (
+            <div className="text-muted">No macro indicators are available for this company right now.</div>
+          ) : (
+            <MarketContextPanel context={optionalPanelStates.marketContext.data} />
+          )}
+        </DeferredClientSection>
+      </Panel>
 
-      {showCapitalStructure ? (
-        <Panel
-          variant="subtle"
-          title="Capital Structure Intelligence"
-          subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
-          className="models-page-span-full"
-        >
-          <CapitalStructureIntelligencePanel
-            ticker={ticker}
-            reloadKey={data?.last_refreshed_at ?? financialData?.last_refreshed_at ?? activeJobId}
-            initialPayload={capitalStructureData}
-          />
-        </Panel>
-      ) : null}
+      <Panel
+        variant="subtle"
+        title="Capital Structure Intelligence"
+        subtitle="SEC-derived maturity ladders, debt roll-forwards, payout mix, SBC burden, and dilution bridges alongside the model stack"
+        className="models-page-span-full"
+      >
+        <DeferredClientSection placeholder={<div className="text-muted">Capital structure context loads when this panel enters view.</div>}>
+          <OptionalPanelActivationMarker onVisible={() => activateOptionalPanel("capitalStructure")} />
+          {optionalPanelStates.capitalStructure.status === "idle" ? (
+            <div className="text-muted">Capital structure intelligence will load when this section becomes active.</div>
+          ) : optionalPanelStates.capitalStructure.status === "loading" ? (
+            <div className="text-muted">Loading capital structure intelligence...</div>
+          ) : optionalPanelStates.capitalStructure.status === "failed" ? (
+            <div className="workspace-error-state text-muted">Capital structure intelligence failed to load: {optionalPanelStates.capitalStructure.error}</div>
+          ) : optionalPanelStates.capitalStructure.status === "disabled" ? (
+            <div className="text-muted">Capital structure intelligence is disabled.</div>
+          ) : optionalPanelStates.capitalStructure.status === "unavailable" ? (
+            <div className="text-muted">Capital structure intelligence is currently unavailable for this company.</div>
+          ) : (
+            <CapitalStructureIntelligencePanel
+              ticker={ticker}
+              reloadKey={data?.last_refreshed_at ?? financialData?.last_refreshed_at ?? activeJobId}
+              initialPayload={optionalPanelStates.capitalStructure.data}
+            />
+          )}
+        </DeferredClientSection>
+      </Panel>
 
-      {showSectorContext ? (
-        <Panel
-          variant="subtle"
-          title="Sector Exposure Context"
-          subtitle="Official sector plug-ins for power, housing, airlines, air cargo, and agricultural supply-demand exposures"
-          className="models-page-span-full"
-        >
-          <SectorContextPanel context={sectorContextData} />
-        </Panel>
-      ) : null}
+      <Panel
+        variant="subtle"
+        title="Sector Exposure Context"
+        subtitle="Official sector plug-ins for power, housing, airlines, air cargo, and agricultural supply-demand exposures"
+        className="models-page-span-full"
+      >
+        <DeferredClientSection placeholder={<div className="text-muted">Sector context loads when this panel enters view.</div>}>
+          <OptionalPanelActivationMarker onVisible={() => activateOptionalPanel("sectorContext")} />
+          {optionalPanelStates.sectorContext.status === "idle" ? (
+            <div className="text-muted">Sector context will load when this section becomes active.</div>
+          ) : optionalPanelStates.sectorContext.status === "loading" ? (
+            <div className="text-muted">Loading sector exposure context...</div>
+          ) : optionalPanelStates.sectorContext.status === "failed" ? (
+            <div className="workspace-error-state text-muted">Sector exposure context failed to load: {optionalPanelStates.sectorContext.error}</div>
+          ) : optionalPanelStates.sectorContext.status === "disabled" ? (
+            <div className="text-muted">Sector exposure context is disabled.</div>
+          ) : optionalPanelStates.sectorContext.status === "unavailable" ? (
+            <div className="text-muted">No sector plug-ins are available for this company right now.</div>
+          ) : (
+            <SectorContextPanel context={optionalPanelStates.sectorContext.data} />
+          )}
+        </DeferredClientSection>
+      </Panel>
 
       <Panel title="Source & Freshness" subtitle="Registry-backed provenance for filing inputs, rates, price overlays, and model disclosures" className="models-page-span-full" variant="subtle">
         <SourceFreshnessSummary
@@ -720,8 +1101,7 @@ function ForecastBackedValuationCard({ handoff, models, ticker, accuracy, accura
   const revenueMetric = findHandoffMetric(handoff.metrics, "revenue");
 
   const weightedChange = resolveWeightedForecastChange([fcfMetric, earningsMetric, revenueMetric]);
-  const estimatedFairValue =
-    baseFairValuePerShare != null && weightedChange != null ? baseFairValuePerShare * (1 + Math.max(-0.8, Math.min(1.5, weightedChange))) : null;
+  const heuristicSignal = resolveHeuristicScenarioSignal(weightedChange);
 
   return (
     <div className="workspace-card-stack workspace-card-stack-tight" data-testid="forecast-backed-valuation-card">
@@ -735,14 +1115,15 @@ function ForecastBackedValuationCard({ handoff, models, ticker, accuracy, accura
 
       <div className="models-forecast-impact-grid">
         <div className="models-forecast-impact-card">
-          <div className="metric-label">DCF fair value per share (existing model)</div>
+          <div className="metric-label">Current DCF fair value per share (model-derived)</div>
           <div className="models-forecast-impact-value">{formatCompactNumber(baseFairValuePerShare)}</div>
-          <div className="text-muted">From cached DCF model outputs in Models.</div>
+          <div className="text-muted">From the latest persisted DCF run already stored in Models.</div>
         </div>
         <div className="models-forecast-impact-card">
-          <div className="metric-label">Directional fair value with forecast handoff</div>
-          <div className="models-forecast-impact-value">{formatCompactNumber(estimatedFairValue)}</div>
-          <div className="text-muted">Additive estimate using projected FCF and earnings deltas from Studio.</div>
+          <div className="metric-label">Scenario impact signal (heuristic, no model rerun)</div>
+          <div className="models-forecast-impact-value">{heuristicSignal.label}</div>
+          <div className="text-muted">{heuristicSignal.band}</div>
+          <div className="text-muted">{heuristicSignal.description}</div>
         </div>
       </div>
 
@@ -764,7 +1145,7 @@ function ForecastBackedValuationCard({ handoff, models, ticker, accuracy, accura
       </div>
 
       <div className="text-muted">
-        This card is additive only. It does not modify the underlying Models compute pipeline or cached model runs.
+        Trust boundary: Projection Studio changed scenario inputs only. Cached model outputs and persisted valuations did not change here. This surface shows a heuristic directional signal until a backend model rerun is executed.
       </div>
       <div>
         <Link href={`/company/${encodeURIComponent(ticker)}/models`} className="ticker-button utility-action-button utility-action-link-button">
@@ -797,6 +1178,58 @@ function resolveWeightedForecastChange(metrics: Array<ForecastHandoffMetric | nu
   return weightedDeltas.reduce((sum, value) => sum + value, 0);
 }
 
+function resolveHeuristicScenarioSignal(weightedChange: number | null): {
+  label: string;
+  band: string;
+  description: string;
+} {
+  if (weightedChange == null) {
+    return {
+      label: "Signal unavailable",
+      band: "Heuristic band: not enough comparable deltas",
+      description: "At least one comparable projected metric delta is needed to produce a directional scenario signal.",
+    };
+  }
+
+  const capped = Math.max(-0.6, Math.min(0.6, weightedChange));
+  const absChange = Math.abs(capped);
+  const direction = capped > 0.01 ? "upside" : capped < -0.01 ? "downside" : "flat";
+  const strength = absChange < 0.03 ? "slight" : absChange < 0.12 ? "moderate" : "strong";
+
+  const halfWidth = absChange < 0.12 ? 5 : 10;
+  const centerPct = capped * 100;
+  const lowerPct = roundToNearestFive(centerPct - halfWidth);
+  const upperPct = roundToNearestFive(centerPct + halfWidth);
+
+  if (direction === "flat") {
+    return {
+      label: "Balanced / low directional tilt",
+      band: "Heuristic band: approximately -5% to +5% directional impact",
+      description: "Projected deltas are mixed or small, so the scenario signal is near neutral.",
+    };
+  }
+
+  const titleDirection = direction === "upside" ? "Upside" : "Downside";
+  return {
+    label: `${strength === "strong" ? "Strong" : strength === "moderate" ? "Moderate" : "Slight"} ${titleDirection} Signal`,
+    band: `Heuristic band: approximately ${formatSignedPercentRange(lowerPct, upperPct)} directional impact`,
+    description: "Computed from weighted projected deltas (FCF, earnings/EPS, revenue). This is not a recomputed valuation output.",
+  };
+}
+
+function roundToNearestFive(value: number): number {
+  return Math.round(value / 5) * 5;
+}
+
+function formatSignedPercentRange(lower: number, upper: number): string {
+  return `${formatSignedPercent(lower)} to ${formatSignedPercent(upper)}`;
+}
+
+function formatSignedPercent(value: number): string {
+  const rounded = Math.round(value);
+  return `${rounded > 0 ? "+" : ""}${rounded}%`;
+}
+
 function formatForecastMetric(value: number | null, unit: string): string {
   if (value == null) {
     return "—";
@@ -815,44 +1248,23 @@ function formatSignedMetric(value: number, unit: string): string {
   return `${prefix}${formatForecastMetric(Math.abs(value), unit)}`;
 }
 
-async function loadModelsWorkspaceData(ticker: string, dupontMode: DupontMode): Promise<ModelsWorkspaceData> {
-  const [modelResult, financialResult, marketContextResult, sectorContextResult, capitalStructureResult, oilScenarioOverlayResult, evaluationResult, oilOverlayEvaluationResult] = await Promise.allSettled([
-    getCompanyModels(ticker, MODEL_NAMES, { dupontMode }),
-    getCompanyFinancials(ticker, { view: "core" }),
-    getCompanyMarketContext(ticker),
-    getCompanySectorContext(ticker),
-    getCompanyCapitalStructure(ticker, { maxPeriods: 6 }),
-    getCompanyOilScenarioOverlay(ticker),
-    getLatestModelEvaluation(),
-    getLatestModelEvaluation(OIL_OVERLAY_EVALUATION_SUITE_KEY),
+async function loadModelsCoreData(ticker: string, dupontMode: DupontMode, signal?: AbortSignal): Promise<ModelsCoreData> {
+  const [modelResult, financialResult] = await Promise.allSettled([
+    getCompanyModels(ticker, MODEL_NAMES, { dupontMode, signal }),
+    getCompanyFinancials(ticker, { view: "core", signal }),
   ]);
+
+  if (isRejectedAbort(modelResult) || isRejectedAbort(financialResult)) {
+    throw abortError();
+  }
 
   const modelData = requireModelsWorkspacePayload(modelResult, "Unable to load models");
   const financialData = requireModelsWorkspacePayload(financialResult, "Unable to load company financials");
-  const marketContextData = optionalModelsWorkspacePayload(marketContextResult);
-  const sectorContextData = optionalModelsWorkspacePayload(sectorContextResult);
-  const capitalStructureData = optionalModelsWorkspacePayload(capitalStructureResult);
-  const oilScenarioOverlayData = optionalModelsWorkspacePayload(oilScenarioOverlayResult);
-  const evaluationData = optionalModelsWorkspacePayload(evaluationResult);
-  const oilOverlayEvaluationData = optionalModelsWorkspacePayload(oilOverlayEvaluationResult);
 
   return {
     modelData,
     financialData,
-    marketContextData,
-    sectorContextData,
-    capitalStructureData,
-    oilScenarioOverlayData,
-    evaluationData,
-    oilOverlayEvaluationData,
-    activeJobId:
-      modelData.refresh.job_id ??
-      financialData.refresh.job_id ??
-      capitalStructureData?.refresh.job_id ??
-      oilScenarioOverlayData?.refresh.job_id ??
-      marketContextData?.refresh.job_id ??
-      sectorContextData?.refresh.job_id ??
-      null
+    activeJobId: modelData.refresh.job_id ?? financialData.refresh.job_id ?? null,
   };
 }
 
@@ -862,10 +1274,6 @@ function requireModelsWorkspacePayload<T>(result: PromiseSettledResult<T>, fallb
   }
 
   throw result.reason instanceof Error ? result.reason : new Error(fallback);
-}
-
-function optionalModelsWorkspacePayload<T>(result: PromiseSettledResult<T>): T | null {
-  return result.status === "fulfilled" ? result.value : null;
 }
 
 function hasMeaningfulMarketContext(context: CompanyMarketContextResponse | null): boolean {
@@ -898,6 +1306,42 @@ function formatSigned(value: number | null): string {
     maximumFractionDigits: 2,
     signDisplay: "exceptZero"
   }).format(value);
+}
+
+function formatPanelError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function isRejectedAbort<T>(result: PromiseSettledResult<T>): boolean {
+  return result.status === "rejected" && isAbortError(result.reason);
+}
+
+function abortError(): DOMException | Error {
+  if (typeof DOMException !== "undefined") {
+    return new DOMException("The operation was aborted.", "AbortError");
+  }
+
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function OptionalPanelActivationMarker({ onVisible }: { onVisible: () => void }) {
+  useEffect(() => {
+    onVisible();
+  }, [onVisible]);
+
+  return null;
 }
 
 

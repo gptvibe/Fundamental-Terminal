@@ -73,7 +73,7 @@ describe("useForecastAccuracy", () => {
 
     expect(result.current.error).toBeNull();
     expect(result.current.data?.aggregate.sample_count).toBe(4);
-    expect(getCompanyChartsForecastAccuracy).toHaveBeenCalledWith("ACME", { asOf: undefined });
+    expect(getCompanyChartsForecastAccuracy).toHaveBeenCalledWith("ACME", expect.objectContaining({ asOf: undefined, signal: expect.anything() }));
   });
 
   it("handles error state", async () => {
@@ -99,5 +99,39 @@ describe("useForecastAccuracy", () => {
     expect(getCompanyChartsForecastAccuracy).not.toHaveBeenCalled();
     expect(result.current.data).toBeNull();
     expect(result.current.error).toBeNull();
+  });
+
+  it("aborts the prior forecast accuracy request when inputs change", async () => {
+    let firstSignal: AbortSignal | undefined;
+
+    vi.mocked(getCompanyChartsForecastAccuracy)
+      .mockImplementationOnce((_ticker, options) => {
+        firstSignal = options?.signal;
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            },
+            { once: true }
+          );
+        }) as never;
+      })
+      .mockResolvedValueOnce(buildResponse() as never);
+
+    const { result, rerender } = renderHook(
+      ({ asOf }) => useForecastAccuracy("ACME", { asOf }),
+      { initialProps: { asOf: "2025-12-31" as string | null } }
+    );
+
+    rerender({ asOf: "2026-01-31" });
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.data?.as_of).toBe("2025-12-31");
   });
 });

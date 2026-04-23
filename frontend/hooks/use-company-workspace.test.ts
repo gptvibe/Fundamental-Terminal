@@ -110,6 +110,10 @@ function buildApiError(status: number, statusText = "Error") {
   return new Error(`API request failed: ${status} ${statusText}`);
 }
 
+function buildAbortError() {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
 describe("useCompanyWorkspace", () => {
   beforeEach(() => {
     mockUseJobStream.mockReturnValue({
@@ -159,13 +163,17 @@ describe("useCompanyWorkspace", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(fetchBootstrap).toHaveBeenCalledWith("RKLB", {
-      financialsView: "core_segments",
-      includeOverviewBrief: true,
-      includeInsiders: false,
-      includeInstitutional: false,
-      includeEarningsSummary: false,
-    });
+    expect(fetchBootstrap).toHaveBeenCalledWith(
+      "RKLB",
+      expect.objectContaining({
+        financialsView: "core_segments",
+        includeOverviewBrief: true,
+        includeInsiders: false,
+        includeInstitutional: false,
+        includeEarningsSummary: false,
+        signal: expect.anything(),
+      })
+    );
     expect(fetchOverview).not.toHaveBeenCalled();
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
@@ -201,7 +209,7 @@ describe("useCompanyWorkspace", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(fetchOverview).toHaveBeenCalledWith("RKLB", { financialsView: "core_segments" });
+    expect(fetchOverview).toHaveBeenCalledWith("RKLB", expect.objectContaining({ financialsView: "core_segments", signal: expect.anything() }));
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.error).toBeNull();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
@@ -282,8 +290,8 @@ describe("useCompanyWorkspace", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(fetchOverview).toHaveBeenCalledWith("RKLB", { financialsView: "core_segments" });
-    expect(fetchFinancials).toHaveBeenCalledWith("RKLB", { view: "core_segments" });
+    expect(fetchOverview).toHaveBeenCalledWith("RKLB", expect.objectContaining({ financialsView: "core_segments", signal: expect.anything() }));
+    expect(fetchFinancials).toHaveBeenCalledWith("RKLB", expect.objectContaining({ view: "core_segments", signal: expect.anything() }));
     expect(result.current.error).toBeNull();
     expect(result.current.briefData).toBeNull();
   });
@@ -421,6 +429,62 @@ describe("useCompanyWorkspace", () => {
       expect(result.current.loading).toBe(false);
     });
 
-    expect(fetchFinancials).toHaveBeenCalledWith("RKLB", { view: "core_segments" });
+    expect(fetchFinancials).toHaveBeenCalledWith("RKLB", expect.objectContaining({ view: "core_segments", signal: expect.anything() }));
+  });
+
+  it("aborts the prior workspace request bundle when ticker changes", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    let firstSignal: AbortSignal | undefined;
+
+    fetchBootstrap
+      .mockImplementationOnce((_ticker, options) => {
+        firstSignal = options?.signal;
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            "abort",
+            () => {
+              reject(buildAbortError());
+            },
+            { once: true }
+          );
+        }) as never;
+      })
+      .mockResolvedValueOnce({
+        company: { ticker: "AAPL", name: "Apple Inc.", cache_state: "fresh" },
+        financials: buildFinancialsResponse({
+          company: {
+            ticker: "AAPL",
+            name: "Apple Inc.",
+            sector: "Technology",
+            market_sector: "Technology",
+            last_checked: "2026-03-31T00:00:00Z",
+            cache_state: "fresh",
+          },
+          refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
+        }),
+        brief: null,
+        earnings_summary: null,
+        insider_trades: null,
+        institutional_holdings: null,
+        errors: { insider: null, institutional: null, earnings_summary: null },
+      } as never);
+
+    const { result, rerender } = renderHook(
+      ({ ticker }) => useCompanyWorkspace(ticker),
+      { initialProps: { ticker: "RKLB" } }
+    );
+
+    await act(async () => {
+      rerender({ ticker: "AAPL" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(result.current.error).toBeNull();
+    expect(result.current.company?.ticker).toBe("AAPL");
   });
 });
