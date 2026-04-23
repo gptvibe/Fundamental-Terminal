@@ -186,7 +186,7 @@ Useful optional environment variables live in [.env.example](.env.example).
 - `/data-sources` - source registry, cache coverage, source health, and strict official mode visibility.
 - `/company/[ticker]` - research brief workspace.
 - `/company/[ticker]/financials` - dedicated statements, derived metrics, charts, provenance, and bank-specific regulated-financial view.
-- `/company/[ticker]/charts` - reported-versus-forecast chart dashboard with scenario framing.
+- `/company/[ticker]/charts` - reported-versus-forecast chart dashboard with scenario framing and an explicit routing gate that keeps banks / regulated financials off the industrial forecast path.
 - `/company/[ticker]/models` - valuation workbench with DCF, reverse DCF, ROIC, and assumption context.
 - `/company/[ticker]/peers` - peer comparison workspace.
 - `/company/[ticker]/oil` - oil scenario overlay for supported companies.

@@ -184,10 +184,10 @@ def build_company_charts_dashboard_response(
     earnings_points = get_company_earnings_model_points(session, company_id, limit=8, as_of=as_of)
     earnings_releases = get_company_earnings_releases(session, company_id, limit=24, as_of=as_of)
     restatements = get_company_financial_restatements(session, company_id, limit=200, as_of=as_of)
-    baseline_driver_bundle = build_driver_forecast_bundle(annuals, earnings_releases)
+    baseline_driver_bundle = build_driver_forecast_bundle(annuals, earnings_releases, company=company)
     requested_overrides = dict(what_if_request.overrides) if what_if_request is not None else {}
     driver_bundle = (
-        build_driver_forecast_bundle(annuals, earnings_releases, overrides=requested_overrides)
+        build_driver_forecast_bundle(annuals, earnings_releases, overrides=requested_overrides, company=company)
         if requested_overrides
         else baseline_driver_bundle
     )
@@ -582,7 +582,7 @@ def _build_forecast_accuracy_samples(
         if len(revenue_actual) < 2:
             continue
 
-        driver_bundle = build_driver_forecast_bundle(visible_annuals, visible_releases)
+        driver_bundle = build_driver_forecast_bundle(visible_annuals, visible_releases, company=company)
         growth_actual = _growth_series(revenue_actual, "actual")
         hist_3y = _cagr([_point_value(point) for point in revenue_actual[-4:]]) if len(revenue_actual) >= 4 else None
         forecast_state = _build_forecast_state(visible_annuals, revenue_actual, growth_actual, hist_3y, driver_bundle, company.name)
@@ -703,7 +703,8 @@ def _build_forecast_state(
     driver_bundle: Any | None,
     company_name: str,
 ) -> dict[str, Any]:
-    if driver_bundle is not None:
+    engine_mode = getattr(driver_bundle, "engine_mode", None) if driver_bundle is not None else None
+    if driver_bundle is not None and engine_mode == "driver":
         base = driver_bundle.scenarios["base"]
         bull = driver_bundle.scenarios["bull"]
         bear = driver_bundle.scenarios["bear"]
@@ -811,7 +812,39 @@ def _build_forecast_state(
             "methodology_disclaimer": "Scenario outputs are internally derived from official inputs and remain explicitly labeled as forecast rather than reported results or analyst consensus.",
             "methodology_heuristic": False,
         }
+    if driver_bundle is not None and engine_mode == "regulated_financial_separate":
+        return _build_regulated_financial_forecast_state(annuals, revenue_actual, growth_actual, hist_3y, driver_bundle, company_name)
 
+    return _build_heuristic_forecast_state(annuals, revenue_actual, growth_actual, hist_3y, driver_bundle, company_name)
+
+
+def _build_heuristic_assumption_items(
+    annuals: list[Any],
+    exp_1y: float | None,
+    routing_rows: list[CompanyChartsAssumptionItemPayload] | None = None,
+) -> list[CompanyChartsAssumptionItemPayload]:
+    items = list(routing_rows or [])
+    items.extend(
+        [
+            CompanyChartsAssumptionItemPayload(key="horizon", label="Forecast Horizon", value="3 fiscal years", detail="Annual-only forecast surface."),
+            CompanyChartsAssumptionItemPayload(key="growth_guardrails", label="Growth Guardrails", value="-18% to +30%", detail="Forecast revenue growth is clipped."),
+            CompanyChartsAssumptionItemPayload(key="history_depth", label="History Depth", value=f"{len(annuals)} annual periods", detail="Shorter annual history makes deterministic extrapolation less stable."),
+            CompanyChartsAssumptionItemPayload(key="growth_volatility_band", label="Growth Volatility Band", value="Heuristic", detail="The fallback heuristic engine uses revenue volatility to dampen extrapolation."),
+            CompanyChartsAssumptionItemPayload(key="fallback_mode", label="Forecast Mode", value="Heuristic fallback", detail="The driver engine is bypassed when statement coverage is too thin for explicit cost, reinvestment, or dilution schedules."),
+            CompanyChartsAssumptionItemPayload(key="base_case_next_year", label="Base-Case Next Year", value=_pct(exp_1y), detail="Implied next-year revenue growth."),
+        ]
+    )
+    return items
+
+
+def _build_heuristic_forecast_state(
+    annuals: list[Any],
+    revenue_actual: list[CompanyChartsSeriesPointPayload],
+    growth_actual: list[CompanyChartsSeriesPointPayload],
+    hist_3y: float | None,
+    routing_bundle: Any | None,
+    company_name: str,
+) -> dict[str, Any]:
     revenue_forecast, growth_curve = _forecast_revenue(revenue_actual)
     growth_forecast = _forecast_growth_series(revenue_forecast, growth_curve)
     profit_series = _margin_projected_series(annuals, revenue_actual, revenue_forecast, [("operating_income", "EBIT"), ("net_income", "Net Income"), ("ebitda_proxy", "EBITDA")])
@@ -820,6 +853,17 @@ def _build_forecast_state(
     eps_actual, eps_forecast = _eps_series(annuals, net_income_forecast.points if net_income_forecast is not None else [])
     exp_1y = _growth_rate(_point_value(revenue_forecast[0]) if revenue_forecast else None, _point_value(revenue_actual[-1]) if revenue_actual else None)
     exp_3y = _cagr([_point_value(revenue_actual[-1])] + [_point_value(point) for point in revenue_forecast[:3]]) if revenue_actual and len(revenue_forecast) >= 3 else None
+    routing_assumption_items = _rows_to_assumption_items(getattr(routing_bundle, "assumption_rows", [])) if routing_bundle is not None else []
+    calculations_card = None
+    if routing_bundle is not None and getattr(routing_bundle, "calculation_rows", None):
+        calculations_card = CompanyChartsAssumptionsCardPayload(key="forecast_calculations", title="Forecast Calculations", items=_rows_to_assumption_items(routing_bundle.calculation_rows))
+    methodology_label = "Deterministic projection with empirical stability overlay"
+    methodology_summary = "Annual historical official filings are normalized into a deterministic three-year projection, then paired with a point-in-time walk-forward stability score calibrated to realized revenue, EBIT, EPS, and FCF error bands plus explicit penalties for cyclicality, structural breaks, M&A, restatements, and share-count instability."
+    methodology_disclaimer = "Forecast stability is a conservative communication aid grounded in historical multi-metric walk-forward error, not a probability, prediction interval, or statistical confidence measure. Forecast values remain projections rather than reported results or analyst consensus."
+    if routing_bundle is not None and getattr(routing_bundle, "entity_routing", None) == "UNSURE_REQUIRE_CONSERVATIVE_FALLBACK":
+        methodology_label = "Conservative fallback after routing gate"
+        methodology_summary = "The forecast entrypoint identified a financial-sector-adjacent issuer without a confirmed non-financial routing, so the industrial driver engine was withheld and the dashboard stayed on a guarded heuristic fallback instead of applying DSO/DIO/DPO, sales-to-capital, or industrial capex heuristics as primary schedules."
+        methodology_disclaimer = "This view is intentionally conservative: it avoids asserting an industrial IB-style schedule until the issuer is clearly classified as non-financial or routed to a dedicated regulated-financial path."
     return {
         "exp_1y": exp_1y,
         "exp_3y": exp_3y,
@@ -831,8 +875,8 @@ def _build_forecast_state(
         "thesis": (
             f"{company_name} reported {_pct(hist_3y)} 3Y revenue CAGR; the base-case projection implies {_pct(exp_1y)} next-year growth with heuristic guardrails."
             if hist_3y is not None and exp_1y is not None
-                else "Historical official filings are normalized first, projected values remain explicitly labeled as forecast, and forecast stability remains guarded when multi-metric empirical history is thin."
-            ),
+            else "Historical official filings are normalized first, projected values remain explicitly labeled as forecast, and forecast stability remains guarded when multi-metric empirical history is thin."
+        ),
         "source_badges": ["Official filings", "Deterministic forecast v3", "Empirical stability overlay", "Benchmark hidden unless trustworthy"],
         "revenue_card": CompanyChartsCardPayload(key="revenue", title="Revenue", subtitle="Reported history with guarded projection", metric_label="Revenue", unit_label="USD", empty_state="Reported revenue history is unavailable." if not revenue_actual else None, series=[_series("revenue_actual", "Reported", "usd", "line", "actual", "solid", revenue_actual), _series("revenue_forecast", "Forecast", "usd", "line", "forecast", "dashed", revenue_forecast)], highlights=[item for item in [f"Hist 3Y CAGR {_pct(hist_3y)}" if hist_3y is not None else None, f"Base-case next year {_pct(exp_1y)}" if exp_1y is not None else None] if item]),
         "growth_card": CompanyChartsCardPayload(key="revenue_growth", title="Revenue Growth", subtitle="Year-over-year reported and projected growth", metric_label="Revenue Growth", unit_label="Percent", empty_state="Revenue growth requires at least two annual periods." if not growth_actual else None, series=[_series("revenue_growth_actual", "Reported", "percent", "bar", "actual", "solid", growth_actual), _series("revenue_growth_forecast", "Forecast", "percent", "bar", "forecast", "muted", growth_forecast)]),
@@ -842,21 +886,89 @@ def _build_forecast_state(
             CompanyChartsComparisonItemPayload(key="expected_1y", label="Exp 1Y", company_value=_round(exp_1y, 4), benchmark_label="Benchmark hidden", benchmark_available=False, unit="percent", company_label="Company"),
             CompanyChartsComparisonItemPayload(key="expected_3y", label="Exp 3Y CAGR", company_value=_round(exp_3y, 4), benchmark_label="Benchmark hidden", benchmark_available=False, unit="percent", company_label="Company"),
         ], empty_state="Growth summary requires a few annual revenue periods." if hist_3y is None and exp_1y is None and exp_3y is None else None),
-        "assumptions_card": CompanyChartsAssumptionsCardPayload(items=[
-            CompanyChartsAssumptionItemPayload(key="horizon", label="Forecast Horizon", value="3 fiscal years", detail="Annual-only forecast surface."),
-            CompanyChartsAssumptionItemPayload(key="growth_guardrails", label="Growth Guardrails", value="-18% to +30%", detail="Forecast revenue growth is clipped."),
-            CompanyChartsAssumptionItemPayload(key="history_depth", label="History Depth", value=f"{len(annuals)} annual periods", detail="Shorter annual history makes deterministic extrapolation less stable."),
-            CompanyChartsAssumptionItemPayload(key="growth_volatility_band", label="Growth Volatility Band", value="Heuristic", detail="The fallback heuristic engine uses revenue volatility to dampen extrapolation."),
-            CompanyChartsAssumptionItemPayload(key="fallback_mode", label="Forecast Mode", value="Heuristic fallback", detail="The driver engine is bypassed when statement coverage is too thin for explicit cost, reinvestment, or dilution schedules."),
-            CompanyChartsAssumptionItemPayload(key="base_case_next_year", label="Base-Case Next Year", value=_pct(exp_1y), detail="Implied next-year revenue growth."),
-        ]),
-        "calculations_card": None,
+        "assumptions_card": CompanyChartsAssumptionsCardPayload(items=_build_heuristic_assumption_items(annuals, exp_1y, routing_assumption_items)),
+        "calculations_card": calculations_card,
         "profit_subtitle": "Margin-based projections with guardrails",
         "cash_subtitle": "Cash generation stays visually distinct from projections",
-        "methodology_label": "Deterministic projection with empirical stability overlay",
-        "methodology_summary": "Annual historical official filings are normalized into a deterministic three-year projection, then paired with a point-in-time walk-forward stability score calibrated to realized revenue, EBIT, EPS, and FCF error bands plus explicit penalties for cyclicality, structural breaks, M&A, restatements, and share-count instability.",
-        "methodology_disclaimer": "Forecast stability is a conservative communication aid grounded in historical multi-metric walk-forward error, not a probability, prediction interval, or statistical confidence measure. Forecast values remain projections rather than reported results or analyst consensus.",
+        "methodology_label": methodology_label,
+        "methodology_summary": methodology_summary,
+        "methodology_disclaimer": methodology_disclaimer,
         "methodology_heuristic": True,
+    }
+
+
+def _build_regulated_financial_forecast_state(
+    annuals: list[Any],
+    revenue_actual: list[CompanyChartsSeriesPointPayload],
+    growth_actual: list[CompanyChartsSeriesPointPayload],
+    hist_3y: float | None,
+    routing_bundle: Any,
+    company_name: str,
+) -> dict[str, Any]:
+    eps_actual, _ = _eps_series(annuals, [])
+    profit_series = [
+        _series("operating_income_actual", "EBIT Reported", "usd", "line", "actual", "solid", _actual_series(annuals, "operating_income")),
+        _series("net_income_actual", "Net Income Reported", "usd", "line", "actual", "solid", _actual_series(annuals, "net_income")),
+        _series("ebitda_actual", "EBITDA Reported", "usd", "line", "actual", "solid", _actual_series(annuals, "ebitda_proxy")),
+    ]
+    cash_series = [
+        _series("operating_cash_flow_actual", "Operating CF Reported", "usd", "line", "actual", "solid", _actual_series(annuals, "operating_cash_flow")),
+        _series("free_cash_flow_actual", "Free CF Reported", "usd", "line", "actual", "solid", _actual_series(annuals, "free_cash_flow")),
+        _series("capex_actual", "Capex Reported", "usd", "line", "actual", "solid", _actual_series(annuals, "capex")),
+    ]
+    return {
+        "exp_1y": None,
+        "exp_3y": None,
+        "profit_series": profit_series,
+        "cash_series": cash_series,
+        "eps_actual": eps_actual,
+        "growth_detail": f"Hist 3Y CAGR {_pct(hist_3y)}; forecast withheld pending regulated-financial routing.",
+        "momentum_detail": "Regulated-financial routing gate blocked industrial forecast schedules.",
+        "thesis": f"{company_name} is routed away from the industrial driver engine because bank / broker / regulated-financial issuers need a separate forecast path built around balance-sheet and regulatory drivers.",
+        "source_badges": ["Official filings", "Routing gate active", "Regulated-financial separate path", "No industrial driver forecast applied"],
+        "revenue_card": CompanyChartsCardPayload(
+            key="revenue",
+            title="Revenue",
+            subtitle="Reported history only while the issuer is routed to the regulated-financial path",
+            metric_label="Revenue",
+            unit_label="USD",
+            empty_state="Reported revenue history is unavailable." if not revenue_actual else None,
+            series=[_series("revenue_actual", "Reported", "usd", "line", "actual", "solid", revenue_actual)],
+            highlights=["Industrial revenue-driver forecasts are withheld for regulated-financial routing."],
+        ),
+        "growth_card": CompanyChartsCardPayload(
+            key="revenue_growth",
+            title="Revenue Growth",
+            subtitle="Reported growth only while industrial forecast logic is bypassed",
+            metric_label="Revenue Growth",
+            unit_label="Percent",
+            empty_state="Revenue growth requires at least two annual periods." if not growth_actual else None,
+            series=[_series("revenue_growth_actual", "Reported", "percent", "bar", "actual", "solid", growth_actual)],
+        ),
+        "eps_card": CompanyChartsCardPayload(
+            key="eps",
+            title="EPS",
+            subtitle="Reported diluted EPS while the regulated-financial path is required",
+            metric_label="EPS",
+            unit_label="USD / share",
+            empty_state="EPS history is unavailable for the selected periods." if not eps_actual else None,
+            series=[_series("eps_actual", "Reported", "usd_per_share", "bar", "actual", "solid", eps_actual)],
+        ),
+        "growth_summary_card": CompanyChartsComparisonCardPayload(
+            subtitle="Forecast comparison is withheld until the regulated-financial path is used.",
+            comparisons=[
+                CompanyChartsComparisonItemPayload(key="historical_3y", label="Hist 3Y CAGR", company_value=_round(hist_3y, 4), benchmark_label="Forecast withheld", benchmark_available=False, unit="percent", company_label="Company"),
+            ],
+            empty_state="Growth summary requires a few annual revenue periods." if hist_3y is None else None,
+        ),
+        "assumptions_card": CompanyChartsAssumptionsCardPayload(items=_rows_to_assumption_items(getattr(routing_bundle, "assumption_rows", []))),
+        "calculations_card": CompanyChartsAssumptionsCardPayload(key="forecast_calculations", title="Forecast Calculations", items=_rows_to_assumption_items(getattr(routing_bundle, "calculation_rows", []))),
+        "profit_subtitle": "Reported profit only while regulated-financial routing is active",
+        "cash_subtitle": "Reported cash-flow history only while industrial forecast logic is bypassed",
+        "methodology_label": "Regulated-financial separate path required",
+        "methodology_summary": "The charts forecast gate classified the issuer as regulated financial before industrial schedules were built, so the dashboard does not apply industrial DSO/DIO/DPO, sales-to-capital, PP&E-led capex heuristics, or generic cash-debt sweeps as the primary modeling framework.",
+        "methodology_disclaimer": "Use the regulated-financial path for banks, brokers, and similarly regulated issuers. This charts surface intentionally withholds the industrial forecast rather than silently stretching it across bank-style balance sheets.",
+        "methodology_heuristic": False,
     }
 
 
@@ -1121,6 +1233,7 @@ def _build_projection_studio_schedule_sections(
             "balance_sheet",
             "Balance Sheet",
             (
+                ("net_ppe", "Net PP&E", "usd"),
                 ("accounts_receivable", "Accounts Receivable", "usd"),
                 ("inventory", "Inventory", "usd"),
                 ("accounts_payable", "Accounts Payable", "usd"),
@@ -1199,6 +1312,8 @@ def _projection_studio_reported_value(statement: Any, line_key: str) -> float | 
         return _statement_value(statement, "income_tax_expense")
     if line_key == "depreciation_amortization":
         return _statement_value(statement, "depreciation_and_amortization")
+    if line_key == "net_ppe":
+        return _statement_value(statement, "net_ppe")
     if line_key == "sbc_expense":
         return _statement_value(statement, "stock_based_compensation")
     if line_key == "cost_of_revenue":
@@ -2053,6 +2168,18 @@ def _statement_value(statement: Any, key: str) -> float | None:
         alias = data.get("weighted_average_diluted_shares")
         if isinstance(alias, (int, float)):
             return float(alias)
+    if key == "net_ppe":
+        for alias_key in (
+            "net_ppe",
+            "net_property_plant_equipment",
+            "net_property_plant_and_equipment",
+            "property_plant_and_equipment_net",
+            "ppe_net",
+            "fixed_assets_net",
+        ):
+            alias = data.get(alias_key)
+            if isinstance(alias, (int, float)):
+                return float(alias)
     return None
 
 
@@ -2495,7 +2622,7 @@ def _walk_forward_forecast_backtest(
             continue
         cutoff_as_of = _statement_effective_at(historical[-1])
         visible_releases = _visible_releases_as_of(earnings_releases, cutoff_as_of)
-        driver_bundle = build_driver_forecast_bundle(historical, visible_releases)
+        driver_bundle = build_driver_forecast_bundle(historical, visible_releases, company=company)
         growth_actual = _growth_series(revenue_actual, "actual")
         hist_3y = _cagr([_point_value(point) for point in revenue_actual[-4:]]) if len(revenue_actual) >= 4 else None
         forecast_state = _build_forecast_state(historical, revenue_actual, growth_actual, hist_3y, driver_bundle, company.name)

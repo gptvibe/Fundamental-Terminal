@@ -5,6 +5,8 @@ from math import isfinite
 from statistics import fmean, median
 from typing import Any
 
+from app.services.regulated_financials import classify_regulated_entity
+
 
 SCENARIO_SEQUENCE = ("base", "bull", "bear")
 SCENARIO_LABELS = {"base": "Base Forecast", "bull": "Bull Forecast", "bear": "Bear Forecast"}
@@ -33,6 +35,9 @@ DEFERRED_REVENUE_DAYS_FLOOR = 0.0
 DEFERRED_REVENUE_DAYS_CAP = 120.0
 ACCRUED_OPERATING_LIABILITY_DAYS_FLOOR = 0.0
 ACCRUED_OPERATING_LIABILITY_DAYS_CAP = 120.0
+USEFUL_LIFE_FLOOR_YEARS = 3.0
+USEFUL_LIFE_CAP_YEARS = 40.0
+DEFAULT_USEFUL_LIFE_YEARS = 12.0
 DEFAULT_DSO = 45.0
 DEFAULT_DIO = 0.0
 DEFAULT_DPO = 30.0
@@ -59,6 +64,7 @@ DEFAULT_CASH_RATIO = 0.06
 DEFAULT_DEBT_INTEREST_RATE = 0.045
 DEFAULT_CASH_YIELD = 0.015
 DEFAULT_EFFECTIVE_TAX_RATE = 0.21
+DEFAULT_CASH_TAX_RATE = DEFAULT_EFFECTIVE_TAX_RATE
 SBC_EXPENSE_RATIO_CAP = 0.08
 SBC_DILUTION_FLOOR = 0.00
 SBC_DILUTION_CAP = 0.04
@@ -75,12 +81,39 @@ PROXY_LATENT_DILUTION_FULL_WEIGHT_OBS = 3.0
 FORECAST_FORMULA_REVENUE = "Prior revenue x (1 + residual demand + share/mix proxy + price proxy + price-volume cross term)"
 FORECAST_FORMULA_MARGIN = "Revenue - variable costs - semi-variable costs - fixed costs"
 FORECAST_FORMULA_PRETAX = "EBIT - interest expense + interest income + other income or expense"
-FORECAST_FORMULA_TAX = "Pretax income x effective tax rate"
+FORECAST_FORMULA_TAX = "Book tax expense = cash tax + deferred tax expense; cash tax = max(pretax income - NOL usage, 0) x cash tax rate"
 FORECAST_FORMULA_FIXED_CAPITAL_REINVESTMENT = "max(delta revenue, 0) / sales-to-capital"
 FORECAST_FORMULA_CAPEX = "max(maintenance capex, D&A + max(delta revenue, 0) / sales-to-capital)"
-FORECAST_FORMULA_OCF = "Net income + D&A + SBC - delta operating working capital"
+FORECAST_FORMULA_NET_PPE = "Opening net PP&E + capex - depreciation - disposals"
+FORECAST_FORMULA_OCF = "Net income + D&A + SBC + deferred tax expense - delta operating working capital"
 FORECAST_FORMULA_FCF = "Operating cash flow - capex"
+FORECAST_FORMULA_DEBT_SCHEDULE = "Opening debt - mandatory amortization - maturity repayment - optional sweep repayment + optional draw"
+FORECAST_FORMULA_RETAINED_EARNINGS = "Opening retained earnings + net income - dividends - buybacks"
+FORECAST_FORMULA_BALANCE_SHEET = "Total assets - total liabilities and equity"
 FORECAST_FORMULA_EPS = "Net income / diluted shares"
+MODEL_SUITABILITY_IB_CORE_NONFIN = "IB_CORE_NONFIN"
+MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC = "IB_USEFUL_BUT_HEURISTIC"
+MODEL_SUITABILITY_NOT_IB_FOR_PRIMARY_MODEL = "NOT_IB_FOR_PRIMARY_MODEL"
+MODEL_SUITABILITY_BANK_ENTITY_SEPARATE_MODEL = "BANK_ENTITY_SEPARATE_MODEL"
+ENTITY_ROUTING_NONFIN_IB_MODEL = "NONFIN_IB_MODEL"
+ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE = "REGULATED_FINANCIAL_SEPARATE"
+ENTITY_ROUTING_UNSURE_REQUIRE_CONSERVATIVE_FALLBACK = "UNSURE_REQUIRE_CONSERVATIVE_FALLBACK"
+ENGINE_MODE_DRIVER = "driver"
+ENGINE_MODE_REGULATED_FINANCIAL_SEPARATE = "regulated_financial_separate"
+ENGINE_MODE_CONSERVATIVE_FALLBACK = "conservative_fallback"
+_UNSURE_FINANCIAL_KEYWORDS = (
+    "broker",
+    "dealer",
+    "capital markets",
+    "capital market",
+    "asset management",
+    "wealth management",
+    "financial services",
+    "financial service",
+    "financial group",
+    "consumer finance",
+    "insurance",
+)
 SUPPORTED_DRIVER_OVERRIDE_KEYS = (
     "price_growth",
     "residual_demand_growth",
@@ -206,6 +239,18 @@ class DriverForecastBundle:
     projected_gross_margin: float | None = None
     line_traces: dict[str, dict[int, FormulaTrace]] = field(default_factory=dict)
     override_context: DriverOverrideContext | None = None
+    suitability_rows: list[dict[str, str]] = field(default_factory=list)
+    entity_routing: str = ENTITY_ROUTING_NONFIN_IB_MODEL
+    routing_reason: str | None = None
+    routing_source: str | None = None
+
+
+@dataclass(slots=True)
+class ForecastEntityRoutingDecision:
+    classification: str
+    reason: str
+    source: str
+    display_label: str
 
 
 @dataclass(slots=True)
@@ -280,8 +325,20 @@ class _OperatingWorkingCapitalSchedule:
 
 
 @dataclass(slots=True)
+class _PpeSchedule:
+    opening_net_ppe: float
+    useful_life_years: float
+    depreciation_rate: float
+    annual_disposals: float
+    opening_basis: str
+    useful_life_basis: str
+    disposals_basis: str
+
+
+@dataclass(slots=True)
 class _ReinvestmentSchedule:
     operating_working_capital: _OperatingWorkingCapitalSchedule
+    ppe_schedule: _PpeSchedule
     sales_to_capital: float
     capex_intensity: float
     depreciation_ratio: float
@@ -308,6 +365,42 @@ class _DilutionSchedule:
     acquisition_basis: str
     convert_basis: str
     fallback_basis: str
+
+
+@dataclass(slots=True)
+class _TaxSchedule:
+    uses_explicit_nol_schedule: bool
+    opening_nol: float
+    opening_deferred_tax_asset: float
+    book_tax_rate: float
+    cash_tax_rate: float
+    basis: str
+    nol_basis: str
+    cash_tax_basis: str
+    deferred_tax_basis: str
+
+
+@dataclass(slots=True)
+class _BalanceSheetSchedule:
+    opening_other_operating_current_assets: float
+    other_operating_current_assets_ratio: float
+    opening_other_long_term_assets_ex_dta: float
+    other_long_term_assets_ratio: float
+    opening_other_liabilities: float
+    other_liabilities_ratio: float
+    opening_retained_earnings: float
+    opening_other_equity: float
+    dividend_payout_ratio: float
+    buyback_cash_ratio: float
+    other_operating_current_assets_basis: str
+    other_long_term_assets_basis: str
+    other_liabilities_basis: str
+    retained_earnings_basis: str
+    other_equity_basis: str
+    dividend_basis: str
+    buyback_basis: str
+    plug_bucket_mode: str
+    plug_bucket_basis: str
 
 
 @dataclass(slots=True)
@@ -339,6 +432,44 @@ class _BelowLineSchedule:
     interest_basis: str
     other_basis: str
     tax_basis: str
+    tax_schedule: _TaxSchedule | None = None
+    debt_schedule_basis: str = "Fallback debt schedule"
+    debt_tranches: list["_DebtTrancheSchedule"] = field(default_factory=list)
+    balancing_revolver_key: str | None = None
+
+
+@dataclass(slots=True)
+class _DebtTrancheSchedule:
+    key: str
+    label: str
+    tranche_type: str
+    opening_balance: float
+    interest_rate: float
+    interest_basis: str
+    annual_mandatory_amortization: float
+    mandatory_basis: str
+    maturity_year_offset: int | None
+    maturity_repayment_amount: float
+    maturity_basis: str
+    allows_optional_draw: bool = False
+    allows_optional_sweep: bool = False
+
+
+@dataclass(slots=True)
+class _ForecastDebtTranchePoint:
+    key: str
+    label: str
+    tranche_type: str
+    opening_balance: float
+    mandatory_amortization: float
+    maturity_repayment: float
+    optional_draw: float
+    optional_sweep_repayment: float
+    ending_balance: float
+    average_balance: float
+    interest_rate: float
+    interest_basis: str
+    interest_expense: float
 
 
 @dataclass(slots=True)
@@ -350,6 +481,18 @@ class _ForecastBridgePoint:
     other_income_expense: float
     pretax_income: float
     taxes: float
+    book_tax_expense: float
+    cash_tax: float
+    deferred_tax_expense: float
+    beginning_nol: float
+    nol_created: float
+    nol_used: float
+    ending_nol: float
+    beginning_deferred_tax_asset: float
+    ending_deferred_tax_asset: float
+    taxable_income_after_nol: float
+    dividends: float
+    buyback_cash: float
     net_income: float
     depreciation: float
     stock_based_compensation: float
@@ -368,6 +511,29 @@ class _ForecastBridgePoint:
     accounts_payable: float
     deferred_revenue: float
     accrued_operating_liabilities: float
+    beginning_net_ppe: float
+    ppe_disposals: float
+    ending_net_ppe: float
+    other_operating_current_assets: float = 0.0
+    other_long_term_assets: float = 0.0
+    other_liabilities: float = 0.0
+    beginning_retained_earnings: float = 0.0
+    ending_retained_earnings: float = 0.0
+    other_equity: float = 0.0
+    total_assets: float = 0.0
+    total_liabilities: float = 0.0
+    total_equity: float = 0.0
+    total_liabilities_and_equity: float = 0.0
+    balance_sheet_delta_before_plug: float = 0.0
+    balance_sheet_plug: float = 0.0
+    balance_sheet_plug_bucket: str = "No plug"
+    balance_sheet_delta: float = 0.0
+    debt_draw: float = 0.0
+    debt_repayment: float = 0.0
+    mandatory_debt_repayment: float = 0.0
+    maturity_debt_repayment: float = 0.0
+    sweep_debt_repayment: float = 0.0
+    debt_tranches: list[_ForecastDebtTranchePoint] = field(default_factory=list)
 
 
 def build_driver_forecast_bundle(
@@ -376,6 +542,7 @@ def build_driver_forecast_bundle(
     *,
     horizon_years: int = 3,
     overrides: dict[str, float] | None = None,
+    company: Any | None = None,
 ) -> DriverForecastBundle | None:
     history = _normalize_statements(statements)
     if len(history) < 3:
@@ -388,6 +555,10 @@ def build_driver_forecast_bundle(
     latest_revenue = history[-1]["revenue"]
     if latest_revenue is None or latest_revenue <= 0:
         return None
+
+    routing_decision = classify_forecast_entity_routing(company, statements)
+    if routing_decision.classification != ENTITY_ROUTING_NONFIN_IB_MODEL:
+        return _build_routing_only_bundle(history, routing_decision)
 
     dilution_schedule = _derive_dilution_schedule(history)
     if dilution_schedule is None:
@@ -404,6 +575,7 @@ def build_driver_forecast_bundle(
         overrides,
     )
     below_line_schedule = _derive_below_line_schedule(history)
+    balance_sheet_schedule = _derive_balance_sheet_schedule(history, reinvestment_schedule, below_line_schedule)
     latest_year = int(history[-1]["year"])
     scenario_tweaks = _scenario_tweaks()
     override_results_by_key = {item.key: item for item in (override_context.applied if override_context is not None else [])}
@@ -417,6 +589,7 @@ def build_driver_forecast_bundle(
             cost_schedule,
             reinvestment_schedule,
             below_line_schedule,
+            balance_sheet_schedule,
             dilution_schedule,
             scenario_key=scenario_key,
             horizon_years=horizon_years,
@@ -431,18 +604,22 @@ def build_driver_forecast_bundle(
 
     assumption_rows = _build_assumption_rows(
         history,
+        routing_decision,
         revenue_drivers,
         cost_schedule,
         reinvestment_schedule,
         below_line_schedule,
+        balance_sheet_schedule,
         dilution_schedule,
     )
+    suitability_rows = _build_modeling_suitability_rows(history, routing_decision)
     calculation_rows = _build_calculation_rows(
         history,
         revenue_drivers,
         cost_schedule,
         reinvestment_schedule,
         below_line_schedule,
+        balance_sheet_schedule,
         dilution_schedule,
         scenarios["base"],
     )
@@ -460,7 +637,7 @@ def build_driver_forecast_bundle(
     )
 
     return DriverForecastBundle(
-        engine_mode="driver",
+        engine_mode=ENGINE_MODE_DRIVER,
         revenue_method=revenue_drivers.mode,
         segment_basis=revenue_drivers.segment_basis,
         scenarios=scenarios,
@@ -479,6 +656,122 @@ def build_driver_forecast_bundle(
         projected_gross_margin=projected_gross_margin,
         line_traces=line_traces,
         override_context=override_context,
+        suitability_rows=suitability_rows,
+        entity_routing=routing_decision.classification,
+        routing_reason=routing_decision.reason,
+        routing_source=routing_decision.source,
+    )
+
+
+def classify_forecast_entity_routing(
+    company: Any | None,
+    statements: list[Any],
+) -> ForecastEntityRoutingDecision:
+    history = _normalize_statements(statements)
+    if company is not None:
+        classification = classify_regulated_entity(company)
+        if classification is not None:
+            return ForecastEntityRoutingDecision(
+                classification=ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE,
+                reason=(
+                    "Company classification indicates a bank or bank holding company, so the charts engine should use the "
+                    "regulated-financial path instead of industrial working-capital and capex schedules."
+                ),
+                source="company market classification via regulated_financials.classify_regulated_entity",
+                display_label="Regulated-financial separate path",
+            )
+
+    if _history_has_regulated_financial_markers(history):
+        return ForecastEntityRoutingDecision(
+            classification=ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE,
+            reason=(
+                "Source statements contain regulated-financial markers such as bank regulatory source ids or reporting bases, "
+                "so industrial DSO/DIO/DPO and sales-to-capital heuristics are bypassed."
+            ),
+            source="statement-level regulated financial markers",
+            display_label="Regulated-financial separate path",
+        )
+
+    company_values = _forecast_routing_company_values(company)
+    combined = " ".join(value for value in company_values.values() if value)
+    market_sector = company_values.get("market_sector") or ""
+    market_industry = company_values.get("market_industry") or ""
+    if (
+        market_sector == "financials"
+        or any(keyword in market_industry for keyword in _UNSURE_FINANCIAL_KEYWORDS)
+        or any(keyword in combined for keyword in _UNSURE_FINANCIAL_KEYWORDS)
+    ):
+        return ForecastEntityRoutingDecision(
+            classification=ENTITY_ROUTING_UNSURE_REQUIRE_CONSERVATIVE_FALLBACK,
+            reason=(
+                "The issuer looks financial-sector-adjacent but does not carry a confirmed bank regulatory classification here, "
+                "so the engine falls back conservatively instead of asserting industrial operating-working-capital and reinvestment schedules."
+            ),
+            source="company sector / industry / name heuristic",
+            display_label="Conservative fallback required",
+        )
+
+    return ForecastEntityRoutingDecision(
+        classification=ENTITY_ROUTING_NONFIN_IB_MODEL,
+        reason=(
+            "No regulated-financial classification or bank-style statement markers were detected, so the industrial non-financial "
+            "driver model remains the primary forecast path."
+        ),
+        source="default industrial path",
+        display_label="Industrial / non-financial model",
+    )
+
+
+def _forecast_routing_company_values(company: Any | None) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if company is None:
+        return values
+    for field in ("name", "sector", "market_sector", "market_industry"):
+        value = getattr(company, field, None)
+        if isinstance(value, str) and value.strip():
+            values[field] = value.strip().lower()
+    return values
+
+
+def _build_routing_only_bundle(
+    history: list[dict[str, Any]],
+    routing_decision: ForecastEntityRoutingDecision,
+) -> DriverForecastBundle:
+    assumption_rows = _build_routing_only_assumption_rows(history, routing_decision)
+    calculation_rows = _build_routing_only_calculation_rows(routing_decision)
+    suitability_rows = _build_modeling_suitability_rows(history, routing_decision)
+    engine_mode = (
+        ENGINE_MODE_REGULATED_FINANCIAL_SEPARATE
+        if routing_decision.classification == ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE
+        else ENGINE_MODE_CONSERVATIVE_FALLBACK
+    )
+    return DriverForecastBundle(
+        engine_mode=engine_mode,
+        revenue_method="routing_gate",
+        segment_basis=None,
+        scenarios={},
+        assumption_rows=assumption_rows,
+        calculation_rows=calculation_rows,
+        highlights=[
+            (
+                "Industrial driver schedules were bypassed because the issuer was classified for a separate regulated-financial path."
+                if engine_mode == ENGINE_MODE_REGULATED_FINANCIAL_SEPARATE
+                else "Industrial driver schedules were not applied because the issuer requires a conservative fallback classification."
+            )
+        ],
+        base_next_year_growth=None,
+        bull_next_year_growth=None,
+        bear_next_year_growth=None,
+        base_three_year_cagr=None,
+        bull_three_year_cagr=None,
+        bear_three_year_cagr=None,
+        projected_gross_margin=None,
+        line_traces={},
+        override_context=None,
+        suitability_rows=suitability_rows,
+        entity_routing=routing_decision.classification,
+        routing_reason=routing_decision.reason,
+        routing_source=routing_decision.source,
     )
 
 
@@ -782,6 +1075,12 @@ def _normalize_statements(statements: list[Any]) -> list[dict[str, Any]]:
                 "depreciation": _statement_value(statement, "depreciation_and_amortization"),
                 "pretax_income": _statement_value(statement, "pretax_income"),
                 "income_tax_expense": _statement_value(statement, "income_tax_expense"),
+                "cash_taxes_paid": _statement_value(statement, "cash_taxes_paid"),
+                "current_tax_expense": _statement_value(statement, "current_tax_expense"),
+                "deferred_tax_expense": _statement_value(statement, "deferred_tax_expense"),
+                "deferred_tax_asset": _statement_value(statement, "deferred_tax_asset"),
+                "nol_balance": _statement_value(statement, "nol_balance"),
+                "dividends_paid": _statement_value(statement, "dividends_paid"),
                 "interest_expense": _statement_value(statement, "interest_expense"),
                 "interest_income": _statement_value(statement, "interest_income"),
                 "other_income_expense": _statement_value(statement, "other_income_expense"),
@@ -791,8 +1090,20 @@ def _normalize_statements(statements: list[Any]) -> list[dict[str, Any]]:
                 "current_debt": _statement_value(statement, "current_debt"),
                 "long_term_debt": _statement_value(statement, "long_term_debt"),
                 "total_debt": _statement_value(statement, "total_debt"),
+                "revolver_debt": _statement_value(statement, "revolver_debt"),
+                "term_loan_debt": _statement_value(statement, "term_loan_debt"),
+                "notes_bonds_debt": _statement_value(statement, "notes_bonds_debt"),
+                "lease_liabilities_debt": _statement_value(statement, "lease_liabilities_debt"),
                 "debt_issuance": _statement_value(statement, "debt_issuance"),
                 "debt_repayment": _statement_value(statement, "debt_repayment"),
+                "revolver_interest_rate": _statement_value(statement, "revolver_interest_rate"),
+                "term_loan_interest_rate": _statement_value(statement, "term_loan_interest_rate"),
+                "notes_interest_rate": _statement_value(statement, "notes_interest_rate"),
+                "lease_interest_rate": _statement_value(statement, "lease_interest_rate"),
+                "term_loan_mandatory_amortization": _statement_value(statement, "term_loan_mandatory_amortization"),
+                "notes_maturity_repayment": _statement_value(statement, "notes_maturity_repayment"),
+                "lease_principal_payment": _statement_value(statement, "lease_principal_payment"),
+                "current_maturities_debt": _statement_value(statement, "current_maturities_debt"),
                 "shares_issued": _statement_value(statement, "shares_issued"),
                 "shares_repurchased": _statement_value(statement, "shares_repurchased"),
                 "share_price": _statement_value(statement, "share_price"),
@@ -809,13 +1120,21 @@ def _normalize_statements(statements: list[Any]) -> list[dict[str, Any]]:
                 "gross_profit": _statement_value(statement, "gross_profit"),
                 "cost_of_revenue": _statement_value(statement, "cost_of_revenue"),
                 "total_assets": _statement_value(statement, "total_assets"),
+                "total_liabilities": _statement_value(statement, "total_liabilities"),
+                "total_equity": _statement_value(statement, "total_equity"),
+                "retained_earnings": _statement_value(statement, "retained_earnings"),
+                "net_ppe": _statement_value(statement, "net_ppe"),
                 "current_assets": _statement_value(statement, "current_assets"),
                 "current_liabilities": _statement_value(statement, "current_liabilities"),
+                "other_operating_current_assets": _statement_value(statement, "other_operating_current_assets"),
+                "other_long_term_assets": _statement_value(statement, "other_long_term_assets"),
+                "other_liabilities": _statement_value(statement, "other_liabilities"),
                 "accounts_receivable": _statement_value(statement, "accounts_receivable"),
                 "inventory": _statement_value(statement, "inventory"),
                 "accounts_payable": _statement_value(statement, "accounts_payable"),
                 "deferred_revenue": _statement_value(statement, "deferred_revenue"),
                 "accrued_operating_liabilities": _statement_value(statement, "accrued_operating_liabilities"),
+                "ppe_disposals": _statement_value(statement, "ppe_disposals"),
                 "stock_based_compensation": _statement_value(statement, "stock_based_compensation"),
                 "share_buybacks": _statement_value(statement, "share_buybacks"),
                 "acquisitions": _statement_value(statement, "acquisitions"),
@@ -966,15 +1285,112 @@ def _derive_cost_schedule(history: list[dict[str, Any]]) -> _CostSchedule:
 def _derive_reinvestment_schedule(history: list[dict[str, Any]], cost_schedule: _CostSchedule) -> _ReinvestmentSchedule:
     latest = history[-1]
     capex_intensity = _clip(_median_abs_ratio(history, "capex", "revenue") or 0.05, CAPEX_INTENSITY_FLOOR, CAPEX_INTENSITY_CAP)
-    depreciation_ratio = _clip(_median_abs_ratio(history, "depreciation", "revenue") or (capex_intensity * 0.75), DEPRECIATION_RATIO_FLOOR, DEPRECIATION_RATIO_CAP)
-    latest_depreciation = abs(latest["depreciation"] or 0.0) or (latest["revenue"] or 0.0) * depreciation_ratio
+    ppe_schedule = _derive_ppe_schedule(history, capex_intensity)
+    depreciation_ratio = _clip(ppe_schedule.depreciation_rate, DEPRECIATION_RATIO_FLOOR, DEPRECIATION_RATIO_CAP)
+    latest_depreciation = abs(latest["depreciation"] or 0.0) or (ppe_schedule.opening_net_ppe * depreciation_ratio)
     return _ReinvestmentSchedule(
         operating_working_capital=_derive_operating_working_capital_schedule(history, cost_schedule),
+        ppe_schedule=ppe_schedule,
         sales_to_capital=_sales_to_capital(history) or 1.25,
         capex_intensity=capex_intensity,
         depreciation_ratio=depreciation_ratio,
         latest_depreciation=latest_depreciation,
     )
+
+
+def _derive_ppe_schedule(history: list[dict[str, Any]], capex_intensity: float) -> _PpeSchedule:
+    latest = history[-1]
+    resolved_net_ppe_history = _resolved_net_ppe_history(history)
+    useful_life_years, useful_life_basis = _derive_useful_life_years(history, resolved_net_ppe_history)
+    depreciation_rate = _clip(1.0 / useful_life_years, DEPRECIATION_RATIO_FLOOR, DEPRECIATION_RATIO_CAP)
+    opening_net_ppe, opening_basis = _derive_opening_net_ppe(history, resolved_net_ppe_history, useful_life_years, capex_intensity)
+    annual_disposals, disposals_basis = _derive_annual_ppe_disposals(history, opening_net_ppe)
+    latest_depreciation = abs(latest["depreciation"] or 0.0)
+    if latest_depreciation > 0 and opening_net_ppe > 0:
+        implied_rate = _clip(latest_depreciation / opening_net_ppe, DEPRECIATION_RATIO_FLOOR, DEPRECIATION_RATIO_CAP)
+        depreciation_rate = implied_rate
+        useful_life_years = _clip(1.0 / implied_rate, USEFUL_LIFE_FLOOR_YEARS, USEFUL_LIFE_CAP_YEARS)
+    return _PpeSchedule(
+        opening_net_ppe=max(0.0, opening_net_ppe),
+        useful_life_years=useful_life_years,
+        depreciation_rate=depreciation_rate,
+        annual_disposals=annual_disposals,
+        opening_basis=opening_basis,
+        useful_life_basis=useful_life_basis,
+        disposals_basis=disposals_basis,
+    )
+
+
+def _resolved_net_ppe_history(history: list[dict[str, Any]]) -> list[float | None]:
+    resolved = [row.get("net_ppe") for row in history]
+    for index in range(1, len(resolved)):
+        if resolved[index] is not None or resolved[index - 1] is None:
+            continue
+        capex = _positive_amount(history[index].get("capex"))
+        depreciation = _positive_amount(history[index].get("depreciation"))
+        disposals = _positive_amount(history[index].get("ppe_disposals")) or 0.0
+        if capex is None or depreciation is None:
+            continue
+        resolved[index] = max(0.0, float(resolved[index - 1]) + capex - depreciation - disposals)
+    for index in range(len(resolved) - 2, -1, -1):
+        if resolved[index] is not None or resolved[index + 1] is None:
+            continue
+        next_capex = _positive_amount(history[index + 1].get("capex"))
+        next_depreciation = _positive_amount(history[index + 1].get("depreciation"))
+        next_disposals = _positive_amount(history[index + 1].get("ppe_disposals")) or 0.0
+        if next_capex is None or next_depreciation is None:
+            continue
+        resolved[index] = max(0.0, float(resolved[index + 1]) - next_capex + next_depreciation + next_disposals)
+    return [float(value) if value is not None else None for value in resolved]
+
+
+def _derive_useful_life_years(history: list[dict[str, Any]], resolved_net_ppe_history: list[float | None]) -> tuple[float, str]:
+    useful_life_values: list[float] = []
+    for index, row in enumerate(history):
+        depreciation = _positive_amount(row.get("depreciation"))
+        ending_net_ppe = resolved_net_ppe_history[index]
+        if depreciation in (None, 0) or ending_net_ppe in (None, 0):
+            continue
+        opening_net_ppe = resolved_net_ppe_history[index - 1] if index > 0 else ending_net_ppe
+        ppe_basis = _average_balance(opening_net_ppe, ending_net_ppe) or ending_net_ppe
+        if ppe_basis in (None, 0):
+            continue
+        useful_life_values.append(_clip(ppe_basis / depreciation, USEFUL_LIFE_FLOOR_YEARS, USEFUL_LIFE_CAP_YEARS))
+    if useful_life_values:
+        return median(useful_life_values), "Implied useful life from disclosed net PP&E and D&A"
+    return DEFAULT_USEFUL_LIFE_YEARS, f"Default useful life fallback {DEFAULT_USEFUL_LIFE_YEARS:.0f} years"
+
+
+def _derive_opening_net_ppe(
+    history: list[dict[str, Any]],
+    resolved_net_ppe_history: list[float | None],
+    useful_life_years: float,
+    capex_intensity: float,
+) -> tuple[float, str]:
+    latest = history[-1]
+    latest_resolved = resolved_net_ppe_history[-1]
+    if latest_resolved is not None and latest_resolved > 0:
+        return float(latest_resolved), "Disclosed or reconstructed latest net PP&E"
+    latest_depreciation = _positive_amount(latest.get("depreciation"))
+    if latest_depreciation is not None and latest_depreciation > 0:
+        return latest_depreciation * useful_life_years, "Latest D&A scaled by implied useful life"
+    latest_revenue = latest.get("revenue") or 0.0
+    fallback_capex = latest_revenue * capex_intensity
+    return fallback_capex * useful_life_years, "Fallback opening net PP&E from capex intensity and default useful life"
+
+
+def _derive_annual_ppe_disposals(history: list[dict[str, Any]], opening_net_ppe: float) -> tuple[float, str]:
+    disposal_values = [
+        _positive_amount(row.get("ppe_disposals"))
+        for row in history
+        if _positive_amount(row.get("ppe_disposals")) not in (None, 0)
+    ]
+    if disposal_values:
+        annual_disposals = median(value for value in disposal_values if value is not None)
+        if opening_net_ppe > 0:
+            annual_disposals = min(annual_disposals, opening_net_ppe * 0.20)
+        return annual_disposals, "Disclosed PP&E disposals"
+    return 0.0, "PP&E disposals default 0 when undisclosed"
 
 
 def _derive_operating_working_capital_schedule(history: list[dict[str, Any]], cost_schedule: _CostSchedule) -> _OperatingWorkingCapitalSchedule:
@@ -1141,30 +1557,14 @@ def _derive_below_line_schedule(history: list[dict[str, Any]]) -> _BelowLineSche
     starting_cash = latest_cash if latest_cash is not None else (latest_revenue * target_cash_ratio)
     cash_basis = "Disclosed cash balance" if latest_cash is not None else "Cash ratio fallback"
 
-    latest_debt = latest["total_debt"]
-    if latest_debt is None:
-        latest_debt = _sum_non_null(latest["current_debt"], latest["long_term_debt"])
-    starting_debt = max(0.0, latest_debt or 0.0)
-    debt_basis = (
-        "Disclosed debt balance"
-        if latest["total_debt"] is not None or latest["current_debt"] is not None or latest["long_term_debt"] is not None
-        else "No debt disclosed"
-    )
-
-    debt_rates: list[float] = []
+    blended_debt_rate = _historical_blended_debt_rate(history)
     cash_yields: list[float] = []
     other_income_ratios: list[float] = []
-    tax_rates: list[float] = []
     derived_other_count = 0
     direct_other_count = 0
 
     previous_row: dict[str, Any] | None = None
     for row in history:
-        interest_expense = _positive_amount(row["interest_expense"])
-        average_debt = _average_balance(previous_row["total_debt"] if previous_row is not None else None, row["total_debt"])
-        if interest_expense is not None and average_debt not in (None, 0):
-            debt_rates.append(_clip(interest_expense / average_debt, 0.0, DEBT_INTEREST_RATE_CAP))
-
         interest_income = _positive_amount(row["interest_income"])
         average_cash = _average_balance(previous_row["cash_balance"] if previous_row is not None else None, row["cash_balance"])
         if interest_income is not None and average_cash not in (None, 0):
@@ -1180,26 +1580,33 @@ def _derive_below_line_schedule(history: list[dict[str, Any]]) -> _BelowLineSche
         if row["revenue"] not in (None, 0) and other_income is not None:
             other_income_ratios.append(_clip(other_income / row["revenue"], OTHER_INCOME_RATIO_FLOOR, OTHER_INCOME_RATIO_CAP))
 
-        pretax_income = row["pretax_income"]
-        income_tax_expense = row["income_tax_expense"]
-        if pretax_income is not None and pretax_income > 0 and income_tax_expense is not None:
-            tax_rates.append(_clip(abs(income_tax_expense) / pretax_income, EFFECTIVE_TAX_RATE_FLOOR, EFFECTIVE_TAX_RATE_CAP))
-
         previous_row = row
 
-    debt_interest_rate = median(debt_rates) if debt_rates else DEFAULT_DEBT_INTEREST_RATE
+    debt_interest_rate = blended_debt_rate
     cash_yield = median(cash_yields) if cash_yields else DEFAULT_CASH_YIELD
     other_income_ratio = median(other_income_ratios) if other_income_ratios else 0.0
-    effective_tax_rate = median(tax_rates) if tax_rates else DEFAULT_EFFECTIVE_TAX_RATE
+    tax_schedule = _derive_tax_schedule(history)
+    effective_tax_rate = tax_schedule.book_tax_rate
 
-    interest_basis = "Disclosed interest rates" if debt_rates or cash_yields else "Default cash and debt rates"
+    debt_tranches, debt_schedule_basis, balancing_revolver_key = _build_debt_tranche_schedule(history, debt_interest_rate)
+    starting_debt = sum(tranche.opening_balance for tranche in debt_tranches)
+    if debt_tranches:
+        debt_basis = debt_schedule_basis
+        interest_basis = (
+            "Tranche-level rates from direct disclosures where available; otherwise blended debt rate fallback"
+            if any("Disclosed" in tranche.interest_basis for tranche in debt_tranches)
+            else "Fallback debt schedule with blended debt rate and synthetic revolver backstop"
+        )
+    else:
+        debt_basis = "No debt disclosed"
+        interest_basis = "Default cash and debt rates"
     if direct_other_count:
         other_basis = "Disclosed other income or expense"
     elif derived_other_count:
         other_basis = "Residual bridge fallback"
     else:
         other_basis = "Zero other income fallback"
-    tax_basis = "Disclosed effective tax rate" if tax_rates else "Default tax rate"
+    tax_basis = tax_schedule.basis
 
     return _BelowLineSchedule(
         starting_cash=max(0.0, starting_cash),
@@ -1214,7 +1621,599 @@ def _derive_below_line_schedule(history: list[dict[str, Any]]) -> _BelowLineSche
         interest_basis=interest_basis,
         other_basis=other_basis,
         tax_basis=tax_basis,
+        tax_schedule=tax_schedule,
+        debt_schedule_basis=debt_schedule_basis,
+        debt_tranches=debt_tranches,
+        balancing_revolver_key=balancing_revolver_key,
     )
+
+
+def _derive_tax_schedule(history: list[dict[str, Any]]) -> _TaxSchedule:
+    book_tax_rates: list[float] = []
+    cash_tax_rates: list[float] = []
+    has_cash_tax_disclosure = False
+    has_deferred_tax_disclosure = False
+    has_nol_disclosure = False
+    has_loss_history = False
+
+    for row in history:
+        pretax_income = row.get("pretax_income")
+        income_tax_expense = row.get("income_tax_expense")
+        if pretax_income is not None and pretax_income > 0 and income_tax_expense is not None:
+            book_tax_rates.append(_clip(abs(income_tax_expense) / pretax_income, EFFECTIVE_TAX_RATE_FLOOR, EFFECTIVE_TAX_RATE_CAP))
+        if pretax_income is not None and pretax_income < 0:
+            has_loss_history = True
+
+        cash_taxes_paid = _positive_amount(row.get("cash_taxes_paid"))
+        if cash_taxes_paid is not None and pretax_income is not None and pretax_income > 0:
+            has_cash_tax_disclosure = True
+            cash_tax_rates.append(_clip(cash_taxes_paid / pretax_income, EFFECTIVE_TAX_RATE_FLOOR, EFFECTIVE_TAX_RATE_CAP))
+            continue
+
+        current_tax_expense = _positive_amount(row.get("current_tax_expense"))
+        if current_tax_expense is not None and pretax_income is not None and pretax_income > 0:
+            has_cash_tax_disclosure = True
+            cash_tax_rates.append(_clip(current_tax_expense / pretax_income, EFFECTIVE_TAX_RATE_FLOOR, EFFECTIVE_TAX_RATE_CAP))
+
+        if row.get("deferred_tax_expense") is not None or row.get("deferred_tax_asset") is not None:
+            has_deferred_tax_disclosure = True
+        if row.get("nol_balance") is not None:
+            has_nol_disclosure = True
+
+    book_tax_rate = median(book_tax_rates) if book_tax_rates else DEFAULT_EFFECTIVE_TAX_RATE
+    cash_tax_rate = median(cash_tax_rates) if cash_tax_rates else (book_tax_rate if book_tax_rates else DEFAULT_CASH_TAX_RATE)
+    explicit_schedule = len(book_tax_rates) >= 2 or (bool(book_tax_rates) and (has_loss_history or has_nol_disclosure or has_deferred_tax_disclosure))
+
+    if explicit_schedule:
+        opening_nol, nol_basis = _derive_opening_nol_balance(history, book_tax_rate)
+        opening_deferred_tax_asset, deferred_tax_basis = _derive_opening_deferred_tax_asset(history, opening_nol, book_tax_rate)
+        if has_cash_tax_disclosure:
+            cash_tax_basis = "Cash taxes / current tax expense disclosure when available"
+        elif has_nol_disclosure:
+            cash_tax_basis = "Cash tax proxy uses the book tax rate because only NOL disclosure is available"
+        else:
+            cash_tax_basis = "Cash tax proxy uses the book tax rate because separate cash-tax disclosure is unavailable"
+        return _TaxSchedule(
+            uses_explicit_nol_schedule=True,
+            opening_nol=opening_nol,
+            opening_deferred_tax_asset=opening_deferred_tax_asset,
+            book_tax_rate=book_tax_rate,
+            cash_tax_rate=cash_tax_rate,
+            basis="Explicit NOL + deferred-tax schedule",
+            nol_basis=nol_basis,
+            cash_tax_basis=cash_tax_basis,
+            deferred_tax_basis=deferred_tax_basis,
+        )
+
+    return _TaxSchedule(
+        uses_explicit_nol_schedule=False,
+        opening_nol=0.0,
+        opening_deferred_tax_asset=0.0,
+        book_tax_rate=book_tax_rate,
+        cash_tax_rate=cash_tax_rate,
+        basis="Fallback simple effective-tax-rate method because tax disclosure is thin",
+        nol_basis="No explicit NOL schedule in fallback mode",
+        cash_tax_basis="Fallback cash tax equals book tax in profitable years and zero in loss years",
+        deferred_tax_basis="Deferred tax is not separately scheduled in fallback mode",
+    )
+
+
+def _derive_balance_sheet_schedule(
+    history: list[dict[str, Any]],
+    reinvestment_schedule: _ReinvestmentSchedule,
+    below_line_schedule: _BelowLineSchedule,
+) -> _BalanceSheetSchedule:
+    latest = history[-1]
+    latest_revenue = latest.get("revenue") or 0.0
+    opening_dta = below_line_schedule.tax_schedule.opening_deferred_tax_asset if below_line_schedule.tax_schedule is not None else 0.0
+
+    def _resolved_total_liabilities(row: dict[str, Any]) -> float | None:
+        direct = row.get("total_liabilities")
+        if direct is not None:
+            return float(direct)
+        total_assets = row.get("total_assets")
+        total_equity = row.get("total_equity")
+        if total_assets is not None and total_equity is not None:
+            return float(total_assets) - float(total_equity)
+        return None
+
+    def _resolved_total_equity(row: dict[str, Any]) -> float | None:
+        direct = row.get("total_equity")
+        if direct is not None:
+            return float(direct)
+        total_assets = row.get("total_assets")
+        total_liabilities = row.get("total_liabilities")
+        if total_assets is not None and total_liabilities is not None:
+            return float(total_assets) - float(total_liabilities)
+        return None
+
+    def _other_operating_current_assets(row: dict[str, Any]) -> float | None:
+        direct = row.get("other_operating_current_assets")
+        if direct is not None:
+            return max(0.0, float(direct))
+        current_assets = row.get("current_assets")
+        if current_assets is None:
+            return None
+        known_assets = (
+            float(row.get("cash_balance") or 0.0)
+            + float(row.get("accounts_receivable") or 0.0)
+            + float(row.get("inventory") or 0.0)
+        )
+        return max(0.0, float(current_assets) - known_assets)
+
+    def _other_long_term_assets_ex_dta(row: dict[str, Any]) -> float | None:
+        direct = row.get("other_long_term_assets")
+        if direct is not None:
+            return max(0.0, float(direct))
+        total_assets = row.get("total_assets")
+        net_ppe = row.get("net_ppe")
+        if total_assets is None or net_ppe is None:
+            return None
+        current_assets = row.get("current_assets")
+        other_current_assets = _other_operating_current_assets(row) or 0.0
+        if current_assets is not None:
+            residual = float(total_assets) - float(current_assets) - float(net_ppe) - float(row.get("deferred_tax_asset") or 0.0)
+            return max(0.0, residual)
+        known_assets = (
+            float(row.get("cash_balance") or 0.0)
+            + float(row.get("accounts_receivable") or 0.0)
+            + float(row.get("inventory") or 0.0)
+            + other_current_assets
+            + float(net_ppe)
+            + float(row.get("deferred_tax_asset") or 0.0)
+        )
+        return max(0.0, float(total_assets) - known_assets)
+
+    def _other_liabilities(row: dict[str, Any]) -> float | None:
+        direct = row.get("other_liabilities")
+        if direct is not None:
+            return max(0.0, float(direct))
+        total_liabilities = _resolved_total_liabilities(row)
+        if total_liabilities is not None:
+            known_liabilities = (
+                float(row.get("accounts_payable") or 0.0)
+                + float(row.get("accrued_operating_liabilities") or 0.0)
+                + float(row.get("deferred_revenue") or 0.0)
+                + float(row.get("total_debt") or 0.0)
+            )
+            return max(0.0, float(total_liabilities) - known_liabilities)
+        current_liabilities = row.get("current_liabilities")
+        if current_liabilities is None:
+            return None
+        known_current_liabilities = (
+            float(row.get("accounts_payable") or 0.0)
+            + float(row.get("accrued_operating_liabilities") or 0.0)
+            + float(row.get("deferred_revenue") or 0.0)
+            + float(row.get("current_debt") or 0.0)
+        )
+        return max(0.0, float(current_liabilities) - known_current_liabilities)
+
+    def _ratio_from_history(resolver: Any, *, cap: float = 1.5) -> tuple[float, float | None]:
+        ratios: list[float] = []
+        latest_value: float | None = None
+        for row in history:
+            value = resolver(row)
+            revenue = row.get("revenue")
+            if row is latest and value is not None:
+                latest_value = float(value)
+            if value is None or revenue in (None, 0):
+                continue
+            ratios.append(_clip(float(value) / float(revenue), 0.0, cap))
+        if latest_value is not None and latest_revenue > 0:
+            return _clip(latest_value / latest_revenue, 0.0, cap), latest_value
+        return (median(ratios) if ratios else 0.0), latest_value
+
+    other_current_assets_ratio, latest_other_current_assets = _ratio_from_history(_other_operating_current_assets, cap=0.60)
+    other_long_term_assets_ratio, latest_other_long_term_assets = _ratio_from_history(_other_long_term_assets_ex_dta, cap=2.50)
+    other_liabilities_ratio, latest_other_liabilities = _ratio_from_history(_other_liabilities, cap=1.50)
+
+    opening_other_current_assets = latest_other_current_assets if latest_other_current_assets is not None else (latest_revenue * other_current_assets_ratio)
+    opening_other_long_term_assets = (
+        latest_other_long_term_assets if latest_other_long_term_assets is not None else (latest_revenue * other_long_term_assets_ratio)
+    )
+    opening_other_liabilities = latest_other_liabilities if latest_other_liabilities is not None else (latest_revenue * other_liabilities_ratio)
+
+    total_equity = _resolved_total_equity(latest)
+    retained_earnings = latest.get("retained_earnings")
+    if retained_earnings is not None:
+        opening_retained_earnings = float(retained_earnings)
+        retained_earnings_basis = "Disclosed retained earnings"
+    elif total_equity is not None:
+        opening_retained_earnings = float(total_equity)
+        retained_earnings_basis = "Retained earnings fallback from total equity"
+    else:
+        opening_retained_earnings = 0.0
+        retained_earnings_basis = "No retained earnings disclosed; defaulting to zero"
+
+    opening_other_equity = (float(total_equity) - opening_retained_earnings) if total_equity is not None else 0.0
+    other_equity_basis = (
+        "Residual other equity from total equity less retained earnings"
+        if total_equity is not None
+        else "No other-equity disclosure; non-retained equity starts at zero and only SBC rolls it forward"
+    )
+
+    dividend_payout_ratio = _clip(_median_abs_ratio(history, "dividends_paid", "revenue") or 0.0, 0.0, 0.20)
+    buyback_cash_ratio = _clip(_median_abs_ratio(history, "share_buybacks", "revenue") or 0.0, 0.0, 0.20)
+    dividend_basis = "Historical dividends-paid to revenue ratio" if dividend_payout_ratio > 0 else "No dividend disclosure; dividends default to zero"
+    buyback_basis = "Historical buyback cash to revenue ratio" if buyback_cash_ratio > 0 else "No buyback cash disclosure; buybacks default to zero"
+
+    latest_total_assets = latest.get("total_assets")
+    latest_total_liabilities = _resolved_total_liabilities(latest)
+    latest_total_equity = _resolved_total_equity(latest)
+    if latest_total_assets is not None and latest_total_liabilities is not None and latest_total_equity is not None:
+        plug_bucket_mode = "none"
+        plug_bucket_basis = "Sufficient opening balance-sheet disclosure; no balancing plug is used"
+    elif latest_total_assets is not None or latest_total_liabilities is not None or latest_total_equity is not None:
+        plug_bucket_mode = "dynamic"
+        plug_bucket_basis = "Incomplete opening balance-sheet disclosure; a clearly labeled plug bucket is used to expose and absorb the unsupported balance"
+    else:
+        plug_bucket_mode = "unanchored"
+        plug_bucket_basis = "No opening total-balance-sheet anchor was disclosed; the engine reports the raw balance-sheet delta without forcing a plug"
+
+    return _BalanceSheetSchedule(
+        opening_other_operating_current_assets=max(0.0, opening_other_current_assets),
+        other_operating_current_assets_ratio=other_current_assets_ratio,
+        opening_other_long_term_assets_ex_dta=max(0.0, opening_other_long_term_assets),
+        other_long_term_assets_ratio=other_long_term_assets_ratio,
+        opening_other_liabilities=max(0.0, opening_other_liabilities),
+        other_liabilities_ratio=other_liabilities_ratio,
+        opening_retained_earnings=opening_retained_earnings,
+        opening_other_equity=opening_other_equity,
+        dividend_payout_ratio=dividend_payout_ratio,
+        buyback_cash_ratio=buyback_cash_ratio,
+        other_operating_current_assets_basis=(
+            "Residual current assets after cash, receivables, and inventory"
+            if latest_other_current_assets is not None
+            else "No other operating current-assets disclosure; defaults from historical ratio or zero"
+        ),
+        other_long_term_assets_basis=(
+            "Residual long-term assets after current assets, net PP&E, and deferred tax asset"
+            if latest_other_long_term_assets is not None
+            else "No other long-term-assets disclosure; defaults from historical ratio or zero"
+        ),
+        other_liabilities_basis=(
+            "Residual liabilities after AP, accrued liabilities, deferred revenue, and debt"
+            if latest_other_liabilities is not None
+            else "No other-liabilities disclosure; defaults from historical ratio or zero"
+        ),
+        retained_earnings_basis=retained_earnings_basis,
+        other_equity_basis=other_equity_basis,
+        dividend_basis=dividend_basis,
+        buyback_basis=buyback_basis,
+        plug_bucket_mode=plug_bucket_mode,
+        plug_bucket_basis=plug_bucket_basis,
+    )
+
+
+def _derive_opening_nol_balance(history: list[dict[str, Any]], book_tax_rate: float) -> tuple[float, str]:
+    for row in reversed(history):
+        disclosed_nol = _positive_amount(row.get("nol_balance"))
+        if disclosed_nol is not None:
+            return disclosed_nol, "Disclosed NOL carryforward balance"
+
+    derived_nol = 0.0
+    saw_loss = False
+    for row in history:
+        pretax_income = row.get("pretax_income")
+        if pretax_income is None:
+            continue
+        if pretax_income < 0:
+            derived_nol += abs(pretax_income)
+            saw_loss = True
+        elif pretax_income > 0 and derived_nol > 0:
+            derived_nol -= min(derived_nol, pretax_income)
+    if saw_loss or derived_nol > 0:
+        return max(0.0, derived_nol), "Derived from historical pretax losses and recoveries"
+
+    for row in reversed(history):
+        disclosed_dta = _positive_amount(row.get("deferred_tax_asset"))
+        if disclosed_dta is not None and book_tax_rate > 0:
+            return disclosed_dta / book_tax_rate, "Implied from disclosed deferred tax asset at the modeled book tax rate"
+
+    return 0.0, "No disclosed or implied NOL carryforward balance"
+
+
+def _derive_opening_deferred_tax_asset(history: list[dict[str, Any]], opening_nol: float, book_tax_rate: float) -> tuple[float, str]:
+    for row in reversed(history):
+        disclosed_dta = _positive_amount(row.get("deferred_tax_asset"))
+        if disclosed_dta is not None:
+            return disclosed_dta, "Disclosed deferred tax asset"
+    if opening_nol > 0 and book_tax_rate > 0:
+        return opening_nol * book_tax_rate, "Implied deferred tax asset from opening NOL x modeled book tax rate"
+    return 0.0, "No deferred tax asset disclosed; opening deferred tax asset defaults to zero"
+
+
+@dataclass(slots=True)
+class _ForecastTaxPoint:
+    book_tax_expense: float
+    cash_tax: float
+    deferred_tax_expense: float
+    opening_nol: float
+    nol_created: float
+    nol_used: float
+    ending_nol: float
+    opening_deferred_tax_asset: float
+    ending_deferred_tax_asset: float
+    taxable_income_after_nol: float
+
+
+def _project_tax_schedule(
+    pretax_income: float,
+    schedule: _TaxSchedule,
+    *,
+    opening_nol: float,
+    opening_deferred_tax_asset: float,
+) -> _ForecastTaxPoint:
+    if not schedule.uses_explicit_nol_schedule:
+        book_tax_expense = _project_taxes(pretax_income, schedule.book_tax_rate)
+        cash_tax = book_tax_expense if pretax_income > 0 else 0.0
+        deferred_tax_expense = book_tax_expense - cash_tax
+        return _ForecastTaxPoint(
+            book_tax_expense=book_tax_expense,
+            cash_tax=cash_tax,
+            deferred_tax_expense=deferred_tax_expense,
+            opening_nol=0.0,
+            nol_created=0.0,
+            nol_used=0.0,
+            ending_nol=0.0,
+            opening_deferred_tax_asset=0.0,
+            ending_deferred_tax_asset=0.0,
+            taxable_income_after_nol=max(pretax_income, 0.0),
+        )
+
+    positive_pretax = max(pretax_income, 0.0)
+    nol_created = max(-pretax_income, 0.0)
+    nol_used = min(max(0.0, opening_nol), positive_pretax)
+    taxable_income_after_nol = max(0.0, positive_pretax - nol_used)
+    cash_tax = taxable_income_after_nol * schedule.cash_tax_rate
+    ending_nol = max(0.0, opening_nol + nol_created - nol_used)
+    ending_deferred_tax_asset = max(0.0, ending_nol * schedule.book_tax_rate)
+    deferred_tax_expense = opening_deferred_tax_asset - ending_deferred_tax_asset
+    book_tax_expense = cash_tax + deferred_tax_expense
+    return _ForecastTaxPoint(
+        book_tax_expense=book_tax_expense,
+        cash_tax=cash_tax,
+        deferred_tax_expense=deferred_tax_expense,
+        opening_nol=max(0.0, opening_nol),
+        nol_created=nol_created,
+        nol_used=nol_used,
+        ending_nol=ending_nol,
+        opening_deferred_tax_asset=max(0.0, opening_deferred_tax_asset),
+        ending_deferred_tax_asset=ending_deferred_tax_asset,
+        taxable_income_after_nol=taxable_income_after_nol,
+    )
+
+
+def _historical_blended_debt_rate(history: list[dict[str, Any]]) -> float:
+    debt_rates: list[float] = []
+    previous_row: dict[str, Any] | None = None
+    for row in history:
+        interest_expense = _positive_amount(row["interest_expense"])
+        average_debt = _average_balance(previous_row["total_debt"] if previous_row is not None else None, row["total_debt"])
+        if interest_expense is not None and average_debt not in (None, 0):
+            debt_rates.append(_clip(interest_expense / average_debt, 0.0, DEBT_INTEREST_RATE_CAP))
+        previous_row = row
+    return median(debt_rates) if debt_rates else DEFAULT_DEBT_INTEREST_RATE
+
+
+def _build_debt_tranche_schedule(
+    history: list[dict[str, Any]],
+    blended_debt_rate: float,
+) -> tuple[list[_DebtTrancheSchedule], str, str | None]:
+    latest = history[-1]
+    explicit_tranches: list[_DebtTrancheSchedule] = []
+    explicit_labels: list[str] = []
+    current_maturities_pool = _positive_amount(latest.get("current_maturities_debt"))
+    if current_maturities_pool is None and any(latest.get(key) not in (None, 0) for key in ("term_loan_debt", "notes_bonds_debt")):
+        current_maturities_pool = _positive_amount(latest.get("current_debt"))
+    remaining_current_maturities = current_maturities_pool or 0.0
+
+    def _tranche_rate(rate_key: str) -> tuple[float, str]:
+        disclosed_rate = latest.get(rate_key)
+        if disclosed_rate is not None:
+            return _clip(float(disclosed_rate), 0.0, DEBT_INTEREST_RATE_CAP), f"Disclosed {rate_key.replace('_', ' ')}"
+        return blended_debt_rate, "Blended debt rate fallback from historical interest expense and average total debt"
+
+    revolver_opening = max(0.0, latest.get("revolver_debt") or 0.0)
+    if revolver_opening > 0:
+        revolver_rate, revolver_interest_basis = _tranche_rate("revolver_interest_rate")
+        explicit_labels.append("revolver")
+        explicit_tranches.append(
+            _DebtTrancheSchedule(
+                key="revolver",
+                label="Revolver",
+                tranche_type="revolver",
+                opening_balance=revolver_opening,
+                interest_rate=revolver_rate,
+                interest_basis=revolver_interest_basis,
+                annual_mandatory_amortization=0.0,
+                mandatory_basis="No mandatory revolver amortization disclosed",
+                maturity_year_offset=None,
+                maturity_repayment_amount=0.0,
+                maturity_basis="No revolver maturity disclosed",
+                allows_optional_draw=True,
+                allows_optional_sweep=True,
+            )
+        )
+
+    term_loan_opening = max(0.0, latest.get("term_loan_debt") or 0.0)
+    if term_loan_opening > 0:
+        term_loan_rate, term_loan_interest_basis = _tranche_rate("term_loan_interest_rate")
+        mandatory_amortization = min(term_loan_opening, max(0.0, latest.get("term_loan_mandatory_amortization") or 0.0))
+        if mandatory_amortization > 0:
+            mandatory_basis = "Disclosed term-loan mandatory amortization"
+        else:
+            mandatory_basis = "No term-loan mandatory amortization disclosed; defaulting to zero"
+        maturity_repayment = min(term_loan_opening - mandatory_amortization, remaining_current_maturities)
+        maturity_year_offset = 1 if maturity_repayment > 0 else None
+        maturity_basis = (
+            "Current maturities proxy allocated to term loan"
+            if maturity_repayment > 0
+            else "No term-loan maturity disclosed inside forecast horizon"
+        )
+        remaining_current_maturities = max(0.0, remaining_current_maturities - maturity_repayment)
+        explicit_labels.append("term loan")
+        explicit_tranches.append(
+            _DebtTrancheSchedule(
+                key="term_loan",
+                label="Term Loan",
+                tranche_type="term_loan",
+                opening_balance=term_loan_opening,
+                interest_rate=term_loan_rate,
+                interest_basis=term_loan_interest_basis,
+                annual_mandatory_amortization=mandatory_amortization,
+                mandatory_basis=mandatory_basis,
+                maturity_year_offset=maturity_year_offset,
+                maturity_repayment_amount=maturity_repayment,
+                maturity_basis=maturity_basis,
+                allows_optional_sweep=True,
+            )
+        )
+
+    notes_opening = max(0.0, latest.get("notes_bonds_debt") or 0.0)
+    if notes_opening > 0:
+        notes_rate, notes_interest_basis = _tranche_rate("notes_interest_rate")
+        disclosed_notes_maturity = min(notes_opening, max(0.0, latest.get("notes_maturity_repayment") or 0.0))
+        if disclosed_notes_maturity > 0:
+            notes_maturity = disclosed_notes_maturity
+            notes_maturity_basis = "Disclosed notes / bonds maturity inside forecast horizon"
+        else:
+            notes_maturity = min(notes_opening, remaining_current_maturities)
+            notes_maturity_basis = (
+                "Current maturities proxy allocated to notes / bonds"
+                if notes_maturity > 0
+                else "No notes / bonds maturity disclosed inside forecast horizon"
+            )
+        remaining_current_maturities = max(0.0, remaining_current_maturities - notes_maturity)
+        explicit_labels.append("notes / bonds")
+        explicit_tranches.append(
+            _DebtTrancheSchedule(
+                key="notes_bonds",
+                label="Notes / Bonds",
+                tranche_type="notes_bonds",
+                opening_balance=notes_opening,
+                interest_rate=notes_rate,
+                interest_basis=notes_interest_basis,
+                annual_mandatory_amortization=0.0,
+                mandatory_basis="No mandatory notes / bonds amortization disclosed",
+                maturity_year_offset=1 if notes_maturity > 0 else None,
+                maturity_repayment_amount=notes_maturity,
+                maturity_basis=notes_maturity_basis,
+                allows_optional_sweep=False,
+            )
+        )
+
+    lease_opening = max(0.0, latest.get("lease_liabilities_debt") or 0.0)
+    if lease_opening > 0:
+        lease_rate, lease_interest_basis = _tranche_rate("lease_interest_rate")
+        lease_principal_payment = min(lease_opening, max(0.0, latest.get("lease_principal_payment") or 0.0))
+        explicit_labels.append("leases")
+        explicit_tranches.append(
+            _DebtTrancheSchedule(
+                key="leases",
+                label="Leases",
+                tranche_type="leases",
+                opening_balance=lease_opening,
+                interest_rate=lease_rate,
+                interest_basis=lease_interest_basis,
+                annual_mandatory_amortization=lease_principal_payment,
+                mandatory_basis=(
+                    "Disclosed lease principal repayment"
+                    if lease_principal_payment > 0
+                    else "No lease principal repayment disclosed; defaulting to zero"
+                ),
+                maturity_year_offset=None,
+                maturity_repayment_amount=0.0,
+                maturity_basis="Lease maturity ladder not separately disclosed",
+                allows_optional_sweep=False,
+            )
+        )
+
+    latest_total_debt = latest["total_debt"]
+    if latest_total_debt is None:
+        latest_total_debt = _sum_non_null(latest["current_debt"], latest["long_term_debt"])
+    disclosed_total_debt = max(0.0, latest_total_debt or 0.0)
+    explicit_opening_total = sum(tranche.opening_balance for tranche in explicit_tranches)
+    residual_opening = max(0.0, disclosed_total_debt - explicit_opening_total)
+
+    debt_tranches: list[_DebtTrancheSchedule] = list(explicit_tranches)
+    if explicit_tranches and residual_opening > 0:
+        residual_maturity = min(residual_opening, remaining_current_maturities)
+        debt_tranches.append(
+            _DebtTrancheSchedule(
+                key="other_debt_fallback",
+                label="Other Debt Fallback",
+                tranche_type="fallback",
+                opening_balance=residual_opening,
+                interest_rate=blended_debt_rate,
+                interest_basis="Residual debt bucket at blended debt rate fallback",
+                annual_mandatory_amortization=0.0,
+                mandatory_basis="No residual debt amortization disclosed",
+                maturity_year_offset=1 if residual_maturity > 0 else None,
+                maturity_repayment_amount=residual_maturity,
+                maturity_basis=(
+                    "Current maturities proxy allocated to residual debt"
+                    if residual_maturity > 0
+                    else "No residual debt maturity disclosed"
+                ),
+                allows_optional_sweep=True,
+            )
+        )
+        remaining_current_maturities = max(0.0, remaining_current_maturities - residual_maturity)
+
+    if not debt_tranches and disclosed_total_debt > 0:
+        debt_tranches.append(
+            _DebtTrancheSchedule(
+                key="debt_fallback",
+                label="Debt Fallback",
+                tranche_type="fallback",
+                opening_balance=disclosed_total_debt,
+                interest_rate=blended_debt_rate,
+                interest_basis="Fallback single-tranche rate from historical interest expense and average total debt",
+                annual_mandatory_amortization=0.0,
+                mandatory_basis="No debt amortization disclosed",
+                maturity_year_offset=None,
+                maturity_repayment_amount=0.0,
+                maturity_basis="No debt maturity ladder disclosed",
+                allows_optional_sweep=True,
+            )
+        )
+
+    if not any(tranche.key == "revolver" for tranche in debt_tranches):
+        debt_tranches.insert(
+            0,
+            _DebtTrancheSchedule(
+                key="revolver",
+                label="Revolver",
+                tranche_type="revolver",
+                opening_balance=0.0,
+                interest_rate=max(blended_debt_rate, DEFAULT_DEBT_INTEREST_RATE),
+                interest_basis=(
+                    "Synthetic balancing revolver at blended debt cost fallback"
+                    if debt_tranches
+                    else "Synthetic minimum-cash revolver at default debt cost"
+                ),
+                annual_mandatory_amortization=0.0,
+                mandatory_basis="No mandatory revolver amortization disclosed",
+                maturity_year_offset=None,
+                maturity_repayment_amount=0.0,
+                maturity_basis="No revolver maturity disclosed",
+                allows_optional_draw=True,
+                allows_optional_sweep=True,
+            ),
+        )
+
+    if explicit_labels:
+        debt_schedule_basis = (
+            f"Tranche schedule from disclosed {' / '.join(explicit_labels)} balances"
+            if disclosed_total_debt <= explicit_opening_total + 1e-6
+            else f"Tranche schedule from disclosed {' / '.join(explicit_labels)} balances plus residual debt fallback"
+        )
+    elif disclosed_total_debt > 0:
+        debt_schedule_basis = "Fallback single-tranche debt schedule from disclosed total debt plus synthetic revolver backstop"
+    else:
+        debt_schedule_basis = "No opening debt disclosed; synthetic revolver provides a minimum-cash backstop only"
+    return debt_tranches, debt_schedule_basis, "revolver"
 
 
 def _scenario_tweaks() -> dict[str, _ScenarioTweaks]:
@@ -1231,6 +2230,7 @@ def _project_scenario(
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
     below_line_schedule: _BelowLineSchedule,
+    balance_sheet_schedule: _BalanceSheetSchedule,
     dilution_schedule: _DilutionSchedule,
     *,
     scenario_key: str,
@@ -1255,11 +2255,18 @@ def _project_scenario(
         operating_working_capital_schedule.starting_deferred_revenue,
         operating_working_capital_schedule.starting_accrued_operating_liabilities,
     )
-    previous_depreciation = reinvestment_schedule.latest_depreciation
+    net_ppe_balance = reinvestment_schedule.ppe_schedule.opening_net_ppe
     semi_cost = previous_revenue * cost_schedule.semi_variable_cost_ratio
     fixed_cost = cost_schedule.fixed_cost_base
     cash_balance = below_line_schedule.starting_cash
     debt_balance = below_line_schedule.starting_debt
+    debt_tranche_state = _initial_forecast_debt_tranche_points(below_line_schedule)
+    nol_balance = below_line_schedule.tax_schedule.opening_nol if below_line_schedule.tax_schedule is not None else 0.0
+    deferred_tax_asset_balance = (
+        below_line_schedule.tax_schedule.opening_deferred_tax_asset if below_line_schedule.tax_schedule is not None else 0.0
+    )
+    retained_earnings_balance = balance_sheet_schedule.opening_retained_earnings
+    other_equity_balance = balance_sheet_schedule.opening_other_equity
     basic_shares = dilution_schedule.starting_basic_shares
 
     years: list[int] = []
@@ -1293,7 +2300,19 @@ def _project_scenario(
         fixed_cost = max(0.0, fixed_cost * (1.0 + fixed_cost_growth))
 
         operating_income = revenue - variable_cost - semi_cost - fixed_cost
-        depreciation = max(0.0, (previous_depreciation * 0.50) + ((revenue * reinvestment_schedule.depreciation_ratio) * 0.50))
+        sales_to_capital = _clip(reinvestment_schedule.sales_to_capital + tweaks.sales_to_capital_shift, SALES_TO_CAPITAL_FLOOR, SALES_TO_CAPITAL_CAP)
+        growth_reinvestment = max(revenue - previous_revenue, 0.0) / sales_to_capital
+
+        ppe_disposals = reinvestment_schedule.ppe_schedule.annual_disposals
+        opening_net_ppe = net_ppe_balance
+        available_ppe_before_depreciation = max(0.0, opening_net_ppe + (revenue * reinvestment_schedule.capex_intensity) - ppe_disposals)
+        depreciation = min(
+            max(0.0, opening_net_ppe * reinvestment_schedule.depreciation_ratio),
+            available_ppe_before_depreciation,
+        )
+        maintenance_capex = max(revenue * reinvestment_schedule.capex_intensity, depreciation)
+        capex = max(maintenance_capex, depreciation + max(growth_reinvestment, 0.0))
+        ending_net_ppe = max(0.0, opening_net_ppe + capex - depreciation - ppe_disposals)
         ebitda = operating_income + depreciation
 
         cost_of_revenue = max(revenue * operating_working_capital_schedule.cost_of_revenue_ratio, variable_cost)
@@ -1307,15 +2326,10 @@ def _project_scenario(
         )
         target_working_capital = working_capital_point["total"]
         delta_working_capital = target_working_capital - previous_working_capital
-
-        sales_to_capital = _clip(reinvestment_schedule.sales_to_capital + tweaks.sales_to_capital_shift, SALES_TO_CAPITAL_FLOOR, SALES_TO_CAPITAL_CAP)
-        growth_reinvestment = max(revenue - previous_revenue, 0.0) / sales_to_capital
-
-        maintenance_capex = max(revenue * reinvestment_schedule.capex_intensity, depreciation)
-        capex = max(maintenance_capex, depreciation + max(growth_reinvestment, 0.0))
         stock_based_compensation = revenue * dilution_schedule.sbc_expense_ratio
         bridge_point = _project_below_line_bridge(
             year=year,
+            projection_year_offset=len(years),
             revenue=revenue,
             ebit=operating_income,
             depreciation=depreciation,
@@ -1324,6 +2338,11 @@ def _project_scenario(
             capex=capex,
             opening_cash=cash_balance,
             opening_debt=debt_balance,
+            opening_debt_tranches=debt_tranche_state,
+            opening_nol=nol_balance,
+            opening_deferred_tax_asset=deferred_tax_asset_balance,
+            opening_retained_earnings=retained_earnings_balance,
+            opening_other_equity=other_equity_balance,
             beginning_operating_working_capital=previous_working_capital,
             ending_operating_working_capital=target_working_capital,
             accounts_receivable=working_capital_point["accounts_receivable"],
@@ -1331,7 +2350,11 @@ def _project_scenario(
             accounts_payable=working_capital_point["accounts_payable"],
             deferred_revenue=working_capital_point["deferred_revenue"],
             accrued_operating_liabilities=working_capital_point["accrued_operating_liabilities"],
+            beginning_net_ppe=opening_net_ppe,
+            ppe_disposals=ppe_disposals,
+            ending_net_ppe=ending_net_ppe,
             schedule=below_line_schedule,
+            balance_sheet_schedule=balance_sheet_schedule,
         )
         net_income = bridge_point.net_income
         operating_cash_flow = bridge_point.operating_cash_flow
@@ -1413,7 +2436,6 @@ def _project_scenario(
                 year=year,
                 projection_index=len(years) - 1,
                 previous_revenue=previous_revenue,
-                previous_depreciation=previous_depreciation,
                 revenue=revenue,
                 cost_of_revenue=cost_of_revenue,
                 cash_operating_cost=cash_operating_cost,
@@ -1435,9 +2457,14 @@ def _project_scenario(
 
         previous_revenue = revenue
         previous_working_capital = target_working_capital
-        previous_depreciation = depreciation
+        net_ppe_balance = ending_net_ppe
         cash_balance = bridge_point.ending_cash
         debt_balance = bridge_point.ending_debt
+        debt_tranche_state = _next_year_forecast_debt_tranche_points(bridge_point.debt_tranches)
+        nol_balance = bridge_point.ending_nol
+        deferred_tax_asset_balance = bridge_point.ending_deferred_tax_asset
+        retained_earnings_balance = bridge_point.ending_retained_earnings
+        other_equity_balance = bridge_point.other_equity
 
     return DriverForecastScenario(
         key=scenario_key,
@@ -1469,7 +2496,6 @@ def _build_line_traces_for_year(
     year: int,
     projection_index: int,
     previous_revenue: float,
-    previous_depreciation: float,
     revenue: float,
     cost_of_revenue: float,
     cash_operating_cost: float,
@@ -1552,19 +2578,27 @@ def _build_line_traces_for_year(
         line_item="depreciation_amortization",
         year=year,
         formula_label="Depreciation and Amortization",
-        formula_template="max(0, prior D&A x 50% + revenue x depreciation ratio x 50%)",
+        formula_template="Opening net PP&E / useful life",
         inputs=[
             _formula_input(
-                "previous_depreciation",
-                "Prior D&A",
-                previous_depreciation,
-                _money(previous_depreciation),
-                _depreciation_basis_detail(history),
-                _depreciation_source_kind(history),
+                "opening_net_ppe",
+                "Opening Net PP&E",
+                bridge_point.beginning_net_ppe,
+                _money(bridge_point.beginning_net_ppe),
+                reinvestment_schedule.ppe_schedule.opening_basis,
+                _source_kind_from_basis(reinvestment_schedule.ppe_schedule.opening_basis),
             ),
             _formula_input(
-                "depreciation_ratio",
-                "Depreciation Ratio",
+                "useful_life_years",
+                "Useful Life",
+                reinvestment_schedule.ppe_schedule.useful_life_years,
+                f"{reinvestment_schedule.ppe_schedule.useful_life_years:.1f} years",
+                reinvestment_schedule.ppe_schedule.useful_life_basis,
+                _source_kind_from_basis(reinvestment_schedule.ppe_schedule.useful_life_basis),
+            ),
+            _formula_input(
+                "depreciation_rate",
+                "Depreciation Rate",
                 reinvestment_schedule.depreciation_ratio,
                 _pct(reinvestment_schedule.depreciation_ratio),
                 _depreciation_basis_detail(history),
@@ -1572,12 +2606,57 @@ def _build_line_traces_for_year(
                 override_key="depreciation_ratio",
                 override_results_by_key=override_results_by_key,
             ),
-            _formula_input("revenue", "Revenue", revenue, _money(revenue), "SEC-derived driver forecast", "sec"),
         ],
         formula_computation=(
-            f"max($0.00, ({_money(previous_depreciation)} x 50%) + ({_money(revenue)} x {_pct(reinvestment_schedule.depreciation_ratio)} x 50%)) = {_money(bridge_point.depreciation)}"
+            f"{_money(bridge_point.beginning_net_ppe)} / {reinvestment_schedule.ppe_schedule.useful_life_years:.1f} = {_money(bridge_point.depreciation)}"
         ),
         result_value=bridge_point.depreciation,
+    )
+    net_ppe_trace = _build_formula_trace(
+        line_item="net_ppe",
+        year=year,
+        formula_label="Ending Net PP&E",
+        formula_template=FORECAST_FORMULA_NET_PPE,
+        inputs=[
+            _formula_input(
+                "opening_net_ppe",
+                "Opening Net PP&E",
+                bridge_point.beginning_net_ppe,
+                _money(bridge_point.beginning_net_ppe),
+                reinvestment_schedule.ppe_schedule.opening_basis,
+                _source_kind_from_basis(reinvestment_schedule.ppe_schedule.opening_basis),
+            ),
+            _formula_input(
+                "capex",
+                "Capex",
+                bridge_point.capex,
+                _money(bridge_point.capex),
+                _capex_basis_detail(history),
+                _capex_source_kind(history),
+            ),
+            _formula_input(
+                "depreciation_amortization",
+                "Depreciation",
+                bridge_point.depreciation,
+                _money(bridge_point.depreciation),
+                f"Derived from D&A trace confidence {_trace_source_kind(depreciation_trace.confidence)}",
+                _trace_source_kind(depreciation_trace.confidence),
+            ),
+            _formula_input(
+                "ppe_disposals",
+                "PP&E Disposals",
+                bridge_point.ppe_disposals,
+                _money(bridge_point.ppe_disposals),
+                reinvestment_schedule.ppe_schedule.disposals_basis,
+                _source_kind_from_basis(reinvestment_schedule.ppe_schedule.disposals_basis),
+            ),
+        ],
+        formula_computation=(
+            f"{_money(bridge_point.beginning_net_ppe)} + {_money(bridge_point.capex)} - {_money(bridge_point.depreciation)} - "
+            f"{_money(bridge_point.ppe_disposals)} = {_money(bridge_point.ending_net_ppe)}"
+        ),
+        result_value=bridge_point.ending_net_ppe,
+        upstream_states=(depreciation_trace.scenario_state,),
     )
     sbc_trace = _build_formula_trace(
         line_item="sbc_expense",
@@ -1748,14 +2827,78 @@ def _build_line_traces_for_year(
             ),
             _formula_input(
                 "effective_tax_rate",
-                "Effective Tax Rate",
+                "Book Tax Rate",
                 below_line_schedule.effective_tax_rate,
                 _pct(below_line_schedule.effective_tax_rate),
                 below_line_schedule.tax_basis,
                 _source_kind_from_basis(below_line_schedule.tax_basis),
             ),
+            _formula_input(
+                "opening_nol",
+                "Opening NOL",
+                bridge_point.beginning_nol,
+                _money(bridge_point.beginning_nol),
+                below_line_schedule.tax_schedule.nol_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.nol_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "nol_usage",
+                "NOL Usage",
+                bridge_point.nol_used,
+                _money(bridge_point.nol_used),
+                below_line_schedule.tax_schedule.nol_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.nol_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "cash_tax_rate",
+                "Cash Tax Rate",
+                below_line_schedule.tax_schedule.cash_tax_rate if below_line_schedule.tax_schedule is not None else below_line_schedule.effective_tax_rate,
+                _pct(below_line_schedule.tax_schedule.cash_tax_rate if below_line_schedule.tax_schedule is not None else below_line_schedule.effective_tax_rate),
+                below_line_schedule.tax_schedule.cash_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.cash_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "cash_tax",
+                "Cash Tax",
+                bridge_point.cash_tax,
+                _money(bridge_point.cash_tax),
+                below_line_schedule.tax_schedule.cash_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.cash_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "opening_deferred_tax_asset",
+                "Opening DTA",
+                bridge_point.beginning_deferred_tax_asset,
+                _money(bridge_point.beginning_deferred_tax_asset),
+                below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "ending_deferred_tax_asset",
+                "Ending DTA",
+                bridge_point.ending_deferred_tax_asset,
+                _money(bridge_point.ending_deferred_tax_asset),
+                below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "deferred_tax_expense",
+                "Deferred Tax Expense",
+                bridge_point.deferred_tax_expense,
+                _money(bridge_point.deferred_tax_expense),
+                below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
+                "book_tax_expense",
+                "Book Tax Expense",
+                bridge_point.taxes,
+                _money(bridge_point.taxes),
+                below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_basis),
+            ),
         ],
-        formula_computation=_income_tax_computation(bridge_point.pretax_income, below_line_schedule.effective_tax_rate, bridge_point.taxes),
+        formula_computation=_income_tax_computation(bridge_point, below_line_schedule.tax_schedule),
         result_value=bridge_point.taxes,
         scenario_state=_scenario_state_for_override_keys(override_results_by_key, SUPPORTED_DRIVER_OVERRIDE_KEYS),
     )
@@ -1865,7 +3008,7 @@ def _build_line_traces_for_year(
                 "Interest Expense",
                 bridge_point.interest_expense,
                 _money(bridge_point.interest_expense),
-                below_line_schedule.interest_basis,
+                _interest_basis_detail(below_line_schedule, bridge_point),
                 _source_kind_from_basis(below_line_schedule.interest_basis),
             ),
             _formula_input(
@@ -1873,8 +3016,8 @@ def _build_line_traces_for_year(
                 "Interest Income",
                 bridge_point.interest_income,
                 _money(bridge_point.interest_income),
-                below_line_schedule.interest_basis,
-                _source_kind_from_basis(below_line_schedule.interest_basis),
+                below_line_schedule.cash_basis,
+                _source_kind_from_basis(below_line_schedule.cash_basis),
             ),
             _formula_input(
                 "other_income_expense",
@@ -1950,6 +3093,14 @@ def _build_line_traces_for_year(
                 _trace_source_kind(sbc_trace.confidence),
             ),
             _formula_input(
+                "deferred_tax_expense",
+                "Deferred Tax Expense",
+                bridge_point.deferred_tax_expense,
+                _money(bridge_point.deferred_tax_expense),
+                below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis,
+                _source_kind_from_basis(below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis),
+            ),
+            _formula_input(
                 "delta_operating_working_capital",
                 "Delta Operating Working Capital",
                 bridge_point.delta_working_capital,
@@ -1959,7 +3110,7 @@ def _build_line_traces_for_year(
             ),
         ],
         formula_computation=(
-            f"{_money(bridge_point.net_income)} + {_money(bridge_point.depreciation)} + {_money(bridge_point.stock_based_compensation)} - "
+            f"{_money(bridge_point.net_income)} + {_money(bridge_point.depreciation)} + {_money(bridge_point.stock_based_compensation)} + {_money(bridge_point.deferred_tax_expense)} - "
             f"{_money(bridge_point.delta_working_capital)} = {_money(bridge_point.operating_cash_flow)}"
         ),
         result_value=bridge_point.operating_cash_flow,
@@ -2047,6 +3198,7 @@ def _build_line_traces_for_year(
         "deferred_revenue": deferred_revenue_trace,
         "accrued_operating_liabilities": accrued_operating_liabilities_trace,
         "depreciation_amortization": depreciation_trace,
+        "net_ppe": net_ppe_trace,
         "sbc_expense": sbc_trace,
         "capex": capex_trace,
         "operating_cash_flow": operating_cash_flow_trace,
@@ -2415,13 +3567,18 @@ def _fixed_cost_growth_basis_detail(history: list[dict[str, Any]]) -> str:
 
 
 def _depreciation_source_kind(history: list[dict[str, Any]]) -> str:
-    return "sec" if _median_abs_ratio(history, "depreciation", "revenue") is not None else "default"
+    resolved_net_ppe_history = _resolved_net_ppe_history(history)
+    for row, net_ppe in zip(history, resolved_net_ppe_history, strict=False):
+        depreciation = _positive_amount(row.get("depreciation"))
+        if depreciation is not None and net_ppe not in (None, 0):
+            return "sec"
+    return "default"
 
 
 def _depreciation_basis_detail(history: list[dict[str, Any]]) -> str:
     if _depreciation_source_kind(history) == "sec":
-        return "SEC-derived depreciation ratio"
-    return "Default depreciation ratio from capex intensity"
+        return "PP&E schedule using disclosed net PP&E and D&A history"
+    return f"Fallback useful life {DEFAULT_USEFUL_LIFE_YEARS:.0f} years with PP&E reconstructed from available history"
 
 
 def _sbc_source_kind(history: list[dict[str, Any]]) -> str:
@@ -2488,11 +3645,18 @@ def _working_capital_days_input(
     )
 
 
-def _income_tax_computation(pretax_income: float, effective_tax_rate: float, taxes: float) -> str:
-    if pretax_income >= 0:
-        return f"{_money(pretax_income)} x {_pct(effective_tax_rate)} = {_money(taxes)}"
-    capped_rate = min(effective_tax_rate, LOSS_TAX_BENEFIT_CAP)
-    return f"{_money(pretax_income)} x min({_pct(effective_tax_rate)}, {_pct(LOSS_TAX_BENEFIT_CAP)}) = {_money(taxes)}"
+def _income_tax_computation(bridge_point: _ForecastBridgePoint, schedule: _TaxSchedule | None) -> str:
+    if schedule is None or not schedule.uses_explicit_nol_schedule:
+        effective_tax_rate = schedule.book_tax_rate if schedule is not None else DEFAULT_EFFECTIVE_TAX_RATE
+        if bridge_point.pretax_income >= 0:
+            return f"Fallback ETR: {_money(bridge_point.pretax_income)} x {_pct(effective_tax_rate)} = {_money(bridge_point.taxes)}"
+        capped_rate = min(effective_tax_rate, LOSS_TAX_BENEFIT_CAP)
+        return f"Fallback loss benefit: {_money(bridge_point.pretax_income)} x min({_pct(effective_tax_rate)}, {_pct(LOSS_TAX_BENEFIT_CAP)}) = {_money(bridge_point.taxes)}"
+    return (
+        f"Cash tax max({_money(max(bridge_point.pretax_income, 0.0))} - {_money(bridge_point.nol_used)}, 0) x {_pct(schedule.cash_tax_rate)} = {_money(bridge_point.cash_tax)}; "
+        f"DTA movement {_money(bridge_point.beginning_deferred_tax_asset)} - {_money(bridge_point.ending_deferred_tax_asset)} = {_money(bridge_point.deferred_tax_expense)}; "
+        f"book tax {_money(bridge_point.cash_tax)} + {_money(bridge_point.deferred_tax_expense)} = {_money(bridge_point.taxes)}."
+    )
 
 
 def _revenue_components_for_trace(
@@ -2523,6 +3687,7 @@ def _revenue_components_for_trace(
 def _project_below_line_bridge(
     *,
     year: int,
+    projection_year_offset: int,
     revenue: float,
     ebit: float,
     depreciation: float,
@@ -2531,6 +3696,11 @@ def _project_below_line_bridge(
     capex: float,
     opening_cash: float,
     opening_debt: float,
+    opening_debt_tranches: list[_ForecastDebtTranchePoint],
+    opening_nol: float,
+    opening_deferred_tax_asset: float,
+    opening_retained_earnings: float,
+    opening_other_equity: float,
     beginning_operating_working_capital: float,
     ending_operating_working_capital: float,
     accounts_receivable: float,
@@ -2538,46 +3708,146 @@ def _project_below_line_bridge(
     accounts_payable: float,
     deferred_revenue: float,
     accrued_operating_liabilities: float,
+    beginning_net_ppe: float,
+    ppe_disposals: float,
+    ending_net_ppe: float,
     schedule: _BelowLineSchedule,
+    balance_sheet_schedule: _BalanceSheetSchedule,
 ) -> _ForecastBridgePoint:
     ending_cash = opening_cash
     ending_debt = opening_debt
     other_income_expense = revenue * schedule.other_income_ratio
+    debt_tranches = _reset_forecast_debt_tranche_points(opening_debt_tranches)
+    tax_schedule = schedule.tax_schedule or _TaxSchedule(
+        uses_explicit_nol_schedule=False,
+        opening_nol=0.0,
+        opening_deferred_tax_asset=0.0,
+        book_tax_rate=schedule.effective_tax_rate,
+        cash_tax_rate=schedule.effective_tax_rate,
+        basis=schedule.tax_basis,
+        nol_basis=schedule.tax_basis,
+        cash_tax_basis=schedule.tax_basis,
+        deferred_tax_basis=schedule.tax_basis,
+    )
+    dividends = max(0.0, revenue * balance_sheet_schedule.dividend_payout_ratio)
+    buyback_cash = max(0.0, revenue * balance_sheet_schedule.buyback_cash_ratio)
 
     for _ in range(2):
         average_cash = _average_balance(opening_cash, ending_cash) or 0.0
-        average_debt = _average_balance(opening_debt, ending_debt) or 0.0
-        interest_expense = average_debt * schedule.debt_interest_rate
+        interest_expense = sum(tranche.interest_expense for tranche in debt_tranches)
         interest_income = average_cash * schedule.cash_yield
         pretax_income = ebit - interest_expense + interest_income + other_income_expense
-        taxes = _project_taxes(pretax_income, schedule.effective_tax_rate)
+        tax_point = _project_tax_schedule(
+            pretax_income,
+            tax_schedule,
+            opening_nol=opening_nol,
+            opening_deferred_tax_asset=opening_deferred_tax_asset,
+        )
+        taxes = tax_point.book_tax_expense
         net_income = pretax_income - taxes
-        operating_cash_flow = net_income + depreciation + stock_based_compensation - delta_working_capital
+        operating_cash_flow = net_income + depreciation + stock_based_compensation + tax_point.deferred_tax_expense - delta_working_capital
         free_cash_flow = operating_cash_flow - capex
-        ending_cash, ending_debt = _roll_forward_cash_and_debt(
+        ending_cash, ending_debt, debt_tranches = _roll_forward_cash_and_debt(
             opening_cash,
-            opening_debt,
+            debt_tranches,
             free_cash_flow,
+            dividends + buyback_cash,
             revenue,
-            schedule.target_cash_ratio,
+            projection_year_offset,
+            schedule,
         )
 
     average_cash = _average_balance(opening_cash, ending_cash) or 0.0
-    average_debt = _average_balance(opening_debt, ending_debt) or 0.0
-    interest_expense = average_debt * schedule.debt_interest_rate
+    interest_expense = sum(tranche.interest_expense for tranche in debt_tranches)
     interest_income = average_cash * schedule.cash_yield
     pretax_income = ebit - interest_expense + interest_income + other_income_expense
-    taxes = _project_taxes(pretax_income, schedule.effective_tax_rate)
-    net_income = pretax_income - taxes
-    operating_cash_flow = net_income + depreciation + stock_based_compensation - delta_working_capital
-    free_cash_flow = operating_cash_flow - capex
-    ending_cash, ending_debt = _roll_forward_cash_and_debt(
-        opening_cash,
-        opening_debt,
-        free_cash_flow,
-        revenue,
-        schedule.target_cash_ratio,
+    tax_point = _project_tax_schedule(
+        pretax_income,
+        tax_schedule,
+        opening_nol=opening_nol,
+        opening_deferred_tax_asset=opening_deferred_tax_asset,
     )
+    taxes = tax_point.book_tax_expense
+    net_income = pretax_income - taxes
+    operating_cash_flow = net_income + depreciation + stock_based_compensation + tax_point.deferred_tax_expense - delta_working_capital
+    free_cash_flow = operating_cash_flow - capex
+    ending_cash, ending_debt, debt_tranches = _roll_forward_cash_and_debt(
+        opening_cash,
+        debt_tranches,
+        free_cash_flow,
+        dividends + buyback_cash,
+        revenue,
+        projection_year_offset,
+        schedule,
+    )
+    average_cash = _average_balance(opening_cash, ending_cash) or 0.0
+    interest_expense = sum(tranche.interest_expense for tranche in debt_tranches)
+    interest_income = average_cash * schedule.cash_yield
+    pretax_income = ebit - interest_expense + interest_income + other_income_expense
+    tax_point = _project_tax_schedule(
+        pretax_income,
+        tax_schedule,
+        opening_nol=opening_nol,
+        opening_deferred_tax_asset=opening_deferred_tax_asset,
+    )
+    taxes = tax_point.book_tax_expense
+    net_income = pretax_income - taxes
+    operating_cash_flow = net_income + depreciation + stock_based_compensation + tax_point.deferred_tax_expense - delta_working_capital
+    free_cash_flow = operating_cash_flow - capex
+
+    other_operating_current_assets = max(
+        0.0,
+        (revenue * balance_sheet_schedule.other_operating_current_assets_ratio)
+        if balance_sheet_schedule.other_operating_current_assets_ratio > 0
+        else balance_sheet_schedule.opening_other_operating_current_assets,
+    )
+    other_long_term_assets = max(
+        0.0,
+        (
+            revenue * balance_sheet_schedule.other_long_term_assets_ratio
+            if balance_sheet_schedule.other_long_term_assets_ratio > 0
+            else balance_sheet_schedule.opening_other_long_term_assets_ex_dta
+        )
+        + tax_point.ending_deferred_tax_asset,
+    )
+    other_liabilities = max(
+        0.0,
+        (revenue * balance_sheet_schedule.other_liabilities_ratio)
+        if balance_sheet_schedule.other_liabilities_ratio > 0
+        else balance_sheet_schedule.opening_other_liabilities,
+    )
+    ending_retained_earnings = opening_retained_earnings + net_income - dividends - buyback_cash
+    other_equity = opening_other_equity + stock_based_compensation
+    total_assets = (
+        ending_cash
+        + accounts_receivable
+        + inventory
+        + other_operating_current_assets
+        + ending_net_ppe
+        + other_long_term_assets
+    )
+    total_liabilities = ending_debt + accounts_payable + accrued_operating_liabilities + deferred_revenue + other_liabilities
+    total_equity = ending_retained_earnings + other_equity
+    total_liabilities_and_equity = total_liabilities + total_equity
+    balance_sheet_delta_before_plug = total_assets - total_liabilities_and_equity
+    balance_sheet_plug = 0.0
+    balance_sheet_plug_bucket = "No plug"
+    if balance_sheet_schedule.plug_bucket_mode == "dynamic" and abs(balance_sheet_delta_before_plug) > 1e-9:
+        if balance_sheet_delta_before_plug > 0:
+            other_liabilities += balance_sheet_delta_before_plug
+            balance_sheet_plug = balance_sheet_delta_before_plug
+            balance_sheet_plug_bucket = "Other Liabilities Plug"
+        else:
+            other_long_term_assets += abs(balance_sheet_delta_before_plug)
+            balance_sheet_plug = abs(balance_sheet_delta_before_plug)
+            balance_sheet_plug_bucket = "Other Long-Term Assets Plug"
+        total_assets = ending_cash + accounts_receivable + inventory + other_operating_current_assets + ending_net_ppe + other_long_term_assets
+        total_liabilities = ending_debt + accounts_payable + accrued_operating_liabilities + deferred_revenue + other_liabilities
+        total_equity = ending_retained_earnings + other_equity
+        total_liabilities_and_equity = total_liabilities + total_equity
+    elif balance_sheet_schedule.plug_bucket_mode == "unanchored":
+        balance_sheet_plug_bucket = "No plug anchor available"
+    balance_sheet_delta = total_assets - total_liabilities_and_equity
 
     return _ForecastBridgePoint(
         year=year,
@@ -2587,6 +3857,18 @@ def _project_below_line_bridge(
         other_income_expense=other_income_expense,
         pretax_income=pretax_income,
         taxes=taxes,
+        book_tax_expense=tax_point.book_tax_expense,
+        cash_tax=tax_point.cash_tax,
+        deferred_tax_expense=tax_point.deferred_tax_expense,
+        beginning_nol=tax_point.opening_nol,
+        nol_created=tax_point.nol_created,
+        nol_used=tax_point.nol_used,
+        ending_nol=tax_point.ending_nol,
+        beginning_deferred_tax_asset=tax_point.opening_deferred_tax_asset,
+        ending_deferred_tax_asset=tax_point.ending_deferred_tax_asset,
+        taxable_income_after_nol=tax_point.taxable_income_after_nol,
+        dividends=dividends,
+        buyback_cash=buyback_cash,
         net_income=net_income,
         depreciation=depreciation,
         stock_based_compensation=stock_based_compensation,
@@ -2605,27 +3887,215 @@ def _project_below_line_bridge(
         accounts_payable=accounts_payable,
         deferred_revenue=deferred_revenue,
         accrued_operating_liabilities=accrued_operating_liabilities,
+        beginning_net_ppe=beginning_net_ppe,
+        ppe_disposals=ppe_disposals,
+        ending_net_ppe=ending_net_ppe,
+        other_operating_current_assets=other_operating_current_assets,
+        other_long_term_assets=other_long_term_assets,
+        other_liabilities=other_liabilities,
+        beginning_retained_earnings=opening_retained_earnings,
+        ending_retained_earnings=ending_retained_earnings,
+        other_equity=other_equity,
+        total_assets=total_assets,
+        total_liabilities=total_liabilities,
+        total_equity=total_equity,
+        total_liabilities_and_equity=total_liabilities_and_equity,
+        balance_sheet_delta_before_plug=balance_sheet_delta_before_plug,
+        balance_sheet_plug=balance_sheet_plug,
+        balance_sheet_plug_bucket=balance_sheet_plug_bucket,
+        balance_sheet_delta=balance_sheet_delta,
+        debt_draw=sum(tranche.optional_draw for tranche in debt_tranches),
+        debt_repayment=sum(
+            tranche.mandatory_amortization + tranche.maturity_repayment + tranche.optional_sweep_repayment
+            for tranche in debt_tranches
+        ),
+        mandatory_debt_repayment=sum(tranche.mandatory_amortization for tranche in debt_tranches),
+        maturity_debt_repayment=sum(tranche.maturity_repayment for tranche in debt_tranches),
+        sweep_debt_repayment=sum(tranche.optional_sweep_repayment for tranche in debt_tranches),
+        debt_tranches=debt_tranches,
     )
 
 
 def _roll_forward_cash_and_debt(
     opening_cash: float,
-    opening_debt: float,
+    opening_debt_tranches: list[_ForecastDebtTranchePoint],
     free_cash_flow: float,
+    shareholder_distributions: float,
     revenue: float,
-    target_cash_ratio: float,
-) -> tuple[float, float]:
-    target_cash = max(0.0, revenue * target_cash_ratio)
-    pre_financing_cash = opening_cash + free_cash_flow
-    if pre_financing_cash < target_cash:
-        debt_draw = target_cash - pre_financing_cash
-        return target_cash, opening_debt + debt_draw
+    projection_year_offset: int,
+    schedule: _BelowLineSchedule,
+) -> tuple[float, float, list[_ForecastDebtTranchePoint]]:
+    target_cash = max(0.0, revenue * schedule.target_cash_ratio)
+    pre_financing_cash = opening_cash + free_cash_flow - shareholder_distributions
+    tranche_points = _reset_forecast_debt_tranche_points(opening_debt_tranches)
 
-    excess_cash = pre_financing_cash - target_cash
-    debt_repayment = min(opening_debt, max(0.0, excess_cash))
-    ending_debt = max(0.0, opening_debt - debt_repayment)
-    ending_cash = pre_financing_cash - debt_repayment
-    return max(0.0, ending_cash), ending_debt
+    for tranche in tranche_points:
+        remaining_balance = tranche.opening_balance
+        tranche.mandatory_amortization = min(
+            remaining_balance,
+            max(0.0, _tranche_schedule_by_key(schedule, tranche.key).annual_mandatory_amortization),
+        )
+        remaining_balance -= tranche.mandatory_amortization
+        maturity_amount = 0.0
+        schedule_tranche = _tranche_schedule_by_key(schedule, tranche.key)
+        if schedule_tranche.maturity_year_offset == projection_year_offset:
+            maturity_amount = min(remaining_balance, schedule_tranche.maturity_repayment_amount)
+        tranche.maturity_repayment = maturity_amount
+        remaining_balance -= maturity_amount
+        tranche.ending_balance = remaining_balance
+        pre_financing_cash -= tranche.mandatory_amortization + tranche.maturity_repayment
+
+    excess_cash = max(0.0, pre_financing_cash - target_cash)
+    for tranche in tranche_points:
+        schedule_tranche = _tranche_schedule_by_key(schedule, tranche.key)
+        if not schedule_tranche.allows_optional_sweep or excess_cash <= 0:
+            continue
+        optional_sweep = min(tranche.ending_balance, excess_cash)
+        tranche.optional_sweep_repayment = optional_sweep
+        tranche.ending_balance -= optional_sweep
+        pre_financing_cash -= optional_sweep
+        excess_cash -= optional_sweep
+
+    if pre_financing_cash < target_cash:
+        shortfall = target_cash - pre_financing_cash
+        revolver_key = schedule.balancing_revolver_key or "revolver"
+        revolver_tranche = next((item for item in tranche_points if item.key == revolver_key), None)
+        if revolver_tranche is not None:
+            revolver_tranche.optional_draw = shortfall
+            revolver_tranche.ending_balance += shortfall
+            pre_financing_cash += shortfall
+
+    for tranche in tranche_points:
+        tranche.average_balance = _average_balance(tranche.opening_balance, tranche.ending_balance) or 0.0
+        tranche.interest_expense = tranche.average_balance * tranche.interest_rate
+
+    ending_cash = max(0.0, pre_financing_cash)
+    ending_debt = sum(tranche.ending_balance for tranche in tranche_points)
+    return ending_cash, ending_debt, tranche_points
+
+
+def _initial_forecast_debt_tranche_points(schedule: _BelowLineSchedule) -> list[_ForecastDebtTranchePoint]:
+    tranche_points: list[_ForecastDebtTranchePoint] = []
+    for tranche in schedule.debt_tranches:
+        opening_balance = max(0.0, tranche.opening_balance)
+        tranche_points.append(
+            _ForecastDebtTranchePoint(
+                key=tranche.key,
+                label=tranche.label,
+                tranche_type=tranche.tranche_type,
+                opening_balance=opening_balance,
+                mandatory_amortization=0.0,
+                maturity_repayment=0.0,
+                optional_draw=0.0,
+                optional_sweep_repayment=0.0,
+                ending_balance=opening_balance,
+                average_balance=opening_balance,
+                interest_rate=tranche.interest_rate,
+                interest_basis=tranche.interest_basis,
+                interest_expense=opening_balance * tranche.interest_rate,
+            )
+        )
+    return tranche_points
+
+
+def _reset_forecast_debt_tranche_points(tranches: list[_ForecastDebtTranchePoint]) -> list[_ForecastDebtTranchePoint]:
+    return [
+        _ForecastDebtTranchePoint(
+            key=tranche.key,
+            label=tranche.label,
+            tranche_type=tranche.tranche_type,
+            opening_balance=max(0.0, tranche.opening_balance),
+            mandatory_amortization=0.0,
+            maturity_repayment=0.0,
+            optional_draw=0.0,
+            optional_sweep_repayment=0.0,
+            ending_balance=max(0.0, tranche.opening_balance),
+            average_balance=max(0.0, tranche.opening_balance),
+            interest_rate=tranche.interest_rate,
+            interest_basis=tranche.interest_basis,
+            interest_expense=max(0.0, tranche.opening_balance) * tranche.interest_rate,
+        )
+        for tranche in tranches
+    ]
+
+
+def _next_year_forecast_debt_tranche_points(tranches: list[_ForecastDebtTranchePoint]) -> list[_ForecastDebtTranchePoint]:
+    return [
+        _ForecastDebtTranchePoint(
+            key=tranche.key,
+            label=tranche.label,
+            tranche_type=tranche.tranche_type,
+            opening_balance=max(0.0, tranche.ending_balance),
+            mandatory_amortization=0.0,
+            maturity_repayment=0.0,
+            optional_draw=0.0,
+            optional_sweep_repayment=0.0,
+            ending_balance=max(0.0, tranche.ending_balance),
+            average_balance=max(0.0, tranche.ending_balance),
+            interest_rate=tranche.interest_rate,
+            interest_basis=tranche.interest_basis,
+            interest_expense=max(0.0, tranche.ending_balance) * tranche.interest_rate,
+        )
+        for tranche in tranches
+    ]
+
+
+def _tranche_schedule_by_key(schedule: _BelowLineSchedule, key: str) -> _DebtTrancheSchedule:
+    for tranche in schedule.debt_tranches:
+        if tranche.key == key:
+            return tranche
+    raise KeyError(key)
+
+
+def _debt_schedule_value(schedule: _BelowLineSchedule) -> str:
+    visible_tranches = [tranche for tranche in schedule.debt_tranches if tranche.opening_balance > 0]
+    if not visible_tranches:
+        return f"{_money(schedule.starting_debt)} opening debt / synthetic revolver backstop"
+    parts = [f"{tranche.label} {_money(tranche.opening_balance)}" for tranche in visible_tranches[:4]]
+    if any(tranche.key == schedule.balancing_revolver_key and tranche.opening_balance <= 0 for tranche in schedule.debt_tranches):
+        parts.append("synthetic revolver available")
+    return " / ".join(parts)
+
+
+def _debt_schedule_assumption_detail(schedule: _BelowLineSchedule) -> str:
+    tranche_details: list[str] = []
+    for tranche in schedule.debt_tranches:
+        if tranche.opening_balance <= 0 and tranche.key == schedule.balancing_revolver_key:
+            tranche_details.append(f"{tranche.label}: {_pct(tranche.interest_rate)} rate ({tranche.interest_basis.lower()})")
+            continue
+        if tranche.opening_balance <= 0:
+            continue
+        tranche_details.append(
+            f"{tranche.label}: opening {_money(tranche.opening_balance)}, mandatory {_money(tranche.annual_mandatory_amortization)}, "
+            f"maturity {_money(tranche.maturity_repayment_amount)} in year {tranche.maturity_year_offset or 'n/a'}, rate {_pct(tranche.interest_rate)}"
+        )
+    if not tranche_details:
+        tranche_details.append("No opening debt disclosed; synthetic revolver is available only to protect minimum cash.")
+    return f"{schedule.debt_schedule_basis}. " + " ".join(tranche_details)
+
+
+def _debt_interest_breakout(tranches: list[_ForecastDebtTranchePoint]) -> str:
+    visible = [tranche for tranche in tranches if tranche.opening_balance > 0 or tranche.optional_draw > 0 or tranche.interest_expense > 0]
+    if not visible:
+        return "No debt interest"
+    return "; ".join(
+        f"{tranche.label} {_money(tranche.interest_expense)} on avg {_money(tranche.average_balance)} at {_pct(tranche.interest_rate)}"
+        for tranche in visible
+    )
+
+
+def _debt_schedule_calculation_detail(bridge_point: _ForecastBridgePoint) -> str:
+    return (
+        f"Base FY{bridge_point.year}E: opening debt {_money(bridge_point.beginning_debt)} - mandatory {_money(bridge_point.mandatory_debt_repayment)} "
+        f"- maturity {_money(bridge_point.maturity_debt_repayment)} - sweep {_money(bridge_point.sweep_debt_repayment)} + draws {_money(bridge_point.debt_draw)} "
+        f"= ending debt {_money(bridge_point.ending_debt)}. Interest by tranche: {_debt_interest_breakout(bridge_point.debt_tranches)}."
+    )
+
+
+def _interest_basis_detail(schedule: _BelowLineSchedule, bridge_point: _ForecastBridgePoint | None = None) -> str:
+    if bridge_point is not None and bridge_point.debt_tranches:
+        return _debt_interest_breakout(bridge_point.debt_tranches)
+    return schedule.interest_basis
 
 
 def _project_taxes(pretax_income: float, effective_tax_rate: float) -> float:
@@ -2719,15 +4189,254 @@ def _revenue_mode_display(mode: str) -> str:
     return f"{base_label} + {' + '.join(cleaned_modifiers)}"
 
 
+def _history_has_regulated_financial_markers(history: list[dict[str, Any]]) -> bool:
+    for row in history:
+        statement = row.get("statement")
+        data = getattr(statement, "data", None)
+        if not isinstance(data, dict):
+            continue
+        for key in (
+            "regulated_bank_source_id",
+            "regulated_bank_reporting_basis",
+            "net_interest_income",
+            "provision_for_credit_losses",
+            "deposits_total",
+            "common_equity_tier1_ratio",
+            "tier1_risk_weighted_ratio",
+            "total_risk_based_capital_ratio",
+            "net_interest_margin",
+        ):
+            if data.get(key) is not None:
+                return True
+    return False
+
+
+def _build_modeling_suitability_rows(
+    history: list[dict[str, Any]],
+    routing_decision: ForecastEntityRoutingDecision | None = None,
+) -> list[dict[str, str]]:
+    bank_guidance = "Route to a separate bank / broker / regulated-financial model; do not stretch this industrial schedule."
+    decision = routing_decision or classify_forecast_entity_routing(None, [row["statement"] for row in history])
+    bank_markers_present = decision.classification == ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE or _history_has_regulated_financial_markers(history)
+    return [
+        {
+            "key": "revenue_growth",
+            "label": "Revenue Growth Logic",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "The engine decomposes realized growth into price, residual demand, and share / mix proxies, then layers in guidance, backlog, and capacity overlays. "
+                "That is useful for chart seeding and sensitivity work, but it is not a banker-grade primary build with explicit volume, pricing, customer, or contract drivers."
+            ),
+            "non_financial_appropriateness": "Useful starting point for non-financial corporates, but replace with explicit operating drivers in a primary model.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "margin_logic",
+            "label": "Margin Logic",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "Variable, semi-variable, and fixed costs are inferred from historical slopes plus SG&A and R&D ratios, with weighted blending over time. "
+                "That can frame operating leverage for an industrial, but it is still a heuristic schedule rather than a line-item or segment operating build."
+            ),
+            "non_financial_appropriateness": "Useful heuristic for non-financial corporates; not sufficient for an IB primary operating model on its own.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "depreciation_amortization",
+            "label": "D&A",
+            "classification": MODEL_SUITABILITY_IB_CORE_NONFIN,
+            "reason": (
+                "D&A now runs from an opening-net-PP&E roll-forward with capex, depreciation, disposals, and ending PP&E, using disclosed PP&E history where available and a labeled useful-life fallback otherwise. "
+                "That is the standard industrial-model structure even when the fallback path is needed."
+            ),
+            "non_financial_appropriateness": "Appropriate for non-financial corporates as the core D&A structure, with explicit fallback labeling when disclosure is sparse.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "operating_working_capital",
+            "label": "Working Capital",
+            "classification": MODEL_SUITABILITY_IB_CORE_NONFIN,
+            "reason": (
+                "AR, inventory, AP, deferred revenue, and accrued operating liabilities are forecast off day-based schedules, which is the standard IB framing for non-financial operating working capital. "
+                "The implementation still uses medians and only the disclosed lines available here, so the structure is core even if some inputs are simplified."
+            ),
+            "non_financial_appropriateness": "Appropriate for non-financial corporates as a primary-model operating working-capital block.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "capex_reinvestment",
+            "label": "Capex / Reinvestment",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "Capex is set as the higher of maintenance intensity and D&A plus positive-growth reinvestment from a sales-to-capital ratio. "
+                "That is a coherent valuation heuristic, but it is not the PP&E- and project-led capex logic expected in a banker-grade primary model."
+            ),
+            "non_financial_appropriateness": "Useful heuristic for non-financial corporates; primary models should move to PP&E, intangible, and program-specific schedules.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "debt_cash_interest",
+            "label": "Debt / Cash / Interest",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "When tranche disclosure exists, debt now rolls with revolvers, term loans, notes / bonds, leases, mandatory amortization, maturity repayments, sweeps, and average-balance interest by tranche. "
+                "It remains partly heuristic because thin disclosure still falls back to a conservative synthetic revolver plus blended-rate debt schedule instead of a full banker-grade maturity wall."
+            ),
+            "non_financial_appropriateness": "Useful for non-financial corporates and directionally closer to an IB financing schedule, but still partly heuristic when tranche disclosure is thin.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "taxes",
+            "label": "Taxes",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "Taxes now use an explicit NOL roll-forward with separate book tax, cash tax, and deferred-tax-asset movement when disclosure support exists, and otherwise fall back to a clearly labeled simple effective-tax-rate shortcut. "
+                "That is directionally closer to IB practice for industrials, but it remains simplified because there is no jurisdiction, valuation-allowance, or discrete-item schedule."
+            ),
+            "non_financial_appropriateness": "Useful for non-financial corporates and more explainable than a flat ETR, but primary models may still need jurisdiction, valuation-allowance, and discrete-item detail.",
+            "bank_appropriateness": "Usable only as a rough placeholder; regulated financials still need a separate bank model and regulatory-capital context.",
+        },
+        {
+            "key": "share_count_dilution",
+            "label": "Share Count / Dilution",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "The explicit path uses direct RSU, buyback, TSM, and if-converted disclosures, which are IB-relevant, but the fallback path proxies dilution from historical share drift and revenue-scaled SBC. "
+                "That makes the block explainable and directionally useful without making the proxy fallback primary-model grade."
+            ),
+            "non_financial_appropriateness": "Useful for non-financial corporates when explicit dilution data exists; proxy fallback is better for charting than for a primary model.",
+            "bank_appropriateness": "The mechanics can still matter for banks, but the overall model should route banks to a separate bank / broker framework.",
+        },
+        {
+            "key": "balance_sheet_linkage",
+            "label": "Balance-Sheet Linkage",
+            "classification": MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC,
+            "reason": (
+                "The model now rolls retained earnings, residual asset and liability buckets, and a visible balance-sheet delta, with explicit plug-bucket labeling when disclosure is incomplete. "
+                "That is materially closer to an IB balancing framework, but it remains heuristic because fallback buckets and plugs can still stand in for fully disclosed sub-schedules."
+            ),
+            "non_financial_appropriateness": "Useful for non-financial corporates as a balancing framework and diagnostics layer, but still not a fully disclosed banker-grade balance sheet when plug buckets are active.",
+            "bank_appropriateness": bank_guidance,
+        },
+        {
+            "key": "regulated_financial_routing",
+            "label": "Regulated-Financial Routing",
+            "classification": MODEL_SUITABILITY_BANK_ENTITY_SEPARATE_MODEL,
+            "reason": (
+                "This driver engine is organized around revenue, EBIT, operating working capital, capex, and generic financing sweeps. "
+                "Banks, brokers, and other regulated financials need a separate model built around earning assets, funding mix, credit cost, capital ratios, and regulatory balance-sheet constraints."
+            ),
+            "non_financial_appropriateness": "Not applicable to non-financial corporates.",
+            "bank_appropriateness": (
+                "Required because the routing gate classified the issuer for the regulated-financial separate path."
+                if decision.classification == ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE
+                else (
+                    "Industrial driver logic is blocked until the issuer is confirmed non-financial."
+                    if decision.classification == ENTITY_ROUTING_UNSURE_REQUIRE_CONSERVATIVE_FALLBACK
+                    else (
+                        "Required when regulated-financial markers are present."
+                        if bank_markers_present
+                        else "Recommended whenever the issuer is a bank, broker, or other regulated financial."
+                    )
+                )
+            ),
+        },
+    ]
+
+
+def _build_entity_routing_assumption_row(routing_decision: ForecastEntityRoutingDecision) -> dict[str, str]:
+    return {
+        "key": "entity_routing",
+        "label": "Forecast Routing Gate",
+        "value": routing_decision.classification,
+        "detail": f"{routing_decision.display_label}. Reason: {routing_decision.reason} Source: {routing_decision.source}.",
+    }
+
+
+def _build_model_scope_assumption_row(
+    history: list[dict[str, Any]],
+    routing_decision: ForecastEntityRoutingDecision,
+) -> dict[str, str]:
+    bank_markers_present = _history_has_regulated_financial_markers(history)
+    detail = (
+        "IB-style fit by block: operating working capital and the PP&E-based D&A schedule are core for non-financial corporates; revenue growth, margin logic, capex / reinvestment, taxes, and share-count logic remain partly heuristic seed schedules; "
+        "debt / cash / interest now uses a tranche-aware schedule when disclosures exist, and the balance-sheet layer now includes retained earnings, residual asset and liability buckets, and a visible balancing check with explicit plugs when disclosure is incomplete."
+    )
+    if routing_decision.classification == ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE:
+        detail = (
+            f"{detail} The routing gate classified the issuer for the regulated-financial separate path, so industrial DSO/DIO/DPO, sales-to-capital, and industrial capex heuristics are bypassed."
+        )
+        value = "Regulated-financial separate path required before industrial forecasting"
+    elif routing_decision.classification == ENTITY_ROUTING_UNSURE_REQUIRE_CONSERVATIVE_FALLBACK:
+        detail = (
+            f"{detail} The issuer is financial-sector-adjacent without a confirmed regulated-bank classification, so the engine stops short of industrial driver schedules and uses a conservative fallback until routing is clearer."
+        )
+        value = "Conservative fallback active until routing is confirmed"
+    elif bank_markers_present:
+        detail = (
+            f"{detail} Regulated-financial markers were detected in the source statements, so banks / brokers should be routed to a separate bank model instead of stretching this industrial schedule."
+        )
+        value = "Regulated-financial markers detected; separate bank model recommended"
+    else:
+        value = "Industrial scope: OWC, financing, taxes, and balance-sheet diagnostics are upgraded; plug buckets may still be required"
+    return {
+        "key": "model_scope",
+        "label": "Model Scope",
+        "value": value,
+        "detail": detail,
+    }
+
+
+def _build_routing_only_assumption_rows(
+    history: list[dict[str, Any]],
+    routing_decision: ForecastEntityRoutingDecision,
+) -> list[dict[str, str]]:
+    detail = (
+        "The forecast entrypoint now classifies the issuer before industrial driver schedules are built. "
+        "When the route is regulated-financial or uncertain, industrial DSO/DIO/DPO, sales-to-capital, and industrial capex heuristics are not used as the primary framework."
+    )
+    return [
+        _build_entity_routing_assumption_row(routing_decision),
+        _build_model_scope_assumption_row(history, routing_decision),
+        {
+            "key": "routing_policy",
+            "label": "Routing Policy",
+            "value": (
+                "Use regulated-financial path"
+                if routing_decision.classification == ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE
+                else "Use conservative fallback until routing is clearer"
+            ),
+            "detail": f"{detail} Routing source: {routing_decision.source}.",
+        },
+    ]
+
+
+def _build_routing_only_calculation_rows(
+    routing_decision: ForecastEntityRoutingDecision,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "key": "routing_decision",
+            "label": "Forecast Routing Decision",
+            "value": routing_decision.classification,
+            "detail": f"{routing_decision.reason} Source: {routing_decision.source}.",
+        }
+    ]
+
+
 def _build_assumption_rows(
     history: list[dict[str, Any]],
+    routing_decision: ForecastEntityRoutingDecision,
     revenue_drivers: _RevenueDrivers,
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
     below_line_schedule: _BelowLineSchedule,
+    balance_sheet_schedule: _BalanceSheetSchedule,
     dilution_schedule: _DilutionSchedule,
 ) -> list[dict[str, str]]:
     return [
+        _build_entity_routing_assumption_row(routing_decision),
+        _build_model_scope_assumption_row(history, routing_decision),
         {
             "key": "revenue_method",
             "label": "Revenue Method",
@@ -2780,22 +4489,84 @@ def _build_assumption_rows(
             "detail": "Sales-to-capital sizes positive-growth fixed-capital reinvestment only; delta operating working capital is modeled separately in operating cash flow so the bridge does not double count it.",
         },
         {
+            "key": "ppe_schedule",
+            "label": "PP&E Roll-Forward",
+            "value": (
+                f"{_money(reinvestment_schedule.ppe_schedule.opening_net_ppe)} opening net PP&E / "
+                f"{reinvestment_schedule.ppe_schedule.useful_life_years:.1f} years useful life / "
+                f"{_money(reinvestment_schedule.ppe_schedule.annual_disposals)} disposals"
+            ),
+            "detail": (
+                f"Opening basis: {reinvestment_schedule.ppe_schedule.opening_basis}. "
+                f"Useful-life basis: {reinvestment_schedule.ppe_schedule.useful_life_basis}. "
+                f"Disposals basis: {reinvestment_schedule.ppe_schedule.disposals_basis}. "
+                "Ending net PP&E rolls as opening net PP&E + capex - depreciation - disposals."
+            ),
+        },
+        {
             "key": "capex_dep",
             "label": "Capex / Depreciation",
-            "value": f"{_pct(reinvestment_schedule.capex_intensity)} capex / {_pct(reinvestment_schedule.depreciation_ratio)} D&A",
-            "detail": "Capex is the higher of maintenance capex and depreciation plus positive-growth fixed-capital reinvestment.",
+            "value": f"{_pct(reinvestment_schedule.capex_intensity)} capex / {reinvestment_schedule.ppe_schedule.useful_life_years:.1f}-year useful life",
+            "detail": "Capex is the higher of maintenance capex and depreciation plus positive-growth fixed-capital reinvestment, while depreciation is sourced from the PP&E roll-forward rather than a revenue ratio.",
         },
         {
             "key": "below_line_bridge",
             "label": "Below-The-Line Bridge",
-            "value": f"{_pct(below_line_schedule.debt_interest_rate)} debt cost / {_pct(below_line_schedule.cash_yield)} cash yield / {_pct(below_line_schedule.effective_tax_rate)} tax",
+            "value": (
+                f"{_pct(below_line_schedule.debt_interest_rate)} debt cost / {_pct(below_line_schedule.cash_yield)} cash yield / "
+                f"{_pct(below_line_schedule.effective_tax_rate)} book tax / "
+                f"{_pct(below_line_schedule.tax_schedule.cash_tax_rate if below_line_schedule.tax_schedule is not None else below_line_schedule.effective_tax_rate)} cash tax"
+            ),
             "detail": "Pretax income explicitly bridges from EBIT through interest expense, interest income, other income or expense, and taxes instead of using a flat EBIT-to-net conversion.",
+        },
+        {
+            "key": "tax_schedule",
+            "label": "Tax Schedule",
+            "value": (
+                f"{_money(below_line_schedule.tax_schedule.opening_nol if below_line_schedule.tax_schedule is not None else 0.0)} opening NOL / "
+                f"{_pct(below_line_schedule.effective_tax_rate)} book tax / "
+                f"{_pct(below_line_schedule.tax_schedule.cash_tax_rate if below_line_schedule.tax_schedule is not None else below_line_schedule.effective_tax_rate)} cash tax"
+            ),
+            "detail": (
+                f"Mode: {below_line_schedule.tax_basis}. NOL basis: {below_line_schedule.tax_schedule.nol_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis}. "
+                f"Cash-tax basis: {below_line_schedule.tax_schedule.cash_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis}. "
+                f"Deferred-tax basis: {below_line_schedule.tax_schedule.deferred_tax_basis if below_line_schedule.tax_schedule is not None else below_line_schedule.tax_basis}. "
+                "Explicit mode rolls opening NOL + current-period NOL creation - usage = ending NOL and books deferred tax through the DTA movement."
+            ),
+        },
+        {
+            "key": "balance_sheet_framework",
+            "label": "Balance-Sheet Framework",
+            "value": (
+                f"{_money(balance_sheet_schedule.opening_retained_earnings)} opening retained earnings / "
+                f"{_money(balance_sheet_schedule.opening_other_operating_current_assets)} other op current assets / "
+                f"{_money(balance_sheet_schedule.opening_other_long_term_assets_ex_dta)} other long-term assets"
+            ),
+            "detail": (
+                f"Other operating current-assets basis: {balance_sheet_schedule.other_operating_current_assets_basis}. "
+                f"Other long-term-assets basis: {balance_sheet_schedule.other_long_term_assets_basis}. "
+                f"Other-liabilities basis: {balance_sheet_schedule.other_liabilities_basis}. "
+                f"Retained-earnings basis: {balance_sheet_schedule.retained_earnings_basis}. "
+                f"Other-equity basis: {balance_sheet_schedule.other_equity_basis}. "
+                f"Dividends: {balance_sheet_schedule.dividend_basis}. Buybacks: {balance_sheet_schedule.buyback_basis}. "
+                f"Plug mode: {balance_sheet_schedule.plug_bucket_basis}."
+            ),
+        },
+        {
+            "key": "debt_schedule",
+            "label": "Debt Schedule",
+            "value": _debt_schedule_value(below_line_schedule),
+            "detail": _debt_schedule_assumption_detail(below_line_schedule),
         },
         {
             "key": "cash_debt_support",
             "label": "Cash + Debt Support",
             "value": f"{_money(below_line_schedule.starting_cash)} cash / {_money(below_line_schedule.starting_debt)} debt",
-            "detail": f"Cash basis: {below_line_schedule.cash_basis}. Debt basis: {below_line_schedule.debt_basis}. Interest basis: {below_line_schedule.interest_basis}. Other basis: {below_line_schedule.other_basis}. Tax basis: {below_line_schedule.tax_basis}.",
+            "detail": (
+                f"Cash basis: {below_line_schedule.cash_basis}. Debt basis: {below_line_schedule.debt_basis}. "
+                f"Interest basis: {below_line_schedule.interest_basis}. Debt schedule basis: {below_line_schedule.debt_schedule_basis}. "
+                f"Other basis: {below_line_schedule.other_basis}. Tax basis: {below_line_schedule.tax_basis}."
+            ),
         },
         {
             "key": "dilution",
@@ -2833,6 +4604,7 @@ def _build_calculation_rows(
     cost_schedule: _CostSchedule,
     reinvestment_schedule: _ReinvestmentSchedule,
     below_line_schedule: _BelowLineSchedule,
+    balance_sheet_schedule: _BalanceSheetSchedule,
     dilution_schedule: _DilutionSchedule,
     base_scenario: DriverForecastScenario,
 ) -> list[dict[str, str]]:
@@ -2861,7 +4633,8 @@ def _build_calculation_rows(
             "label": "Pretax Income Formula",
             "value": FORECAST_FORMULA_PRETAX,
             "detail": (
-                f"Base FY{base_bridge.year}E: EBIT {_money(base_bridge.ebit)}, interest expense {_money(base_bridge.interest_expense)}, interest income {_money(base_bridge.interest_income)}, other {_money(base_bridge.other_income_expense)}, pretax {_money(base_bridge.pretax_income)}."
+                f"Base FY{base_bridge.year}E: EBIT {_money(base_bridge.ebit)}, interest expense {_money(base_bridge.interest_expense)}, interest income {_money(base_bridge.interest_income)}, other {_money(base_bridge.other_income_expense)}, pretax {_money(base_bridge.pretax_income)}. "
+                f"Interest by tranche: {_debt_interest_breakout(base_bridge.debt_tranches)}."
                 if base_bridge is not None
                 else f"Interest runs at {_pct(below_line_schedule.debt_interest_rate)} on average debt and cash earns {_pct(below_line_schedule.cash_yield)}."
             ),
@@ -2871,9 +4644,14 @@ def _build_calculation_rows(
             "label": "Tax Formula",
             "value": FORECAST_FORMULA_TAX,
             "detail": (
-                f"Base FY{base_bridge.year}E taxes {_money(base_bridge.taxes)} on pretax income {_money(base_bridge.pretax_income)} at {_pct(below_line_schedule.effective_tax_rate)}."
+                (
+                    f"Base FY{base_bridge.year}E: opening NOL {_money(base_bridge.beginning_nol)} + creation {_money(base_bridge.nol_created)} - usage {_money(base_bridge.nol_used)} = ending NOL {_money(base_bridge.ending_nol)}. "
+                    f"Cash tax {_money(base_bridge.cash_tax)} plus deferred tax {_money(base_bridge.deferred_tax_expense)} = book tax {_money(base_bridge.taxes)}."
+                    if below_line_schedule.tax_schedule is not None and below_line_schedule.tax_schedule.uses_explicit_nol_schedule
+                    else f"Base FY{base_bridge.year}E fallback taxes {_money(base_bridge.taxes)} on pretax income {_money(base_bridge.pretax_income)} at {_pct(below_line_schedule.effective_tax_rate)}."
+                )
                 if base_bridge is not None
-                else f"Effective tax rate {_pct(below_line_schedule.effective_tax_rate)} from {below_line_schedule.tax_basis.lower()}."
+                else f"Tax schedule basis: {below_line_schedule.tax_basis}."
             ),
         },
         {
@@ -2882,15 +4660,32 @@ def _build_calculation_rows(
             "value": FORECAST_FORMULA_CAPEX,
             "detail": (
                 (
-                    f"Base FY{base_bridge.year}E: maintenance capex is the higher of {_money((base_revenue or 0.0) * reinvestment_schedule.capex_intensity)} and D&A {_money(base_bridge.depreciation)}; "
+                    f"Base FY{base_bridge.year}E: maintenance capex is the higher of {_money((base_revenue or 0.0) * reinvestment_schedule.capex_intensity)} and PP&E-schedule D&A {_money(base_bridge.depreciation)}; "
                     f"positive-growth fixed capital uses {reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital. "
                     f"Delta operating working capital {_money(base_bridge.delta_working_capital)} flows through OCF, not capex."
                 )
                 if base_bridge is not None
                 else (
-                    f"Maintenance capex uses {_pct(reinvestment_schedule.capex_intensity)} of revenue with a D&A floor; "
+                    f"Maintenance capex uses {_pct(reinvestment_schedule.capex_intensity)} of revenue with a PP&E-schedule D&A floor; "
                     f"positive-growth fixed capital uses {reinvestment_schedule.sales_to_capital:.2f}x sales-to-capital. "
                     "Delta operating working capital flows through OCF, not capex."
+                )
+            ),
+        },
+        {
+            "key": "formula_ppe",
+            "label": "PP&E Roll-Forward Formula",
+            "value": FORECAST_FORMULA_NET_PPE,
+            "detail": (
+                (
+                    f"Base FY{base_bridge.year}E: opening net PP&E {_money(base_bridge.beginning_net_ppe)} + capex {_money(base_bridge.capex)} - "
+                    f"depreciation {_money(base_bridge.depreciation)} - disposals {_money(base_bridge.ppe_disposals)} = ending net PP&E {_money(base_bridge.ending_net_ppe)}. "
+                    f"Useful life {reinvestment_schedule.ppe_schedule.useful_life_years:.1f} years."
+                )
+                if base_bridge is not None
+                else (
+                    f"Opening net PP&E {_money(reinvestment_schedule.ppe_schedule.opening_net_ppe)} rolls with capex, depreciation, and "
+                    f"{_money(reinvestment_schedule.ppe_schedule.annual_disposals)} disposals at {reinvestment_schedule.ppe_schedule.useful_life_years:.1f} years useful life."
                 )
             ),
         },
@@ -2899,7 +4694,7 @@ def _build_calculation_rows(
             "label": "Operating Cash Flow Formula",
             "value": FORECAST_FORMULA_OCF,
             "detail": (
-                f"Base FY{base_bridge.year}E: net income {_money(base_bridge.net_income)} + D&A {_money(base_bridge.depreciation)} + SBC {_money(base_bridge.stock_based_compensation)} - delta operating WC {_money(base_bridge.delta_working_capital)} = OCF {_money(base_bridge.operating_cash_flow)}."
+                f"Base FY{base_bridge.year}E: net income {_money(base_bridge.net_income)} + D&A {_money(base_bridge.depreciation)} + SBC {_money(base_bridge.stock_based_compensation)} + deferred tax {_money(base_bridge.deferred_tax_expense)} - delta operating WC {_money(base_bridge.delta_working_capital)} = OCF {_money(base_bridge.operating_cash_flow)}."
                 if base_bridge is not None
                 else (
                     f"SBC expense ratio {_pct(dilution_schedule.sbc_expense_ratio)}; "
@@ -2917,6 +4712,40 @@ def _build_calculation_rows(
                 f"Base FY{base_bridge.year}E: OCF {_money(base_bridge.operating_cash_flow)} - capex {_money(base_bridge.capex)} = FCF {_money(base_bridge.free_cash_flow)}."
                 if base_bridge is not None
                 else "Cash and debt balances roll forward from free cash flow after preserving a target cash buffer."
+            ),
+        },
+        {
+            "key": "formula_debt_schedule",
+            "label": "Debt Schedule Formula",
+            "value": FORECAST_FORMULA_DEBT_SCHEDULE,
+            "detail": (
+                _debt_schedule_calculation_detail(base_bridge)
+                if base_bridge is not None
+                else f"{below_line_schedule.debt_schedule_basis}. Revolver is the balancing item only after free cash flow and the target cash buffer."
+            ),
+        },
+        {
+            "key": "formula_retained_earnings",
+            "label": "Retained Earnings Formula",
+            "value": FORECAST_FORMULA_RETAINED_EARNINGS,
+            "detail": (
+                f"Base FY{base_bridge.year}E: opening retained earnings {_money(base_bridge.beginning_retained_earnings)} + net income {_money(base_bridge.net_income)} - dividends {_money(base_bridge.dividends)} - buybacks {_money(base_bridge.buyback_cash)} = ending retained earnings {_money(base_bridge.ending_retained_earnings)}."
+                if base_bridge is not None
+                else (
+                    f"Opening retained earnings {_money(balance_sheet_schedule.opening_retained_earnings)} roll with forecast net income, "
+                    f"dividends at {_pct(balance_sheet_schedule.dividend_payout_ratio)}, and buybacks at {_pct(balance_sheet_schedule.buyback_cash_ratio)} of revenue when modeled."
+                )
+            ),
+        },
+        {
+            "key": "formula_balance_sheet",
+            "label": "Balance-Sheet Check",
+            "value": FORECAST_FORMULA_BALANCE_SHEET,
+            "detail": (
+                f"Base FY{base_bridge.year}E: assets {_money(base_bridge.total_assets)} - liabilities and equity {_money(base_bridge.total_liabilities_and_equity)} = delta {_money(base_bridge.balance_sheet_delta)}. "
+                f"Raw delta before plug {_money(base_bridge.balance_sheet_delta_before_plug)}; plug {_money(base_bridge.balance_sheet_plug)} in {base_bridge.balance_sheet_plug_bucket}."
+                if base_bridge is not None
+                else balance_sheet_schedule.plug_bucket_basis
             ),
         },
         {
@@ -3547,6 +5376,42 @@ def _statement_value(statement: Any, key: str) -> float | None:
             if alias_value is not None:
                 return alias_value
         return None
+    if key == "cash_taxes_paid":
+        for alias in ("cash_taxes_paid", "income_taxes_paid", "cash_paid_for_income_taxes"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "current_tax_expense":
+        for alias in ("current_tax_expense", "current_income_tax_expense", "current_tax_provision"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "deferred_tax_expense":
+        for alias in ("deferred_tax_expense", "deferred_income_tax_expense", "deferred_tax_benefit"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "deferred_tax_asset":
+        for alias in ("deferred_tax_asset", "net_deferred_tax_asset", "deferred_tax_assets"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "nol_balance":
+        for alias in ("nol_balance", "net_operating_loss_carryforward", "tax_loss_carryforward", "federal_nol_carryforward"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "dividends_paid":
+        for alias in ("dividends_paid", "cash_dividends_paid", "dividends_paid_common", "dividend_payments"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return abs(alias_value)
+        return None
     if key == "interest_income":
         for alias in ("interest_income", "interest_and_investment_income", "investment_income"):
             alias_value = _as_float(data.get(alias))
@@ -3577,8 +5442,217 @@ def _statement_value(statement: Any, key: str) -> float | None:
         current_debt = _as_float(data.get("current_debt"))
         long_term_debt = _as_float(data.get("long_term_debt"))
         return _sum_non_null(current_debt, long_term_debt)
+    if key == "revolver_debt":
+        for alias in (
+            "revolver_debt",
+            "revolver_balance",
+            "revolving_credit_facility",
+            "revolving_credit_balance",
+            "revolving_credit_borrowings",
+            "abl_revolver_balance",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "term_loan_debt":
+        for alias in (
+            "term_loan_debt",
+            "term_loan_balance",
+            "term_loans",
+            "secured_term_loan_balance",
+            "term_loan_borrowings",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "notes_bonds_debt":
+        for alias in (
+            "notes_bonds_debt",
+            "notes_payable",
+            "notes_and_bonds",
+            "bonds_payable",
+            "senior_notes",
+            "senior_unsecured_notes",
+            "convertible_notes_principal",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "lease_liabilities_debt":
+        for alias in (
+            "lease_liabilities_debt",
+            "lease_liabilities",
+            "operating_lease_liabilities",
+            "finance_lease_liabilities",
+            "lease_obligations",
+            "capital_lease_obligations",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "revolver_interest_rate":
+        for alias in ("revolver_interest_rate", "revolving_credit_interest_rate", "revolver_rate"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return _clip(alias_value, 0.0, DEBT_INTEREST_RATE_CAP)
+        return None
+    if key == "term_loan_interest_rate":
+        for alias in ("term_loan_interest_rate", "term_loan_rate", "secured_term_loan_interest_rate"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return _clip(alias_value, 0.0, DEBT_INTEREST_RATE_CAP)
+        return None
+    if key == "notes_interest_rate":
+        for alias in ("notes_interest_rate", "notes_coupon_rate", "bond_coupon_rate", "senior_notes_interest_rate"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return _clip(alias_value, 0.0, DEBT_INTEREST_RATE_CAP)
+        return None
+    if key == "lease_interest_rate":
+        for alias in ("lease_interest_rate", "lease_discount_rate", "finance_lease_interest_rate"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return _clip(alias_value, 0.0, DEBT_INTEREST_RATE_CAP)
+        return None
+    if key == "term_loan_mandatory_amortization":
+        for alias in ("term_loan_mandatory_amortization", "term_loan_amortization", "mandatory_term_loan_repayment"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return abs(alias_value)
+        return None
+    if key == "notes_maturity_repayment":
+        for alias in ("notes_maturity_repayment", "notes_due_within_one_year", "bond_maturity_repayment"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return abs(alias_value)
+        return None
+    if key == "lease_principal_payment":
+        for alias in ("lease_principal_payment", "lease_payments_principal", "lease_liability_repayment"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return abs(alias_value)
+        return None
+    if key == "current_maturities_debt":
+        for alias in (
+            "current_maturities_debt",
+            "current_maturities_of_long_term_debt",
+            "current_portion_of_long_term_debt",
+            "debt_due_within_one_year",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return abs(alias_value)
+        return None
+    if key == "total_liabilities":
+        for alias in ("total_liabilities", "liabilities", "total_liabilities_net_minority_interest"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        total_assets = _as_float(data.get("total_assets"))
+        total_equity = _as_float(data.get("total_equity") or data.get("shareholders_equity") or data.get("stockholders_equity"))
+        if total_assets is not None and total_equity is not None:
+            return total_assets - total_equity
+        return None
+    if key == "total_equity":
+        for alias in (
+            "total_equity",
+            "shareholders_equity",
+            "stockholders_equity",
+            "total_stockholders_equity",
+            "total_shareholders_equity",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        total_assets = _as_float(data.get("total_assets"))
+        total_liabilities = _as_float(data.get("total_liabilities") or data.get("liabilities"))
+        if total_assets is not None and total_liabilities is not None:
+            return total_assets - total_liabilities
+        return None
+    if key == "retained_earnings":
+        for alias in ("retained_earnings", "accumulated_deficit", "retained_earnings_accumulated_deficit"):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        return None
+    if key == "net_ppe":
+        for alias in (
+            "net_ppe",
+            "net_property_plant_equipment",
+            "net_property_plant_and_equipment",
+            "property_plant_and_equipment_net",
+            "property_plant_equipment_net",
+            "ppe_net",
+            "fixed_assets_net",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return alias_value
+        gross_ppe = _as_float(
+            data.get("gross_ppe")
+            or data.get("gross_property_plant_equipment")
+            or data.get("gross_property_plant_and_equipment")
+            or data.get("property_plant_and_equipment_gross")
+        )
+        accumulated_depreciation = _as_float(
+            data.get("accumulated_depreciation")
+            or data.get("accumulated_depreciation_and_amortization")
+            or data.get("accumulated_depreciation_ppe")
+        )
+        if gross_ppe is not None and accumulated_depreciation is not None:
+            return max(0.0, gross_ppe - accumulated_depreciation)
+        return None
+    if key == "ppe_disposals":
+        for alias in (
+            "ppe_disposals",
+            "asset_disposals",
+            "property_plant_equipment_disposals",
+            "disposals_of_property_plant_and_equipment",
+            "net_book_value_of_asset_disposals",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return abs(alias_value)
+        return None
     if key == "gross_profit":
         return _as_float(data.get("gross_profit"))
+    if key == "other_operating_current_assets":
+        for alias in (
+            "other_operating_current_assets",
+            "other_current_assets_operating",
+            "prepaid_expenses_and_other_current_assets",
+            "other_current_assets",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "other_long_term_assets":
+        for alias in (
+            "other_long_term_assets",
+            "other_noncurrent_assets",
+            "other_assets_noncurrent",
+            "other_assets",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
+    if key == "other_liabilities":
+        for alias in (
+            "other_liabilities",
+            "other_noncurrent_liabilities",
+            "other_long_term_liabilities",
+            "other_current_and_noncurrent_liabilities",
+        ):
+            alias_value = _as_float(data.get(alias))
+            if alias_value is not None:
+                return max(0.0, alias_value)
+        return None
     if key == "cost_of_revenue":
         direct_value = _as_float(data.get("cost_of_revenue") or data.get("cost_of_goods_sold"))
         if direct_value is not None:

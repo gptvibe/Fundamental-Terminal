@@ -5,6 +5,8 @@
 The charts dashboard now prefers a driver-based integrated forecast engine for `/company/[ticker]/charts`.
 The payload contract is unchanged: the endpoint still emits base / bull / bear scenario series plus the same assumptions and calculations cards.
 When statement coverage is too thin, it still falls back to the older guarded heuristic model instead of fabricating driver inputs.
+Before industrial schedules are built, the forecast entrypoint now classifies the issuer as `NONFIN_IB_MODEL`, `REGULATED_FINANCIAL_SEPARATE`, or `UNSURE_REQUIRE_CONSERVATIVE_FALLBACK`.
+That gate prevents bank-style and other regulated-financial issuers from being silently modeled with industrial operating-working-capital, sales-to-capital, and capex heuristics.
 
 The driver bundle now also carries backend-only `line_traces` for the core base-scenario projected lines: revenue, cost of revenue, gross profit, operating income, pretax income, income tax, net income, accounts receivable, inventory, accounts payable, deferred revenue, accrued operating liabilities, depreciation and amortization, SBC expense, capex, operating cash flow, free cash flow, diluted shares, and EPS.
 Those traces are generated inside the forecast flow from the same schedules and bridge points used to compute the forecast.
@@ -22,12 +24,14 @@ That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF
 ## Migration Path
 
 1. `build_company_charts_dashboard_response(...)` now loads annual statements, point-in-time-safe earnings-model diagnostics, and point-in-time-safe earnings releases.
-2. `build_driver_forecast_bundle(...)` is attempted first.
-3. If the driver bundle is available, the payload renders:
+2. `build_driver_forecast_bundle(...)` first runs the bank-suitability routing gate.
+3. If the issuer is tagged `NONFIN_IB_MODEL`, the industrial driver bundle is built and the payload renders:
    - base / bull / bear revenue, growth, and EPS cases
    - base-case profit and cash-flow schedules
    - separate assumption and calculation cards
-4. If the driver bundle is unavailable, the existing heuristic extrapolation path remains active and the payload shape stays valid.
+4. If the issuer is tagged `REGULATED_FINANCIAL_SEPARATE`, the industrial driver engine is bypassed and the UI surfaces routing metadata instead of silently stretching DSO/DIO/DPO and industrial capex logic onto a bank-style balance sheet.
+5. If the issuer is tagged `UNSURE_REQUIRE_CONSERVATIVE_FALLBACK`, the UI stays on the guarded heuristic fallback and surfaces the routing warning in assumptions metadata.
+6. If the driver bundle is otherwise unavailable because coverage is thin, the existing heuristic extrapolation path remains active and the payload shape stays valid.
 
 ## Core Formulas
 
@@ -41,7 +45,7 @@ That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF
 - Pretax bridge:
   `Pretax income = EBIT - interest expense + interest income + other income/expense`
 - Taxes:
-  `Taxes = Pretax income * effective tax rate`
+  `Book tax expense = cash tax + deferred tax expense; cash tax = max(pretax income - NOL usage, 0) x cash tax rate`
 - Net income:
   `Net income = Pretax income - taxes`
 - Operating working capital:
@@ -63,7 +67,7 @@ That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF
 - Capex:
   `Capex = max(maintenance capex, D&A + growth reinvestment)`
 - Operating cash flow:
-  `OCF = Net income + D&A + SBC - delta operating working capital`
+  `OCF = Net income + D&A + SBC + deferred tax expense - delta operating working capital`
 - Free cash flow:
   `FCF = OCF - Capex`
 - Cash and debt support:
@@ -91,9 +95,12 @@ That split preserves the full `EBIT -> pretax income -> net income -> OCF -> FCF
 - Debt cost uses historical `interest_expense / average debt` when disclosed.
 - Cash yield uses historical `interest_income / average cash` when disclosed.
 - Other income/expense uses direct disclosure first, then a residual bridge from pretax income if available.
-- Effective tax rate uses historical `income_tax_expense / pretax income` when disclosed.
+- Book tax rate uses historical `income_tax_expense / pretax income` when disclosed, while cash tax rate uses direct cash taxes or current-tax disclosure when available and otherwise falls back to the modeled book rate.
+- When tax disclosure is sufficient, the engine rolls opening NOL, current-period NOL creation, NOL usage, and ending NOL explicitly, with a simplified deferred-tax-asset bridge tied to the NOL balance.
 - The diluted-share bridge starts from disclosed basic weighted-average shares when available, then layers on treasury-stock-method option and warrant dilution, disclosed RSU or stock-award issuance, explicit buyback retirement, acquisition share issuance, and if-converted shares for dilutive converts.
 - If the filings do not disclose enough share-bridge components to support that build, the engine falls back to the older historical-share-drift proxy and labels that fallback explicitly in the assumptions card.
+- Regulated-financial routing uses company classification from `regulated_financials.classify_regulated_entity(...)` first, then statement-level bank markers such as regulatory source ids, net interest income, deposits, and capital-ratio fields.
+- Financial-sector-adjacent issuers without a confirmed bank classification are tagged `UNSURE_REQUIRE_CONSERVATIVE_FALLBACK` so the engine does not assert industrial IB-style working-capital and reinvestment schedules prematurely.
 
 ## Fallback Behavior
 
@@ -108,9 +115,10 @@ The driver engine still prefers explicit disclosure, but it uses conservative sh
 - If historical debt cost is missing, new or existing debt accrues at a default debt rate rather than a company-specific disclosed rate.
 - If historical cash yield is missing, surplus cash earns a default cash yield.
 - If other income/expense is not directly disclosed, the engine back-solves it from the historical pretax bridge when possible; otherwise it assumes zero.
-- If historical tax data is missing, taxes default to a conservative effective tax rate, with capped tax benefits on loss-making forecast years.
+- If historical tax data is thin, taxes fall back to a clearly labeled simple effective-tax-rate method rather than an explicit NOL schedule.
 - If explicit share-bridge disclosures are missing, diluted shares fall back to historical diluted-share drift with revenue-scaled SBC, buyback, acquisition, and convert proxies, and that fallback is called out directly in the assumptions output.
 - If annual history is too thin to support explicit revenue, cost, reinvestment, and dilution schedules, the entire driver engine is bypassed and the older heuristic forecast remains the fallback.
+- If the routing gate classifies the issuer as `REGULATED_FINANCIAL_SEPARATE`, the industrial driver engine is bypassed even when statement history is otherwise deep enough.
 
 These shortcuts are intentionally narrow: they preserve a full EBIT -> EBT -> Net income -> OCF -> FCF bridge without reintroducing the old `net_income = EBIT * conversion` shortcut.
 They also preserve working-capital release in declining revenue scenarios because the operating working-capital balances are explicitly re-scaled down with the lower revenue and cost base.

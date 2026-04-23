@@ -77,6 +77,15 @@ def _driver_forecast_statement(
     payable_days: float,
     deferred_revenue_days: float = 0.0,
     accrued_liability_days: float = 0.0,
+    net_ppe: float | None = None,
+    ppe_disposals: float | None = None,
+    cash_balance: float | None = None,
+    current_debt: float | None = None,
+    long_term_debt: float | None = None,
+    total_debt: float | None = None,
+    interest_expense: float | None = None,
+    interest_income: float | None = None,
+    extra_data: dict[str, float | None] | None = None,
 ) -> SimpleNamespace:
     cost_of_revenue = revenue * 0.55
     depreciation = revenue * 0.03
@@ -85,38 +94,41 @@ def _driver_forecast_statement(
     income_tax_expense = pretax_income * 0.21
     net_income = pretax_income - income_tax_expense
     cash_operating_cost = revenue - operating_income - depreciation
-    return _statement(
-        year,
-        {
-            "revenue": revenue,
-            "gross_profit": revenue - cost_of_revenue,
-            "operating_income": operating_income,
-            "pretax_income": pretax_income,
-            "income_tax_expense": income_tax_expense,
-            "net_income": net_income,
-            "operating_cash_flow": revenue * 0.13,
-            "free_cash_flow": revenue * 0.09,
-            "capex": revenue * 0.04,
-            "depreciation_and_amortization": depreciation,
-            "weighted_average_diluted_shares": 100.0,
-            "accounts_receivable": driver_model._days_to_balance(revenue, receivables_days),
-            "inventory": driver_model._days_to_balance(cost_of_revenue, inventory_days),
-            "accounts_payable": driver_model._days_to_balance(cost_of_revenue, payable_days),
-            "deferred_revenue": driver_model._days_to_balance(revenue, deferred_revenue_days),
-            "accrued_operating_liabilities": driver_model._days_to_balance(cash_operating_cost, accrued_liability_days),
-            "current_assets": revenue * 0.40,
-            "current_liabilities": revenue * 0.20,
-            "total_assets": revenue * 1.20,
-            "cash_and_cash_equivalents": revenue * 0.18,
-            "current_debt": revenue * 0.02,
-            "long_term_debt": revenue * 0.18,
-            "interest_expense": revenue * 0.01,
-            "interest_income": revenue * 0.002,
-            "other_income_expense": -(revenue * 0.001),
-            "stock_based_compensation": revenue * 0.01,
-            "share_buybacks": revenue * 0.003,
-        },
-    )
+    data = {
+        "revenue": revenue,
+        "gross_profit": revenue - cost_of_revenue,
+        "operating_income": operating_income,
+        "pretax_income": pretax_income,
+        "income_tax_expense": income_tax_expense,
+        "net_income": net_income,
+        "operating_cash_flow": revenue * 0.13,
+        "free_cash_flow": revenue * 0.09,
+        "capex": revenue * 0.04,
+        "depreciation_and_amortization": depreciation,
+        "weighted_average_diluted_shares": 100.0,
+        "accounts_receivable": driver_model._days_to_balance(revenue, receivables_days),
+        "inventory": driver_model._days_to_balance(cost_of_revenue, inventory_days),
+        "accounts_payable": driver_model._days_to_balance(cost_of_revenue, payable_days),
+        "deferred_revenue": driver_model._days_to_balance(revenue, deferred_revenue_days),
+        "accrued_operating_liabilities": driver_model._days_to_balance(cash_operating_cost, accrued_liability_days),
+        "net_ppe": net_ppe,
+        "ppe_disposals": ppe_disposals,
+        "current_assets": revenue * 0.40,
+        "current_liabilities": revenue * 0.20,
+        "total_assets": revenue * 1.20,
+        "cash_and_cash_equivalents": revenue * 0.18 if cash_balance is None else cash_balance,
+        "current_debt": revenue * 0.02 if current_debt is None else current_debt,
+        "long_term_debt": revenue * 0.18 if long_term_debt is None else long_term_debt,
+        "total_debt": total_debt,
+        "interest_expense": revenue * 0.01 if interest_expense is None else interest_expense,
+        "interest_income": revenue * 0.002 if interest_income is None else interest_income,
+        "other_income_expense": -(revenue * 0.001),
+        "stock_based_compensation": revenue * 0.01,
+        "share_buybacks": revenue * 0.003,
+    }
+    if extra_data:
+        data.update(extra_data)
+    return _statement(year, data)
 
 
 def _standard_driver_regression_statements() -> list[SimpleNamespace]:
@@ -124,6 +136,283 @@ def _standard_driver_regression_statements() -> list[SimpleNamespace]:
         _driver_forecast_statement(2023, 900.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, deferred_revenue_days=3.0, accrued_liability_days=3.0),
         _driver_forecast_statement(2024, 1000.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, deferred_revenue_days=3.0, accrued_liability_days=3.0),
         _driver_forecast_statement(2025, 1100.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, deferred_revenue_days=3.0, accrued_liability_days=3.0),
+    ]
+
+
+def _ppe_disclosure_driver_statements() -> list[SimpleNamespace]:
+    return [
+        _driver_forecast_statement(2023, 900.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, net_ppe=310.0, ppe_disposals=4.0),
+        _driver_forecast_statement(2024, 1000.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, net_ppe=340.0, ppe_disposals=5.0),
+        _driver_forecast_statement(2025, 1100.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, net_ppe=369.0, ppe_disposals=6.0),
+    ]
+
+
+def _ppe_sparse_driver_statements() -> list[SimpleNamespace]:
+    return [
+        _driver_forecast_statement(2023, 900.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, net_ppe=310.0),
+        _driver_forecast_statement(2024, 1000.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, net_ppe=340.0),
+        _driver_forecast_statement(2025, 1100.0, receivables_days=55.0, inventory_days=32.0, payable_days=28.0, net_ppe=None),
+    ]
+
+
+def _loss_recovery_tax_driver_statements() -> list[SimpleNamespace]:
+    return [
+        _driver_forecast_statement(
+            2023,
+            900.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            extra_data={
+                "pretax_income": 118.0,
+                "income_tax_expense": 24.0,
+                "net_income": 94.0,
+                "cash_taxes_paid": 24.0,
+            },
+        ),
+        _driver_forecast_statement(
+            2024,
+            850.0,
+            receivables_days=58.0,
+            inventory_days=34.0,
+            payable_days=29.0,
+            extra_data={
+                "operating_income": -42.0,
+                "pretax_income": -80.0,
+                "income_tax_expense": -16.0,
+                "net_income": -64.0,
+                "operating_cash_flow": -36.0,
+                "free_cash_flow": -70.0,
+                "cash_taxes_paid": 0.0,
+            },
+        ),
+        _driver_forecast_statement(
+            2025,
+            980.0,
+            receivables_days=56.0,
+            inventory_days=33.0,
+            payable_days=28.0,
+            extra_data={
+                "pretax_income": 60.0,
+                "income_tax_expense": 0.0,
+                "net_income": 60.0,
+                "cash_taxes_paid": 0.0,
+            },
+        ),
+    ]
+
+
+def _sparse_tax_driver_statements() -> list[SimpleNamespace]:
+    return [
+        _driver_forecast_statement(
+            2023,
+            900.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            extra_data={
+                "income_tax_expense": None,
+                "cash_taxes_paid": None,
+                "current_tax_expense": None,
+                "deferred_tax_expense": None,
+                "deferred_tax_asset": None,
+                "net_income": 118.0,
+            },
+        ),
+        _driver_forecast_statement(
+            2024,
+            1000.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            extra_data={
+                "income_tax_expense": None,
+                "cash_taxes_paid": None,
+                "current_tax_expense": None,
+                "deferred_tax_expense": None,
+                "deferred_tax_asset": None,
+                "net_income": 131.0,
+            },
+        ),
+        _driver_forecast_statement(
+            2025,
+            1100.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            extra_data={
+                "income_tax_expense": None,
+                "cash_taxes_paid": None,
+                "current_tax_expense": None,
+                "deferred_tax_expense": None,
+                "deferred_tax_asset": None,
+                "net_income": 144.1,
+            },
+        ),
+    ]
+
+
+def _balanced_balance_sheet_driver_statements() -> list[SimpleNamespace]:
+    statements: list[SimpleNamespace] = []
+    for year, revenue, net_ppe in ((2023, 900.0, 280.0), (2024, 1000.0, 310.0), (2025, 1100.0, 340.0)):
+        statement = _driver_forecast_statement(
+            year,
+            revenue,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            net_ppe=net_ppe,
+            cash_balance=revenue * 0.12,
+            current_debt=20.0,
+            long_term_debt=80.0,
+            total_debt=100.0,
+            extra_data={
+                "stock_based_compensation": 0.0,
+                "share_buybacks": 0.0,
+                "dividends_paid": 0.0,
+            },
+        )
+        data = statement.data
+        current_assets = data["cash_and_cash_equivalents"] + data["accounts_receivable"] + data["inventory"]
+        total_assets = current_assets + data["net_ppe"]
+        total_liabilities = data["accounts_payable"] + data["current_debt"] + data["long_term_debt"]
+        total_equity = total_assets - total_liabilities
+        data.update(
+            {
+                "current_assets": current_assets,
+                "current_liabilities": data["accounts_payable"] + data["current_debt"],
+                "total_assets": total_assets,
+                "total_liabilities": total_liabilities,
+                "total_equity": total_equity,
+                "retained_earnings": total_equity,
+                "cash_taxes_paid": data["income_tax_expense"],
+            }
+        )
+        statements.append(statement)
+    return statements
+
+
+def _plugged_balance_sheet_driver_statements() -> list[SimpleNamespace]:
+    statements = _balanced_balance_sheet_driver_statements()
+    for statement in statements:
+        statement.data["total_assets"] = float(statement.data["total_assets"]) + 40.0
+        statement.data.pop("total_liabilities", None)
+        statement.data.pop("total_equity", None)
+        statement.data["retained_earnings"] = float(statement.data["retained_earnings"])
+    return statements
+
+
+def _no_debt_draw_driver_statements() -> list[SimpleNamespace]:
+    statements: list[SimpleNamespace] = []
+    for year, revenue in ((2023, 900.0), (2024, 1000.0), (2025, 1100.0)):
+        statements.append(
+            _statement(
+                year,
+                {
+                    "revenue": revenue,
+                    "gross_profit": revenue * 0.42,
+                    "operating_income": revenue * 0.06,
+                    "pretax_income": revenue * 0.055,
+                    "income_tax_expense": revenue * 0.011,
+                    "net_income": revenue * 0.044,
+                    "operating_cash_flow": revenue * 0.05,
+                    "free_cash_flow": -(revenue * 0.08),
+                    "capex": revenue * 0.13,
+                    "depreciation_and_amortization": revenue * 0.02,
+                    "weighted_average_diluted_shares": 100.0,
+                    "accounts_receivable": revenue * 0.12,
+                    "inventory": revenue * 0.08,
+                    "accounts_payable": revenue * 0.06,
+                    "cash_and_cash_equivalents": revenue * 0.005,
+                    "current_debt": None,
+                    "long_term_debt": None,
+                    "total_debt": None,
+                    "interest_expense": 0.0,
+                    "interest_income": 0.0,
+                    "stock_based_compensation": revenue * 0.005,
+                },
+            )
+        )
+    return statements
+
+
+def _multi_tranche_driver_statements() -> list[SimpleNamespace]:
+    return [
+        _driver_forecast_statement(
+            2023,
+            900.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            cash_balance=24.0,
+            current_debt=18.0,
+            long_term_debt=162.0,
+            total_debt=180.0,
+            extra_data={
+                "revolver_debt": 24.0,
+                "term_loan_debt": 68.0,
+                "notes_bonds_debt": 73.0,
+                "lease_liabilities": 15.0,
+                "revolver_interest_rate": 0.060,
+                "term_loan_interest_rate": 0.055,
+                "notes_interest_rate": 0.0475,
+                "lease_interest_rate": 0.040,
+                "term_loan_mandatory_amortization": 8.0,
+                "notes_maturity_repayment": 0.0,
+                "lease_principal_payment": 4.0,
+                "current_maturities_debt": 12.0,
+            },
+        ),
+        _driver_forecast_statement(
+            2024,
+            1000.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            cash_balance=20.0,
+            current_debt=18.0,
+            long_term_debt=167.0,
+            total_debt=185.0,
+            extra_data={
+                "revolver_debt": 26.0,
+                "term_loan_debt": 69.0,
+                "notes_bonds_debt": 75.0,
+                "lease_liabilities": 15.0,
+                "revolver_interest_rate": 0.060,
+                "term_loan_interest_rate": 0.055,
+                "notes_interest_rate": 0.0475,
+                "lease_interest_rate": 0.040,
+                "term_loan_mandatory_amortization": 8.0,
+                "notes_maturity_repayment": 0.0,
+                "lease_principal_payment": 4.0,
+                "current_maturities_debt": 12.0,
+            },
+        ),
+        _driver_forecast_statement(
+            2025,
+            1100.0,
+            receivables_days=55.0,
+            inventory_days=32.0,
+            payable_days=28.0,
+            cash_balance=120.0,
+            current_debt=18.0,
+            long_term_debt=172.0,
+            total_debt=190.0,
+            extra_data={
+                "revolver_debt": 30.0,
+                "term_loan_debt": 70.0,
+                "notes_bonds_debt": 75.0,
+                "lease_liabilities": 15.0,
+                "revolver_interest_rate": 0.060,
+                "term_loan_interest_rate": 0.055,
+                "notes_interest_rate": 0.0475,
+                "lease_interest_rate": 0.040,
+                "term_loan_mandatory_amortization": 8.0,
+                "notes_maturity_repayment": 12.0,
+                "lease_principal_payment": 4.0,
+                "current_maturities_debt": 12.0,
+            },
+        ),
     ]
 
 
@@ -1100,28 +1389,57 @@ def _assert_base_bridge_formulas(bundle: driver_model.DriverForecastBundle, stat
     )
     fixed_cost = max(0.0, cost_schedule.fixed_cost_base * (1.0 + fixed_cost_growth))
     growth_reinvestment = max(next_revenue - previous_revenue, 0.0) / reinvestment_schedule.sales_to_capital
+    expected_depreciation = min(
+        reinvestment_schedule.ppe_schedule.opening_net_ppe * reinvestment_schedule.depreciation_ratio,
+        reinvestment_schedule.ppe_schedule.opening_net_ppe + (next_revenue * reinvestment_schedule.capex_intensity) - reinvestment_schedule.ppe_schedule.annual_disposals,
+    )
     maintenance_capex = max(next_revenue * reinvestment_schedule.capex_intensity, bridge.depreciation)
 
     assert bridge.ebit == pytest.approx(next_revenue - variable_cost - semi_cost - fixed_cost, abs=1e-6)
     assert bridge.ebit == pytest.approx(base_scenario.operating_income.values[0], abs=1e-6)
+    assert bridge.depreciation == pytest.approx(expected_depreciation, abs=1e-6)
     assert bridge.pretax_income == pytest.approx(
         bridge.ebit - bridge.interest_expense + bridge.interest_income + bridge.other_income_expense,
         abs=1e-6,
     )
-    assert bridge.taxes == pytest.approx(
-        driver_model._project_taxes(bridge.pretax_income, below_line_schedule.effective_tax_rate),
-        abs=1e-6,
+    expected_tax_point = driver_model._project_tax_schedule(
+        bridge.pretax_income,
+        below_line_schedule.tax_schedule,
+        opening_nol=bridge.beginning_nol,
+        opening_deferred_tax_asset=bridge.beginning_deferred_tax_asset,
     )
+    assert bridge.taxes == pytest.approx(expected_tax_point.book_tax_expense, abs=1e-6)
+    assert bridge.cash_tax == pytest.approx(expected_tax_point.cash_tax, abs=1e-6)
+    assert bridge.deferred_tax_expense == pytest.approx(expected_tax_point.deferred_tax_expense, abs=1e-6)
+    assert bridge.ending_nol == pytest.approx(bridge.beginning_nol + bridge.nol_created - bridge.nol_used, abs=1e-6)
     assert bridge.net_income == pytest.approx(bridge.pretax_income - bridge.taxes, abs=1e-6)
     assert bridge.operating_cash_flow == pytest.approx(
-        bridge.net_income + bridge.depreciation + bridge.stock_based_compensation - bridge.delta_working_capital,
+        bridge.net_income + bridge.depreciation + bridge.stock_based_compensation + bridge.deferred_tax_expense - bridge.delta_working_capital,
         abs=1e-6,
     )
     assert bridge.capex == pytest.approx(
         max(maintenance_capex, bridge.depreciation + growth_reinvestment),
         abs=1e-6,
     )
+    assert bridge.ending_net_ppe == pytest.approx(
+        bridge.beginning_net_ppe + bridge.capex - bridge.depreciation - bridge.ppe_disposals,
+        abs=1e-6,
+    )
     assert bridge.free_cash_flow == pytest.approx(bridge.operating_cash_flow - bridge.capex, abs=1e-6)
+    assert bridge.beginning_debt == pytest.approx(sum(tranche.opening_balance for tranche in bridge.debt_tranches), abs=1e-6)
+    assert bridge.ending_debt == pytest.approx(sum(tranche.ending_balance for tranche in bridge.debt_tranches), abs=1e-6)
+    assert bridge.interest_expense == pytest.approx(
+        sum(tranche.average_balance * tranche.interest_rate for tranche in bridge.debt_tranches),
+        abs=1e-6,
+    )
+    assert bridge.ending_retained_earnings == pytest.approx(
+        bridge.beginning_retained_earnings + bridge.net_income - bridge.dividends - bridge.buyback_cash,
+        abs=1e-6,
+    )
+    assert bridge.balance_sheet_delta == pytest.approx(
+        bridge.total_assets - bridge.total_liabilities_and_equity,
+        abs=1e-6,
+    )
     assert base_scenario.net_income.values[0] == pytest.approx(bridge.net_income, abs=1e-6)
     assert base_scenario.operating_cash_flow.values[0] == pytest.approx(bridge.operating_cash_flow, abs=1e-6)
     assert base_scenario.capex.values[0] == pytest.approx(bridge.capex, abs=1e-6)
@@ -1160,10 +1478,7 @@ def _assert_trace_math(trace: driver_model.FormulaTrace) -> None:
             + _trace_input_value(trace, "other_income_expense")
         )
     elif trace.line_item == "income_tax":
-        expected = driver_model._project_taxes(
-            _trace_input_value(trace, "pretax_income"),
-            _trace_input_value(trace, "effective_tax_rate"),
-        )
+        expected = _trace_input_value(trace, "cash_tax") + _trace_input_value(trace, "deferred_tax_expense")
     elif trace.line_item == "net_income":
         expected = _trace_input_value(trace, "pretax_income") - _trace_input_value(trace, "taxes")
     elif trace.line_item == "accounts_receivable":
@@ -1192,10 +1507,13 @@ def _assert_trace_math(trace: driver_model.FormulaTrace) -> None:
             _trace_input_value(trace, "accrued_operating_liabilities_days"),
         )
     elif trace.line_item == "depreciation_amortization":
-        expected = max(
-            0.0,
-            (_trace_input_value(trace, "previous_depreciation") * 0.50)
-            + ((_trace_input_value(trace, "revenue") * _trace_input_value(trace, "depreciation_ratio")) * 0.50),
+        expected = _trace_input_value(trace, "opening_net_ppe") / _trace_input_value(trace, "useful_life_years")
+    elif trace.line_item == "net_ppe":
+        expected = (
+            _trace_input_value(trace, "opening_net_ppe")
+            + _trace_input_value(trace, "capex")
+            - _trace_input_value(trace, "depreciation_amortization")
+            - _trace_input_value(trace, "ppe_disposals")
         )
     elif trace.line_item == "sbc_expense":
         expected = _trace_input_value(trace, "revenue") * _trace_input_value(trace, "sbc_ratio")
@@ -1209,6 +1527,7 @@ def _assert_trace_math(trace: driver_model.FormulaTrace) -> None:
             _trace_input_value(trace, "net_income")
             + _trace_input_value(trace, "depreciation")
             + _trace_input_value(trace, "stock_based_compensation")
+            + _trace_input_value(trace, "deferred_tax_expense")
             - _trace_input_value(trace, "delta_operating_working_capital")
         )
     elif trace.line_item == "free_cash_flow":
@@ -2799,8 +3118,11 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
     assert calculation_rows["formula_pretax"]["value"] == driver_model.FORECAST_FORMULA_PRETAX
     assert calculation_rows["formula_tax"]["value"] == driver_model.FORECAST_FORMULA_TAX
     assert calculation_rows["formula_reinvestment"]["value"] == driver_model.FORECAST_FORMULA_CAPEX
+    assert calculation_rows["formula_ppe"]["value"] == driver_model.FORECAST_FORMULA_NET_PPE
     assert calculation_rows["formula_ocf"]["value"] == driver_model.FORECAST_FORMULA_OCF
     assert calculation_rows["formula_fcf"]["value"] == driver_model.FORECAST_FORMULA_FCF
+    assert calculation_rows["formula_retained_earnings"]["value"] == driver_model.FORECAST_FORMULA_RETAINED_EARNINGS
+    assert calculation_rows["formula_balance_sheet"]["value"] == driver_model.FORECAST_FORMULA_BALANCE_SHEET
     assert calculation_rows["formula_eps"]["value"] == (
         "Net income / diluted shares, with basic shares rolled by proxy net dilution and diluted shares topped up by a latent dilution overlay"
     )
@@ -2809,8 +3131,14 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_pretax"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_tax"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_reinvestment"]["detail"]
+    assert f"Base FY{bridge.year}E" in calculation_rows["formula_ppe"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_ocf"]["detail"]
     assert f"Base FY{bridge.year}E" in calculation_rows["formula_fcf"]["detail"]
+    assert f"Base FY{bridge.year}E" in calculation_rows["formula_retained_earnings"]["detail"]
+    assert f"Base FY{bridge.year}E" in calculation_rows["formula_balance_sheet"]["detail"]
+    assert "PP&E-schedule D&A" in calculation_rows["formula_reinvestment"]["detail"]
+    assert "opening net PP&E" in calculation_rows["formula_ppe"]["detail"]
+    assert "ending net PP&E" in calculation_rows["formula_ppe"]["detail"]
     assert "Guidance blend active: 35% model 8.8% + 65% guided 9.1% toward $1200.00 = 9.0%." in calculation_rows["formula_revenue"]["detail"]
     assert "residual-implied demand growth 8.6%" in calculation_rows["formula_revenue"]["detail"]
     assert "share/mix proxy 0.0%" in calculation_rows["formula_revenue"]["detail"]
@@ -2820,6 +3148,341 @@ def test_driver_forecast_calculation_rows_match_backend_formula_contract():
         "Proxy basis: Historical diluted-share growth with revenue-scaled SBC, buyback, acquisition, and convert proxies. "
         f"EPS = {driver_model._money(base_scenario.net_income.values[0])} / 100 = {driver_model._money(base_scenario.eps.values[0])}."
     )
+
+
+def test_driver_forecast_bundle_uses_disclosed_ppe_history_for_depreciation_schedule():
+    statements = _ppe_disclosure_driver_statements()
+    history = driver_model._normalize_statements(statements)
+    cost_schedule = driver_model._derive_cost_schedule(history)
+    reinvestment_schedule = driver_model._derive_reinvestment_schedule(history, cost_schedule)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    ppe_assumption = next(row for row in bundle.assumption_rows if row["key"] == "ppe_schedule")
+    ppe_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_ppe")
+
+    assert reinvestment_schedule.ppe_schedule.opening_net_ppe == pytest.approx(369.0, abs=1e-6)
+    assert reinvestment_schedule.ppe_schedule.annual_disposals == pytest.approx(5.0, abs=1e-6)
+    assert reinvestment_schedule.depreciation_ratio == pytest.approx(33.0 / 369.0, abs=1e-6)
+    assert bridge.depreciation == pytest.approx(369.0 * reinvestment_schedule.depreciation_ratio, abs=1e-6)
+    assert bridge.ending_net_ppe == pytest.approx(bridge.beginning_net_ppe + bridge.capex - bridge.depreciation - bridge.ppe_disposals, abs=1e-6)
+    assert "opening net PP&E" in ppe_formula["detail"]
+    assert "Useful life" in ppe_formula["detail"]
+    assert "Opening basis: Disclosed or reconstructed latest net PP&E." in ppe_assumption["detail"]
+
+
+def test_driver_forecast_bundle_reconstructs_sparse_latest_ppe_with_labeled_fallback():
+    statements = _ppe_sparse_driver_statements()
+    history = driver_model._normalize_statements(statements)
+    cost_schedule = driver_model._derive_cost_schedule(history)
+    reinvestment_schedule = driver_model._derive_reinvestment_schedule(history, cost_schedule)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    depreciation_trace = bundle.line_traces["depreciation_amortization"][bundle.scenarios["base"].revenue.years[0]]
+
+    assert reinvestment_schedule.ppe_schedule.opening_net_ppe == pytest.approx(351.0, abs=1e-6)
+    assert reinvestment_schedule.ppe_schedule.opening_basis == "Disclosed or reconstructed latest net PP&E"
+    assert reinvestment_schedule.ppe_schedule.annual_disposals == pytest.approx(0.0, abs=1e-6)
+    assert "Disclosed or reconstructed latest net PP&E" in depreciation_trace.inputs[0].source_detail
+    assert bridge.ending_net_ppe == pytest.approx(bridge.beginning_net_ppe + bridge.capex - bridge.depreciation - bridge.ppe_disposals, abs=1e-6)
+    assert bundle.scenarios["base"].free_cash_flow.values[0] == pytest.approx(bridge.operating_cash_flow - bridge.capex, abs=1e-6)
+
+
+def test_driver_forecast_bundle_uses_explicit_tax_schedule_for_profitable_company_with_no_nol():
+    statements = _standard_driver_regression_statements()
+    history = driver_model._normalize_statements(statements)
+    below_line_schedule = driver_model._derive_below_line_schedule(history)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [_guidance_release(1200.0)])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    tax_assumption = next(row for row in bundle.assumption_rows if row["key"] == "tax_schedule")
+
+    assert below_line_schedule.tax_schedule is not None
+    assert below_line_schedule.tax_schedule.uses_explicit_nol_schedule is True
+    assert bridge.beginning_nol == pytest.approx(0.0, abs=1e-6)
+    assert bridge.nol_used == pytest.approx(0.0, abs=1e-6)
+    assert bridge.cash_tax == pytest.approx(bridge.taxes, abs=1e-6)
+    assert bridge.deferred_tax_expense == pytest.approx(0.0, abs=1e-6)
+    assert "Explicit NOL + deferred-tax schedule" in tax_assumption["detail"]
+
+
+def test_driver_forecast_bundle_builds_nol_and_uses_it_before_cash_taxes_normalize():
+    statements = _loss_recovery_tax_driver_statements()
+    history = driver_model._normalize_statements(statements)
+    below_line_schedule = driver_model._derive_below_line_schedule(history)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    tax_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_tax")
+    expected_tax_point = driver_model._project_tax_schedule(
+        bridge.pretax_income,
+        below_line_schedule.tax_schedule,
+        opening_nol=bridge.beginning_nol,
+        opening_deferred_tax_asset=bridge.beginning_deferred_tax_asset,
+    )
+
+    assert below_line_schedule.tax_schedule is not None
+    assert below_line_schedule.tax_schedule.uses_explicit_nol_schedule is True
+    assert bridge.beginning_nol > 0
+    assert bridge.nol_used > 0
+    assert bridge.ending_nol == pytest.approx(bridge.beginning_nol + bridge.nol_created - bridge.nol_used, abs=1e-6)
+    assert bridge.cash_tax == pytest.approx(expected_tax_point.cash_tax, abs=1e-6)
+    assert bridge.taxes == pytest.approx(expected_tax_point.book_tax_expense, abs=1e-6)
+    assert bridge.cash_tax < bridge.taxes
+    assert "opening NOL" in tax_formula["detail"]
+    assert "Cash tax" in tax_formula["detail"]
+
+
+def test_driver_forecast_bundle_uses_fallback_tax_method_when_disclosure_is_sparse():
+    statements = _sparse_tax_driver_statements()
+    history = driver_model._normalize_statements(statements)
+    below_line_schedule = driver_model._derive_below_line_schedule(history)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    tax_assumption = next(row for row in bundle.assumption_rows if row["key"] == "tax_schedule")
+
+    assert below_line_schedule.tax_schedule is not None
+    assert below_line_schedule.tax_schedule.uses_explicit_nol_schedule is False
+    assert bridge.beginning_nol == pytest.approx(0.0, abs=1e-6)
+    assert bridge.nol_used == pytest.approx(0.0, abs=1e-6)
+    assert bridge.cash_tax == pytest.approx(bridge.taxes, abs=1e-6)
+    assert bridge.deferred_tax_expense == pytest.approx(0.0, abs=1e-6)
+    assert "Fallback simple effective-tax-rate method" in tax_assumption["detail"]
+
+
+def test_driver_forecast_bundle_balances_clean_balance_sheet_when_disclosure_is_sufficient():
+    statements = _balanced_balance_sheet_driver_statements()
+    history = driver_model._normalize_statements(statements)
+    cost_schedule = driver_model._derive_cost_schedule(history)
+    reinvestment_schedule = driver_model._derive_reinvestment_schedule(history, cost_schedule)
+    below_line_schedule = driver_model._derive_below_line_schedule(history)
+    balance_sheet_schedule = driver_model._derive_balance_sheet_schedule(history, reinvestment_schedule, below_line_schedule)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    balance_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_balance_sheet")
+
+    assert balance_sheet_schedule.plug_bucket_mode == "none"
+    assert bridge.balance_sheet_plug == pytest.approx(0.0, abs=1e-6)
+    assert bridge.balance_sheet_delta_before_plug == pytest.approx(bridge.balance_sheet_delta, abs=1e-6)
+    assert bridge.balance_sheet_delta == pytest.approx(0.0, abs=1e-3)
+    assert bridge.total_assets == pytest.approx(bridge.total_liabilities_and_equity, abs=1e-3)
+    assert "Raw delta before plug" in balance_formula["detail"]
+
+
+def test_driver_forecast_bundle_uses_explicit_balance_sheet_plug_when_disclosure_is_partial():
+    statements = _plugged_balance_sheet_driver_statements()
+    history = driver_model._normalize_statements(statements)
+    cost_schedule = driver_model._derive_cost_schedule(history)
+    reinvestment_schedule = driver_model._derive_reinvestment_schedule(history, cost_schedule)
+    below_line_schedule = driver_model._derive_below_line_schedule(history)
+    balance_sheet_schedule = driver_model._derive_balance_sheet_schedule(history, reinvestment_schedule, below_line_schedule)
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    balance_assumption = next(row for row in bundle.assumption_rows if row["key"] == "balance_sheet_framework")
+    balance_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_balance_sheet")
+
+    assert balance_sheet_schedule.plug_bucket_mode == "dynamic"
+    assert bridge.balance_sheet_plug > 0
+    assert bridge.balance_sheet_plug_bucket in {"Other Liabilities Plug", "Other Long-Term Assets Plug"}
+    assert abs(bridge.balance_sheet_delta_before_plug) > 1e-6
+    assert bridge.balance_sheet_delta == pytest.approx(0.0, abs=1e-6)
+    assert "plug bucket" in balance_assumption["detail"].lower()
+    assert bridge.balance_sheet_plug_bucket in balance_formula["detail"]
+
+
+def test_driver_forecast_bundle_draws_synthetic_revolver_when_no_opening_debt_supports_minimum_cash():
+    bundle = driver_model.build_driver_forecast_bundle(_no_debt_draw_driver_statements(), [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    debt_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_debt_schedule")
+    debt_assumption = next(row for row in bundle.assumption_rows if row["key"] == "debt_schedule")
+
+    assert bridge.beginning_debt == pytest.approx(0.0, abs=1e-6)
+    assert bridge.debt_draw > 0
+    assert bridge.ending_debt == pytest.approx(bridge.debt_draw, abs=1e-6)
+    assert any(tranche.key == "revolver" and tranche.optional_draw > 0 for tranche in bridge.debt_tranches)
+    assert "synthetic revolver" in debt_assumption["detail"].lower()
+    assert "draws" in debt_formula["detail"]
+
+
+def test_driver_forecast_bundle_keeps_simple_debt_in_clearly_labeled_fallback_schedule():
+    bundle = driver_model.build_driver_forecast_bundle(_standard_driver_regression_statements(), [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    debt_assumption = next(row for row in bundle.assumption_rows if row["key"] == "debt_schedule")
+    debt_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_debt_schedule")
+
+    assert [tranche.key for tranche in bridge.debt_tranches] == ["revolver", "debt_fallback"]
+    assert bridge.debt_tranches[0].opening_balance == pytest.approx(0.0, abs=1e-6)
+    assert bridge.debt_tranches[1].opening_balance == pytest.approx(bridge.beginning_debt, abs=1e-6)
+    assert "fallback single-tranche debt schedule" in debt_assumption["detail"].lower()
+    assert "Debt Fallback" in debt_formula["detail"]
+
+
+def test_driver_forecast_bundle_rolls_multi_tranche_debt_and_interest_by_average_balance():
+    bundle = driver_model.build_driver_forecast_bundle(_multi_tranche_driver_statements(), [])
+
+    assert bundle is not None
+    bridge = bundle.scenarios["base"].bridge[0]
+    debt_formula = next(row for row in bundle.calculation_rows if row["key"] == "formula_debt_schedule")
+
+    tranche_map = {tranche.key: tranche for tranche in bridge.debt_tranches}
+
+    assert {"revolver", "term_loan", "notes_bonds", "leases"} <= set(tranche_map)
+    assert bridge.beginning_debt == pytest.approx(190.0, abs=1e-6)
+    assert tranche_map["term_loan"].mandatory_amortization == pytest.approx(8.0, abs=1e-6)
+    assert tranche_map["notes_bonds"].maturity_repayment == pytest.approx(12.0, abs=1e-6)
+    assert tranche_map["leases"].mandatory_amortization == pytest.approx(4.0, abs=1e-6)
+    assert tranche_map["revolver"].optional_sweep_repayment > 0
+    assert all(
+        tranche.ending_balance
+        == pytest.approx(
+            tranche.opening_balance
+            - tranche.mandatory_amortization
+            - tranche.maturity_repayment
+            - tranche.optional_sweep_repayment
+            + tranche.optional_draw,
+            abs=1e-6,
+        )
+        for tranche in bridge.debt_tranches
+    )
+    assert bridge.interest_expense == pytest.approx(
+        sum(
+            ((tranche.opening_balance + tranche.ending_balance) / 2.0) * tranche.interest_rate
+            for tranche in bridge.debt_tranches
+        ),
+        abs=1e-6,
+    )
+    assert "Interest by tranche" in debt_formula["detail"]
+    assert "Term Loan" in debt_formula["detail"]
+
+
+def test_driver_forecast_bundle_exposes_ib_modeling_suitability_rows():
+    bundle = driver_model.build_driver_forecast_bundle(_standard_driver_regression_statements(), [_guidance_release(1200.0)])
+
+    assert bundle is not None
+    suitability_rows = {row["key"]: row for row in bundle.suitability_rows}
+    routing_row = next(row for row in bundle.assumption_rows if row["key"] == "entity_routing")
+    model_scope = next(row for row in bundle.assumption_rows if row["key"] == "model_scope")
+
+    assert bundle.engine_mode == driver_model.ENGINE_MODE_DRIVER
+    assert bundle.entity_routing == driver_model.ENTITY_ROUTING_NONFIN_IB_MODEL
+    assert routing_row["value"] == driver_model.ENTITY_ROUTING_NONFIN_IB_MODEL
+    assert suitability_rows["revenue_growth"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["margin_logic"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["depreciation_amortization"]["classification"] == driver_model.MODEL_SUITABILITY_IB_CORE_NONFIN
+    assert suitability_rows["operating_working_capital"]["classification"] == driver_model.MODEL_SUITABILITY_IB_CORE_NONFIN
+    assert suitability_rows["capex_reinvestment"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["debt_cash_interest"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["taxes"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["share_count_dilution"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["balance_sheet_linkage"]["classification"] == driver_model.MODEL_SUITABILITY_IB_USEFUL_BUT_HEURISTIC
+    assert suitability_rows["regulated_financial_routing"]["classification"] == driver_model.MODEL_SUITABILITY_BANK_ENTITY_SEPARATE_MODEL
+    assert model_scope["value"] == "Industrial scope: OWC, financing, taxes, and balance-sheet diagnostics are upgraded; plug buckets may still be required"
+    assert "visible balancing check with explicit plugs" in model_scope["detail"]
+
+
+def test_driver_forecast_bundle_flags_regulated_financial_markers_for_separate_bank_model():
+    statements = []
+    for statement in _standard_driver_regression_statements():
+        statements.append(
+            _statement(
+                statement.period_end.year,
+                {
+                    **statement.data,
+                    "regulated_bank_source_id": "fdic_bankfind_financials",
+                    "regulated_bank_reporting_basis": "fdic_call_report",
+                    "net_interest_income": statement.data["revenue"] * 0.55,
+                    "provision_for_credit_losses": statement.data["revenue"] * 0.02,
+                    "deposits_total": statement.data["revenue"] * 0.85,
+                    "common_equity_tier1_ratio": 0.12,
+                },
+            )
+        )
+
+    bundle = driver_model.build_driver_forecast_bundle(statements, [])
+
+    assert bundle is not None
+    routing_row = next(row for row in bundle.assumption_rows if row["key"] == "entity_routing")
+    model_scope = next(row for row in bundle.assumption_rows if row["key"] == "model_scope")
+    regulated_row = next(row for row in bundle.suitability_rows if row["key"] == "regulated_financial_routing")
+
+    assert bundle.engine_mode == driver_model.ENGINE_MODE_REGULATED_FINANCIAL_SEPARATE
+    assert bundle.entity_routing == driver_model.ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE
+    assert routing_row["value"] == driver_model.ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE
+    assert model_scope["value"] == "Regulated-financial separate path required before industrial forecasting"
+    assert "industrial DSO/DIO/DPO, sales-to-capital, and industrial capex heuristics are bypassed" in model_scope["detail"]
+    assert regulated_row["classification"] == driver_model.MODEL_SUITABILITY_BANK_ENTITY_SEPARATE_MODEL
+    assert regulated_row["bank_appropriateness"] == "Required because the routing gate classified the issuer for the regulated-financial separate path."
+
+
+def test_driver_forecast_bundle_uses_conservative_fallback_for_unsure_financial_sector_issuer():
+    company = SimpleNamespace(
+        name="Example Capital Markets",
+        sector="Financials",
+        market_sector="Financials",
+        market_industry="Capital Markets",
+    )
+
+    bundle = driver_model.build_driver_forecast_bundle(
+        _standard_driver_regression_statements(),
+        [],
+        company=company,
+    )
+
+    assert bundle is not None
+    routing_row = next(row for row in bundle.assumption_rows if row["key"] == "entity_routing")
+    model_scope = next(row for row in bundle.assumption_rows if row["key"] == "model_scope")
+
+    assert bundle.engine_mode == driver_model.ENGINE_MODE_CONSERVATIVE_FALLBACK
+    assert bundle.entity_routing == driver_model.ENTITY_ROUTING_UNSURE_REQUIRE_CONSERVATIVE_FALLBACK
+    assert routing_row["value"] == driver_model.ENTITY_ROUTING_UNSURE_REQUIRE_CONSERVATIVE_FALLBACK
+    assert model_scope["value"] == "Conservative fallback active until routing is confirmed"
+    assert bundle.scenarios == {}
+
+
+def test_build_company_charts_dashboard_response_withholds_industrial_forecast_for_regulated_financials(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="BANK",
+        cik="0000123000",
+        name="Example Bank Corp",
+        sector="Financials",
+        market_sector="Financials",
+        market_industry="Banks",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.6, drift=0.02)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    assert response.forecast_methodology.heuristic is False
+    assert response.forecast_methodology.label == "Regulated-financial separate path required"
+    assert response.cards.revenue.series == [series for series in response.cards.revenue.series if series.series_kind == "actual"]
+    assert response.cards.revenue_outlook_bridge is None
+    assert response.cards.forecast_assumptions is not None
+    assert response.cards.forecast_assumptions.items[0].value == driver_model.ENTITY_ROUTING_REGULATED_FINANCIAL_SEPARATE
 
 
 def test_driver_forecast_docs_match_backend_formula_wording():
@@ -2884,11 +3547,8 @@ def test_build_company_charts_dashboard_response_preserves_exact_driver_formula_
     assert formula_items["formula_eps"].value == (
         "Net income / diluted shares, with basic shares rolled by proxy net dilution and diluted shares topped up by a latent dilution overlay"
     )
-    assert formula_items["formula_eps"].detail == (
-        "FY2026E proxy fallback: starting basic 100 + proxy net change 0 = ending basic 100; "
-        "latent dilution overlay 0 from 0.0% reaches 100 diluted shares. "
-        "Proxy basis: Historical diluted-share growth with revenue-scaled SBC, buyback, acquisition, and convert proxies. "
-        "EPS = $95.65 / 100 = $0.96."
+    assert formula_items["formula_eps"].detail == next(
+        row["detail"] for row in expected_bundle.calculation_rows if row["key"] == "formula_eps"
     )
 
 
@@ -2935,12 +3595,8 @@ def test_build_company_charts_dashboard_response_preserves_explicit_driver_formu
         "Net income / diluted shares, with basic shares = prior basic + RSU or SBC issuance + acquisition issuance - buybacks "
         "and diluted shares = basic + options or warrants + convertibles"
     )
-    assert formula_items["formula_eps"].detail == (
-        "FY2026E explicit bridge: starting basic 100 + RSU or SBC 2 + acquisitions 1 - buybacks 1 + options or warrants 2 + "
-        "convertibles 1 = 105 diluted shares. Starting basis: Basic weighted-average shares. "
-        "Options and warrants: Direct dilutive option or warrant shares. RSU or SBC issuance: Direct RSU or stock-award shares. "
-        "Buybacks: Direct repurchased-share disclosure. Acquisition issuance: Direct acquisition share issuance. "
-        "Convertibles: Direct dilutive convertible shares. EPS = $109.37 / 105 = $1.04."
+    assert formula_items["formula_eps"].detail == next(
+        row["detail"] for row in expected_bundle.calculation_rows if row["key"] == "formula_eps"
     )
 
 
@@ -2978,6 +3634,7 @@ def test_driver_formula_copy_calls_out_explicit_dilution_bridge():
 
     assert bundle is not None
     formula_eps = next(row for row in bundle.calculation_rows if row["key"] == "formula_eps")
+    base_scenario = bundle.scenarios["base"]
     assert formula_eps["value"] == (
         "Net income / diluted shares, with basic shares = prior basic + RSU or SBC issuance + acquisition issuance - buybacks "
         "and diluted shares = basic + options or warrants + convertibles"
@@ -2987,7 +3644,7 @@ def test_driver_formula_copy_calls_out_explicit_dilution_bridge():
         "convertibles 1 = 105 diluted shares. Starting basis: Basic weighted-average shares. "
         "Options and warrants: Direct dilutive option or warrant shares. RSU or SBC issuance: Direct RSU or stock-award shares. "
         "Buybacks: Direct repurchased-share disclosure. Acquisition issuance: Direct acquisition share issuance. "
-        "Convertibles: Direct dilutive convertible shares. EPS = $109.37 / 105 = $1.04."
+        f"Convertibles: Direct dilutive convertible shares. EPS = {driver_model._money(base_scenario.net_income.values[0])} / 105 = {driver_model._money(base_scenario.eps.values[0])}."
     )
 
 
@@ -3003,6 +3660,7 @@ def test_driver_forecast_bundle_populates_formula_traces_for_core_base_lines():
         "pretax_income",
         "income_tax",
         "net_income",
+        "net_ppe",
         "accounts_receivable",
         "inventory",
         "accounts_payable",
@@ -3661,7 +4319,7 @@ def test_walk_forward_backtest_filters_future_release_inputs(monkeypatch):
     visible_release = SimpleNamespace(filing_date=date(2024, 1, 20), filing_acceptance_at=datetime(2024, 1, 20, tzinfo=timezone.utc), revenue_guidance_high=121.0)
     future_release = SimpleNamespace(filing_date=date(2025, 2, 20), filing_acceptance_at=datetime(2025, 2, 20, tzinfo=timezone.utc), revenue_guidance_high=999.0)
 
-    def _fake_bundle(_history, releases):
+    def _fake_bundle(_history, releases, **_kwargs):
         anchor = max((getattr(release, "revenue_guidance_high", 0.0) or 0.0) for release in releases) if releases else 0.0
         return SimpleNamespace(guidance_anchor=anchor)
 
