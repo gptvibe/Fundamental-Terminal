@@ -20,6 +20,8 @@ from app.contracts.company_charts import (
     CompanyChartsDashboardResponse,
     CompanyChartsDriverControlMetadataPayload,
     CompanyChartsDriverCardPayload,
+    CompanyChartsEventOverlayPayload,
+    CompanyChartsEventPayload,
     CompanyChartsFactorValuePayload,
     CompanyChartsFactorsPayload,
     CompanyChartsForecastDiagnosticsPayload,
@@ -34,6 +36,8 @@ from app.contracts.company_charts import (
     CompanyChartsMethodologyPayload,
     CompanyChartsProjectedRowPayload,
     CompanyChartsProjectionStudioPayload,
+    CompanyChartsQuarterChangeItemPayload,
+    CompanyChartsQuarterChangePayload,
     CompanyChartsScheduleSectionPayload,
     CompanyChartsScoreComponentPayload,
     CompanyChartsScoreBadgePayload,
@@ -50,6 +54,7 @@ from app.contracts.company_charts import (
 from app.models import Company, CompanyChartsDashboardSnapshot
 from app.source_registry import SourceUsage, build_provenance_entries, build_source_mix
 from app.services.cache_queries import (
+    get_company_capital_markets_events,
     get_company_earnings_model_points,
     get_company_earnings_releases,
     get_company_financials,
@@ -135,6 +140,19 @@ FORECAST_ACCURACY_METRICS: tuple[tuple[str, str, str], ...] = (
     ("eps", "Diluted EPS", "usd_per_share"),
     ("free_cash_flow", "Free Cash Flow", "usd"),
 )
+CHART_EVENT_TYPES: tuple[str, ...] = (
+    "earnings",
+    "guidance",
+    "buyback",
+    "major_m_and_a",
+    "restatement",
+)
+DEFAULT_ENABLED_CHART_EVENT_TYPES: tuple[str, ...] = (
+    "earnings",
+    "guidance",
+    "restatement",
+)
+MAX_CHART_EVENTS = 18
 
 
 def get_company_charts_dashboard_snapshot(session: Session, company_id: int, *, as_of: datetime | None = None, schema_version: str = CHARTS_DASHBOARD_SCHEMA_VERSION) -> CompanyChartsDashboardSnapshot | None:
@@ -184,6 +202,7 @@ def build_company_charts_dashboard_response(
     earnings_points = get_company_earnings_model_points(session, company_id, limit=8, as_of=as_of)
     earnings_releases = get_company_earnings_releases(session, company_id, limit=24, as_of=as_of)
     restatements = get_company_financial_restatements(session, company_id, limit=200, as_of=as_of)
+    capital_markets_events = _load_capital_markets_events(session, company_id, as_of=as_of)
     baseline_driver_bundle = build_driver_forecast_bundle(annuals, earnings_releases, company=company)
     requested_overrides = dict(what_if_request.overrides) if what_if_request is not None else {}
     driver_bundle = (
@@ -197,6 +216,7 @@ def build_company_charts_dashboard_response(
         _latest_checked(earnings_points),
         _latest_checked(earnings_releases),
         _latest_checked(restatements),
+        _latest_checked(capital_markets_events),
     )
 
     revenue_actual = _actual_series(annuals, "revenue")
@@ -309,6 +329,17 @@ def build_company_charts_dashboard_response(
         confidence_label=stability_label,
     )
     projection_studio = _build_projection_studio_payload(annuals, driver_bundle, forecast_methodology)
+    event_overlay = _build_chart_event_overlay(
+        earnings_releases=earnings_releases,
+        restatements=restatements,
+        capital_markets_events=capital_markets_events,
+        annuals=annuals,
+    )
+    quarter_change = _build_quarter_change_payload(
+        annuals=annuals,
+        event_overlay=event_overlay,
+        forecast_state=forecast_state,
+    )
     what_if_payload = (
         _build_company_charts_what_if_payload(baseline_driver_bundle, driver_bundle)
         if what_if_request is not None
@@ -354,6 +385,8 @@ def build_company_charts_dashboard_response(
             margin_path=margin_path_card,
             fcf_outlook=fcf_outlook_card,
         ),
+        event_overlay=event_overlay,
+        quarter_change=quarter_change,
         forecast_methodology=forecast_methodology,
         forecast_diagnostics=forecast_stability,
         projection_studio=projection_studio,
@@ -979,6 +1012,416 @@ def _annual_statements(financials: list[Any]) -> list[Any]:
             seen[statement.period_end] = statement
     ordered = sorted(seen.values(), key=lambda item: item.period_end)
     return ordered[-8:]
+
+
+def _load_capital_markets_events(session: Session, company_id: int, *, as_of: datetime | None) -> list[Any]:
+    try:
+        events = get_company_capital_markets_events(session, company_id, limit=120)
+    except (AttributeError, TypeError):
+        # Unit tests often pass a lightweight session double without SQL methods.
+        return []
+    if as_of is None:
+        return events
+    filtered: list[Any] = []
+    for event in events:
+        effective_at = _capital_markets_event_effective_at(event)
+        if effective_at is None or effective_at > as_of:
+            continue
+        filtered.append(event)
+    return filtered
+
+
+def _build_chart_event_overlay(
+    *,
+    earnings_releases: list[Any],
+    restatements: list[Any],
+    capital_markets_events: list[Any],
+    annuals: list[Any],
+) -> CompanyChartsEventOverlayPayload:
+    events: list[CompanyChartsEventPayload] = []
+    has_guidance = False
+    has_buyback = False
+    has_m_and_a = False
+
+    for release in earnings_releases:
+        event_date = _release_event_date(release)
+        if event_date is None:
+            continue
+        period_end = getattr(release, "reported_period_end", None)
+        period_label = f"FY{period_end.year}" if period_end is not None else None
+        source_url = _to_str_or_none(getattr(release, "source_url", None))
+        filing_date = getattr(release, "filing_date", None)
+        events.append(
+            CompanyChartsEventPayload(
+                key=f"earnings-{getattr(release, 'id', event_date.isoformat())}",
+                event_type="earnings",
+                label="Earnings release",
+                event_date=event_date,
+                period_label=period_label,
+                detail=(f"Filed {filing_date.isoformat()}" if filing_date is not None else "Filed with SEC"),
+                source_label="SEC earnings release",
+                source_url=source_url,
+            )
+        )
+        if _release_has_guidance(release):
+            has_guidance = True
+            events.append(
+                CompanyChartsEventPayload(
+                    key=f"guidance-{getattr(release, 'id', event_date.isoformat())}",
+                    event_type="guidance",
+                    label="Guidance update",
+                    event_date=event_date,
+                    period_label=period_label,
+                    detail=_release_guidance_detail(release),
+                    source_label="SEC earnings release",
+                    source_url=source_url,
+                )
+            )
+        if _release_has_buyback(release):
+            has_buyback = True
+            events.append(
+                CompanyChartsEventPayload(
+                    key=f"buyback-release-{getattr(release, 'id', event_date.isoformat())}",
+                    event_type="buyback",
+                    label="Buyback announcement",
+                    event_date=event_date,
+                    period_label=period_label,
+                    detail=_release_buyback_detail(release),
+                    source_label="SEC earnings release",
+                    source_url=source_url,
+                )
+            )
+
+    for record in restatements:
+        event_date = _restatement_event_date(record)
+        if event_date is None:
+            continue
+        period_end = getattr(record, "period_end", None)
+        period_label = f"FY{period_end.year}" if period_end is not None else None
+        changed_count = len(getattr(record, "changed_metric_keys", []) or [])
+        detail = f"{changed_count} metric updates detected" if changed_count else "Detected from amended filing"
+        events.append(
+            CompanyChartsEventPayload(
+                key=f"restatement-{getattr(record, 'id', event_date.isoformat())}",
+                event_type="restatement",
+                label="Financial restatement",
+                event_date=event_date,
+                period_label=period_label,
+                detail=detail,
+                source_label="SEC filing delta",
+                source_url=_to_str_or_none(getattr(record, "source", None)),
+            )
+        )
+
+    for record in capital_markets_events:
+        event_type_text = (_to_str_or_none(getattr(record, "event_type", None)) or "").lower()
+        summary_text = (_to_str_or_none(getattr(record, "summary", None)) or "").lower()
+        if not any(keyword in event_type_text or keyword in summary_text for keyword in ("acquisition", "merger", "m&a", "takeover", "combination")):
+            continue
+        event_date = _capital_markets_event_date(record)
+        if event_date is None:
+            continue
+        has_m_and_a = True
+        events.append(
+            CompanyChartsEventPayload(
+                key=f"m-and-a-{getattr(record, 'id', event_date.isoformat())}",
+                event_type="major_m_and_a",
+                label="Major M&A announcement",
+                event_date=event_date,
+                period_label=None,
+                detail=_truncate_text(_to_str_or_none(getattr(record, "summary", None)) or "Capital markets disclosure", 180),
+                source_label="SEC capital markets filing",
+                source_url=_to_str_or_none(getattr(record, "source_url", None)),
+            )
+        )
+
+    if not has_buyback:
+        buyback_fallback = _build_buyback_fallback_event(annuals)
+        if buyback_fallback is not None:
+            events.append(buyback_fallback)
+
+    if not has_m_and_a:
+        acquisition_fallback = _build_acquisition_fallback_event(annuals)
+        if acquisition_fallback is not None:
+            events.append(acquisition_fallback)
+
+    events.sort(key=lambda item: (item.event_date, item.key), reverse=True)
+    events = events[:MAX_CHART_EVENTS]
+
+    sparse_note = None
+    coverage = {event.event_type for event in events}
+    if len(coverage) < 3:
+        sparse_note = "Sparse filing signal: showing only events found in recent official disclosures and conservative metric-derived fallbacks."
+
+    default_enabled = [event_type for event_type in DEFAULT_ENABLED_CHART_EVENT_TYPES if event_type in CHART_EVENT_TYPES]
+    if "earnings" not in coverage and default_enabled:
+        default_enabled = [event_type for event_type in default_enabled if event_type != "earnings"]
+
+    return CompanyChartsEventOverlayPayload(
+        title="Event overlays",
+        available_event_types=list(CHART_EVENT_TYPES),
+        default_enabled_event_types=default_enabled,
+        events=events,
+        sparse_data_note=sparse_note,
+    )
+
+
+def _build_quarter_change_payload(
+    *,
+    annuals: list[Any],
+    event_overlay: CompanyChartsEventOverlayPayload,
+    forecast_state: dict[str, Any],
+) -> CompanyChartsQuarterChangePayload:
+    if len(annuals) < 2:
+        return CompanyChartsQuarterChangePayload(
+            empty_state="Need at least two reported annual periods to summarize what changed.",
+        )
+
+    latest = annuals[-1]
+    prior = annuals[-2]
+    latest_label = f"FY{latest.period_end.year}"
+    prior_label = f"FY{prior.period_end.year}"
+
+    revenue_latest = _statement_value(latest, "revenue")
+    revenue_prior = _statement_value(prior, "revenue")
+    eps_latest = _statement_value(latest, "eps")
+    eps_prior = _statement_value(prior, "eps")
+    fcf_latest = _statement_value(latest, "free_cash_flow")
+    fcf_prior = _statement_value(prior, "free_cash_flow")
+
+    items: list[CompanyChartsQuarterChangeItemPayload] = []
+    for key, label, current_value, previous_value in (
+        ("revenue_delta", "Revenue", revenue_latest, revenue_prior),
+        ("eps_delta", "EPS", eps_latest, eps_prior),
+        ("fcf_delta", "Free cash flow", fcf_latest, fcf_prior),
+    ):
+        delta = _safe_diff(current_value, previous_value)
+        change = _growth_rate(current_value, previous_value)
+        if delta is None:
+            continue
+        items.append(
+            CompanyChartsQuarterChangeItemPayload(
+                key=key,
+                label=label,
+                value=_format_delta(delta, change),
+                detail=f"{latest_label} vs {prior_label}",
+            )
+        )
+
+    recent_period_events = [
+        event
+        for event in event_overlay.events
+        if event.period_label in {latest_label, prior_label}
+    ]
+    if recent_period_events:
+        grouped = sorted({event.label for event in recent_period_events})
+        items.append(
+            CompanyChartsQuarterChangeItemPayload(
+                key="recent_events",
+                label="Event context",
+                value=str(len(recent_period_events)),
+                detail=", ".join(grouped[:3]),
+            )
+        )
+
+    exp_1y = forecast_state.get("exp_1y")
+    if isinstance(exp_1y, (int, float)):
+        items.append(
+            CompanyChartsQuarterChangeItemPayload(
+                key="next_year_outlook",
+                label="Next-year outlook",
+                value=_pct(float(exp_1y)),
+                detail="Base-case growth from current model state",
+            )
+        )
+
+    if not items:
+        return CompanyChartsQuarterChangePayload(
+            latest_period_label=latest_label,
+            prior_period_label=prior_label,
+            empty_state="Not enough comparable metrics to summarize period-over-period changes.",
+        )
+
+    summary = f"{latest_label} vs {prior_label} combines reported deltas with filing-event context."
+    return CompanyChartsQuarterChangePayload(
+        latest_period_label=latest_label,
+        prior_period_label=prior_label,
+        summary=summary,
+        items=items[:5],
+    )
+
+
+def _release_event_date(release: Any) -> DateType | None:
+    acceptance = _normalize_datetime(getattr(release, "filing_acceptance_at", None))
+    if acceptance is not None:
+        return acceptance.date()
+    filing_date = getattr(release, "filing_date", None)
+    if isinstance(filing_date, DateType):
+        return filing_date
+    report_end = getattr(release, "reported_period_end", None)
+    if isinstance(report_end, DateType):
+        return report_end
+    return None
+
+
+def _restatement_event_date(record: Any) -> DateType | None:
+    acceptance = _normalize_datetime(getattr(record, "filing_acceptance_at", None))
+    if acceptance is not None:
+        return acceptance.date()
+    filing_date = getattr(record, "filing_date", None)
+    if isinstance(filing_date, DateType):
+        return filing_date
+    period_end = getattr(record, "period_end", None)
+    if isinstance(period_end, DateType):
+        return period_end
+    return None
+
+
+def _capital_markets_event_date(record: Any) -> DateType | None:
+    filing_date = getattr(record, "filing_date", None)
+    if isinstance(filing_date, DateType):
+        return filing_date
+    report_date = getattr(record, "report_date", None)
+    if isinstance(report_date, DateType):
+        return report_date
+    checked = _normalize_datetime(getattr(record, "last_checked", None))
+    return checked.date() if checked is not None else None
+
+
+def _capital_markets_event_effective_at(record: Any) -> datetime | None:
+    filing_date = getattr(record, "filing_date", None)
+    if isinstance(filing_date, DateType):
+        return datetime.combine(filing_date, TimeType.max, tzinfo=timezone.utc)
+    report_date = getattr(record, "report_date", None)
+    if isinstance(report_date, DateType):
+        return datetime.combine(report_date, TimeType.max, tzinfo=timezone.utc)
+    return _normalize_datetime(getattr(record, "last_checked", None))
+
+
+def _release_has_guidance(release: Any) -> bool:
+    return any(
+        getattr(release, field, None) is not None
+        for field in ("revenue_guidance_low", "revenue_guidance_high", "eps_guidance_low", "eps_guidance_high")
+    )
+
+
+def _release_has_buyback(release: Any) -> bool:
+    amount = getattr(release, "share_repurchase_amount", None)
+    return isinstance(amount, (int, float)) and float(amount) > 0
+
+
+def _release_guidance_detail(release: Any) -> str:
+    revenue_low = _to_float_or_none(getattr(release, "revenue_guidance_low", None))
+    revenue_high = _to_float_or_none(getattr(release, "revenue_guidance_high", None))
+    eps_low = _to_float_or_none(getattr(release, "eps_guidance_low", None))
+    eps_high = _to_float_or_none(getattr(release, "eps_guidance_high", None))
+    parts: list[str] = []
+    if revenue_low is not None or revenue_high is not None:
+        if revenue_low is not None and revenue_high is not None:
+            parts.append(f"Revenue ${_compact_money(revenue_low)}-${_compact_money(revenue_high)}")
+        else:
+            parts.append(f"Revenue ${_compact_money(revenue_low if revenue_low is not None else revenue_high or 0.0)}")
+    if eps_low is not None or eps_high is not None:
+        if eps_low is not None and eps_high is not None:
+            parts.append(f"EPS ${eps_low:.2f}-${eps_high:.2f}")
+        else:
+            parts.append(f"EPS ${((eps_low if eps_low is not None else eps_high) or 0.0):.2f}")
+    return "; ".join(parts) if parts else "Management guidance updated"
+
+
+def _release_buyback_detail(release: Any) -> str:
+    amount = _to_float_or_none(getattr(release, "share_repurchase_amount", None))
+    if amount is None:
+        return "Buyback signal detected in release"
+    return f"Share repurchase authorization ${_compact_money(amount)}"
+
+
+def _build_buyback_fallback_event(annuals: list[Any]) -> CompanyChartsEventPayload | None:
+    for statement in reversed(annuals):
+        value = _statement_value(statement, "share_buybacks")
+        if value is None or value <= 0:
+            continue
+        period_end = getattr(statement, "period_end", None)
+        if period_end is None:
+            continue
+        return CompanyChartsEventPayload(
+            key=f"buyback-fallback-{period_end.isoformat()}",
+            event_type="buyback",
+            label="Buyback activity",
+            event_date=period_end,
+            period_label=f"FY{period_end.year}",
+            detail=f"Annual share buybacks reported at ${_compact_money(value)}",
+            source_label="SEC financial statement",
+        )
+    return None
+
+
+def _build_acquisition_fallback_event(annuals: list[Any]) -> CompanyChartsEventPayload | None:
+    for statement in reversed(annuals):
+        value = _statement_value(statement, "acquisitions")
+        if value is None or value <= 0:
+            continue
+        period_end = getattr(statement, "period_end", None)
+        if period_end is None:
+            continue
+        return CompanyChartsEventPayload(
+            key=f"m-and-a-fallback-{period_end.isoformat()}",
+            event_type="major_m_and_a",
+            label="M&A activity",
+            event_date=period_end,
+            period_label=f"FY{period_end.year}",
+            detail=f"Acquisition cash use reported at ${_compact_money(value)}",
+            source_label="SEC cash-flow statement",
+        )
+    return None
+
+
+def _compact_money(value: float) -> str:
+    absolute = abs(float(value))
+    sign = "-" if value < 0 else ""
+    if absolute >= 1_000_000_000:
+        return f"{sign}{absolute / 1_000_000_000:.2f}B"
+    if absolute >= 1_000_000:
+        return f"{sign}{absolute / 1_000_000:.1f}M"
+    if absolute >= 1_000:
+        return f"{sign}{absolute / 1_000:.1f}K"
+    return f"{sign}{absolute:.0f}"
+
+
+def _safe_diff(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous is None:
+        return None
+    return float(current) - float(previous)
+
+
+def _format_delta(delta: float, change: float | None) -> str:
+    direction = "+" if delta >= 0 else "-"
+    magnitude = _compact_money(abs(delta))
+    if change is None:
+        return f"{direction}${magnitude}"
+    return f"{direction}${magnitude} ({_pct(change)})"
+
+
+def _to_str_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _to_float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)].rstrip() + "..."
 
 
 def _actual_series(statements: list[Any], key: str) -> list[CompanyChartsSeriesPointPayload]:

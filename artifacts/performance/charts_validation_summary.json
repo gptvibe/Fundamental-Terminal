@@ -1,0 +1,280 @@
+{
+  "accounting_identities": {
+    "AAPL": [],
+    "ADBE": [],
+    "CAT": [],
+    "JPM": [],
+    "MRNA": [],
+    "WMT": []
+  },
+  "benchmark_summary": {
+    "guidance_available_count": 4,
+    "model_better_than_guidance_count": 2,
+    "model_better_than_last_value_count": 4,
+    "model_better_than_trailing_cagr_count": 2,
+    "non_regulated_case_count": 5
+  },
+  "benchmarks": [
+    {
+      "actual_next_year": {
+        "eps": 7.35,
+        "revenue": 447.0
+      },
+      "baselines": {
+        "last_value_carry_forward": {
+          "eps": 6.818181818181818,
+          "eps_abs_pct_error": 0.072356215213358,
+          "revenue": 420.0,
+          "revenue_abs_pct_error": 0.06040268456375839
+        },
+        "management_guidance": {
+          "revenue": 445.20000000000005,
+          "revenue_abs_pct_error": 0.004026845637583791
+        },
+        "trailing_cagr": {
+          "revenue": 450.65004093287075,
+          "revenue_abs_pct_error": 0.008165639670851795
+        }
+      },
+      "category": "megacap_tech",
+      "engine_mode": "driver",
+      "model": {
+        "eps": 6.171606918287345,
+        "eps_abs_pct_error": 0.16032558934866045,
+        "revenue": 446.02863879696594,
+        "revenue_abs_pct_error": 0.002173067568308868
+      },
+      "ticker": "AAPL"
+    },
+    {
+      "actual_next_year": {
+        "eps": 11.4,
+        "revenue": 66.5
+      },
+      "baselines": {
+        "last_value_carry_forward": {
+          "eps": 15.17786561264822,
+          "eps_abs_pct_error": 0.3313917204077386,
+          "revenue": 64.0,
+          "revenue_abs_pct_error": 0.03759398496240601
+        },
+        "management_guidance": {
+          "revenue": 66.56,
+          "revenue_abs_pct_error": 0.0009022556390977785
+        },
+        "trailing_cagr": {
+          "revenue": 66.51940359832184,
+          "revenue_abs_pct_error": 0.0002917834334111899
+        }
+      },
+      "category": "cyclical_industrial",
+      "engine_mode": "driver",
+      "model": {
+        "eps": 15.300878226716149,
+        "eps_abs_pct_error": 0.34218230058913585,
+        "revenue": 66.69001887224235,
+        "revenue_abs_pct_error": 0.002857426650260871
+      },
+      "ticker": "CAT"
+    },
+    {
+      "actual_next_year": {
+        "eps": 2.55,
+        "revenue": 668.0
+      },
+      "baselines": {
+        "last_value_carry_forward": {
+          "eps": 6.960431654676259,
+          "eps_abs_pct_error": 1.7295810410495134,
+          "revenue": 645.0,
+          "revenue_abs_pct_error": 0.0344311377245509
+        },
+        "management_guidance": {
+          "revenue": 667.5749999999999,
+          "revenue_abs_pct_error": 0.0006362275449102818
+        },
+        "trailing_cagr": {
+          "revenue": 668.2469034671034,
+          "revenue_abs_pct_error": 0.00036961596871763416
+        }
+      },
+      "category": "retailer",
+      "engine_mode": "driver",
+      "model": {
+        "eps": 8.453843482155623,
+        "eps_abs_pct_error": 2.3152327381002444,
+        "revenue": 668.6559105223636,
+        "revenue_abs_pct_error": 0.0009819019795861822
+      },
+      "ticker": "WMT"
+    },
+    {
+      "actual_next_year": {
+        "eps": 17.1,
+        "revenue": 31.8
+      },
+      "baselines": {
+        "last_value_carry_forward": {
+          "eps": 16.680851063829788,
+          "eps_abs_pct_error": 0.024511633694164512,
+          "revenue": 28.0,
+          "revenue_abs_pct_error": 0.11949685534591196
+        },
+        "management_guidance": {
+          "revenue": 31.92,
+          "revenue_abs_pct_error": 0.0037735849056604086
+        },
+        "trailing_cagr": {
+          "revenue": 32.44291535227353,
+          "revenue_abs_pct_error": 0.020217463907972636
+        }
+      },
+      "category": "capital_light_software",
+      "engine_mode": "driver",
+      "model": {
+        "eps": 17.118862071344694,
+        "eps_abs_pct_error": 0.0011030451078767431,
+        "revenue": 31.788503021844665,
+        "revenue_abs_pct_error": 0.0003615401935640116
+      },
+      "ticker": "ADBE"
+    },
+    {
+      "actual_next_year": {
+        "eps": 16.2,
+        "revenue": 157.0
+      },
+      "baselines": {
+        "last_value_carry_forward": {
+          "eps": 12.0,
+          "eps_abs_pct_error": 0.25925925925925924,
+          "revenue": 150.0,
+          "revenue_abs_pct_error": 0.044585987261146494
+        },
+        "management_guidance": {
+          "revenue": null,
+          "revenue_abs_pct_error": null
+        },
+        "trailing_cagr": {
+          "revenue": 158.14362474407798,
+          "revenue_abs_pct_error": 0.007284234038713263
+        }
+      },
+      "category": "bank_financial",
+      "engine_mode": "regulated_financial_separate",
+      "model": {
+        "eps": null,
+        "eps_abs_pct_error": null,
+        "revenue": null,
+        "revenue_abs_pct_error": null
+      },
+      "ticker": "JPM"
+    },
+    {
+      "actual_next_year": {
+        "eps": 1.42,
+        "revenue": 10.0
+      },
+      "baselines": {
+        "last_value_carry_forward": {
+          "eps": 1.7061611374407581,
+          "eps_abs_pct_error": 0.20152192777518185,
+          "revenue": 12.0,
+          "revenue_abs_pct_error": 0.2
+        },
+        "management_guidance": {
+          "revenue": null,
+          "revenue_abs_pct_error": null
+        },
+        "trailing_cagr": {
+          "revenue": 13.207708995578507,
+          "revenue_abs_pct_error": 0.3207708995578507
+        }
+      },
+      "category": "biotech_high_volatility",
+      "engine_mode": "driver",
+      "model": {
+        "eps": 1.6580473615941924,
+        "eps_abs_pct_error": 0.16763898703816374,
+        "revenue": 14.399745000000001,
+        "revenue_abs_pct_error": 0.4399745000000001
+      },
+      "ticker": "MRNA"
+    }
+  ],
+  "generated_at": "2026-04-23T12:50:20.052076+00:00",
+  "golden_snapshot": {
+    "AAPL": {
+      "base_next_year_eps": 6.171607,
+      "base_next_year_growth": 0.061973,
+      "base_next_year_revenue": 446.028639,
+      "engine_mode": "driver",
+      "entity_routing": "NONFIN_IB_MODEL",
+      "guidance_anchor": 445.2
+    },
+    "ADBE": {
+      "base_next_year_eps": 17.118862,
+      "base_next_year_growth": 0.135304,
+      "base_next_year_revenue": 31.788503,
+      "engine_mode": "driver",
+      "entity_routing": "NONFIN_IB_MODEL",
+      "guidance_anchor": 31.92
+    },
+    "CAT": {
+      "base_next_year_eps": 15.300878,
+      "base_next_year_growth": 0.042032,
+      "base_next_year_revenue": 66.690019,
+      "engine_mode": "driver",
+      "entity_routing": "NONFIN_IB_MODEL",
+      "guidance_anchor": 66.56
+    },
+    "JPM": {
+      "base_next_year_eps": null,
+      "base_next_year_growth": null,
+      "base_next_year_revenue": null,
+      "engine_mode": "regulated_financial_separate",
+      "entity_routing": "REGULATED_FINANCIAL_SEPARATE",
+      "guidance_anchor": null
+    },
+    "MRNA": {
+      "base_next_year_eps": 1.658047,
+      "base_next_year_growth": 0.199979,
+      "base_next_year_revenue": 14.399745,
+      "engine_mode": "driver",
+      "entity_routing": "NONFIN_IB_MODEL",
+      "guidance_anchor": null
+    },
+    "WMT": {
+      "base_next_year_eps": 8.453843,
+      "base_next_year_growth": 0.036676,
+      "base_next_year_revenue": 668.655911,
+      "engine_mode": "driver",
+      "entity_routing": "NONFIN_IB_MODEL",
+      "guidance_anchor": 667.575
+    }
+  },
+  "labels": {
+    "AAPL": [],
+    "ADBE": [],
+    "CAT": [],
+    "JPM": [],
+    "MRNA": [],
+    "WMT": []
+  },
+  "override_clipping": {
+    "AAPL": [],
+    "ADBE": [],
+    "CAT": [],
+    "JPM": [],
+    "MRNA": [],
+    "WMT": []
+  },
+  "sensitivity_matrix": {
+    "AAPL": [],
+    "ADBE": [],
+    "CAT": [],
+    "JPM": [],
+    "MRNA": [],
+    "WMT": []
+  }
+}

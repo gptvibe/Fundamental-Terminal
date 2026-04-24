@@ -222,6 +222,13 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "fdic_bankfind_financials",
         "federal_reserve_fr_y9c",
     ),
+    ("GET", "/api/companies/{ticker}/charts/scenarios"): _control_plane_contract(),
+    ("POST", "/api/companies/{ticker}/charts/scenarios"): _control_plane_contract(),
+    ("GET", "/api/companies/{ticker}/charts/scenarios/{scenario_id}"): _control_plane_contract(),
+    ("POST", "/api/companies/{ticker}/charts/scenarios/{scenario_id}"): _control_plane_contract(),
+    ("POST", "/api/companies/{ticker}/charts/scenarios/{scenario_id}/clone"): _control_plane_contract(),
+    ("POST", "/api/companies/{ticker}/charts/share-snapshots"): _control_plane_contract(),
+    ("GET", "/api/companies/{ticker}/charts/share-snapshots/{snapshot_id}"): _control_plane_contract(),
     (
         "GET",
         "/api/companies/{ticker}/financials",

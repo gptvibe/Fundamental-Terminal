@@ -5,6 +5,8 @@ from app.models.capital_structure_snapshot import CapitalStructureSnapshot
 from app.models.comment_letter import CommentLetter
 from app.models.company import Company
 from app.models.company_charts_dashboard_snapshot import CompanyChartsDashboardSnapshot
+from app.models.company_charts_scenario import CompanyChartsScenario
+from app.models.company_charts_share_snapshot import CompanyChartsShareSnapshot
 from app.models.company_macro_snapshot import CompanyMacroSnapshot
 from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
 from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
@@ -40,6 +42,8 @@ __all__ = [
     "CommentLetter",
     "Company",
     "CompanyChartsDashboardSnapshot",
+    "CompanyChartsScenario",
+    "CompanyChartsShareSnapshot",
     "CompanyMacroSnapshot",
     "CompanyOilScenarioOverlaySnapshot",
     "CompanyResearchBriefSnapshot",

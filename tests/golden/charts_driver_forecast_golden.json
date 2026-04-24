@@ -1,0 +1,50 @@
+{
+  "AAPL": {
+    "base_next_year_eps": 6.171607,
+    "base_next_year_growth": 0.061973,
+    "base_next_year_revenue": 446.028639,
+    "engine_mode": "driver",
+    "entity_routing": "NONFIN_IB_MODEL",
+    "guidance_anchor": 445.2
+  },
+  "ADBE": {
+    "base_next_year_eps": 17.118862,
+    "base_next_year_growth": 0.135304,
+    "base_next_year_revenue": 31.788503,
+    "engine_mode": "driver",
+    "entity_routing": "NONFIN_IB_MODEL",
+    "guidance_anchor": 31.92
+  },
+  "CAT": {
+    "base_next_year_eps": 15.300878,
+    "base_next_year_growth": 0.042032,
+    "base_next_year_revenue": 66.690019,
+    "engine_mode": "driver",
+    "entity_routing": "NONFIN_IB_MODEL",
+    "guidance_anchor": 66.56
+  },
+  "JPM": {
+    "base_next_year_eps": null,
+    "base_next_year_growth": null,
+    "base_next_year_revenue": null,
+    "engine_mode": "regulated_financial_separate",
+    "entity_routing": "REGULATED_FINANCIAL_SEPARATE",
+    "guidance_anchor": null
+  },
+  "MRNA": {
+    "base_next_year_eps": 1.658047,
+    "base_next_year_growth": 0.199979,
+    "base_next_year_revenue": 14.399745,
+    "engine_mode": "driver",
+    "entity_routing": "NONFIN_IB_MODEL",
+    "guidance_anchor": null
+  },
+  "WMT": {
+    "base_next_year_eps": 8.453843,
+    "base_next_year_growth": 0.036676,
+    "base_next_year_revenue": 668.655911,
+    "engine_mode": "driver",
+    "entity_routing": "NONFIN_IB_MODEL",
+    "guidance_anchor": 667.575
+  }
+}

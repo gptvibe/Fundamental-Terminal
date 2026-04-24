@@ -4,7 +4,13 @@ from fastapi import APIRouter
 
 from app.api.handlers import financials as handlers
 from app.api.source_contracts import add_user_visible_route
-from app.api.schemas.company_charts import CompanyChartsDashboardResponse, CompanyChartsForecastAccuracyResponse
+from app.api.schemas.company_charts import (
+    CompanyChartsDashboardResponse,
+    CompanyChartsForecastAccuracyResponse,
+    CompanyChartsShareSnapshotRecordPayload,
+    CompanyChartsScenarioDetailPayload,
+    CompanyChartsScenarioListResponse,
+)
 from app.api.schemas.equity_claim_risk import CompanyEquityClaimRiskResponse
 from app.api.schemas.financials import (
     CompanyCapitalStructureResponse,
@@ -50,6 +56,55 @@ def build_router() -> APIRouter:
         handlers.company_charts_forecast_accuracy,
         methods=["GET"],
         response_model=CompanyChartsForecastAccuracyResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/scenarios",
+        handlers.company_charts_scenarios,
+        methods=["GET"],
+        response_model=CompanyChartsScenarioListResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/scenarios",
+        handlers.company_charts_scenario_create,
+        methods=["POST"],
+        response_model=CompanyChartsScenarioDetailPayload,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/scenarios/{scenario_id}",
+        handlers.company_charts_scenario_detail,
+        methods=["GET"],
+        response_model=CompanyChartsScenarioDetailPayload,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/scenarios/{scenario_id}",
+        handlers.company_charts_scenario_update,
+        methods=["POST"],
+        response_model=CompanyChartsScenarioDetailPayload,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/scenarios/{scenario_id}/clone",
+        handlers.company_charts_scenario_clone,
+        methods=["POST"],
+        response_model=CompanyChartsScenarioDetailPayload,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/share-snapshots",
+        handlers.company_charts_share_snapshot_create,
+        methods=["POST"],
+        response_model=CompanyChartsShareSnapshotRecordPayload,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/charts/share-snapshots/{snapshot_id}",
+        handlers.company_charts_share_snapshot_detail,
+        methods=["GET"],
+        response_model=CompanyChartsShareSnapshotRecordPayload,
     )
     add_user_visible_route(
         router,

@@ -1,14 +1,19 @@
-import { headers } from "next/headers";
+import type { Metadata } from "next";
 
 import { CompanyChartsDashboard } from "@/components/company/charts-dashboard";
-import { ProjectionStudio } from "@/components/company/projection-studio";
-import type { CompanyChartsDashboardResponse } from "@/lib/types";
 
 import { ChartsRetryButton } from "./charts-retry-button";
-
-type DashboardMode = "outlook" | "studio";
-
-type QueryParamValue = string | string[] | undefined;
+import {
+  buildCompanyChartsMetadata,
+  type ChartsLoadFailure,
+  type QueryParamValue,
+  loadCompanyChartsRouteData,
+  normalizeTicker,
+  readQueryParam,
+  resolveDashboardMode,
+  resolveServerBaseUrl,
+} from "./charts-route-data";
+import { ProjectionStudioHydration } from "./projection-studio-hydration";
 
 type CompanyChartsPageProps = {
   params: { ticker: string } | Promise<{ ticker: string }>;
@@ -18,13 +23,25 @@ type CompanyChartsPageProps = {
     | undefined;
 };
 
-type ChartsLoadFailure = "not_found" | "service_error" | "temporary_error";
+export async function generateMetadata({ params, searchParams }: CompanyChartsPageProps): Promise<Metadata> {
+  const resolvedParams = await params;
+  const resolvedSearchParams = (await searchParams) ?? {};
+  const ticker = normalizeTicker(resolvedParams.ticker);
+  const query = {
+    asOf: readQueryParam(resolvedSearchParams.as_of),
+    requestedMode: readQueryParam(resolvedSearchParams.mode),
+    requestedScenarioId: readQueryParam(resolvedSearchParams.scenario),
+  };
+  const chartsResult = await loadCompanyChartsRouteData(ticker, query.asOf);
 
-function resolveDashboardMode(rawMode: string | null, hasProjectionStudio: boolean): DashboardMode {
-  if (rawMode === "studio" && hasProjectionStudio) {
-    return "studio";
+  if (!chartsResult.ok) {
+    return {
+      title: `${ticker} Growth Outlook`,
+      description: "Company charts and projection studio.",
+    };
   }
-  return "outlook";
+
+  return buildCompanyChartsMetadata(ticker, query, chartsResult.data, resolveServerBaseUrl());
 }
 
 export default async function CompanyChartsPage({ params, searchParams }: CompanyChartsPageProps) {
@@ -33,87 +50,31 @@ export default async function CompanyChartsPage({ params, searchParams }: Compan
   const ticker = normalizeTicker(resolvedParams.ticker);
   const requestedAsOf = readQueryParam(resolvedSearchParams.as_of);
   const requestedMode = readQueryParam(resolvedSearchParams.mode);
-  const chartsResult = await loadCompanyCharts(ticker, requestedAsOf);
+  const requestedScenarioId = readQueryParam(resolvedSearchParams.scenario);
+  const chartsResult = await loadCompanyChartsRouteData(ticker, requestedAsOf);
 
   if (!chartsResult.ok) {
     return <ChartsErrorState failure={chartsResult.failure} />;
   }
 
   const data = chartsResult.data;
-  const mode = resolveDashboardMode(requestedMode, Boolean(data.projection_studio));
+  const mode = resolveDashboardMode(requestedMode, Boolean(data.projection_studio), requestedScenarioId);
 
-  return (
-    <>
-      {mode === "studio" && data.projection_studio ? (
-        <ProjectionStudio payload={data} studio={data.projection_studio} requestedAsOf={requestedAsOf} />
-      ) : (
-        <CompanyChartsDashboard payload={data} activeMode={mode} studioEnabled={Boolean(data.projection_studio)} requestedAsOf={requestedAsOf} />
-      )}
-    </>
+  return mode === "studio" && data.projection_studio ? (
+    <ProjectionStudioHydration
+      payload={data}
+      studio={data.projection_studio}
+      requestedAsOf={requestedAsOf}
+      requestedScenarioId={requestedScenarioId}
+    />
+  ) : (
+    <CompanyChartsDashboard
+      payload={data}
+      activeMode={mode}
+      studioEnabled={Boolean(data.projection_studio)}
+      requestedAsOf={requestedAsOf}
+    />
   );
-}
-
-function normalizeTicker(rawTicker: string): string {
-  try {
-    return decodeURIComponent(rawTicker).trim().toUpperCase();
-  } catch {
-    return rawTicker.trim().toUpperCase();
-  }
-}
-
-function readQueryParam(value: QueryParamValue): string | null {
-  if (Array.isArray(value)) {
-    return value[0] ?? null;
-  }
-  return value ?? null;
-}
-
-async function loadCompanyCharts(
-  ticker: string,
-  asOf: string | null
-): Promise<{ ok: true; data: CompanyChartsDashboardResponse } | { ok: false; failure: ChartsLoadFailure }> {
-  const params = new URLSearchParams();
-  if (asOf?.trim()) {
-    params.set("as_of", asOf.trim());
-  }
-  const suffix = params.toString() ? `?${params.toString()}` : "";
-  const baseUrl = resolveServerBaseUrl();
-
-  try {
-    const response = await fetch(`${baseUrl}/backend/api/companies/${encodeURIComponent(ticker)}/charts${suffix}`, {
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return { ok: false, failure: "not_found" };
-      }
-      if (response.status >= 500) {
-        return { ok: false, failure: "service_error" };
-      }
-      return { ok: false, failure: "temporary_error" };
-    }
-
-    const payload = (await response.json()) as CompanyChartsDashboardResponse;
-    return { ok: true, data: payload };
-  } catch {
-    return { ok: false, failure: "temporary_error" };
-  }
-}
-
-function resolveServerBaseUrl(): string {
-  const headerStore = headers();
-  const host = headerStore.get("x-forwarded-host") ?? headerStore.get("host");
-  const protocol = headerStore.get("x-forwarded-proto") ?? "http";
-
-  if (!host) {
-    throw new Error("Missing host header while loading charts route");
-  }
-
-  return `${protocol}://${host}`;
 }
 
 function ChartsErrorState({ failure }: { failure: ChartsLoadFailure }) {

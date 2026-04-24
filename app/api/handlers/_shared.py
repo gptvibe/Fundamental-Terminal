@@ -109,6 +109,21 @@ from app.services.company_charts_dashboard import (
     recompute_and_persist_company_charts_forecast_accuracy,
     recompute_and_persist_company_charts_dashboard,
 )
+from app.services.company_charts_scenarios import (
+    clone_company_charts_scenario,
+    create_company_charts_scenario,
+    get_company_charts_scenario,
+    list_company_charts_scenarios,
+    serialize_company_charts_scenario,
+    update_company_charts_scenario,
+    viewer_can_access_company_charts_scenario,
+    viewer_can_edit_company_charts_scenario,
+)
+from app.services.company_charts_share_snapshots import (
+    create_company_charts_share_snapshot,
+    get_company_charts_share_snapshot,
+    serialize_company_charts_share_snapshot,
+)
 from app.services.company_research_brief import (
     BRIEF_SCHEMA_VERSION,
     get_company_research_brief_snapshot,
@@ -3124,6 +3139,278 @@ def company_charts_forecast_accuracy(
         ),
     )
     return response
+
+
+_PROJECTION_STUDIO_VIEWER_HEADER = "x-ft-projection-viewer"
+_PROJECTION_STUDIO_VIEWER_COOKIE = "ft_projection_viewer"
+_PROJECTION_STUDIO_AUTH_HEADERS = (
+    "x-ft-user-id",
+    "x-user-id",
+    "x-forwarded-user",
+)
+
+
+def _normalize_projection_studio_viewer_key(raw_value: str | None) -> str | None:
+    if raw_value is None:
+        return None
+    normalized = raw_value.strip()
+    if not normalized:
+        return None
+    if len(normalized) > 160:
+        normalized = normalized[:160]
+    return normalized
+
+
+def _resolve_projection_studio_viewer(
+    request: Request | None,
+) -> tuple[str | None, CompanyChartsScenarioViewerPayload]:
+    if request is None:
+        return None, CompanyChartsScenarioViewerPayload()
+
+    for header_name in _PROJECTION_STUDIO_AUTH_HEADERS:
+        viewer_key = _normalize_projection_studio_viewer_key(request.headers.get(header_name))
+        if viewer_key:
+            return viewer_key, CompanyChartsScenarioViewerPayload(
+                kind="user",
+                signed_in=True,
+                sync_enabled=True,
+                can_create_private=True,
+            )
+
+    device_viewer_key = _normalize_projection_studio_viewer_key(
+        request.headers.get(_PROJECTION_STUDIO_VIEWER_HEADER)
+        or request.cookies.get(_PROJECTION_STUDIO_VIEWER_COOKIE)
+    )
+    if device_viewer_key:
+        return device_viewer_key, CompanyChartsScenarioViewerPayload(
+            kind="device",
+            signed_in=False,
+            sync_enabled=True,
+            can_create_private=True,
+        )
+
+    return None, CompanyChartsScenarioViewerPayload()
+
+
+def company_charts_scenarios(
+    ticker: str,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioListResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    scenarios = [
+        serialize_company_charts_scenario(
+            scenario,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        )
+        for scenario in list_company_charts_scenarios(
+            session,
+            company_id=snapshot.company.id,
+            viewer_key=viewer_key,
+        )
+    ]
+    return CompanyChartsScenarioListResponse(viewer=viewer, scenarios=scenarios)
+
+
+def company_charts_scenario_create(
+    ticker: str,
+    payload: CompanyChartsScenarioUpsertRequest,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    if payload.visibility == "private" and not viewer.can_create_private:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private Projection Studio scenarios require a local viewer or signed-in identity.",
+        )
+
+    scenario = create_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        payload=payload,
+        viewer_key=viewer_key,
+    )
+    if hasattr(session, "commit"):
+        session.commit()
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            scenario,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_scenario_detail(
+    ticker: str,
+    scenario_id: str,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    scenario = get_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        scenario_id=scenario_id,
+    )
+    if scenario is None or not viewer_can_access_company_charts_scenario(scenario, viewer_key=viewer_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projection Studio scenario not found.")
+
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            scenario,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_scenario_update(
+    ticker: str,
+    scenario_id: str,
+    payload: CompanyChartsScenarioUpsertRequest,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    scenario = get_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        scenario_id=scenario_id,
+    )
+    if scenario is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projection Studio scenario not found.")
+    if not viewer_can_edit_company_charts_scenario(scenario, viewer_key=viewer_key):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot update this Projection Studio scenario.")
+    if payload.visibility == "private" and not viewer.can_create_private:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private Projection Studio scenarios require a local viewer or signed-in identity.",
+        )
+
+    updated = update_company_charts_scenario(session, scenario=scenario, payload=payload)
+    if hasattr(session, "commit"):
+        session.commit()
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            updated,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_scenario_clone(
+    ticker: str,
+    scenario_id: str,
+    payload: CompanyChartsScenarioCloneRequest,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    source_scenario = get_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        scenario_id=scenario_id,
+    )
+    if source_scenario is None or not viewer_can_access_company_charts_scenario(source_scenario, viewer_key=viewer_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projection Studio scenario not found.")
+
+    requested_visibility = payload.visibility or source_scenario.visibility
+    if requested_visibility == "private" and not viewer.can_create_private:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private Projection Studio scenarios require a local viewer or signed-in identity.",
+        )
+
+    cloned = clone_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        source_scenario=source_scenario,
+        payload=payload,
+        viewer_key=viewer_key,
+    )
+    if hasattr(session, "commit"):
+        session.commit()
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            cloned,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_share_snapshot_create(
+    ticker: str,
+    payload: CompanyChartsShareSnapshotPayload,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsShareSnapshotRecordPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    created = create_company_charts_share_snapshot(
+        session,
+        company_id=snapshot.company.id,
+        payload=payload.model_copy(update={"ticker": snapshot.company.ticker}),
+    )
+    if hasattr(session, "commit"):
+        session.commit()
+    return serialize_company_charts_share_snapshot(created, ticker=snapshot.company.ticker)
+
+
+def company_charts_share_snapshot_detail(
+    ticker: str,
+    snapshot_id: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsShareSnapshotRecordPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    record = get_company_charts_share_snapshot(
+        session,
+        company_id=snapshot.company.id,
+        snapshot_id=snapshot_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Charts share snapshot not found.")
+
+    return serialize_company_charts_share_snapshot(record, ticker=snapshot.company.ticker)
 
 
 def _build_company_charts_response(

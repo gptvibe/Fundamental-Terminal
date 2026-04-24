@@ -25,6 +25,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 COMPANY_ROUTE_CACHE_CONTROL = "public, max-age=20, stale-while-revalidate=300"
 
 
+def _should_apply_company_route_cache(path: str) -> bool:
+    return "/charts/scenarios" not in path and "/charts/share-snapshots" not in path
+
+
 def _normalize_company_cache_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -403,6 +407,8 @@ async def _resolve_company_route_cache_metadata(request: Request) -> tuple[str, 
         return None
 
     path = request.url.path
+    if not _should_apply_company_route_cache(path):
+        return None
     if not path.startswith("/api/companies/"):
         return None
 
@@ -487,7 +493,11 @@ def create_app() -> FastAPI:
 
         response = await call_next(request)
 
-        if request.method.upper() == "GET" and request.url.path.startswith("/api/companies/"):
+        if (
+            request.method.upper() == "GET"
+            and request.url.path.startswith("/api/companies/")
+            and _should_apply_company_route_cache(request.url.path)
+        ):
             if cache_metadata is not None:
                 etag, last_modified, from_hot_cache = cache_metadata
                 if not from_hot_cache:

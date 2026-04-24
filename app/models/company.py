@@ -11,6 +11,8 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.capital_markets_event import CapitalMarketsEvent
+    from app.models.company_charts_scenario import CompanyChartsScenario
+    from app.models.company_charts_share_snapshot import CompanyChartsShareSnapshot
     from app.models.capital_structure_snapshot import CapitalStructureSnapshot
     from app.models.company_charts_dashboard_snapshot import CompanyChartsDashboardSnapshot
     from app.models.comment_letter import CommentLetter
@@ -117,6 +119,16 @@ class Company(Base):
         passive_deletes=True,
     )
     charts_dashboard_snapshots: Mapped[list["CompanyChartsDashboardSnapshot"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    charts_scenarios: Mapped[list["CompanyChartsScenario"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    charts_share_snapshots: Mapped[list["CompanyChartsShareSnapshot"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

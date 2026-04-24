@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date as DateType
+from datetime import date as DateType, datetime
+
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -88,6 +90,41 @@ class CompanyChartsLegendItemPayload(BaseModel):
 class CompanyChartsLegendPayload(BaseModel):
     title: str = "Actual vs Forecast"
     items: list[CompanyChartsLegendItemPayload] = Field(default_factory=list)
+
+
+class CompanyChartsEventPayload(BaseModel):
+    key: str
+    event_type: str
+    label: str
+    event_date: DateType
+    period_label: str | None = None
+    detail: str | None = None
+    source_label: str = "Official filing"
+    source_url: str | None = None
+
+
+class CompanyChartsEventOverlayPayload(BaseModel):
+    title: str = "Event overlays"
+    available_event_types: list[str] = Field(default_factory=list)
+    default_enabled_event_types: list[str] = Field(default_factory=list)
+    events: list[CompanyChartsEventPayload] = Field(default_factory=list)
+    sparse_data_note: str | None = None
+
+
+class CompanyChartsQuarterChangeItemPayload(BaseModel):
+    key: str
+    label: str
+    value: str
+    detail: str | None = None
+
+
+class CompanyChartsQuarterChangePayload(BaseModel):
+    title: str = "What changed since last quarter?"
+    latest_period_label: str | None = None
+    prior_period_label: str | None = None
+    summary: str | None = None
+    items: list[CompanyChartsQuarterChangeItemPayload] = Field(default_factory=list)
+    empty_state: str | None = None
 
 
 class CompanyChartsSeriesPointPayload(BaseModel):
@@ -324,6 +361,215 @@ class CompanyChartsWhatIfPayload(BaseModel):
     driver_control_metadata: list[CompanyChartsDriverControlMetadataPayload] = Field(default_factory=list)
 
 
+class CompanyChartsOutlookSpecPayload(BaseModel):
+    title: str = "Growth Outlook"
+    summary: CompanyChartsSummaryPayload = Field(default_factory=CompanyChartsSummaryPayload)
+    legend: CompanyChartsLegendPayload = Field(default_factory=CompanyChartsLegendPayload)
+    cards: CompanyChartsCardsPayload = Field(default_factory=CompanyChartsCardsPayload)
+    primary_card_order: list[str] = Field(default_factory=list)
+    secondary_card_order: list[str] = Field(default_factory=list)
+    comparison_card_order: list[str] = Field(default_factory=list)
+    detail_card_order: list[str] = Field(default_factory=list)
+    methodology: CompanyChartsMethodologyPayload = Field(
+        default_factory=lambda: CompanyChartsMethodologyPayload(
+            version="company_charts_dashboard_v9",
+            label="Driver-based integrated forecast",
+            summary="Forecasts are generated from official inputs and explicit driver rules.",
+            disclaimer="Forecast values are projections and are not reported results.",
+        )
+    )
+    forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)
+    event_overlay: CompanyChartsEventOverlayPayload = Field(default_factory=CompanyChartsEventOverlayPayload)
+    quarter_change: CompanyChartsQuarterChangePayload = Field(default_factory=CompanyChartsQuarterChangePayload)
+
+
+class CompanyChartsStudioSpecPayload(BaseModel):
+    title: str = "Projection Studio"
+    summary: str | None = None
+    projection_studio: CompanyChartsProjectionStudioPayload
+    what_if: CompanyChartsWhatIfPayload | None = None
+
+
+class CompanyChartsSpecPayload(ProvenanceEnvelope):
+    schema_version: str = "company_chart_spec_v1"
+    payload_version: str = "company_charts_dashboard_v9"
+    company: CompanyPayload | None = None
+    build_state: str = "building"
+    build_status: str = "Charts dashboard is warming up."
+    refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+    available_modes: list[Literal["outlook", "studio"]] = Field(default_factory=lambda: ["outlook"])
+    default_mode: Literal["outlook", "studio"] = "outlook"
+    outlook: CompanyChartsOutlookSpecPayload = Field(default_factory=CompanyChartsOutlookSpecPayload)
+    studio: CompanyChartsStudioSpecPayload | None = None
+
+
+class CompanyChartsShareSnapshotMetricPayload(BaseModel):
+    key: str
+    label: str
+    value: str
+    detail: str | None = None
+    tone: str = "neutral"
+
+
+class CompanyChartsShareSnapshotSeriesPointPayload(BaseModel):
+    label: str
+    value: Number = None
+    kind: Literal["actual", "forecast"] = "actual"
+
+
+class CompanyChartsShareSnapshotChartPayload(BaseModel):
+    title: str
+    unit: str = "count"
+    actual_points: list[CompanyChartsShareSnapshotSeriesPointPayload] = Field(default_factory=list)
+    forecast_points: list[CompanyChartsShareSnapshotSeriesPointPayload] = Field(default_factory=list)
+
+
+class CompanyChartsShareSnapshotOutlookPayload(BaseModel):
+    headline: str = "Growth Outlook"
+    thesis: str | None = None
+    primary_score: CompanyChartsScoreBadgePayload = Field(
+        default_factory=lambda: CompanyChartsScoreBadgePayload(key="growth", label="Growth")
+    )
+    secondary_scores: list[CompanyChartsScoreBadgePayload] = Field(default_factory=list)
+    summary_metrics: list[CompanyChartsShareSnapshotMetricPayload] = Field(default_factory=list)
+    primary_chart: CompanyChartsShareSnapshotChartPayload | None = None
+
+
+class CompanyChartsShareSnapshotStudioRowPayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    base_value: Number = None
+    bull_value: Number = None
+    bear_value: Number = None
+
+
+class CompanyChartsShareSnapshotStudioPayload(BaseModel):
+    headline: str = "Projection Studio"
+    summary: str | None = None
+    scenario_name: str | None = None
+    override_count: int = 0
+    forecast_year: int | None = None
+    metrics: list[CompanyChartsShareSnapshotMetricPayload] = Field(default_factory=list)
+    scenario_rows: list[CompanyChartsShareSnapshotStudioRowPayload] = Field(default_factory=list)
+
+
+class CompanyChartsShareSnapshotPayload(BaseModel):
+    schema_version: str = "company_chart_share_snapshot_v1"
+    mode: Literal["outlook", "studio"]
+    ticker: str
+    company_name: str | None = None
+    title: str
+    as_of: str | None = None
+    source_badge: str = "Official filings"
+    provenance_badge: str = "SEC-derived"
+    trust_label: str | None = None
+    actual_label: str = "Reported"
+    forecast_label: str = "Projected"
+    source_path: str
+    chart_spec: CompanyChartsSpecPayload
+    outlook: CompanyChartsShareSnapshotOutlookPayload | None = None
+    studio: CompanyChartsShareSnapshotStudioPayload | None = None
+
+
+class CompanyChartsShareSnapshotRecordPayload(BaseModel):
+    id: str
+    ticker: str
+    mode: Literal["outlook", "studio"]
+    schema_version: str
+    share_path: str
+    image_path: str
+    created_at: datetime | None = None
+    payload: CompanyChartsShareSnapshotPayload
+
+
+class CompanyChartsScenarioMetricPayload(BaseModel):
+    key: str
+    label: str
+    unit: str
+    value: Number = None
+
+
+class CompanyChartsScenarioViewerPayload(BaseModel):
+    kind: Literal["anonymous", "device", "user"] = "anonymous"
+    signed_in: bool = False
+    sync_enabled: bool = False
+    can_create_private: bool = False
+
+
+class CompanyChartsScenarioUpsertRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    visibility: Literal["public", "private"] = "private"
+    source: Literal["sec_base_forecast", "user_scenario"] = "sec_base_forecast"
+    override_count: int = 0
+    forecast_year: int | None = None
+    as_of: str | None = None
+    overrides: dict[str, float] = Field(default_factory=dict)
+    metrics: list[CompanyChartsScenarioMetricPayload] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Scenario name is required.")
+        if len(normalized) > 120:
+            raise ValueError("Scenario name must be 120 characters or fewer.")
+        return normalized
+
+
+class CompanyChartsScenarioCloneRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    visibility: Literal["public", "private"] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Cloned scenario name cannot be empty.")
+        if len(normalized) > 120:
+            raise ValueError("Scenario name must be 120 characters or fewer.")
+        return normalized
+
+
+class CompanyChartsScenarioPayload(BaseModel):
+    schema_version: int = 1
+    id: str
+    ticker: str
+    name: str
+    visibility: Literal["public", "private"] = "private"
+    source: Literal["sec_base_forecast", "user_scenario"] = "sec_base_forecast"
+    override_count: int = 0
+    forecast_year: int | None = None
+    as_of: str | None = None
+    overrides: dict[str, float] = Field(default_factory=dict)
+    metrics: list[CompanyChartsScenarioMetricPayload] = Field(default_factory=list)
+    share_path: str
+    cloned_from_scenario_id: str | None = None
+    owned_by_viewer: bool = False
+    editable: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class CompanyChartsScenarioDetailPayload(BaseModel):
+    viewer: CompanyChartsScenarioViewerPayload = Field(default_factory=CompanyChartsScenarioViewerPayload)
+    scenario: CompanyChartsScenarioPayload
+
+
+class CompanyChartsScenarioListResponse(BaseModel):
+    viewer: CompanyChartsScenarioViewerPayload = Field(default_factory=CompanyChartsScenarioViewerPayload)
+    scenarios: list[CompanyChartsScenarioPayload] = Field(default_factory=list)
+
+
 class CompanyChartsForecastAccuracySamplePayload(BaseModel):
     metric_key: str
     metric_label: str
@@ -378,6 +624,8 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     factors: CompanyChartsFactorsPayload = Field(default_factory=CompanyChartsFactorsPayload)
     legend: CompanyChartsLegendPayload = Field(default_factory=CompanyChartsLegendPayload)
     cards: CompanyChartsCardsPayload = Field(default_factory=CompanyChartsCardsPayload)
+    event_overlay: CompanyChartsEventOverlayPayload = Field(default_factory=CompanyChartsEventOverlayPayload)
+    quarter_change: CompanyChartsQuarterChangePayload = Field(default_factory=CompanyChartsQuarterChangePayload)
     forecast_methodology: CompanyChartsMethodologyPayload = Field(
         default_factory=lambda: CompanyChartsMethodologyPayload(
             version="company_charts_dashboard_v9",
@@ -389,6 +637,15 @@ class CompanyChartsDashboardResponse(ProvenanceEnvelope):
     forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload = Field(default_factory=CompanyChartsForecastDiagnosticsPayload)
     projection_studio: CompanyChartsProjectionStudioPayload | None = None
     what_if: CompanyChartsWhatIfPayload | None = None
+    chart_spec: CompanyChartsSpecPayload | None = None
     payload_version: str = "company_charts_dashboard_v9"
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+
+    @model_validator(mode="after")
+    def _ensure_chart_spec(self) -> CompanyChartsDashboardResponse:
+        if self.chart_spec is None:
+            from app.services.company_charts_spec import build_company_charts_spec
+
+            self.chart_spec = build_company_charts_spec(self)
+        return self

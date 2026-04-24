@@ -5,13 +5,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { ProjectionStudio } from "./projection-studio";
-import { getCompanyChartsWhatIf } from "@/lib/api";
+import {
+  cloneCompanyChartsScenario,
+  createCompanyChartsShareSnapshot,
+  createCompanyChartsScenario,
+  getCompanyChartsScenario,
+  getCompanyChartsWhatIf,
+  listCompanyChartsScenarios,
+  updateCompanyChartsScenario,
+} from "@/lib/api";
 import { FORECAST_HANDOFF_QUERY_PARAM, decodeForecastHandoffPayload } from "@/lib/forecast-handoff";
 
 const mockUseForecastAccuracy = vi.fn();
 
 const { exportRowsToCsv } = vi.hoisted(() => ({
   exportRowsToCsv: vi.fn(),
+}));
+
+const { captureElementViewportAsPngBlob } = vi.hoisted(() => ({
+  captureElementViewportAsPngBlob: vi.fn(),
 }));
 
 vi.mock("next/link", () => ({
@@ -50,12 +62,19 @@ vi.mock("@/lib/export", async () => {
   const actual = await vi.importActual<typeof import("@/lib/export")>("@/lib/export");
   return {
     ...actual,
+    captureElementViewportAsPngBlob,
     exportRowsToCsv,
   };
 });
 
 vi.mock("@/lib/api", () => ({
+  cloneCompanyChartsScenario: vi.fn(),
+  createCompanyChartsShareSnapshot: vi.fn(),
+  createCompanyChartsScenario: vi.fn(),
+  getCompanyChartsScenario: vi.fn(),
   getCompanyChartsWhatIf: vi.fn(),
+  listCompanyChartsScenarios: vi.fn(),
+  updateCompanyChartsScenario: vi.fn(),
 }));
 
 function buildFormulaTrace({
@@ -97,6 +116,7 @@ function buildPayload(options?: {
   priceGrowthValue?: number;
   impactSummary?: boolean;
   appliedOverrides?: Array<Record<string, unknown>>;
+  chart_spec?: Record<string, unknown>;
 }) {
   const revenue2026 = options?.revenue2026 ?? 1210;
   const receivables2026 = options?.receivables2026 ?? 210;
@@ -349,6 +369,7 @@ function buildPayload(options?: {
     last_refreshed_at: null,
     source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
     confidence_flags: [],
+    ...(options?.chart_spec ? { chart_spec: options.chart_spec } : {}),
   };
 
   return {
@@ -360,6 +381,30 @@ function buildPayload(options?: {
 describe("ProjectionStudio", () => {
   beforeEach(() => {
     mockUseForecastAccuracy.mockReturnValue({ data: null, loading: false, error: null });
+    vi.mocked(listCompanyChartsScenarios).mockResolvedValue({
+      viewer: { kind: "device", signed_in: false, sync_enabled: true, can_create_private: true },
+      scenarios: [],
+    } as never);
+    vi.mocked(getCompanyChartsScenario).mockReset();
+    vi.mocked(createCompanyChartsShareSnapshot).mockReset();
+    captureElementViewportAsPngBlob.mockReset();
+    captureElementViewportAsPngBlob.mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.mocked(createCompanyChartsScenario).mockRejectedValue(new Error("offline"));
+    vi.mocked(updateCompanyChartsScenario).mockRejectedValue(new Error("offline"));
+    vi.mocked(cloneCompanyChartsScenario).mockRejectedValue(new Error("offline"));
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { write: vi.fn().mockResolvedValue(undefined), writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    Object.defineProperty(window, "ClipboardItem", {
+      configurable: true,
+      value: class ClipboardItem {
+        items: Record<string, Blob>;
+        constructor(items: Record<string, Blob>) {
+          this.items = items;
+        }
+      },
+    });
   });
 
   afterEach(() => {
@@ -401,6 +446,92 @@ describe("ProjectionStudio", () => {
     expect(trackRecordSection).toBeTruthy();
     expect(screen.getByText("Forecast Track Record")).toBeTruthy();
     expect(within(trackRecordSection).getByText("Partial Default")).toBeTruthy();
+  });
+
+  it("copies the live studio surface instead of creating a share snapshot image", async () => {
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+
+    render(<ProjectionStudio payload={payload as never} studio={studio as never} />);
+    fireEvent.click(screen.getByRole("button", { name: "Copy Image" }));
+
+    await waitFor(() => expect(captureElementViewportAsPngBlob).toHaveBeenCalledTimes(1));
+    const [captureTarget] = vi.mocked(captureElementViewportAsPngBlob).mock.calls[0] ?? [];
+    expect(captureTarget).toBeInstanceOf(HTMLDivElement);
+    expect(captureTarget?.textContent ?? "").toContain("Projection Studio");
+    expect(captureTarget?.textContent ?? "").toContain("Export Studio CSV");
+    expect(captureTarget?.textContent ?? "").toContain("What-If Controls");
+    expect(createCompanyChartsShareSnapshot).not.toHaveBeenCalled();
+    await waitFor(() => expect(navigator.clipboard.write).toHaveBeenCalledTimes(1));
+  });
+
+  it("uses the versioned chart spec studio summary when present", async () => {
+    const baseline = buildPayload({ includeWhatIf: true });
+    const { payload, studio } = buildPayload({
+      includeWhatIf: true,
+      chart_spec: {
+        schema_version: "company_chart_spec_v1",
+        payload_version: "company_charts_dashboard_v9",
+        company: null,
+        build_state: "ready",
+        build_status: "Charts dashboard ready.",
+        refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+        diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 0.9, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+        provenance: [],
+        as_of: "2026-04-13",
+        last_refreshed_at: null,
+        source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+        confidence_flags: [],
+        available_modes: ["outlook", "studio"],
+        default_mode: "outlook",
+        outlook: {
+          title: "Growth Outlook",
+          summary: baseline.payload.summary,
+          legend: baseline.payload.legend,
+          cards: baseline.payload.cards,
+          primary_card_order: ["revenue", "revenue_growth", "profit_metric", "cash_flow_metric", "eps"],
+          secondary_card_order: [],
+          comparison_card_order: ["growth_summary"],
+          detail_card_order: [],
+          methodology: baseline.payload.forecast_methodology,
+          forecast_diagnostics: {
+            score_key: "forecast_stability",
+            score_name: "Forecast Stability",
+            heuristic: false,
+            final_score: 72,
+            summary: "Moderate stability.",
+            history_depth_years: 5,
+            thin_history: false,
+            growth_volatility: 0.12,
+            growth_volatility_band: "moderate",
+            missing_data_penalty: 0,
+            quality_score: 0.9,
+            missing_inputs: [],
+            sample_size: 3,
+            scenario_dispersion: 0.1,
+            sector_template: "Technology",
+            guidance_usage: "management_guidance_applied",
+            historical_backtest_error_band: "moderate",
+            backtest_weighted_error: 0.1,
+            backtest_horizon_errors: {},
+            backtest_metric_weights: {},
+            backtest_metric_errors: {},
+            backtest_metric_horizon_errors: {},
+            backtest_metric_sample_sizes: {},
+            components: [],
+          },
+        },
+        studio: {
+          title: "Projection Studio",
+          summary: "Spec-driven studio summary",
+          projection_studio: baseline.studio,
+          what_if: baseline.payload.what_if,
+        },
+      },
+    });
+
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    expect(await screen.findByText("Spec-driven studio summary")).toBeTruthy();
   });
 
   it("opens and collapses the what-if sidebar and uses backend-provided limits", async () => {
@@ -623,7 +754,9 @@ describe("ProjectionStudio", () => {
     const promptSpy = vi
       .spyOn(window, "prompt")
       .mockReturnValueOnce("Upside Scenario")
-      .mockReturnValueOnce("Defensive Scenario");
+      .mockReturnValueOnce("private")
+      .mockReturnValueOnce("Defensive Scenario")
+      .mockReturnValueOnce("private");
 
     const { payload, studio } = buildPayload({ includeWhatIf: true });
     render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
@@ -632,16 +765,16 @@ describe("ProjectionStudio", () => {
     fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.08", valueAsNumber: 0.08 } });
     await new Promise((resolve) => setTimeout(resolve, 350));
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     fireEvent.change(screen.getByTestId("studio-what-if-input-price_growth"), { target: { value: "0.01", valueAsNumber: 0.01 } });
     await new Promise((resolve) => setTimeout(resolve, 350));
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save As" }));
 
-    expect(promptSpy).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Upside Scenario")).toBeTruthy();
-    expect(screen.getByText("Defensive Scenario")).toBeTruthy();
+    expect(promptSpy).toHaveBeenCalledTimes(4);
+    expect(await screen.findByText("Upside Scenario")).toBeTruthy();
+    expect(await screen.findByText("Defensive Scenario")).toBeTruthy();
 
     const upsideCard = screen.getByText("Upside Scenario").closest("article");
     const defensiveCard = screen.getByText("Defensive Scenario").closest("article");
@@ -659,20 +792,124 @@ describe("ProjectionStudio", () => {
     expect(screen.queryByText("Defensive Scenario")).toBeNull();
   });
 
-  it("exports scenario compare rows and includes valuation handoff payload", async () => {
-    vi.mocked(getCompanyChartsWhatIf).mockResolvedValueOnce(
-      buildPayload({
-        includeWhatIf: true,
-        impactSummary: true,
-        revenue2026: 1300,
-        receivables2026: 278,
-        dsoValue: 78,
-        priceGrowthValue: 0.08,
-        revenueScenarioState: "user_override",
-      }).payload as never
+  it("builds a why-changed decomposition for compared scenarios and copies a compact summary", async () => {
+    vi.mocked(getCompanyChartsWhatIf)
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          revenue2026: 1300,
+          receivables2026: 278,
+          dsoValue: 78,
+          priceGrowthValue: 0.08,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      )
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          revenue2026: 1125,
+          receivables2026: 205,
+          dsoValue: 28,
+          priceGrowthValue: 0.01,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      );
+
+    window.localStorage.setItem(
+      "ft:projection-studio:scenarios:ACME",
+      JSON.stringify([
+        {
+          version: 1,
+          id: "saved-1",
+          name: "Upside Scenario",
+          createdAt: "2026-04-19T00:00:00.000Z",
+          overrideCount: 2,
+          source: "user_scenario",
+          visibility: "private",
+          overrides: { price_growth: 0.08, dso: 78 },
+          metrics: [{ key: "revenue", label: "Revenue", unit: "usd", value: 1300 }],
+        },
+        {
+          version: 1,
+          id: "saved-2",
+          name: "Defensive Scenario",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          overrideCount: 2,
+          source: "user_scenario",
+          visibility: "private",
+          overrides: { price_growth: 0.01, dso: 28 },
+          metrics: [{ key: "revenue", label: "Revenue", unit: "usd", value: 1125 }],
+        },
+      ])
     );
 
-    vi.spyOn(window, "prompt").mockReturnValueOnce("Scenario One").mockReturnValueOnce("Scenario Two");
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    const firstCard = (await screen.findByText("Upside Scenario")).closest("article") as HTMLElement;
+    const secondCard = (await screen.findByText("Defensive Scenario")).closest("article") as HTMLElement;
+    fireEvent.click(within(firstCard).getByLabelText("Compare"));
+    fireEvent.click(within(secondCard).getByLabelText("Compare"));
+
+    await waitFor(() => expect(screen.getByTestId("studio-scenario-diff-panel")).toBeTruthy());
+    expect(screen.getByText("Why did this change?")).toBeTruthy();
+    expect(screen.getByText("Top Assumption Changes")).toBeTruthy();
+    expect(screen.getByText("Major Intermediate Deltas")).toBeTruthy();
+    expect(screen.getAllByText("Price Growth").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy Summary" }));
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(1));
+    expect(String(clipboardWrite.mock.calls[0]?.[0] ?? "")).toContain("Why did this change?");
+  });
+
+  it("exports scenario compare rows and includes valuation handoff payload", async () => {
+    vi.mocked(getCompanyChartsWhatIf)
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          impactSummary: true,
+          revenue2026: 1300,
+          receivables2026: 278,
+          dsoValue: 78,
+          priceGrowthValue: 0.08,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      )
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          impactSummary: true,
+          revenue2026: 1300,
+          receivables2026: 278,
+          dsoValue: 78,
+          priceGrowthValue: 0.08,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      )
+      .mockResolvedValueOnce(
+        buildPayload({
+          includeWhatIf: true,
+          impactSummary: true,
+          revenue2026: 1125,
+          receivables2026: 205,
+          dsoValue: 28,
+          priceGrowthValue: 0.01,
+          revenueScenarioState: "user_override",
+        }).payload as never
+      );
+
+    vi
+      .spyOn(window, "prompt")
+      .mockReturnValueOnce("Scenario One")
+      .mockReturnValueOnce("private")
+      .mockReturnValueOnce("Scenario Two")
+      .mockReturnValueOnce("private");
 
     const { payload, studio } = buildPayload({ includeWhatIf: true });
     render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
@@ -682,18 +919,21 @@ describe("ProjectionStudio", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    const firstCard = screen.getByText("Scenario One").closest("article") as HTMLElement;
-    const secondCard = screen.getByText("Scenario Two").closest("article") as HTMLElement;
+    const firstCard = (await screen.findByText("Scenario One")).closest("article") as HTMLElement;
+    const secondCard = (await screen.findByText("Scenario Two")).closest("article") as HTMLElement;
     fireEvent.click(within(firstCard).getByLabelText("Compare"));
     fireEvent.click(within(secondCard).getByLabelText("Compare"));
+
+    await waitFor(() => expect(screen.getByTestId("studio-scenario-diff-panel")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Export Studio CSV" }));
     expect(exportRowsToCsv).toHaveBeenCalledTimes(1);
     const [, rows] = exportRowsToCsv.mock.calls[0] as [string, Array<Record<string, unknown>>];
     expect(rows.some((row) => row.record_type === "scenario_compare")).toBe(true);
+    expect(rows.some((row) => row.record_type === "scenario_decomposition_output")).toBe(true);
 
     const valuationLink = screen.getByRole("link", { name: "See Valuation Impact" });
     const href = valuationLink.getAttribute("href") ?? "";
@@ -740,7 +980,7 @@ describe("ProjectionStudio", () => {
   });
 
   it("keeps the studio interactive when scenario persistence hits quota", async () => {
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Upside Scenario");
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("Upside Scenario").mockReturnValueOnce("private");
     const originalSetItem = window.localStorage.setItem.bind(window.localStorage);
     const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (key: string, value: string) {
       if (key === "ft:projection-studio:scenarios:ACME" && String(value).includes("Upside Scenario")) {
@@ -770,7 +1010,7 @@ describe("ProjectionStudio", () => {
     await new Promise((resolve) => setTimeout(resolve, 350));
     await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByRole("button", { name: "Save Scenario" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText("Upside Scenario")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("saved scenarios cannot persist on this device");
@@ -778,5 +1018,94 @@ describe("ProjectionStudio", () => {
 
     promptSpy.mockRestore();
     setItemSpy.mockRestore();
+  });
+
+  it("renders synced scenarios and copies a share link", async () => {
+    vi.mocked(listCompanyChartsScenarios).mockResolvedValue({
+      viewer: { kind: "device", signed_in: false, sync_enabled: true, can_create_private: true },
+      scenarios: [
+        {
+          schema_version: 1,
+          id: "remote-1",
+          ticker: "ACME",
+          name: "Synced Public",
+          visibility: "public",
+          source: "user_scenario",
+          override_count: 1,
+          forecast_year: 2026,
+          as_of: null,
+          overrides: { price_growth: 0.08 },
+          metrics: [{ key: "revenue", label: "Revenue", unit: "usd", value: 1300 }],
+          share_path: "/company/ACME/charts?mode=studio&scenario=remote-1",
+          cloned_from_scenario_id: null,
+          owned_by_viewer: true,
+          editable: true,
+          created_at: "2026-04-19T00:00:00.000Z",
+          updated_at: "2026-04-19T00:00:00.000Z",
+        },
+      ],
+    } as never);
+
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: clipboardWrite },
+    });
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
+
+    const syncedCard = await screen.findByText("Synced Public");
+    fireEvent.click(within(syncedCard.closest("article") as HTMLElement).getByRole("button", { name: "Share Link" }));
+
+    await waitFor(() =>
+      expect(clipboardWrite).toHaveBeenCalledWith("http://localhost:3000/company/ACME/charts?mode=studio&scenario=remote-1")
+    );
+  });
+
+  it("loads a requested shared scenario from the URL and reapplies its overrides", async () => {
+    vi.mocked(getCompanyChartsScenario).mockResolvedValue({
+      viewer: { kind: "device", signed_in: false, sync_enabled: true, can_create_private: true },
+      scenario: {
+        schema_version: 1,
+        id: "remote-2",
+        ticker: "ACME",
+        name: "Shared Upside",
+        visibility: "public",
+        source: "user_scenario",
+        override_count: 1,
+        forecast_year: 2026,
+        as_of: null,
+        overrides: { price_growth: 0.08 },
+        metrics: [{ key: "revenue", label: "Revenue", unit: "usd", value: 1300 }],
+        share_path: "/company/ACME/charts?mode=studio&scenario=remote-2",
+        cloned_from_scenario_id: null,
+        owned_by_viewer: true,
+        editable: true,
+        created_at: "2026-04-19T00:00:00.000Z",
+        updated_at: "2026-04-19T00:00:00.000Z",
+      },
+    } as never);
+    vi.mocked(getCompanyChartsWhatIf).mockResolvedValue(
+      buildPayload({
+        includeWhatIf: true,
+        impactSummary: true,
+        revenue2026: 1300,
+        receivables2026: 278,
+        dsoValue: 31,
+        priceGrowthValue: 0.08,
+        revenueScenarioState: "user_override",
+      }).payload as never
+    );
+
+    const { payload, studio } = buildPayload({ includeWhatIf: true });
+    render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never, requestedScenarioId: "remote-2" }));
+
+    await waitFor(() => expect(getCompanyChartsScenario).toHaveBeenCalledWith("ACME", "remote-2", expect.anything()));
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await waitFor(() =>
+      expect(getCompanyChartsWhatIf).toHaveBeenCalledWith("ACME", { overrides: { price_growth: 0.08 } }, expect.anything())
+    );
+    expect(await screen.findByText("Shared Upside")).toBeTruthy();
   });
 });

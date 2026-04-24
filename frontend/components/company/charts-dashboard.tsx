@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Area,
   Bar,
@@ -17,8 +17,11 @@ import {
 } from "recharts";
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
+import { ChartShareActions } from "@/components/company/chart-share-actions";
 import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
 import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
+import { buildOutlookChartShareSnapshot } from "@/lib/chart-share";
+import { getCompanyChartsOutlookSpec, getOrderedOutlookComparisonCards, getOrderedOutlookDetailCards, getOrderedOutlookMetricCards } from "@/lib/chart-spec";
 import { resolveChartsForecastSourceState } from "@/lib/forecast-source-state";
 import { CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
@@ -28,6 +31,9 @@ import type {
   CompanyChartsComparisonCardPayload,
   CompanyChartsDashboardResponse,
   CompanyChartsLegendItemPayload,
+  CompanyChartsEventOverlayPayload,
+  CompanyChartsEventPayload,
+  CompanyChartsQuarterChangePayload,
   CompanyChartsScoreBadgePayload,
   CompanyChartsSeriesPayload,
   CompanyChartsTone,
@@ -37,9 +43,10 @@ import type {
 type ChartRow = {
   periodLabel: string;
   forecastZone: boolean;
+  events: CompanyChartsEventPayload[];
   values: Record<string, number | null>;
   pointMeta: Record<string, { annotation: string | null; seriesKind: string }>;
-} & Record<string, number | boolean | string | null | Record<string, { annotation: string | null; seriesKind: string }> | Record<string, number | null>>;
+} & Record<string, number | boolean | string | null | CompanyChartsEventPayload[] | Record<string, { annotation: string | null; seriesKind: string }> | Record<string, number | null>>;
 
 type MetricChartTooltipEntry = {
   dataKey?: string | number;
@@ -50,14 +57,53 @@ type MetricChartTooltipEntry = {
 };
 
 const CARD_PALETTES: Record<string, string[]> = {
-  revenue: ["#f2efe6", "#7be0a7"],
-  revenue_outlook_bridge: ["#f2efe6", "#7be0a7", "#8ebbe2", "#e9c85d", "#f0877f", "#c7d0d9"],
-  revenue_growth: ["#79e08d", "#45674f"],
-  profit_metric: ["#ffb15f", "#ffd56c", "#77d3ff"],
-  margin_path: ["#f2efe6", "#ffb15f", "#7be0a7", "#c7d0d9", "#ffd56c", "#8ebbe2"],
-  cash_flow_metric: ["#7a88ff", "#d87dff", "#9ba6b2"],
-  fcf_outlook: ["#f2efe6", "#77d3ff", "#7be0a7", "#d87dff", "#7a88ff", "#ffb15f", "#c7d0d9"],
-  eps: ["#d6a04a", "#8f6f33"],
+  revenue: ["var(--charts-series-reported)", "var(--charts-series-forecast)"],
+  revenue_outlook_bridge: [
+    "var(--charts-series-reported)",
+    "var(--charts-series-forecast)",
+    "var(--charts-series-context)",
+    "var(--charts-series-warning)",
+    "var(--charts-series-alert)",
+    "var(--charts-series-muted)",
+  ],
+  revenue_growth: ["var(--charts-series-growth)", "var(--charts-series-growth-context)"],
+  profit_metric: ["var(--charts-series-profit-1)", "var(--charts-series-profit-2)", "var(--charts-series-profit-3)"],
+  margin_path: [
+    "var(--charts-series-reported)",
+    "var(--charts-series-profit-1)",
+    "var(--charts-series-forecast)",
+    "var(--charts-series-muted)",
+    "var(--charts-series-profit-2)",
+    "var(--charts-series-context)",
+  ],
+  cash_flow_metric: ["var(--charts-series-cash-1)", "var(--charts-series-cash-2)", "var(--charts-series-cash-3)"],
+  fcf_outlook: [
+    "var(--charts-series-reported)",
+    "var(--charts-series-profit-3)",
+    "var(--charts-series-forecast)",
+    "var(--charts-series-cash-2)",
+    "var(--charts-series-cash-1)",
+    "var(--charts-series-profit-1)",
+    "var(--charts-series-muted)",
+  ],
+  eps: ["var(--charts-series-eps-1)", "var(--charts-series-eps-2)"],
+};
+
+const EMPTY_EVENT_OVERLAY: CompanyChartsEventOverlayPayload = {
+  title: "Event overlays",
+  available_event_types: [],
+  default_enabled_event_types: [],
+  events: [],
+  sparse_data_note: null,
+};
+
+const EMPTY_QUARTER_CHANGE: CompanyChartsQuarterChangePayload = {
+  title: "What changed since last quarter?",
+  latest_period_label: null,
+  prior_period_label: null,
+  summary: null,
+  items: [],
+  empty_state: "Not enough period history for a change summary yet.",
 };
 
 export function CompanyChartsDashboard({
@@ -72,16 +118,52 @@ export function CompanyChartsDashboard({
   requestedAsOf?: string | null;
 }) {
   const company = payload.company;
+  const outlookSpec = useMemo(() => getCompanyChartsOutlookSpec(payload), [payload]);
+  const primaryCards = useMemo(() => getOrderedOutlookMetricCards(outlookSpec, "primary"), [outlookSpec]);
+  const secondaryCards = useMemo(() => getOrderedOutlookMetricCards(outlookSpec, "secondary"), [outlookSpec]);
+  const comparisonCards = useMemo(() => getOrderedOutlookComparisonCards(outlookSpec), [outlookSpec]);
+  const detailCards = useMemo(() => getOrderedOutlookDetailCards(outlookSpec), [outlookSpec]);
+  const revenueCard = useMemo(
+    () => primaryCards.find((card) => card.key === "revenue") ?? outlookSpec.cards.revenue,
+    [outlookSpec.cards.revenue, primaryCards]
+  );
+  const primaryComparisonCard = comparisonCards[0] ?? outlookSpec.cards.growth_summary;
   const sourceState = useMemo(() => resolveChartsForecastSourceState(payload), [payload]);
   const forecastAccuracy = useForecastAccuracy(company?.ticker ?? "", {
     asOf: requestedAsOf,
     enabled: Boolean(company?.ticker),
   });
-  const revenuePhaseSummary = useMemo(() => buildChartPhaseSummary(buildChartRows(payload.cards.revenue.series)), [payload.cards.revenue.series]);
-  const summaryBadges = useMemo(() => payload.summary.secondary_badges.slice(0, 4), [payload.summary.secondary_badges]);
+  const revenuePhaseSummary = useMemo(() => buildChartPhaseSummary(buildChartRows(revenueCard.series)), [revenueCard.series]);
+  const summaryBadges = useMemo(() => outlookSpec.summary.secondary_badges.slice(0, 4), [outlookSpec.summary.secondary_badges]);
   const freshnessLine = useMemo(() => buildChartsFreshnessLine(payload), [payload]);
-  const sourceLine = useMemo(() => payload.summary.source_badges.slice(0, 2).join(" · "), [payload.summary.source_badges]);
-  const hasSecondaryOutlookCards = Boolean(payload.cards.revenue_outlook_bridge || payload.cards.margin_path || payload.cards.fcf_outlook);
+  const sourceLine = useMemo(() => outlookSpec.summary.source_badges.slice(0, 2).join(" · "), [outlookSpec.summary.source_badges]);
+  const hasSecondaryOutlookCards = secondaryCards.length > 0;
+  const shareSnapshot = useMemo(() => buildOutlookChartShareSnapshot(payload), [payload]);
+  const eventOverlay = outlookSpec.event_overlay ?? payload.event_overlay ?? EMPTY_EVENT_OVERLAY;
+  const quarterChange = outlookSpec.quarter_change ?? payload.quarter_change ?? EMPTY_QUARTER_CHANGE;
+  const defaultEnabledEventTypes = useMemo(
+    () => eventOverlay.default_enabled_event_types.filter((eventType) => eventOverlay.available_event_types.includes(eventType)),
+    [eventOverlay.available_event_types, eventOverlay.default_enabled_event_types]
+  );
+  const [enabledEventTypes, setEnabledEventTypes] = useState<Set<string>>(() => new Set(defaultEnabledEventTypes));
+
+  useEffect(() => {
+    setEnabledEventTypes(new Set(defaultEnabledEventTypes));
+  }, [defaultEnabledEventTypes]);
+
+  const enabledEventTypeList = useMemo(() => Array.from(enabledEventTypes), [enabledEventTypes]);
+
+  const toggleEventType = (eventType: string) => {
+    setEnabledEventTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(eventType)) {
+        next.delete(eventType);
+      } else {
+        next.add(eventType);
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="charts-page-shell">
@@ -96,31 +178,34 @@ export function CompanyChartsDashboard({
           <div className="charts-page-meta-row">
             <span className="charts-page-meta-pill">{company?.ticker ?? "Ticker pending"}</span>
             {company?.market_sector ? <span className="charts-page-meta-pill">{company.market_sector}</span> : null}
-            {payload.forecast_methodology.confidence_label ? (
-              <span className="charts-page-meta-pill">{payload.forecast_methodology.confidence_label}</span>
+            {outlookSpec.methodology.confidence_label ? (
+              <span className="charts-page-meta-pill">{outlookSpec.methodology.confidence_label}</span>
             ) : null}
           </div>
-          <p className="charts-page-hero-thesis">{payload.summary.thesis ?? "Forecast values stay clearly labeled and visually separated from reported results."}</p>
+          <p className="charts-page-hero-thesis">{outlookSpec.summary.thesis ?? "Forecast values stay clearly labeled and visually separated from reported results."}</p>
         </div>
         <div className="charts-page-hero-side charts-page-hero-summary-card">
-          <div className="charts-page-hero-label">{payload.title}</div>
+          <div className="charts-page-hero-label">{outlookSpec.title}</div>
           <p className="charts-page-hero-status">{payload.build_status}</p>
           <div className="charts-page-hero-summary-grid">
             <HeroSummaryStat label="Reported" value={revenuePhaseSummary.reportedThrough ?? "Pending"} />
             <HeroSummaryStat label="Projected" value={revenuePhaseSummary.projectedFrom ?? "Pending"} />
-            <HeroSummaryStat label={payload.summary.primary_score.label} value={payload.summary.primary_score.score == null ? "—" : String(Math.round(payload.summary.primary_score.score))} />
+            <HeroSummaryStat label={outlookSpec.summary.primary_score.label} value={outlookSpec.summary.primary_score.score == null ? "—" : String(Math.round(outlookSpec.summary.primary_score.score))} />
           </div>
           <div className="charts-page-hero-caption">{freshnessLine}</div>
+          {company?.ticker ? <ChartShareActions ticker={company.ticker} snapshot={shareSnapshot} fileStem={`${company.ticker.toLowerCase()}-growth-outlook`} /> : null}
         </div>
       </header>
 
-      <KeyAssumptionsStrip card={payload.cards.forecast_assumptions} />
+      <KeyAssumptionsStrip card={detailCards.find((card) => card.key === "forecast_assumptions") ?? null} />
+      <EventOverlayPanel overlay={eventOverlay} enabledEventTypes={enabledEventTypeList} onToggleEventType={toggleEventType} />
+      <QuarterChangePanel panel={quarterChange} />
 
       <section className="charts-dashboard-matrix" aria-label="Growth outlook dashboard">
         <aside className="charts-summary-panel" aria-label="Growth outlook summary">
           <div className="charts-summary-head">
-            <span className="charts-summary-eyebrow">{payload.summary.headline}</span>
-            <PrimaryScoreBadge badge={payload.summary.primary_score} />
+            <span className="charts-summary-eyebrow">{outlookSpec.summary.headline}</span>
+            <PrimaryScoreBadge badge={outlookSpec.summary.primary_score} />
           </div>
           <div className="charts-summary-score-grid">
             {summaryBadges.map((badge) => (
@@ -128,16 +213,16 @@ export function CompanyChartsDashboard({
             ))}
           </div>
           <div className="charts-summary-read-guide">
-            <div className="charts-summary-section-title">{payload.legend.title}</div>
+            <div className="charts-summary-section-title">{outlookSpec.legend.title}</div>
             <div className="charts-legend-inline" aria-label="Actual versus forecast legend">
-              {payload.legend.items.map((item) => (
+              {outlookSpec.legend.items.map((item) => (
                 <LegendInlineItem key={item.key} item={item} />
               ))}
             </div>
             <div className="charts-legend-footnote">Projected periods begin at the divider and use a soft shaded region inside each chart.</div>
           </div>
           <div className="charts-summary-data-lines">
-            <SummaryDataLine label="Freshness" value={payload.summary.freshness_badges.join(" · ") || freshnessLine} />
+            <SummaryDataLine label="Freshness" value={outlookSpec.summary.freshness_badges.join(" · ") || freshnessLine} />
             <SummaryDataLine label="Sources" value={sourceLine || "Official filings"} />
           </div>
           <div className="charts-summary-trust-block">
@@ -157,12 +242,12 @@ export function CompanyChartsDashboard({
               <div className="charts-methodology-point">Point-in-time inputs only</div>
               <div className="charts-methodology-point">Guarded fallback when disclosures are thin</div>
             </div>
-            <div className="charts-methodology-label">{payload.forecast_methodology.label}</div>
-            <p>{payload.forecast_methodology.summary}</p>
+            <div className="charts-methodology-label">{outlookSpec.methodology.label}</div>
+            <p>{outlookSpec.methodology.summary}</p>
           </div>
-          {payload.summary.unavailable_notes.length ? (
+          {outlookSpec.summary.unavailable_notes.length ? (
             <div className="charts-summary-note-list">
-              {payload.summary.unavailable_notes.slice(0, 2).map((note) => (
+              {outlookSpec.summary.unavailable_notes.slice(0, 2).map((note) => (
                 <div key={note} className="charts-summary-note-item">
                   {note}
                 </div>
@@ -171,26 +256,39 @@ export function CompanyChartsDashboard({
           ) : null}
         </aside>
 
-        <MetricChartCard card={payload.cards.revenue} palette={CARD_PALETTES.revenue} className="charts-card-matrix" />
-        <MetricChartCard card={payload.cards.revenue_growth} palette={CARD_PALETTES.revenue_growth} className="charts-card-matrix" />
-        <MetricChartCard card={payload.cards.profit_metric} palette={CARD_PALETTES.profit_metric} className="charts-card-matrix" />
-        <MetricChartCard card={payload.cards.cash_flow_metric} palette={CARD_PALETTES.cash_flow_metric} className="charts-card-matrix" />
-        <MetricChartCard card={payload.cards.eps} palette={CARD_PALETTES.eps} className="charts-card-matrix" />
-        <GrowthSummaryCard card={payload.cards.growth_summary} className="charts-card-matrix" />
+        {primaryCards.map((card) => (
+          <MetricChartCard
+            key={card.key}
+            card={card}
+            palette={CARD_PALETTES[card.key] ?? CARD_PALETTES.revenue}
+            className="charts-card-matrix"
+            overlayEvents={eventOverlay.events}
+            enabledEventTypes={enabledEventTypeList}
+          />
+        ))}
+        <GrowthSummaryCard card={primaryComparisonCard} className="charts-card-matrix" />
       </section>
 
       {hasSecondaryOutlookCards ? (
         <section className="charts-card-grid charts-card-grid-secondary" aria-label="Growth outlook details">
-          {payload.cards.revenue_outlook_bridge ? <MetricChartCard card={payload.cards.revenue_outlook_bridge} palette={CARD_PALETTES.revenue_outlook_bridge} className="charts-card-wide" /> : null}
-          {payload.cards.margin_path ? <MetricChartCard card={payload.cards.margin_path} palette={CARD_PALETTES.margin_path} /> : null}
-          {payload.cards.fcf_outlook ? <MetricChartCard card={payload.cards.fcf_outlook} palette={CARD_PALETTES.fcf_outlook} /> : null}
+          {secondaryCards.map((card, index) => (
+            <MetricChartCard
+              key={card.key}
+              card={card}
+              palette={CARD_PALETTES[card.key] ?? CARD_PALETTES.revenue}
+              className={index === 0 ? "charts-card-wide" : undefined}
+              overlayEvents={eventOverlay.events}
+              enabledEventTypes={enabledEventTypeList}
+            />
+          ))}
         </section>
       ) : null}
 
-      {payload.cards.forecast_assumptions || payload.cards.forecast_calculations ? (
+      {detailCards.length ? (
         <section className="charts-detail-grid" aria-label="Forecast details">
-          {payload.cards.forecast_assumptions ? <ForecastAssumptionsCard card={payload.cards.forecast_assumptions} /> : null}
-          {payload.cards.forecast_calculations ? <ForecastAssumptionsCard card={payload.cards.forecast_calculations} /> : null}
+          {detailCards.map((card) => (
+            <ForecastAssumptionsCard key={card.key} card={card} />
+          ))}
         </section>
       ) : null}
     </div>
@@ -277,12 +375,105 @@ function LegendInlineItem({ item }: { item: CompanyChartsLegendItemPayload }) {
   );
 }
 
-function MetricChartCard({ card, palette, className }: { card: CompanyChartsCardPayload; palette: string[]; className?: string }) {
-  const rows = useMemo(() => buildChartRows(card.series), [card.series]);
+function EventOverlayPanel({
+  overlay,
+  enabledEventTypes,
+  onToggleEventType,
+}: {
+  overlay: CompanyChartsEventOverlayPayload;
+  enabledEventTypes: string[];
+  onToggleEventType: (eventType: string) => void;
+}) {
+  const visibleEvents = useMemo(() => overlay.events.filter((event) => enabledEventTypes.includes(event.event_type)).slice(0, 8), [enabledEventTypes, overlay.events]);
+
+  return (
+    <section className="charts-event-panel" aria-label="Event overlays">
+      <div className="charts-event-panel-header">
+        <h2 className="charts-card-title">{overlay.title}</h2>
+        <div className="charts-event-toggle-row" role="group" aria-label="Event overlay toggles">
+          {overlay.available_event_types.map((eventType) => {
+            const enabled = enabledEventTypes.includes(eventType);
+            return (
+              <button key={eventType} type="button" className={`charts-event-toggle ${enabled ? "is-active" : ""}`} onClick={() => onToggleEventType(eventType)}>
+                {eventType.replace(/_/g, " ")}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      {overlay.sparse_data_note ? <p className="charts-event-sparse-note">{overlay.sparse_data_note}</p> : null}
+      <div className="charts-event-list" aria-label="Recent chart events">
+        {visibleEvents.length ? (
+          visibleEvents.map((event) => (
+            <article key={event.key} className={`charts-event-item charts-event-type-${event.event_type}`}>
+              <div className="charts-event-item-meta">
+                <span>{formatDate(event.event_date)}</span>
+                <span>{event.source_label}</span>
+              </div>
+              <div className="charts-event-item-title">{event.label}</div>
+              {event.detail ? <div className="charts-event-item-detail">{event.detail}</div> : null}
+            </article>
+          ))
+        ) : (
+          <div className="charts-card-empty">No events in the selected categories for this snapshot.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function QuarterChangePanel({ panel }: { panel: CompanyChartsQuarterChangePayload }) {
+  if (panel.empty_state) {
+    return (
+      <section className="charts-quarter-change-panel" aria-label="What changed since last quarter">
+        <h2 className="charts-card-title">{panel.title}</h2>
+        <div className="charts-card-empty">{panel.empty_state}</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="charts-quarter-change-panel" aria-label="What changed since last quarter">
+      <div className="charts-quarter-change-header">
+        <h2 className="charts-card-title">{panel.title}</h2>
+        {panel.latest_period_label && panel.prior_period_label ? <div className="charts-quarter-change-periods">{panel.latest_period_label} vs {panel.prior_period_label}</div> : null}
+      </div>
+      {panel.summary ? <p className="charts-quarter-change-summary">{panel.summary}</p> : null}
+      <div className="charts-quarter-change-grid">
+        {panel.items.map((item) => (
+          <div key={item.key} className="charts-quarter-change-item">
+            <div className="charts-quarter-change-label">{item.label}</div>
+            <div className="charts-quarter-change-value">{item.value}</div>
+            {item.detail ? <div className="charts-quarter-change-detail">{item.detail}</div> : null}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MetricChartCard({
+  card,
+  palette,
+  className,
+  overlayEvents,
+  enabledEventTypes,
+}: {
+  card: CompanyChartsCardPayload;
+  palette: string[];
+  className?: string;
+  overlayEvents: CompanyChartsEventPayload[];
+  enabledEventTypes: string[];
+}) {
+  const rows = useMemo(
+    () => buildChartRows(card.series, overlayEvents, enabledEventTypes),
+    [card.series, enabledEventTypes, overlayEvents]
+  );
   const phaseSummary = useMemo(() => buildChartPhaseSummary(rows), [rows]);
   const showSeriesEndLabels = useMemo(() => shouldShowSeriesEndLabels(card.series), [card.series]);
   const phaseContext = buildPhaseContextText(phaseSummary);
   const hasInlineLegend = card.series.length > 1 && !showSeriesEndLabels;
+  const markerRows = useMemo(() => rows.filter((row) => row.events.length > 0), [rows]);
 
   return (
     <section className={`charts-card charts-card-metric ${phaseSummary.projectedFrom ? "has-forecast-boundary" : ""} ${className ?? ""}`.trim()}>
@@ -310,16 +501,16 @@ function MetricChartCard({ card, palette, className }: { card: CompanyChartsCard
             <ComposedChart data={rows}>
               <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
               {phaseSummary.projectedFrom ? (
-                <ReferenceArea x1={phaseSummary.projectedFrom} x2={rows.at(-1)?.periodLabel} fill="rgba(123, 224, 167, 0.09)" strokeOpacity={0} />
+                <ReferenceArea x1={phaseSummary.projectedFrom} x2={rows.at(-1)?.periodLabel} fill="var(--charts-forecast-region)" strokeOpacity={0} />
               ) : null}
               {phaseSummary.projectedFrom ? (
-                <ReferenceLine x={phaseSummary.projectedFrom} stroke="rgba(242, 239, 230, 0.5)" strokeWidth={1.1} strokeDasharray="4 4" ifOverflow="extendDomain" />
+                <ReferenceLine x={phaseSummary.projectedFrom} stroke="var(--charts-forecast-divider)" strokeWidth={1.1} strokeDasharray="4 4" ifOverflow="extendDomain" />
               ) : null}
               <XAxis dataKey="periodLabel" tick={chartTick(11)} axisLine={false} tickLine={false} />
               <YAxis tickFormatter={(value: number) => formatAxisValue(value, card.series[0]?.unit ?? "count")} tick={chartTick(11)} axisLine={false} tickLine={false} width={56} />
               <Tooltip
                 {...RECHARTS_TOOLTIP_PROPS}
-                cursor={{ stroke: "rgba(242, 239, 230, 0.28)", strokeWidth: 1 }}
+                cursor={{ stroke: "var(--charts-chart-cursor)", strokeWidth: 1 }}
                 content={({ active, payload, label }) => (
                   <MetricChartTooltipContent
                     active={active}
@@ -329,6 +520,9 @@ function MetricChartCard({ card, palette, className }: { card: CompanyChartsCard
                   />
                 )}
               />
+              {markerRows.map((row) => (
+                <ReferenceLine key={`${card.key}-${row.periodLabel}-events`} x={row.periodLabel} stroke="var(--charts-event-marker)" strokeWidth={1} strokeDasharray="2 6" ifOverflow="extendDomain" />
+              ))}
               {card.series.map((series, index) => {
                 const color = resolveSeriesColor(series, index, palette);
                 const commonProps = {
@@ -390,6 +584,17 @@ function MetricChartCard({ card, palette, className }: { card: CompanyChartsCard
       ) : (
         <div className="charts-card-empty">{card.empty_state ?? "Historical and forecast data are still warming up."}</div>
       )}
+
+      {markerRows.length ? (
+        <div className="charts-event-rail" aria-label={`${card.title} events`}>
+          {markerRows.slice(0, 4).map((row) => (
+            <div key={`${card.key}-${row.periodLabel}-event-pill`} className="charts-event-rail-pill">
+              <span className="charts-event-rail-period">{row.periodLabel}</span>
+              <span className="charts-event-rail-count">{row.events.length} events</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {card.highlights.length ? (
         <div className="charts-card-highlights charts-card-highlights-quiet">
@@ -459,6 +664,16 @@ export function MetricChartTooltipContent({
           );
         })}
       </div>
+      {activeRow.events.length ? (
+        <div className="charts-tooltip-event-list">
+          {activeRow.events.slice(0, 3).map((event) => (
+            <div key={event.key} className="charts-tooltip-event-row">
+              <span className="charts-tooltip-event-label">{event.label}</span>
+              <span className="charts-tooltip-event-meta">{formatDate(event.event_date)} · {event.source_label}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -523,7 +738,11 @@ function ForecastAssumptionsCard({ card }: { card: CompanyChartsAssumptionsCardP
   );
 }
 
-function buildChartRows(seriesList: CompanyChartsSeriesPayload[]): ChartRow[] {
+function buildChartRows(
+  seriesList: CompanyChartsSeriesPayload[],
+  overlayEvents: CompanyChartsEventPayload[] = [],
+  enabledEventTypes: string[] = []
+): ChartRow[] {
   const byPeriod = new Map<string, ChartRow>();
 
   for (const series of seriesList) {
@@ -533,6 +752,7 @@ function buildChartRows(seriesList: CompanyChartsSeriesPayload[]): ChartRow[] {
         {
           periodLabel: point.period_label,
           forecastZone: false,
+          events: [],
           values: {},
           pointMeta: {},
         };
@@ -563,7 +783,31 @@ function buildChartRows(seriesList: CompanyChartsSeriesPayload[]): ChartRow[] {
     row[`${series.key}__endLabel`] = series.label;
   }
 
-  return Array.from(byPeriod.values());
+  const rows = Array.from(byPeriod.values());
+  if (!rows.length || !overlayEvents.length || !enabledEventTypes.length) {
+    return rows;
+  }
+
+  const rowByLabel = new Map(rows.map((row) => [row.periodLabel, row]));
+  for (const event of overlayEvents) {
+    if (!enabledEventTypes.includes(event.event_type)) {
+      continue;
+    }
+    const direct = event.period_label ? rowByLabel.get(event.period_label) : null;
+    if (direct) {
+      direct.events.push(event);
+      continue;
+    }
+    const year = Number.parseInt(event.event_date.slice(0, 4), 10);
+    if (Number.isNaN(year)) {
+      continue;
+    }
+    const inferred = rowByLabel.get(`FY${year}`) ?? rowByLabel.get(`FY${year}E`);
+    if (inferred) {
+      inferred.events.push(event);
+    }
+  }
+  return rows;
 }
 
 function buildChartPhaseSummary(rows: ChartRow[]): { reportedThrough: string | null; projectedFrom: string | null } {
@@ -578,7 +822,7 @@ function buildChartPhaseSummary(rows: ChartRow[]): { reportedThrough: string | n
 function resolveSeriesColor(series: CompanyChartsSeriesPayload, index: number, palette: string[]): string {
   const explicit = palette[index % palette.length];
   if (series.series_kind === "comparison") {
-    return "#7f8a96";
+    return "var(--charts-comparison-series)";
   }
   if (series.series_kind === "forecast" && series.chart_type !== "bar") {
     return explicit;

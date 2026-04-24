@@ -4,6 +4,11 @@ import {
   __resetApiClientCacheForTests,
   getCompanyCapitalStructure,
   getCompanyCharts,
+  createCompanyChartsShareSnapshot,
+  createCompanyChartsScenario,
+  cloneCompanyChartsScenario,
+  getCompanyChartsShareSnapshot,
+  getCompanyChartsScenario,
   getCompanyChartsWhatIf,
   getCompanyChangesSinceLastFiling,
   getCompaniesCompare,
@@ -16,6 +21,7 @@ import {
   getCompanyOverview,
   getCompanyWorkspaceBootstrap,
   getCompanyResearchBrief,
+  listCompanyChartsScenarios,
   getLatestModelEvaluation,
   getCompanyModels,
   getCompanyPeers,
@@ -23,12 +29,14 @@ import {
   getSourceRegistry,
   getWatchlistCalendar,
   getWatchlistSummary,
+  updateCompanyChartsScenario,
 } from "@/lib/api";
 
 describe("api route stability", () => {
   afterEach(() => {
     __resetApiClientCacheForTests();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("keeps key GET helper paths unchanged", async () => {
@@ -328,6 +336,224 @@ describe("api route stability", () => {
         cache: "no-store",
         method: "POST",
         body: JSON.stringify({ overrides: { dso: 60 } }),
+      })
+    );
+  });
+
+  it("keeps charts share snapshot helper paths unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createCompanyChartsShareSnapshot("AAPL", {
+      schema_version: "company_chart_share_snapshot_v1",
+      mode: "outlook",
+      ticker: "AAPL",
+      company_name: "Apple Inc.",
+      title: "Growth Outlook",
+      as_of: "2025-02-01",
+      source_badge: "SEC Company Facts",
+      provenance_badge: "SEC-derived",
+      trust_label: "Forecast stability: Moderate stability",
+      actual_label: "Reported",
+      forecast_label: "Forecast",
+      source_path: "/company/AAPL/charts",
+      chart_spec: {
+        schema_version: "company_chart_spec_v1",
+        payload_version: "company_charts_dashboard_v9",
+        company: null,
+        build_state: "ready",
+        build_status: "Charts ready.",
+        refresh: { triggered: false, reason: "fresh", ticker: "AAPL", job_id: null },
+        diagnostics: {
+          coverage_ratio: 1,
+          fallback_ratio: 0,
+          stale_flags: [],
+          parser_confidence: 0.9,
+          missing_field_flags: [],
+          reconciliation_penalty: null,
+          reconciliation_disagreement_count: 0,
+        },
+        provenance: [],
+        as_of: "2025-02-01",
+        last_refreshed_at: "2025-02-01T00:00:00Z",
+        source_mix: {
+          source_ids: [],
+          source_tiers: [],
+          primary_source_ids: [],
+          fallback_source_ids: [],
+          official_only: true,
+        },
+        confidence_flags: [],
+        available_modes: ["outlook"],
+        default_mode: "outlook",
+        outlook: {
+          title: "Growth Outlook",
+          summary: {
+            headline: "Growth Outlook",
+            primary_score: { key: "growth", label: "Growth", score: 88, tone: "positive", detail: "Strong" },
+            secondary_badges: [],
+            thesis: "Projected and reported values are distinct.",
+            unavailable_notes: [],
+            freshness_badges: [],
+            source_badges: [],
+          },
+          legend: { title: "Actual vs Forecast", items: [] },
+          cards: {
+            revenue: { key: "revenue", title: "Revenue", subtitle: null, metric_label: null, unit_label: null, empty_state: null, series: [], highlights: [] },
+            revenue_growth: { key: "revenue_growth", title: "Revenue Growth", subtitle: null, metric_label: null, unit_label: null, empty_state: null, series: [], highlights: [] },
+            profit_metric: { key: "profit_metric", title: "Profit", subtitle: null, metric_label: null, unit_label: null, empty_state: null, series: [], highlights: [] },
+            cash_flow_metric: { key: "cash_flow_metric", title: "Cash Flow", subtitle: null, metric_label: null, unit_label: null, empty_state: null, series: [], highlights: [] },
+            eps: { key: "eps", title: "EPS", subtitle: null, metric_label: null, unit_label: null, empty_state: null, series: [], highlights: [] },
+            growth_summary: { key: "growth_summary", title: "Growth Summary", subtitle: null, comparisons: [], empty_state: null },
+            forecast_assumptions: null,
+          },
+          primary_card_order: ["revenue"],
+          secondary_card_order: [],
+          comparison_card_order: ["growth_summary"],
+          detail_card_order: [],
+          methodology: {
+            version: "company_charts_dashboard_v9",
+            label: "Driver-based integrated forecast",
+            summary: "Summary",
+            disclaimer: "Disclaimer",
+            forecast_horizon_years: 3,
+            confidence_label: "Forecast stability: Moderate stability",
+          },
+          forecast_diagnostics: {
+            score_key: "forecast_stability",
+            score_name: "Forecast Stability",
+            heuristic: true,
+            final_score: 72,
+            summary: "Moderate stability.",
+            history_depth_years: 4,
+            thin_history: false,
+            growth_volatility: 0.1,
+            growth_volatility_band: "moderate",
+            missing_data_penalty: 0,
+            quality_score: 0.9,
+            missing_inputs: [],
+            sample_size: 3,
+            scenario_dispersion: 0.1,
+            sector_template: "Technology",
+            guidance_usage: "management_guidance_applied",
+            historical_backtest_error_band: "moderate",
+            backtest_weighted_error: 0.1,
+            backtest_horizon_errors: {},
+            backtest_metric_weights: {},
+            backtest_metric_errors: {},
+            backtest_metric_horizon_errors: {},
+            backtest_metric_sample_sizes: {},
+            components: [],
+          },
+        },
+        studio: null,
+      },
+      outlook: {
+        headline: "Growth Outlook",
+        thesis: "Projected and reported values are distinct.",
+        primary_score: { key: "growth", label: "Growth", score: 88, tone: "positive", detail: "Strong" },
+        secondary_scores: [],
+        summary_metrics: [],
+        primary_chart: null,
+      },
+      studio: null,
+    });
+    await getCompanyChartsShareSnapshot("AAPL", "share-1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/companies/AAPL/charts/share-snapshots",
+      expect.objectContaining({
+        cache: "no-store",
+        method: "POST",
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/AAPL/charts/share-snapshots/share-1",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("keeps Projection Studio scenario helper paths unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ viewer: { kind: "device", signed_in: false, sync_enabled: true, can_create_private: true }, scenarios: [] }),
+    });
+    const localStorageMock = {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+    };
+
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("window", { localStorage: localStorageMock });
+    localStorageMock.clear();
+
+    await listCompanyChartsScenarios("AAPL");
+    await getCompanyChartsScenario("AAPL", "scenario-1");
+    await createCompanyChartsScenario("AAPL", {
+      name: "Base case",
+      visibility: "private",
+      source: "sec_base_forecast",
+      override_count: 1,
+      forecast_year: 2026,
+      as_of: "2025-02-01",
+      overrides: { dso: 42 },
+      metrics: [],
+    });
+    await updateCompanyChartsScenario("AAPL", "scenario-1", {
+      name: "Base case",
+      visibility: "public",
+      source: "user_scenario",
+      override_count: 2,
+      forecast_year: 2026,
+      as_of: "2025-02-01",
+      overrides: { dso: 55 },
+      metrics: [],
+    });
+    await cloneCompanyChartsScenario("AAPL", "scenario-1", {
+      name: "Base case copy",
+      visibility: "public",
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/companies/AAPL/charts/scenarios",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/AAPL/charts/scenarios/scenario-1",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/backend/api/companies/AAPL/charts/scenarios",
+      expect.objectContaining({
+        cache: "no-store",
+        method: "POST",
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/backend/api/companies/AAPL/charts/scenarios/scenario-1",
+      expect.objectContaining({
+        cache: "no-store",
+        method: "POST",
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/backend/api/companies/AAPL/charts/scenarios/scenario-1/clone",
+      expect.objectContaining({
+        cache: "no-store",
+        method: "POST",
       })
     );
   });

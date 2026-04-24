@@ -1241,6 +1241,104 @@ def test_company_charts_dashboard_response_round_trips_new_cards_through_snapsho
     ).projected_values
 
 
+def test_build_company_charts_dashboard_response_populates_event_overlay_and_quarter_change(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = _standard_driver_regression_statements()
+    release = SimpleNamespace(
+        id=41,
+        filing_acceptance_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
+        filing_date=date(2026, 1, 20),
+        reported_period_end=date(2025, 12, 31),
+        revenue_guidance_low=1220.0,
+        revenue_guidance_high=1260.0,
+        eps_guidance_low=1.1,
+        eps_guidance_high=1.2,
+        share_repurchase_amount=22000000.0,
+        source_url="https://www.sec.gov/ixviewer/earnings",
+        last_checked=datetime(2026, 1, 20, tzinfo=timezone.utc),
+    )
+    restatement = SimpleNamespace(
+        id=90,
+        filing_acceptance_at=datetime(2026, 2, 8, tzinfo=timezone.utc),
+        filing_date=date(2026, 2, 8),
+        period_end=date(2024, 12, 31),
+        changed_metric_keys=["revenue", "net_income"],
+        source="https://www.sec.gov/ixviewer/restatement",
+        last_checked=datetime(2026, 2, 8, tzinfo=timezone.utc),
+    )
+    capital_event = SimpleNamespace(
+        id=77,
+        filing_date=date(2026, 3, 1),
+        report_date=None,
+        event_type="acquisition",
+        summary="Completed acquisition of a strategic platform business.",
+        source_url="https://www.sec.gov/ixviewer/m-and-a",
+        last_checked=datetime(2026, 3, 1, tzinfo=timezone.utc),
+    )
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.8, drift=0.06)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [release])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [restatement])
+    monkeypatch.setattr(charts_service, "get_company_capital_markets_events", lambda *_args, **_kwargs: [capital_event])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    event_types = {event.event_type for event in response.event_overlay.events}
+    assert {"earnings", "guidance", "buyback", "restatement", "major_m_and_a"}.issubset(event_types)
+    assert response.quarter_change.empty_state is None
+    assert response.quarter_change.items
+    assert response.quarter_change.latest_period_label == "FY2025"
+    assert response.chart_spec is not None
+    assert response.chart_spec.outlook.event_overlay.events
+
+
+def test_build_company_charts_dashboard_response_event_overlay_sparse_fallback(monkeypatch):
+    company = SimpleNamespace(
+        id=1,
+        ticker="ACME",
+        cik="0000123456",
+        name="Acme Corp",
+        sector="Technology",
+        market_sector="Technology",
+        market_industry="Software",
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+    statements = [
+        _statement(2024, {"revenue": 1000.0, "net_income": 130.0, "eps": 1.2, "free_cash_flow": 105.0, "share_buybacks": 8.5, "acquisitions": 0.0}),
+        _statement(2025, {"revenue": 1110.0, "net_income": 142.0, "eps": 1.33, "free_cash_flow": 117.0, "share_buybacks": 12.0, "acquisitions": 18.0}),
+    ]
+    fake_session = SimpleNamespace(get=lambda _model, _company_id: company)
+
+    monkeypatch.setattr(charts_service, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(charts_service, "get_company_financials", lambda *_args, **_kwargs: statements)
+    monkeypatch.setattr(charts_service, "get_company_earnings_model_points", lambda *_args, **_kwargs: [_earnings_point(quality_score=0.6, drift=0.02)])
+    monkeypatch.setattr(charts_service, "get_company_earnings_releases", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(charts_service, "get_company_financial_restatements", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(charts_service, "get_company_capital_markets_events", lambda *_args, **_kwargs: [])
+
+    response = charts_service.build_company_charts_dashboard_response(fake_session, 1, generated_at=datetime(2026, 4, 13, tzinfo=timezone.utc))
+
+    assert response is not None
+    event_types = {event.event_type for event in response.event_overlay.events}
+    assert "buyback" in event_types
+    assert "major_m_and_a" in event_types
+    assert response.event_overlay.sparse_data_note is not None
+    assert response.quarter_change.empty_state is None
+
+
 def test_build_company_charts_dashboard_response_applies_what_if_overrides_and_surfaces_trace_metadata(monkeypatch):
     company = SimpleNamespace(
         id=1,

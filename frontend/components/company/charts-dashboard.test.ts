@@ -14,6 +14,7 @@ const mockUseForecastAccuracy = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/company/ACME/charts",
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 vi.mock("next/link", () => ({
@@ -164,6 +165,39 @@ function makePayload(overrides?: Partial<CompanyChartsDashboardResponse>): Compa
       backtest_metric_sample_sizes: {},
       components: [],
     },
+    event_overlay: {
+      title: "Event overlays",
+      available_event_types: ["earnings", "guidance", "buyback", "major_m_and_a", "restatement"],
+      default_enabled_event_types: ["earnings", "guidance", "restatement"],
+      events: [
+        {
+          key: "earnings-fy2025",
+          event_type: "earnings",
+          label: "Earnings release",
+          event_date: "2026-01-20",
+          period_label: "FY2025",
+          detail: "Filed 2026-01-20",
+          source_label: "SEC earnings release",
+          source_url: null,
+        },
+      ],
+      sparse_data_note: null,
+    },
+    quarter_change: {
+      title: "What changed since last quarter?",
+      latest_period_label: "FY2025",
+      prior_period_label: "FY2024",
+      summary: "Reported deltas and event context.",
+      items: [
+        {
+          key: "revenue_delta",
+          label: "Revenue",
+          value: "+$20.0M (+20.00%)",
+          detail: "FY2025 vs FY2024",
+        },
+      ],
+      empty_state: null,
+    },
     payload_version: "company_charts_dashboard_v8",
     provenance: [],
     as_of: "2026-04-13",
@@ -272,10 +306,17 @@ describe("CompanyChartsDashboard", () => {
     expect(screen.getByText("Projected periods begin at the divider and use a soft shaded region inside each chart.")).toBeTruthy();
     expect(screen.getAllByText("Reported").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Projected").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Copy Image" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download PNG" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy Link" })).toBeTruthy();
     expect(screen.getAllByText("FY2025").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/FY2026E/i).length).toBeGreaterThan(0);
     expect(within(assumptionsStrip).getByText("Revenue Method")).toBeTruthy();
     expect(within(assumptionsStrip).getAllByText("Fallback").length).toBeGreaterThan(0);
+    expect(screen.getByText("Event overlays")).toBeTruthy();
+    expect(screen.getByText("What changed since last quarter?")).toBeTruthy();
+    expect(screen.getByText("Earnings release")).toBeTruthy();
+    expect(screen.getAllByText("Revenue").length).toBeGreaterThan(0);
 
     const matrixTitles = within(dashboard)
       .getAllByRole("heading", { level: 2 })
@@ -291,6 +332,81 @@ describe("CompanyChartsDashboard", () => {
 
     expect(within(summary).queryByText("Revenue")).toBeNull();
     expect(within(detailCards).getByText("Revenue Outlook Bridge")).toBeTruthy();
+  });
+
+  it("prefers the versioned chart spec when it is present", () => {
+    const baseline = makePayload();
+    const payload = makePayload({
+      title: "Legacy Outlook",
+      summary: {
+        headline: "Legacy Headline",
+        primary_score: { key: "growth", label: "Growth", score: 88, tone: "positive", detail: "Legacy detail", unavailable_reason: null },
+        secondary_badges: [],
+        thesis: "Legacy thesis",
+        unavailable_notes: [],
+        freshness_badges: ["Legacy freshness"],
+        source_badges: ["Legacy source"],
+      },
+      chart_spec: {
+        schema_version: "company_chart_spec_v1",
+        payload_version: "company_charts_dashboard_v8",
+        company: null,
+        build_state: "ready",
+        build_status: "Charts dashboard ready.",
+        refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+        diagnostics: {
+          coverage_ratio: 1,
+          fallback_ratio: 0,
+          stale_flags: [],
+          parser_confidence: 0.9,
+          missing_field_flags: [],
+          reconciliation_penalty: null,
+          reconciliation_disagreement_count: 0,
+        },
+        provenance: [],
+        as_of: "2026-04-13",
+        last_refreshed_at: "2026-04-13T00:00:00Z",
+        source_mix: {
+          source_ids: [],
+          source_tiers: [],
+          primary_source_ids: [],
+          fallback_source_ids: [],
+          official_only: true,
+        },
+        confidence_flags: [],
+        available_modes: ["outlook"],
+        default_mode: "outlook",
+        outlook: {
+          title: "Spec Outlook",
+          summary: {
+            headline: "Spec Headline",
+            primary_score: { key: "growth", label: "Growth", score: 91, tone: "positive", detail: "Spec detail", unavailable_reason: null },
+            secondary_badges: [],
+            thesis: "Spec thesis",
+            unavailable_notes: [],
+            freshness_badges: ["Spec freshness"],
+            source_badges: ["Spec source"],
+          },
+          legend: baseline.legend,
+          cards: baseline.cards,
+          primary_card_order: ["revenue", "revenue_growth", "profit_metric", "cash_flow_metric", "eps"],
+          secondary_card_order: ["revenue_outlook_bridge", "margin_path", "fcf_outlook"],
+          comparison_card_order: ["growth_summary"],
+          detail_card_order: ["forecast_assumptions", "forecast_calculations"],
+          methodology: baseline.forecast_methodology,
+          forecast_diagnostics: baseline.forecast_diagnostics!,
+          event_overlay: baseline.event_overlay,
+          quarter_change: baseline.quarter_change,
+        },
+        studio: null,
+      },
+    });
+
+    render(React.createElement(CompanyChartsDashboard, { payload }));
+
+    expect(screen.getByText("Spec Outlook")).toBeTruthy();
+    expect(screen.getByText("Spec Headline")).toBeTruthy();
+    expect(screen.queryByText("Legacy Headline")).toBeNull();
   });
 
   it("labels tooltip rows as reported or projected", () => {
@@ -310,6 +426,7 @@ describe("CompanyChartsDashboard", () => {
             payload: {
               periodLabel: "FY2026E",
               forecastZone: true,
+              events: [],
               values: { revenue_forecast: 120 },
               pointMeta: {
                 revenue_forecast: {
@@ -327,6 +444,50 @@ describe("CompanyChartsDashboard", () => {
     expect(screen.getByText("Projected")).toBeTruthy();
     expect(screen.getByText("Projection")).toBeTruthy();
     expect(screen.getByText("$120")).toBeTruthy();
+  });
+
+  it("renders event context inside tooltip when event overlays are present", () => {
+    const payload = makePayload();
+
+    render(
+      React.createElement(MetricChartTooltipContent, {
+        active: true,
+        label: "FY2025",
+        seriesList: payload.cards.revenue.series,
+        payload: [
+          {
+            dataKey: "revenue_actual",
+            name: "Reported",
+            color: "#f2efe6",
+            value: 100,
+            payload: {
+              periodLabel: "FY2025",
+              forecastZone: false,
+              events: payload.event_overlay.events,
+              values: { revenue_actual: 100 },
+              pointMeta: {
+                revenue_actual: {
+                  annotation: null,
+                  seriesKind: "actual",
+                },
+              },
+            },
+          },
+        ] as never,
+      })
+    );
+
+    expect(screen.getByText("Earnings release")).toBeTruthy();
+    expect(screen.getByText(/SEC earnings release/i)).toBeTruthy();
+  });
+
+  it("shows event overlay toggles and quarter-change panel", () => {
+    render(React.createElement(CompanyChartsDashboard, { payload: makePayload() }));
+
+    expect(screen.getByRole("group", { name: "Event overlay toggles" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "earnings" })).toBeTruthy();
+    expect(screen.getByText("What changed since last quarter?")).toBeTruthy();
+    expect(screen.getAllByText("FY2025 vs FY2024").length).toBeGreaterThan(0);
   });
 
   it("omits optional forecast cards and keeps the strip graceful when fields are missing", () => {
@@ -365,7 +526,7 @@ describe("CompanyChartsDashboard", () => {
     expect(within(detailsGrid).getByText("Forecast Assumptions")).toBeTruthy();
     expect(screen.getByText("Key Assumptions")).toBeTruthy();
     expect(within(assumptionsStrip).getByText("History Depth")).toBeTruthy();
-    expect(screen.getByText("Revenue")).toBeTruthy();
+    expect(screen.getAllByText("Revenue").length).toBeGreaterThan(0);
     expect(screen.getByText("Forecast Assumptions")).toBeTruthy();
   });
 

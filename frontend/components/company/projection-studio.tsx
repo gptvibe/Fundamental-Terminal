@@ -5,13 +5,23 @@ import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
+import { ChartShareActions } from "@/components/company/chart-share-actions";
 import { ForecastTrackRecord } from "@/components/charts/forecast-track-record";
 import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
 import { SourceStateBadge } from "@/components/ui/source-state-badge";
 import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
-import { getCompanyChartsWhatIf } from "@/lib/api";
+import { buildChartsSourcePath, buildStudioChartShareSnapshot } from "@/lib/chart-share";
+import { getCompanyChartsStudioSpec } from "@/lib/chart-spec";
+import {
+  cloneCompanyChartsScenario,
+  createCompanyChartsScenario,
+  getCompanyChartsScenario,
+  getCompanyChartsWhatIf,
+  listCompanyChartsScenarios,
+  updateCompanyChartsScenario,
+} from "@/lib/api";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
-import { exportRowsToCsv, type ExportRow, normalizeExportFileStem } from "@/lib/export";
+import { copyTextToClipboard, exportRowsToCsv, type ExportRow, normalizeExportFileStem } from "@/lib/export";
 import { FORECAST_HANDOFF_QUERY_PARAM, encodeForecastHandoffPayload, type ForecastHandoffMetric, type ForecastHandoffPayload } from "@/lib/forecast-handoff";
 import { getForecastSourceStateDescriptor, resolveProjectionForecastSourceState, resolveSavedScenarioSourceState, type ForecastSourceState } from "@/lib/forecast-source-state";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
@@ -23,6 +33,9 @@ import type {
   CompanyChartsFormulaInputPayload,
   CompanyChartsFormulaTracePayload,
   CompanyChartsProjectedRowPayload,
+  CompanyChartsScenarioPayload,
+  CompanyChartsScenarioUpsertRequest,
+  CompanyChartsScenarioViewerPayload,
   CompanyChartsScheduleSectionPayload,
   CompanyChartsSensitivityCellPayload,
   CompanyChartsWhatIfImpactMetricPayload,
@@ -35,6 +48,7 @@ interface ProjectionStudioProps {
   payload: CompanyChartsDashboardResponse;
   studio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>;
   requestedAsOf?: string | null;
+  requestedScenarioId?: string | null;
 }
 
 interface DriverGroup {
@@ -83,6 +97,37 @@ interface CellDelta {
   tone: "up" | "down";
 }
 
+interface ScenarioDecompositionContribution {
+  kind: "assumption" | "intermediate";
+  key: string;
+  label: string;
+  unit: string;
+  leftValue: number | null;
+  rightValue: number | null;
+  deltaValue: number | null;
+  contributionValue: number | null;
+  sourceNote: string | null;
+}
+
+interface ScenarioOutputDecomposition {
+  metricKey: string;
+  metricLabel: string;
+  unit: string;
+  leftValue: number | null;
+  rightValue: number | null;
+  deltaValue: number | null;
+  contributions: ScenarioDecompositionContribution[];
+}
+
+interface ScenarioDiffSummary {
+  leftScenarioName: string;
+  rightScenarioName: string;
+  forecastYear: number | null;
+  assumptionContributions: ScenarioDecompositionContribution[];
+  intermediateContributions: ScenarioDecompositionContribution[];
+  outputDecompositions: ScenarioOutputDecomposition[];
+}
+
 const DRIVER_GROUP_TITLES: Record<string, string> = {
   revenue: "Revenue Drivers",
   cost: "Cost Structure",
@@ -105,6 +150,31 @@ const FORECAST_METRIC_SPECS = [
   { key: "free_cash_flow", label: "Free Cash Flow", unit: "usd" },
   { key: "eps", label: "EPS", unit: "usd_per_share" },
 ] as const;
+const OUTPUT_DECOMPOSITION_METRICS = [
+  { key: "eps", label: "EPS", unit: "usd_per_share" },
+  { key: "revenue", label: "Revenue", unit: "usd" },
+  { key: "free_cash_flow", label: "Free Cash Flow", unit: "usd" },
+  { key: "operating_income", label: "Operating Income", unit: "usd" },
+  { key: "net_income", label: "Net Income", unit: "usd" },
+] as const;
+const INTERMEDIATE_LINE_ITEM_KEYS = [
+  "revenue",
+  "operating_income",
+  "net_income",
+  "operating_cash_flow",
+  "capex",
+  "free_cash_flow",
+  "eps",
+] as const;
+const INTERMEDIATE_LINE_ITEM_LABELS: Record<string, string> = {
+  revenue: "Revenue",
+  operating_income: "Operating Income",
+  net_income: "Net Income",
+  operating_cash_flow: "Operating Cash Flow",
+  capex: "Capex",
+  free_cash_flow: "Free Cash Flow",
+  eps: "EPS",
+};
 
 interface SavedStudioScenarioMetric {
   key: string;
@@ -118,10 +188,15 @@ interface SavedStudioScenario {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt: string | null;
   overrideCount: number;
   source: "sec_base_forecast" | "user_scenario";
+  visibility: "public" | "private";
+  storage: "local" | "remote";
   overrides: Record<string, number>;
   metrics: SavedStudioScenarioMetric[];
+  sharePath: string | null;
+  editable: boolean;
 }
 
 type SavedScenarioPersistenceResult =
@@ -499,6 +574,7 @@ function buildExportRows(
   sensitivityCells: CompanyChartsSensitivityCellPayload[],
   impactMetrics: CompanyChartsWhatIfImpactMetricPayload[],
   comparedScenarios: SavedStudioScenario[],
+  compareDiffSummary: ScenarioDiffSummary | null,
   sourceState: ForecastSourceState,
   forecastAccuracy: CompanyChartsForecastAccuracyResponse | null
 ): ExportRow[] {
@@ -616,7 +692,43 @@ function buildExportRows(
       ? buildComparedScenarioRows(comparedScenarios[0], comparedScenarios[1])
       : [];
 
-  return [...metadataRows, ...scheduleRows, ...driverRows, ...scenarioRows, ...sensitivityRows, ...impactRows, ...comparedScenarioRows];
+  const decompositionRows: ExportRow[] = compareDiffSummary
+    ? [
+        {
+          record_type: "scenario_decomposition_meta",
+          left_scenario: compareDiffSummary.leftScenarioName,
+          right_scenario: compareDiffSummary.rightScenarioName,
+          forecast_year: compareDiffSummary.forecastYear ?? "",
+        },
+        ...compareDiffSummary.outputDecompositions.map((output) => ({
+          record_type: "scenario_decomposition_output",
+          metric_key: output.metricKey,
+          metric_label: output.metricLabel,
+          unit: output.unit,
+          left_value: output.leftValue ?? "",
+          right_value: output.rightValue ?? "",
+          delta_value: output.deltaValue ?? "",
+        })),
+        ...compareDiffSummary.outputDecompositions.flatMap((output) =>
+          output.contributions.map((contribution) => ({
+            record_type: "scenario_decomposition_contribution",
+            output_metric_key: output.metricKey,
+            output_metric_label: output.metricLabel,
+            contribution_kind: contribution.kind,
+            contribution_key: contribution.key,
+            contribution_label: contribution.label,
+            contribution_unit: contribution.unit,
+            left_value: contribution.leftValue ?? "",
+            right_value: contribution.rightValue ?? "",
+            delta_value: contribution.deltaValue ?? "",
+            contribution_value: contribution.contributionValue ?? "",
+            source_note: contribution.sourceNote ?? "",
+          }))
+        ),
+      ]
+    : [];
+
+  return [...metadataRows, ...scheduleRows, ...driverRows, ...scenarioRows, ...sensitivityRows, ...impactRows, ...comparedScenarioRows, ...decompositionRows];
 }
 
 function buildComparedScenarioRows(left: SavedStudioScenario, right: SavedStudioScenario): ExportRow[] {
@@ -644,6 +756,299 @@ function buildComparedScenarioRows(left: SavedStudioScenario, right: SavedStudio
       delta,
     } satisfies ExportRow;
   });
+}
+
+function extractNumericSuffix(value: string): number | null {
+  const match = value.match(/-?\d+(?:\.\d+)?$/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function inferInputUnit(input: CompanyChartsFormulaInputPayload): string {
+  const text = `${input.formatted_value} ${input.label}`.toLowerCase();
+  if (input.formatted_value.includes("%") || text.includes("growth") || text.includes("margin") || text.includes("rate")) {
+    return "percent";
+  }
+  if (input.formatted_value.toLowerCase().includes("d") || text.includes("days") || text.includes("dso") || text.includes("dio") || text.includes("dpo")) {
+    return "days";
+  }
+  if (input.formatted_value.includes("$") && text.includes("share")) {
+    return "usd_per_share";
+  }
+  if (input.formatted_value.includes("$") || text.includes("revenue") || text.includes("income") || text.includes("cash")) {
+    return "usd";
+  }
+  return "count";
+}
+
+function normalizeInputValue(input: CompanyChartsFormulaInputPayload | undefined): number | null {
+  if (!input) {
+    return null;
+  }
+  if (typeof input.value === "number" && Number.isFinite(input.value)) {
+    return input.value;
+  }
+  return extractNumericSuffix(input.formatted_value);
+}
+
+function humanizeKey(value: string): string {
+  return value
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function firstProjectedYearFromStudio(studioPayload: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>): number | null {
+  const years = new Set<number>();
+  studioPayload.schedule_sections.forEach((section) => {
+    section.rows.forEach((row) => {
+      Object.keys(row.projected_values).forEach((year) => {
+        years.add(Number(year));
+      });
+    });
+  });
+  const sorted = Array.from(years).sort((left, right) => left - right);
+  return sorted[0] ?? null;
+}
+
+function readProjectedRowValue(
+  studioPayload: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>,
+  rowKey: string,
+  year: number
+): { value: number | null; unit: string; label: string; trace: CompanyChartsFormulaTracePayload | null } {
+  const row = findRowByKey(studioPayload.schedule_sections, rowKey);
+  if (!row) {
+    return { value: null, unit: "count", label: humanizeKey(rowKey), trace: null };
+  }
+  const rawValue = row.projected_values[year];
+  return {
+    value: typeof rawValue === "number" && Number.isFinite(rawValue) ? rawValue : null,
+    unit: row.unit,
+    label: row.label,
+    trace: row.formula_traces[year] ?? null,
+  };
+}
+
+function topByMagnitude<T>(values: T[], readMagnitude: (value: T) => number, limit: number): T[] {
+  return [...values].sort((left, right) => readMagnitude(right) - readMagnitude(left)).slice(0, limit);
+}
+
+function buildAssumptionDiffContributions(left: SavedStudioScenario, right: SavedStudioScenario): ScenarioDecompositionContribution[] {
+  const keys = Array.from(new Set([...Object.keys(left.overrides), ...Object.keys(right.overrides)]));
+  return topByMagnitude(
+    keys
+      .map((key): ScenarioDecompositionContribution | null => {
+        const leftValue = key in left.overrides ? left.overrides[key] : null;
+        const rightValue = key in right.overrides ? right.overrides[key] : null;
+        if (leftValue == null || rightValue == null) {
+          return null;
+        }
+        const deltaValue = rightValue - leftValue;
+        if (Math.abs(deltaValue) <= 1e-9) {
+          return null;
+        }
+        return {
+          kind: "assumption",
+          key,
+          label: humanizeKey(key),
+          unit: key.includes("growth") || key.includes("margin") ? "percent" : key.includes("day") || key.includes("dso") ? "days" : "count",
+          leftValue,
+          rightValue,
+          deltaValue,
+          contributionValue: null,
+          sourceNote: "Scenario override",
+        };
+      })
+      .filter((entry): entry is ScenarioDecompositionContribution => entry !== null),
+    (entry) => Math.abs(entry.deltaValue ?? 0),
+    8
+  );
+}
+
+function buildTraceInputContributions(
+  leftTrace: CompanyChartsFormulaTracePayload | null,
+  rightTrace: CompanyChartsFormulaTracePayload | null,
+  outputDelta: number | null
+): ScenarioDecompositionContribution[] {
+  if (!leftTrace || !rightTrace) {
+    return [];
+  }
+
+  const leftByKey = new Map(leftTrace.inputs.map((input) => [input.key, input]));
+  const rightByKey = new Map(rightTrace.inputs.map((input) => [input.key, input]));
+  const keys = Array.from(new Set([...leftByKey.keys(), ...rightByKey.keys()]));
+
+  const rawContributions = keys
+    .map((key): ScenarioDecompositionContribution | null => {
+      const leftInput = leftByKey.get(key);
+      const rightInput = rightByKey.get(key);
+      const leftValue = normalizeInputValue(leftInput);
+      const rightValue = normalizeInputValue(rightInput);
+      if (leftValue == null || rightValue == null) {
+        return null;
+      }
+      const deltaValue = rightValue - leftValue;
+      if (Math.abs(deltaValue) <= 1e-9) {
+        return null;
+      }
+
+      return {
+        kind: "assumption",
+        key,
+        label: rightInput?.label ?? leftInput?.label ?? humanizeKey(key),
+        unit: inferInputUnit(
+          rightInput ??
+            leftInput ?? {
+              key,
+              label: humanizeKey(key),
+              value: null,
+              formatted_value: "",
+              source_detail: "",
+              source_kind: "derived",
+              is_override: false,
+              original_value: null,
+              original_source: null,
+            }
+        ),
+        leftValue,
+        rightValue,
+        deltaValue,
+        contributionValue: null,
+        sourceNote: rightInput?.source_detail ?? leftInput?.source_detail ?? null,
+      };
+    })
+    .filter((entry): entry is ScenarioDecompositionContribution => entry !== null);
+
+  const denominator = rawContributions.reduce((sum, entry) => sum + Math.abs(entry.deltaValue ?? 0), 0);
+  return topByMagnitude(
+    rawContributions.map((entry) => ({
+      ...entry,
+      contributionValue:
+        denominator > 0 && outputDelta != null
+          ? outputDelta * (Math.abs(entry.deltaValue ?? 0) / denominator) * ((entry.deltaValue ?? 0) >= 0 ? 1 : -1)
+          : null,
+    })),
+    (entry) => Math.abs(entry.contributionValue ?? entry.deltaValue ?? 0),
+    6
+  );
+}
+
+function buildIntermediateLineItemContributions(
+  leftStudio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>,
+  rightStudio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>,
+  year: number
+): ScenarioDecompositionContribution[] {
+  return topByMagnitude(
+    INTERMEDIATE_LINE_ITEM_KEYS
+      .map((rowKey): ScenarioDecompositionContribution | null => {
+        const left = readProjectedRowValue(leftStudio, rowKey, year);
+        const right = readProjectedRowValue(rightStudio, rowKey, year);
+        if (left.value == null || right.value == null) {
+          return null;
+        }
+        const deltaValue = right.value - left.value;
+        if (Math.abs(deltaValue) <= 1e-9) {
+          return null;
+        }
+        return {
+          kind: "intermediate",
+          key: rowKey,
+          label: right.label || left.label || INTERMEDIATE_LINE_ITEM_LABELS[rowKey] || humanizeKey(rowKey),
+          unit: right.unit || left.unit || "count",
+          leftValue: left.value,
+          rightValue: right.value,
+          deltaValue,
+          contributionValue: deltaValue,
+          sourceNote: "Projected line item",
+        };
+      })
+      .filter((entry): entry is ScenarioDecompositionContribution => entry !== null),
+    (entry) => Math.abs(entry.deltaValue ?? 0),
+    8
+  );
+}
+
+function buildScenarioDiffSummary(
+  leftScenario: SavedStudioScenario,
+  rightScenario: SavedStudioScenario,
+  leftPayload: CompanyChartsDashboardResponse,
+  rightPayload: CompanyChartsDashboardResponse
+): ScenarioDiffSummary | null {
+  const leftStudio = getCompanyChartsStudioSpec(leftPayload)?.projection_studio ?? leftPayload.projection_studio;
+  const rightStudio = getCompanyChartsStudioSpec(rightPayload)?.projection_studio ?? rightPayload.projection_studio;
+  if (!leftStudio || !rightStudio) {
+    return null;
+  }
+
+  const forecastYear = firstProjectedYearFromStudio(rightStudio) ?? firstProjectedYearFromStudio(leftStudio);
+  if (forecastYear == null) {
+    return null;
+  }
+
+  const assumptionContributions = buildAssumptionDiffContributions(leftScenario, rightScenario);
+  const intermediateContributions = buildIntermediateLineItemContributions(leftStudio, rightStudio, forecastYear);
+
+  const outputDecompositions: ScenarioOutputDecomposition[] = OUTPUT_DECOMPOSITION_METRICS.map((metric) => {
+    const left = readProjectedRowValue(leftStudio, metric.key, forecastYear);
+    const right = readProjectedRowValue(rightStudio, metric.key, forecastYear);
+    const deltaValue =
+      left.value != null && right.value != null
+        ? right.value - left.value
+        : null;
+
+    const traceContributions = buildTraceInputContributions(left.trace, right.trace, deltaValue);
+    const outputSpecificIntermediates = intermediateContributions.filter((entry) => entry.key !== metric.key).slice(0, 4);
+
+    return {
+      metricKey: metric.key,
+      metricLabel: metric.label,
+      unit: right.unit || left.unit || metric.unit,
+      leftValue: left.value,
+      rightValue: right.value,
+      deltaValue,
+      contributions: [...traceContributions, ...outputSpecificIntermediates],
+    };
+  });
+
+  return {
+    leftScenarioName: leftScenario.name,
+    rightScenarioName: rightScenario.name,
+    forecastYear,
+    assumptionContributions,
+    intermediateContributions,
+    outputDecompositions,
+  };
+}
+
+function buildScenarioDiffShareSummary(summary: ScenarioDiffSummary): string {
+  const lines: string[] = [];
+  lines.push(`Why did this change? ${summary.leftScenarioName} -> ${summary.rightScenarioName}`);
+  lines.push(`Forecast year: ${summary.forecastYear ?? "n/a"}`);
+
+  summary.outputDecompositions.slice(0, 4).forEach((output) => {
+    lines.push(
+      `${output.metricLabel}: ${formatValue(output.leftValue, output.unit)} -> ${formatValue(output.rightValue, output.unit)} (${output.deltaValue == null ? "—" : formatSignedDelta(output.deltaValue, output.unit)})`
+    );
+  });
+
+  lines.push("Top assumption shifts:");
+  summary.assumptionContributions.slice(0, 3).forEach((entry) => {
+    lines.push(
+      `- ${entry.label}: ${formatValue(entry.leftValue, entry.unit)} -> ${formatValue(entry.rightValue, entry.unit)} (${entry.deltaValue == null ? "—" : formatSignedDelta(entry.deltaValue, entry.unit)})`
+    );
+  });
+
+  lines.push("Top intermediate deltas:");
+  summary.intermediateContributions.slice(0, 3).forEach((entry) => {
+    lines.push(`- ${entry.label}: ${entry.deltaValue == null ? "—" : formatSignedDelta(entry.deltaValue, entry.unit)}`);
+  });
+
+  return lines.join("\n");
 }
 
 function normalizeScenarioName(name: string | null | undefined): string | null {
@@ -683,16 +1088,17 @@ function tryPersistSavedScenarios(storageKey: string, savedScenarios: SavedStudi
 
 function persistSavedScenariosForTicker(ticker: string, savedScenarios: SavedStudioScenario[]): SavedScenarioPersistenceResult {
   const storageKey = storageKeyForTicker(ticker);
+  const localOnlyScenarios = savedScenarios.filter((scenario) => scenario.storage === "local");
 
-  if (tryPersistSavedScenarios(storageKey, savedScenarios)) {
+  if (tryPersistSavedScenarios(storageKey, localOnlyScenarios)) {
     return {
       status: "ok",
-      persistedCount: savedScenarios.length,
+      persistedCount: localOnlyScenarios.length,
     };
   }
 
-  for (let keepCount = savedScenarios.length - 1; keepCount >= 1; keepCount -= 1) {
-    if (tryPersistSavedScenarios(storageKey, savedScenarios.slice(0, keepCount))) {
+  for (let keepCount = localOnlyScenarios.length - 1; keepCount >= 1; keepCount -= 1) {
+    if (tryPersistSavedScenarios(storageKey, localOnlyScenarios.slice(0, keepCount))) {
       return {
         status: "trimmed",
         persistedCount: keepCount,
@@ -771,17 +1177,57 @@ function parseSavedScenarios(raw: string | null): SavedStudioScenario[] {
           id: candidate.id,
           name: candidate.name,
           createdAt: candidate.createdAt,
+          updatedAt: typeof candidate.updatedAt === "string" ? candidate.updatedAt : null,
           overrideCount: typeof candidate.overrideCount === "number" && Number.isFinite(candidate.overrideCount) ? candidate.overrideCount : Object.keys(normalizedOverrides).length,
           source: candidate.source === "user_scenario" ? "user_scenario" : "sec_base_forecast",
+          visibility: candidate.visibility === "public" ? "public" : "private",
+          storage: "local",
           overrides: normalizedOverrides,
           metrics,
+          sharePath: typeof candidate.sharePath === "string" ? candidate.sharePath : null,
+          editable: true,
         };
       })
       .filter((entry): entry is SavedStudioScenario => entry !== null)
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime());
   } catch {
     return [];
   }
+}
+
+function mapRemoteScenario(candidate: CompanyChartsScenarioPayload): SavedStudioScenario {
+  return {
+    version: 1,
+    id: candidate.id,
+    name: candidate.name,
+    createdAt: candidate.created_at ?? new Date().toISOString(),
+    updatedAt: candidate.updated_at,
+    overrideCount: candidate.override_count,
+    source: candidate.source,
+    visibility: candidate.visibility,
+    storage: "remote",
+    overrides: { ...candidate.overrides },
+    metrics: candidate.metrics.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      unit: metric.unit,
+      value: metric.value,
+    })),
+    sharePath: candidate.share_path,
+    editable: candidate.editable,
+  };
+}
+
+function mergeSavedScenarios(remoteScenarios: SavedStudioScenario[], localScenarios: SavedStudioScenario[]): SavedStudioScenario[] {
+  const merged = new Map<string, SavedStudioScenario>();
+  [...remoteScenarios, ...localScenarios].forEach((scenario) => {
+    if (!merged.has(scenario.id)) {
+      merged.set(scenario.id, scenario);
+    }
+  });
+  return Array.from(merged.values()).sort(
+    (left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime()
+  );
 }
 
 function readProjectedValueByKey(studio: NonNullable<CompanyChartsDashboardResponse["projection_studio"]>, rowKey: string, year: number): number | null {
@@ -1307,7 +1753,125 @@ function WhatIfSidebar({
   );
 }
 
-export function ProjectionStudio({ payload, studio, requestedAsOf = null }: ProjectionStudioProps) {
+function ScenarioDiffPanel({
+  summary,
+  loading,
+  error,
+  onCopy,
+}: {
+  summary: ScenarioDiffSummary | null;
+  loading: boolean;
+  error: string | null;
+  onCopy: () => void;
+}) {
+  if (!loading && !error && !summary) {
+    return null;
+  }
+
+  return (
+    <section className="studio-panel" aria-label="Why did this change">
+      <div className="studio-panel-header">
+        <div>
+          <h2 className="studio-panel-title">Why did this change?</h2>
+          <p className="studio-panel-subtitle">Decomposition between two scenarios using changed assumptions, formula traces, and major intermediate line items.</p>
+        </div>
+        {summary ? (
+          <button type="button" className="studio-secondary-button" onClick={onCopy}>
+            Copy Summary
+          </button>
+        ) : null}
+      </div>
+
+      {loading ? <div className="studio-what-if-state">Building scenario decomposition...</div> : null}
+      {error ? <div className="studio-what-if-error" role="alert">{error}</div> : null}
+
+      {summary ? (
+        <div className="studio-diff-shell" data-testid="studio-scenario-diff-panel">
+          <div className="studio-diff-summary-card" data-testid="studio-scenario-diff-summary-card">
+            <div className="studio-diff-summary-title">{summary.leftScenarioName} -&gt; {summary.rightScenarioName}</div>
+            <div className="studio-diff-summary-subtitle">Forecast Year {summary.forecastYear ?? "n/a"}</div>
+            <div className="studio-diff-summary-grid">
+              {summary.outputDecompositions.slice(0, 4).map((output) => (
+                <div key={output.metricKey} className="studio-diff-summary-metric">
+                  <span>{output.metricLabel}</span>
+                  <strong>{output.deltaValue == null ? "—" : formatSignedDelta(output.deltaValue, output.unit)}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="studio-diff-columns">
+            <div className="studio-diff-column">
+              <h3 className="studio-panel-title">Top Assumption Changes</h3>
+              {!summary.assumptionContributions.length ? <div className="studio-what-if-state">No assumption deltas detected.</div> : null}
+              <div className="studio-diff-list">
+                {summary.assumptionContributions.slice(0, 6).map((entry) => (
+                  <article key={`assumption-${entry.key}`} className="studio-driver-card studio-diff-item">
+                    <div className="studio-driver-topline">
+                      <div className="studio-driver-title">{entry.label}</div>
+                      <div className="studio-driver-value">{entry.deltaValue == null ? "—" : formatSignedDelta(entry.deltaValue, entry.unit)}</div>
+                    </div>
+                    <div className="studio-driver-detail">
+                      {formatValue(entry.leftValue, entry.unit)} -&gt; {formatValue(entry.rightValue, entry.unit)}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+
+            <div className="studio-diff-column">
+              <h3 className="studio-panel-title">Major Intermediate Deltas</h3>
+              {!summary.intermediateContributions.length ? <div className="studio-what-if-state">No intermediate line-item deltas detected.</div> : null}
+              <div className="studio-diff-list">
+                {summary.intermediateContributions.slice(0, 6).map((entry) => (
+                  <article key={`intermediate-${entry.key}`} className="studio-driver-card studio-diff-item">
+                    <div className="studio-driver-topline">
+                      <div className="studio-driver-title">{entry.label}</div>
+                      <div className="studio-driver-value">{entry.deltaValue == null ? "—" : formatSignedDelta(entry.deltaValue, entry.unit)}</div>
+                    </div>
+                    <div className="studio-driver-detail">
+                      {formatValue(entry.leftValue, entry.unit)} -&gt; {formatValue(entry.rightValue, entry.unit)}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="studio-diff-output-grid">
+            {summary.outputDecompositions.map((output) => (
+              <article key={output.metricKey} className="studio-driver-card studio-diff-output-card">
+                <div className="studio-driver-topline">
+                  <div className="studio-driver-title">{output.metricLabel}</div>
+                  <div className="studio-driver-value">{output.deltaValue == null ? "—" : formatSignedDelta(output.deltaValue, output.unit)}</div>
+                </div>
+                <div className="studio-driver-detail">
+                  {formatValue(output.leftValue, output.unit)} -&gt; {formatValue(output.rightValue, output.unit)}
+                </div>
+                <div className="studio-diff-contribution-list">
+                  {output.contributions.slice(0, 4).map((contribution) => (
+                    <div key={`${output.metricKey}-${contribution.kind}-${contribution.key}`} className="studio-diff-contribution-row">
+                      <span>{contribution.label}</span>
+                      <strong>
+                        {contribution.contributionValue == null
+                          ? contribution.deltaValue == null
+                            ? "—"
+                            : formatSignedDelta(contribution.deltaValue, contribution.unit)
+                          : formatSignedDelta(contribution.contributionValue, output.unit)}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function ProjectionStudio({ payload, studio, requestedAsOf = null, requestedScenarioId = null }: ProjectionStudioProps) {
   const ticker = payload.company?.ticker ?? "company";
   const forecastAccuracy = useForecastAccuracy(ticker, {
     asOf: requestedAsOf,
@@ -1323,13 +1887,25 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
   const [recomputeError, setRecomputeError] = useState<string | null>(null);
   const [controlsRetryTick, setControlsRetryTick] = useState(0);
   const [recomputeRetryTick, setRecomputeRetryTick] = useState(0);
-  const [savedScenarios, setSavedScenarios] = useState<SavedStudioScenario[]>([]);
+  const [localSavedScenarios, setLocalSavedScenarios] = useState<SavedStudioScenario[]>([]);
+  const [remoteSavedScenarios, setRemoteSavedScenarios] = useState<SavedStudioScenario[]>([]);
+  const [scenarioViewer, setScenarioViewer] = useState<CompanyChartsScenarioViewerPayload>({
+    kind: "anonymous",
+    signed_in: false,
+    sync_enabled: false,
+    can_create_private: false,
+  });
   const [savedScenarioPersistenceMessage, setSavedScenarioPersistenceMessage] = useState<string | null>(null);
+  const [scenarioSyncMessage, setScenarioSyncMessage] = useState<string | null>(null);
   const [loadedScenarioId, setLoadedScenarioId] = useState<string | null>(null);
   const [compareScenarioIds, setCompareScenarioIds] = useState<string[]>([]);
+  const [compareDiffSummary, setCompareDiffSummary] = useState<ScenarioDiffSummary | null>(null);
+  const [compareDiffLoading, setCompareDiffLoading] = useState(false);
+  const [compareDiffError, setCompareDiffError] = useState<string | null>(null);
   const [loadedSavedScenarioTicker, setLoadedSavedScenarioTicker] = useState<string | null>(null);
   const recomputeAbortRef = useRef<AbortController | null>(null);
   const persistedSavedScenarioSnapshotRef = useRef<string | null>(null);
+  const shareCaptureRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setBasePayload(payload);
@@ -1341,6 +1917,9 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
     setSelectedTrace(null);
     setLoadedScenarioId(null);
     setCompareScenarioIds([]);
+    setCompareDiffSummary(null);
+    setCompareDiffLoading(false);
+    setCompareDiffError(null);
   }, [payload]);
 
   useEffect(() => {
@@ -1350,8 +1929,10 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
 
     const nextSavedScenarios = parseSavedScenarios(window.localStorage.getItem(storageKeyForTicker(ticker)));
     persistedSavedScenarioSnapshotRef.current = JSON.stringify(nextSavedScenarios);
-    setSavedScenarios(nextSavedScenarios);
+    setLocalSavedScenarios(nextSavedScenarios);
+    setRemoteSavedScenarios([]);
     setSavedScenarioPersistenceMessage(null);
+    setScenarioSyncMessage(null);
     setLoadedSavedScenarioTicker(ticker);
   }, [ticker]);
 
@@ -1364,12 +1945,12 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
       return;
     }
 
-    const savedScenarioSnapshot = JSON.stringify(savedScenarios);
+    const savedScenarioSnapshot = JSON.stringify(localSavedScenarios);
     if (savedScenarioSnapshot === persistedSavedScenarioSnapshotRef.current) {
       return;
     }
 
-    const persistenceResult = persistSavedScenariosForTicker(ticker, savedScenarios);
+    const persistenceResult = persistSavedScenariosForTicker(ticker, localSavedScenarios);
     if (persistenceResult.status === "ok") {
       persistedSavedScenarioSnapshotRef.current = savedScenarioSnapshot;
       setSavedScenarioPersistenceMessage(null);
@@ -1377,7 +1958,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
     }
 
     if (persistenceResult.status === "trimmed") {
-      persistedSavedScenarioSnapshotRef.current = JSON.stringify(savedScenarios.slice(0, persistenceResult.persistedCount));
+      persistedSavedScenarioSnapshotRef.current = JSON.stringify(localSavedScenarios.slice(0, persistenceResult.persistedCount));
       const plural = persistenceResult.persistedCount === 1 ? "" : "s";
       setSavedScenarioPersistenceMessage(
         `Browser storage is full. Projection Studio kept this tab live, but only the newest ${persistenceResult.persistedCount.toLocaleString()} saved scenario${plural} will persist on this device.`
@@ -1389,7 +1970,36 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
     setSavedScenarioPersistenceMessage(
       "Browser storage is full. Projection Studio will keep scenario changes in this tab, but saved scenarios cannot persist on this device."
     );
-  }, [loadedSavedScenarioTicker, savedScenarios, ticker]);
+  }, [loadedSavedScenarioTicker, localSavedScenarios, ticker]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let cancelled = false;
+
+    void listCompanyChartsScenarios(ticker, { signal: controller.signal })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setScenarioViewer(response.viewer);
+        setRemoteSavedScenarios(response.scenarios.map(mapRemoteScenario));
+      })
+      .catch((error) => {
+        if (!cancelled && !isAbortError(error)) {
+          setScenarioSyncMessage(asErrorMessage(error, "Unable to sync Projection Studio scenarios right now"));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [ticker]);
+
+  const savedScenarios = useMemo(
+    () => mergeSavedScenarios(remoteSavedScenarios, localSavedScenarios),
+    [localSavedScenarios, remoteSavedScenarios]
+  );
 
   useEffect(() => {
     return () => {
@@ -1434,10 +2044,22 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
     };
   }, [controlsRetryTick, payload, requestedAsOf, ticker]);
 
-  const baseStudio = basePayload.projection_studio ?? studio;
-  const visibleStudio = visiblePayload.projection_studio ?? studio;
-  const baseWhatIf = basePayload.what_if;
-  const visibleWhatIf = visiblePayload.what_if;
+  const baseStudioSpec = useMemo(() => getCompanyChartsStudioSpec(basePayload), [basePayload]);
+  const visibleStudioSpec = useMemo(() => getCompanyChartsStudioSpec(visiblePayload), [visiblePayload]);
+  const baseStudio = baseStudioSpec?.projection_studio ?? basePayload.projection_studio ?? studio;
+  const visibleStudio = visibleStudioSpec?.projection_studio ?? visiblePayload.projection_studio ?? studio;
+  const baseWhatIf = baseStudioSpec?.what_if ?? basePayload.what_if;
+  const visibleWhatIf = visibleStudioSpec?.what_if ?? visiblePayload.what_if;
+  const loadedScenario = useMemo(
+    () => (loadedScenarioId ? savedScenarios.find((scenario) => scenario.id === loadedScenarioId) ?? null : null),
+    [loadedScenarioId, savedScenarios]
+  );
+  const shareSourcePath = useMemo(() => {
+    if (loadedScenario?.storage === "remote" && loadedScenario.sharePath) {
+      return loadedScenario.sharePath;
+    }
+    return buildChartsSourcePath(ticker, "studio");
+  }, [loadedScenario?.sharePath, loadedScenario?.storage, ticker]);
   const baseControls = baseWhatIf?.driver_control_metadata ?? EMPTY_DRIVER_CONTROLS;
   const baseControlMap = useMemo(() => new Map(baseControls.map((control) => [control.key, control])), [baseControls]);
   const appliedOverrides = useMemo(
@@ -1447,6 +2069,15 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
   const clippedOverrides = useMemo(() => new Set((visibleWhatIf?.overrides_clipped ?? []).map((override) => override.key)), [visibleWhatIf?.overrides_clipped]);
   const overrideSignature = useMemo(() => JSON.stringify(draftOverrides), [draftOverrides]);
   const activeOverrideCount = Object.keys(draftOverrides).length;
+  const shareSnapshot = useMemo(
+    () =>
+      buildStudioChartShareSnapshot(visiblePayload, {
+        sourcePath: shareSourcePath,
+        scenarioName: loadedScenario?.name ?? null,
+        overrideCount: activeOverrideCount,
+      }),
+    [activeOverrideCount, loadedScenario?.name, shareSourcePath, visiblePayload]
+  );
 
   useEffect(() => {
     if (!baseControls.length) {
@@ -1531,10 +2162,47 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
     [compareScenarioIds, savedScenarios]
   );
 
-  const loadedScenario = useMemo(
-    () => (loadedScenarioId ? savedScenarios.find((scenario) => scenario.id === loadedScenarioId) ?? null : null),
-    [loadedScenarioId, savedScenarios]
-  );
+  useEffect(() => {
+    if (comparedScenarios.length !== MAX_COMPARE_SCENARIOS) {
+      setCompareDiffSummary(null);
+      setCompareDiffLoading(false);
+      setCompareDiffError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    setCompareDiffLoading(true);
+    setCompareDiffError(null);
+
+    const [leftScenario, rightScenario] = comparedScenarios;
+    void Promise.all([
+      getCompanyChartsWhatIf(ticker, { overrides: leftScenario.overrides }, { asOf: requestedAsOf, signal: controller.signal }),
+      getCompanyChartsWhatIf(ticker, { overrides: rightScenario.overrides }, { asOf: requestedAsOf, signal: controller.signal }),
+    ])
+      .then(([leftPayload, rightPayload]) => {
+        if (cancelled) {
+          return;
+        }
+        setCompareDiffSummary(buildScenarioDiffSummary(leftScenario, rightScenario, leftPayload, rightPayload));
+      })
+      .catch((error) => {
+        if (!cancelled && !isAbortError(error)) {
+          setCompareDiffError(asErrorMessage(error, "Unable to build scenario decomposition"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCompareDiffLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [comparedScenarios, requestedAsOf, ticker]);
 
   const forecastHandoffPayload = useMemo<ForecastHandoffPayload | null>(() => {
     const metrics = buildForecastHandoffMetrics(baseStudio, visibleStudio, firstProjectedYear);
@@ -1569,13 +2237,179 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
   );
 
   const exportRows = useMemo(
-    () => buildExportRows(scheduleSections, driverGroups, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix, scenarioImpactMetrics, comparedScenarios, sourceState, forecastAccuracy.data),
-    [comparedScenarios, driverGroups, forecastAccuracy.data, scenarioImpactMetrics, scheduleSections, sourceState, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix]
+    () =>
+      buildExportRows(
+        scheduleSections,
+        driverGroups,
+        visibleStudio.scenarios_comparison,
+        visibleStudio.sensitivity_matrix,
+        scenarioImpactMetrics,
+        comparedScenarios,
+        compareDiffSummary,
+        sourceState,
+        forecastAccuracy.data
+      ),
+    [compareDiffSummary, comparedScenarios, driverGroups, forecastAccuracy.data, scenarioImpactMetrics, scheduleSections, sourceState, visibleStudio.scenarios_comparison, visibleStudio.sensitivity_matrix]
   );
 
   function handleExportCsv() {
     exportRowsToCsv(`${normalizeExportFileStem(`${ticker}-projection-studio`, "projection-studio")}.csv`, exportRows);
   }
+
+  async function handleCopyCompareSummary() {
+    if (!compareDiffSummary) {
+      return;
+    }
+    await copyTextToClipboard(buildScenarioDiffShareSummary(compareDiffSummary));
+    setScenarioSyncMessage("Scenario diff summary copied.");
+  }
+
+  function buildScenarioRequest(name: string, visibility: "public" | "private"): CompanyChartsScenarioUpsertRequest {
+    return {
+      name,
+      visibility,
+      source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
+      override_count: activeOverrideCount,
+      forecast_year: firstProjectedYear,
+      as_of: requestedAsOf,
+      overrides: { ...draftOverrides },
+      metrics: collectScenarioMetrics(visibleStudio, firstProjectedYear),
+    };
+  }
+
+  function buildScenarioRequestFromSavedScenario(
+    scenario: SavedStudioScenario,
+    name: string,
+    visibility: "public" | "private"
+  ): CompanyChartsScenarioUpsertRequest {
+    return {
+      name,
+      visibility,
+      source: scenario.source,
+      override_count: scenario.overrideCount,
+      forecast_year: firstProjectedYear,
+      as_of: requestedAsOf,
+      overrides: { ...scenario.overrides },
+      metrics: scenario.metrics,
+    };
+  }
+
+  function upsertLocalScenario(name: string, visibility: "public" | "private", replaceScenarioId: string | null = null): SavedStudioScenario {
+    const now = new Date().toISOString();
+    const nextScenario: SavedStudioScenario = {
+      version: 1,
+      id: replaceScenarioId ?? `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      createdAt: replaceScenarioId && loadedScenario ? loadedScenario.createdAt : now,
+      updatedAt: now,
+      overrideCount: activeOverrideCount,
+      source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
+      visibility,
+      storage: "local",
+      overrides: { ...draftOverrides },
+      metrics: collectScenarioMetrics(visibleStudio, firstProjectedYear),
+      sharePath: null,
+      editable: true,
+    };
+
+    setLocalSavedScenarios((current) => [nextScenario, ...current.filter((scenario) => scenario.id !== nextScenario.id)]);
+    setLoadedScenarioId(nextScenario.id);
+    return nextScenario;
+  }
+
+  function upsertRemoteScenarioInState(nextScenario: SavedStudioScenario) {
+    setRemoteSavedScenarios((current) => [nextScenario, ...current.filter((scenario) => scenario.id !== nextScenario.id)]);
+    setLoadedScenarioId(nextScenario.id);
+  }
+
+  function promptForScenarioVisibility(defaultVisibility: "public" | "private"): "public" | "private" | null {
+    const fallbackVisibility = scenarioViewer.can_create_private ? defaultVisibility : "public";
+    const rawValue = window.prompt("Visibility: public or private", fallbackVisibility);
+    if (rawValue == null) {
+      return null;
+    }
+    const normalized = rawValue.trim().toLowerCase();
+    if (normalized === "public") {
+      return "public";
+    }
+    if (normalized === "private") {
+      if (!scenarioViewer.can_create_private) {
+        window.alert("Private scenarios need a local viewer identity in this browser.");
+        return null;
+      }
+      return "private";
+    }
+    window.alert("Enter either 'public' or 'private'.");
+    return null;
+  }
+
+  async function copyScenarioLink(sharePath: string): Promise<void> {
+    const fallbackUrl =
+      typeof window !== "undefined"
+        ? new URL(sharePath, window.location.origin).toString()
+        : sharePath;
+
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(fallbackUrl);
+      setScenarioSyncMessage("Scenario link copied.");
+      return;
+    }
+
+    window.prompt("Copy this Projection Studio link", fallbackUrl);
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("mode", "studio");
+    if (loadedScenario?.storage === "remote") {
+      url.searchParams.set("scenario", loadedScenario.id);
+    } else {
+      url.searchParams.delete("scenario");
+    }
+    window.history.replaceState({}, "", url.toString());
+  }, [loadedScenario?.id, loadedScenario?.storage]);
+
+  useEffect(() => {
+    if (!requestedScenarioId) {
+      return;
+    }
+
+    const existingScenario = savedScenarios.find((scenario) => scenario.id === requestedScenarioId) ?? null;
+    if (existingScenario) {
+      setDraftOverrides({ ...existingScenario.overrides });
+      setLoadedScenarioId(existingScenario.id);
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    void getCompanyChartsScenario(ticker, requestedScenarioId, { signal: controller.signal })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        const nextScenario = mapRemoteScenario(response.scenario);
+        setScenarioViewer(response.viewer);
+        setRemoteSavedScenarios((current) => [nextScenario, ...current.filter((scenario) => scenario.id !== nextScenario.id)]);
+        setDraftOverrides({ ...nextScenario.overrides });
+        setLoadedScenarioId(nextScenario.id);
+      })
+      .catch((error) => {
+        if (!cancelled && !isAbortError(error)) {
+          setScenarioSyncMessage(asErrorMessage(error, "Unable to load the requested shared scenario"));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [requestedScenarioId, savedScenarios, ticker]);
 
   function handleControlChange(key: string, rawValue: number) {
     const control = baseControlMap.get(key);
@@ -1621,26 +2455,167 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
     setRecomputeRetryTick((current) => current + 1);
   }
 
-  function handleSaveScenario() {
+  async function handleSaveScenario() {
+    setScenarioSyncMessage(null);
+    if (loadedScenario?.storage === "remote" && loadedScenario.editable) {
+      const response = await updateCompanyChartsScenario(
+        ticker,
+        loadedScenario.id,
+        buildScenarioRequest(loadedScenario.name, loadedScenario.visibility)
+      ).catch((error) => {
+        setScenarioSyncMessage(asErrorMessage(error, "Unable to update the saved scenario"));
+        return null;
+      });
+
+      if (response) {
+        upsertRemoteScenarioInState(mapRemoteScenario(response.scenario));
+        setScenarioViewer(response.viewer);
+      }
+      return;
+    }
+
     const suggestedName = loadedScenario?.name ?? `Scenario ${savedScenarios.length + 1}`;
     const inputName = normalizeScenarioName(window.prompt("Name this scenario", suggestedName));
     if (!inputName) {
       return;
     }
+    const visibility = promptForScenarioVisibility(loadedScenario?.visibility ?? "private");
+    if (!visibility) {
+      return;
+    }
 
-    const nextScenario: SavedStudioScenario = {
-      version: 1,
+    const response = await createCompanyChartsScenario(ticker, buildScenarioRequest(inputName, visibility)).catch((error) => {
+      setScenarioSyncMessage(asErrorMessage(error, "Unable to save to the backend. Keeping a local scenario copy instead."));
+      return null;
+    });
+
+    if (response) {
+      upsertRemoteScenarioInState(mapRemoteScenario(response.scenario));
+      setScenarioViewer(response.viewer);
+      if (loadedScenario?.storage === "local") {
+        setLocalSavedScenarios((current) => current.filter((scenario) => scenario.id !== loadedScenario.id));
+      }
+      return;
+    }
+
+    upsertLocalScenario(inputName, visibility, loadedScenario?.storage === "local" ? loadedScenario.id : null);
+  }
+
+  async function handleSaveAsScenario() {
+    setScenarioSyncMessage(null);
+    const suggestedName = loadedScenario ? `${loadedScenario.name} Copy` : `Scenario ${savedScenarios.length + 1}`;
+    const inputName = normalizeScenarioName(window.prompt("Save this scenario as", suggestedName));
+    if (!inputName) {
+      return;
+    }
+    const visibility = promptForScenarioVisibility(loadedScenario?.visibility ?? "private");
+    if (!visibility) {
+      return;
+    }
+
+    const response = await createCompanyChartsScenario(ticker, buildScenarioRequest(inputName, visibility)).catch(() => null);
+    if (response) {
+      upsertRemoteScenarioInState(mapRemoteScenario(response.scenario));
+      setScenarioViewer(response.viewer);
+      return;
+    }
+
+    upsertLocalScenario(inputName, visibility);
+  }
+
+  async function handleDuplicateScenario(scenario: SavedStudioScenario | null = loadedScenario) {
+    const sourceScenario = scenario ?? loadedScenario;
+    if (!sourceScenario) {
+      return;
+    }
+
+    setScenarioSyncMessage(null);
+    const inputName = normalizeScenarioName(window.prompt("Duplicate scenario as", `${sourceScenario.name} Copy`));
+    if (!inputName) {
+      return;
+    }
+    const visibility = promptForScenarioVisibility(sourceScenario.visibility);
+    if (!visibility) {
+      return;
+    }
+
+    if (sourceScenario.storage === "remote") {
+      const response = await cloneCompanyChartsScenario(ticker, sourceScenario.id, { name: inputName, visibility }).catch((error) => {
+        setScenarioSyncMessage(asErrorMessage(error, "Unable to duplicate the saved scenario"));
+        return null;
+      });
+      if (response) {
+        upsertRemoteScenarioInState(mapRemoteScenario(response.scenario));
+        setScenarioViewer(response.viewer);
+        return;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const duplicatedScenario: SavedStudioScenario = {
+      ...sourceScenario,
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: inputName,
-      createdAt: new Date().toISOString(),
-      overrideCount: activeOverrideCount,
-      source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
-      overrides: { ...draftOverrides },
-      metrics: collectScenarioMetrics(visibleStudio, firstProjectedYear),
+      visibility,
+      storage: "local",
+      sharePath: null,
+      editable: true,
+      createdAt: now,
+      updatedAt: now,
     };
+    setLocalSavedScenarios((current) => [duplicatedScenario, ...current]);
+    setLoadedScenarioId(duplicatedScenario.id);
+  }
 
-    setSavedScenarios((current) => [nextScenario, ...current]);
-    setLoadedScenarioId(nextScenario.id);
+  async function handleShareScenarioLink(scenario: SavedStudioScenario | null = loadedScenario) {
+    const currentScenario = scenario ?? loadedScenario;
+    setScenarioSyncMessage(null);
+
+    if (currentScenario?.storage === "remote" && currentScenario.sharePath) {
+      if (currentScenario.visibility === "private") {
+        const response = await updateCompanyChartsScenario(
+          ticker,
+          currentScenario.id,
+          buildScenarioRequestFromSavedScenario(currentScenario, currentScenario.name, "public")
+        ).catch((error) => {
+          setScenarioSyncMessage(asErrorMessage(error, "Unable to publish the saved scenario"));
+          return null;
+        });
+        if (!response) {
+          return;
+        }
+        const nextScenario = mapRemoteScenario(response.scenario);
+        upsertRemoteScenarioInState(nextScenario);
+        setScenarioViewer(response.viewer);
+        await copyScenarioLink(nextScenario.sharePath ?? response.scenario.share_path);
+        return;
+      }
+
+      await copyScenarioLink(currentScenario.sharePath);
+      return;
+    }
+
+    const suggestedName = currentScenario?.name ?? `Scenario ${savedScenarios.length + 1}`;
+    const inputName = normalizeScenarioName(window.prompt("Create a public share link for", suggestedName));
+    if (!inputName) {
+      return;
+    }
+
+    const response = await createCompanyChartsScenario(
+      ticker,
+      currentScenario ? buildScenarioRequestFromSavedScenario(currentScenario, inputName, "public") : buildScenarioRequest(inputName, "public")
+    ).catch((error) => {
+      setScenarioSyncMessage(asErrorMessage(error, "Unable to create a public share link"));
+      return null;
+    });
+    if (!response) {
+      return;
+    }
+
+    const nextScenario = mapRemoteScenario(response.scenario);
+    upsertRemoteScenarioInState(nextScenario);
+    setScenarioViewer(response.viewer);
+    await copyScenarioLink(response.scenario.share_path);
   }
 
   function handleLoadScenario(scenario: SavedStudioScenario) {
@@ -1649,7 +2624,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
   }
 
   function handleDeleteScenario(id: string) {
-    setSavedScenarios((current) => current.filter((scenario) => scenario.id !== id));
+    setLocalSavedScenarios((current) => current.filter((scenario) => scenario.id !== id));
     setCompareScenarioIds((current) => current.filter((scenarioId) => scenarioId !== id));
     setLoadedScenarioId((current) => (current === id ? null : current));
   }
@@ -1672,7 +2647,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
       : [];
 
   return (
-    <div className="charts-page-shell">
+    <div ref={shareCaptureRef} className="charts-page-shell">
       <header className="charts-page-hero">
         <div className="charts-page-hero-copy">
           <div className="charts-page-kicker-row">
@@ -1692,14 +2667,30 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
             loading={forecastAccuracy.loading}
             error={forecastAccuracy.error}
           />
-          <p className="charts-page-hero-thesis">Inspection of projected values, sensitivities, waterfall bridges, and traceable formulas.</p>
+          <p className="charts-page-hero-thesis">{visibleStudioSpec?.summary ?? "Inspection of projected values, sensitivities, waterfall bridges, and traceable formulas."}</p>
         </div>
         <div className="studio-hero-actions">
           <button type="button" className="studio-primary-button" onClick={handleExportCsv}>
             Export Studio CSV
           </button>
-          <button type="button" className="studio-secondary-button" onClick={handleSaveScenario}>
-            Save Scenario
+          <ChartShareActions
+            ticker={ticker}
+            snapshot={shareSnapshot}
+            fileStem={`${ticker.toLowerCase()}-projection-studio`}
+            className="chart-share-action-bar-inline"
+            captureTargetRef={shareCaptureRef}
+          />
+          <button type="button" className="studio-secondary-button" onClick={() => void handleSaveScenario()}>
+            Save
+          </button>
+          <button type="button" className="studio-secondary-button" onClick={() => void handleSaveAsScenario()}>
+            Save As
+          </button>
+          <button type="button" className="studio-secondary-button" onClick={() => void handleShareScenarioLink()}>
+            Share Link
+          </button>
+          <button type="button" className="studio-secondary-button" onClick={() => void handleDuplicateScenario()}>
+            Duplicate
           </button>
           <button type="button" className="studio-secondary-button" onClick={() => setSidebarOpen((current) => !current)} aria-controls="studio-what-if-sidebar">
             {sidebarOpen ? "Hide What-If Sidebar" : "Show What-If Sidebar"}
@@ -1725,13 +2716,23 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
             <div className="studio-panel-header">
               <div>
                 <h2 className="studio-panel-title">Scenario Library</h2>
-                <p className="studio-panel-subtitle">Saved locally in this browser. Compare up to two scenarios with simple deltas.</p>
+                <p className="studio-panel-subtitle">
+                  {scenarioViewer.sync_enabled
+                    ? "Local drafts stay in this browser while synced scenarios can be reopened and shared with public or private visibility."
+                    : "Saved locally in this browser. Compare up to two scenarios with simple deltas."}
+                </p>
               </div>
             </div>
 
             {savedScenarioPersistenceMessage ? (
               <div className="studio-what-if-error" role="alert">
                 <div>{savedScenarioPersistenceMessage}</div>
+              </div>
+            ) : null}
+
+            {scenarioSyncMessage ? (
+              <div className="studio-what-if-state" role="status">
+                {scenarioSyncMessage}
               </div>
             ) : null}
 
@@ -1744,12 +2745,16 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
                     <div className="studio-driver-topline">
                       <div>
                         <div className="studio-driver-title">{scenario.name}</div>
-                        <div className="studio-driver-detail">Saved {formatScenarioTimestamp(scenario.createdAt)}</div>
+                        <div className="studio-driver-detail">
+                          {scenario.updatedAt ? `Updated ${formatScenarioTimestamp(scenario.updatedAt)}` : `Saved ${formatScenarioTimestamp(scenario.createdAt)}`}
+                        </div>
                       </div>
                       <span className="studio-marker-chip is-default">{scenario.overrideCount} overrides</span>
                     </div>
                     <div className="studio-scenario-meta-row">
                       <SourceStateBadge state={resolveSavedScenarioSourceState(scenario.source)} />
+                      <span className="studio-marker-chip is-default">{scenario.visibility}</span>
+                      <span className="studio-marker-chip is-default">{scenario.storage === "remote" ? "Synced" : "Local"}</span>
                       <label className="studio-scenario-compare-toggle">
                         <input
                           type="checkbox"
@@ -1763,9 +2768,17 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
                       <button type="button" className="studio-secondary-button" onClick={() => handleLoadScenario(scenario)}>
                         Load
                       </button>
-                      <button type="button" className="studio-secondary-button" onClick={() => handleDeleteScenario(scenario.id)}>
-                        Delete
+                      <button type="button" className="studio-secondary-button" onClick={() => void handleShareScenarioLink(scenario)}>
+                        Share Link
                       </button>
+                      <button type="button" className="studio-secondary-button" onClick={() => void handleDuplicateScenario(scenario)}>
+                        Duplicate
+                      </button>
+                      {scenario.storage === "local" ? (
+                        <button type="button" className="studio-secondary-button" onClick={() => handleDeleteScenario(scenario.id)}>
+                          Delete
+                        </button>
+                      ) : null}
                     </div>
                   </article>
                 ))}
@@ -1796,6 +2809,15 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null }: Proj
                 </table>
               </div>
             ) : null}
+
+            <ScenarioDiffPanel
+              summary={compareDiffSummary}
+              loading={compareDiffLoading}
+              error={compareDiffError}
+              onCopy={() => {
+                void handleCopyCompareSummary();
+              }}
+            />
           </section>
 
           <section className="studio-panel" aria-label="Key drivers">

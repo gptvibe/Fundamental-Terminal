@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 import app.main as main_module
 from app.db import get_db_session
 from app.main import app
+from app.services.hot_cache import shared_hot_response_cache
 from scripts.benchmark_hot_endpoints import build_cases
 
 
@@ -591,6 +592,7 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
 def _clear_benchmark_caches() -> None:
     main_module._search_response_cache.clear()
     main_module._hot_response_cache.clear()
+    shared_hot_response_cache.clear_sync()
 
 
 def _snapshot() -> SimpleNamespace:

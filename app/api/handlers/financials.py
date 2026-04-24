@@ -7,6 +7,13 @@ company_compare = route_handler("company_compare")
 company_charts = route_handler("company_charts")
 company_charts_what_if = route_handler("company_charts_what_if")
 company_charts_forecast_accuracy = route_handler("company_charts_forecast_accuracy")
+company_charts_scenarios = route_handler("company_charts_scenarios")
+company_charts_scenario_create = route_handler("company_charts_scenario_create")
+company_charts_scenario_detail = route_handler("company_charts_scenario_detail")
+company_charts_scenario_update = route_handler("company_charts_scenario_update")
+company_charts_scenario_clone = route_handler("company_charts_scenario_clone")
+company_charts_share_snapshot_create = route_handler("company_charts_share_snapshot_create")
+company_charts_share_snapshot_detail = route_handler("company_charts_share_snapshot_detail")
 company_equity_claim_risk = route_handler("company_equity_claim_risk")
 company_financials = route_handler("company_financials")
 company_segment_history = route_handler("company_segment_history")
@@ -24,6 +31,13 @@ __all__ = [
     "company_capital_structure",
     "company_charts",
     "company_charts_forecast_accuracy",
+    "company_charts_scenario_clone",
+    "company_charts_scenario_create",
+    "company_charts_scenario_detail",
+    "company_charts_scenario_update",
+    "company_charts_scenarios",
+    "company_charts_share_snapshot_create",
+    "company_charts_share_snapshot_detail",
     "company_charts_what_if",
     "company_changes_since_last_filing",
     "company_compare",

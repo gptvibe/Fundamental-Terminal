@@ -4,7 +4,7 @@ import * as React from "react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import CompanyChartsPage from "./page";
+import CompanyChartsPage, { generateMetadata } from "./page";
 
 const headersMock = vi.fn();
 const fetchMock = vi.fn();
@@ -25,8 +25,8 @@ vi.mock("@/components/company/charts-dashboard", () => ({
   ),
 }));
 
-vi.mock("@/components/company/projection-studio", () => ({
-  ProjectionStudio: () => <div data-testid="projection-studio">Projection Studio</div>,
+vi.mock("./projection-studio-hydration", () => ({
+  ProjectionStudioHydration: () => <div data-testid="projection-studio">Projection Studio</div>,
 }));
 
 function buildPayload(overrides: Record<string, unknown> = {}) {
@@ -147,9 +147,28 @@ describe("CompanyChartsPage", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:3000/backend/api/companies/ACME/charts?as_of=2026-04-17",
-      expect.objectContaining({ cache: "no-store" })
+      expect.objectContaining({ next: expect.objectContaining({ revalidate: 20 }) })
     );
     expect(screen.getByTestId("charts-dashboard").textContent).toBe("dashboard:outlook:disabled");
+  });
+
+  it("builds route metadata from the cached charts payload", async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => buildPayload(),
+    });
+
+    const metadata = await generateMetadata({
+      params: { ticker: "acme" },
+      searchParams: { as_of: "2026-04-17" },
+    });
+
+    expect(metadata.title).toBe("Acme Corporation Growth Outlook");
+    expect(metadata.description).toContain("Growth outlook thesis");
+    expect(metadata.description).toContain("SEC XBRL");
+    expect(metadata.alternates?.canonical).toBe("http://localhost:3000/company/ACME/charts?as_of=2026-04-17");
+    expect(metadata.openGraph?.images?.[0]).toBe("http://localhost:3000/company/ACME/charts/opengraph-image?as_of=2026-04-17");
   });
 
   it("renders Projection Studio when mode is studio and payload includes studio", async () => {

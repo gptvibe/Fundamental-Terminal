@@ -9,6 +9,12 @@ import {
   CompanyCapitalStructureResponse,
   CompanyChartsForecastAccuracyResponse,
   CompanyChartsDashboardResponse,
+  CompanyChartsScenarioCloneRequest,
+  CompanyChartsScenarioDetailPayload,
+  CompanyChartsScenarioListResponse,
+  CompanyChartsShareSnapshotPayload,
+  CompanyChartsShareSnapshotRecordPayload,
+  CompanyChartsScenarioUpsertRequest,
   CompanyChartsWhatIfRequest,
   CompanyEquityClaimRiskResponse,
   CompanyChangesSinceLastFilingResponse,
@@ -112,6 +118,7 @@ const CACHE_STORAGE_PREFIX = "ft:api-cache:v4:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
 const CACHE_INVALIDATION_STORAGE_KEY = `${CACHE_STORAGE_PREFIX}invalidation`;
 const AUDIT_RECORDED_ERROR = Symbol("auditRecordedError");
+const PROJECTION_STUDIO_VIEWER_STORAGE_KEY = "ft:projection-studio:viewer";
 
 const MEMORY_CACHE_MAX_ENTRIES = 160;
 const MEMORY_CACHE_MAX_BYTES = 8 * 1024 * 1024;
@@ -586,6 +593,31 @@ function requestKeyForPath(path: string): string {
   return withApiPrefix(path);
 }
 
+function buildProjectionStudioViewerHeader(): Record<string, string> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const existing = window.localStorage.getItem(PROJECTION_STUDIO_VIEWER_STORAGE_KEY)?.trim();
+    const viewerKey = existing || buildProjectionStudioViewerKey();
+    if (!existing) {
+      window.localStorage.setItem(PROJECTION_STUDIO_VIEWER_STORAGE_KEY, viewerKey);
+    }
+    return { "X-FT-Projection-Viewer": viewerKey };
+  } catch {
+    return {};
+  }
+}
+
+function buildProjectionStudioViewerKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `viewer-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   return fetchAndParseWithAudit(path, init, {
     cacheDisposition: "network",
@@ -1040,6 +1072,105 @@ export function getCompanyChartsWhatIf(
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/what-if${suffix}`, {
     method: "POST",
     headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
+}
+
+export function createCompanyChartsShareSnapshot(
+  ticker: string,
+  body: CompanyChartsShareSnapshotPayload,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsShareSnapshotRecordPayload> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/share-snapshots`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
+}
+
+export function getCompanyChartsShareSnapshot(
+  ticker: string,
+  snapshotId: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsShareSnapshotRecordPayload> {
+  return fetchAndParse(`/companies/${encodeURIComponent(ticker)}/charts/share-snapshots/${encodeURIComponent(snapshotId)}`, {
+    cache: "no-store",
+    signal: options?.signal,
+  });
+}
+
+export function listCompanyChartsScenarios(
+  ticker: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsScenarioListResponse> {
+  return fetchAndParse(`/companies/${encodeURIComponent(ticker)}/charts/scenarios`, {
+    headers: buildProjectionStudioViewerHeader(),
+    cache: "no-store",
+    signal: options?.signal,
+  });
+}
+
+export function getCompanyChartsScenario(
+  ticker: string,
+  scenarioId: string,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsScenarioDetailPayload> {
+  return fetchAndParse(`/companies/${encodeURIComponent(ticker)}/charts/scenarios/${encodeURIComponent(scenarioId)}`, {
+    headers: buildProjectionStudioViewerHeader(),
+    cache: "no-store",
+    signal: options?.signal,
+  });
+}
+
+export function createCompanyChartsScenario(
+  ticker: string,
+  body: CompanyChartsScenarioUpsertRequest,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsScenarioDetailPayload> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/scenarios`, {
+    method: "POST",
+    headers: {
+      ...buildProjectionStudioViewerHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
+}
+
+export function updateCompanyChartsScenario(
+  ticker: string,
+  scenarioId: string,
+  body: CompanyChartsScenarioUpsertRequest,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsScenarioDetailPayload> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/scenarios/${encodeURIComponent(scenarioId)}`, {
+    method: "POST",
+    headers: {
+      ...buildProjectionStudioViewerHeader(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
+}
+
+export function cloneCompanyChartsScenario(
+  ticker: string,
+  scenarioId: string,
+  body: CompanyChartsScenarioCloneRequest,
+  options?: { signal?: AbortSignal }
+): Promise<CompanyChartsScenarioDetailPayload> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/charts/scenarios/${encodeURIComponent(scenarioId)}/clone`, {
+    method: "POST",
+    headers: {
+      ...buildProjectionStudioViewerHeader(),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),

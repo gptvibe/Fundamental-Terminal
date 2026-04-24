@@ -2689,6 +2689,41 @@ export interface CompanyChartsCardsPayload {
   fcf_outlook?: CompanyChartsCardPayload | null;
 }
 
+export interface CompanyChartsEventPayload {
+  key: string;
+  event_type: string;
+  label: string;
+  event_date: string;
+  period_label: string | null;
+  detail: string | null;
+  source_label: string;
+  source_url: string | null;
+}
+
+export interface CompanyChartsEventOverlayPayload {
+  title: string;
+  available_event_types: string[];
+  default_enabled_event_types: string[];
+  events: CompanyChartsEventPayload[];
+  sparse_data_note: string | null;
+}
+
+export interface CompanyChartsQuarterChangeItemPayload {
+  key: string;
+  label: string;
+  value: string;
+  detail: string | null;
+}
+
+export interface CompanyChartsQuarterChangePayload {
+  title: string;
+  latest_period_label: string | null;
+  prior_period_label: string | null;
+  summary: string | null;
+  items: CompanyChartsQuarterChangeItemPayload[];
+  empty_state: string | null;
+}
+
 export interface CompanyChartsMethodologyPayload {
   version: string;
   label: string;
@@ -2822,6 +2857,180 @@ export interface CompanyChartsWhatIfPayload {
   driver_control_metadata: CompanyChartsDriverControlMetadataPayload[];
 }
 
+export interface CompanyChartsOutlookSpecPayload {
+  title: string;
+  summary: CompanyChartsSummaryPayload;
+  legend: CompanyChartsLegendPayload;
+  cards: CompanyChartsCardsPayload;
+  primary_card_order: string[];
+  secondary_card_order: string[];
+  comparison_card_order: string[];
+  detail_card_order: string[];
+  methodology: CompanyChartsMethodologyPayload;
+  forecast_diagnostics: CompanyChartsForecastDiagnosticsPayload;
+  event_overlay: CompanyChartsEventOverlayPayload;
+  quarter_change: CompanyChartsQuarterChangePayload;
+}
+
+export interface CompanyChartsStudioSpecPayload {
+  title: string;
+  summary: string | null;
+  projection_studio: CompanyChartsProjectionStudioPayload;
+  what_if: CompanyChartsWhatIfPayload | null;
+}
+
+export interface CompanyChartsSpecPayload extends ProvenanceEnvelope {
+  schema_version: string;
+  payload_version: string;
+  company: CompanyPayload | null;
+  build_state: "building" | "partial" | "ready";
+  build_status: string;
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+  available_modes: Array<"outlook" | "studio">;
+  default_mode: "outlook" | "studio";
+  outlook: CompanyChartsOutlookSpecPayload;
+  studio: CompanyChartsStudioSpecPayload | null;
+}
+
+export interface CompanyChartsShareSnapshotMetricPayload {
+  key: string;
+  label: string;
+  value: string;
+  detail: string | null;
+  tone: string;
+}
+
+export interface CompanyChartsShareSnapshotSeriesPointPayload {
+  label: string;
+  value: number | null;
+  kind: "actual" | "forecast";
+}
+
+export interface CompanyChartsShareSnapshotChartPayload {
+  title: string;
+  unit: string;
+  actual_points: CompanyChartsShareSnapshotSeriesPointPayload[];
+  forecast_points: CompanyChartsShareSnapshotSeriesPointPayload[];
+}
+
+export interface CompanyChartsShareSnapshotOutlookPayload {
+  headline: string;
+  thesis: string | null;
+  primary_score: CompanyChartsScoreBadgePayload;
+  secondary_scores: CompanyChartsScoreBadgePayload[];
+  summary_metrics: CompanyChartsShareSnapshotMetricPayload[];
+  primary_chart: CompanyChartsShareSnapshotChartPayload | null;
+}
+
+export interface CompanyChartsShareSnapshotStudioRowPayload {
+  key: string;
+  label: string;
+  unit: string;
+  base_value: number | null;
+  bull_value: number | null;
+  bear_value: number | null;
+}
+
+export interface CompanyChartsShareSnapshotStudioPayload {
+  headline: string;
+  summary: string | null;
+  scenario_name: string | null;
+  override_count: number;
+  forecast_year: number | null;
+  metrics: CompanyChartsShareSnapshotMetricPayload[];
+  scenario_rows: CompanyChartsShareSnapshotStudioRowPayload[];
+}
+
+export interface CompanyChartsShareSnapshotPayload {
+  schema_version: string;
+  mode: "outlook" | "studio";
+  ticker: string;
+  company_name: string | null;
+  title: string;
+  as_of: string | null;
+  source_badge: string;
+  provenance_badge: string;
+  trust_label: string | null;
+  actual_label: string;
+  forecast_label: string;
+  source_path: string;
+  chart_spec: CompanyChartsSpecPayload;
+  outlook: CompanyChartsShareSnapshotOutlookPayload | null;
+  studio: CompanyChartsShareSnapshotStudioPayload | null;
+}
+
+export interface CompanyChartsShareSnapshotRecordPayload {
+  id: string;
+  ticker: string;
+  mode: "outlook" | "studio";
+  schema_version: string;
+  share_path: string;
+  image_path: string;
+  created_at: string | null;
+  payload: CompanyChartsShareSnapshotPayload;
+}
+
+export interface CompanyChartsScenarioMetricPayload {
+  key: string;
+  label: string;
+  unit: string;
+  value: number | null;
+}
+
+export interface CompanyChartsScenarioViewerPayload {
+  kind: "anonymous" | "device" | "user";
+  signed_in: boolean;
+  sync_enabled: boolean;
+  can_create_private: boolean;
+}
+
+export interface CompanyChartsScenarioUpsertRequest {
+  name: string;
+  visibility: "public" | "private";
+  source: "sec_base_forecast" | "user_scenario";
+  override_count: number;
+  forecast_year: number | null;
+  as_of: string | null;
+  overrides: Record<string, number>;
+  metrics: CompanyChartsScenarioMetricPayload[];
+}
+
+export interface CompanyChartsScenarioCloneRequest {
+  name?: string | null;
+  visibility?: "public" | "private" | null;
+}
+
+export interface CompanyChartsScenarioPayload {
+  schema_version: number;
+  id: string;
+  ticker: string;
+  name: string;
+  visibility: "public" | "private";
+  source: "sec_base_forecast" | "user_scenario";
+  override_count: number;
+  forecast_year: number | null;
+  as_of: string | null;
+  overrides: Record<string, number>;
+  metrics: CompanyChartsScenarioMetricPayload[];
+  share_path: string;
+  cloned_from_scenario_id: string | null;
+  owned_by_viewer: boolean;
+  editable: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CompanyChartsScenarioDetailPayload {
+  viewer: CompanyChartsScenarioViewerPayload;
+  scenario: CompanyChartsScenarioPayload;
+}
+
+export interface CompanyChartsScenarioListResponse {
+  viewer: CompanyChartsScenarioViewerPayload;
+  scenarios: CompanyChartsScenarioPayload[];
+}
+
 export interface CompanyChartsForecastAccuracySamplePayload {
   metric_key: string;
   metric_label: string;
@@ -2876,10 +3085,13 @@ export interface CompanyChartsDashboardResponse extends ProvenanceEnvelope {
   factors: CompanyChartsFactorsPayload;
   legend: CompanyChartsLegendPayload;
   cards: CompanyChartsCardsPayload;
+  event_overlay: CompanyChartsEventOverlayPayload;
+  quarter_change: CompanyChartsQuarterChangePayload;
   forecast_methodology: CompanyChartsMethodologyPayload;
   forecast_diagnostics?: CompanyChartsForecastDiagnosticsPayload;
   projection_studio: CompanyChartsProjectionStudioPayload | null;
   what_if: CompanyChartsWhatIfPayload | null;
+  chart_spec?: CompanyChartsSpecPayload | null;
   payload_version: string;
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;
