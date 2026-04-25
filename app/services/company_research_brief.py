@@ -1362,15 +1362,44 @@ def _serialize_model_payload(model_run: ModelRun | dict[str, Any], company: Comp
     if not isinstance(input_periods, (dict, list)):
         input_periods = {}
     raw_result = model_run.get("result") if isinstance(model_run, dict) else model_run.result
-    standardized = standardize_model_result(model_name, raw_result if isinstance(raw_result, dict) else {}, input_payload=input_periods if isinstance(input_periods, dict) else None, company_context=_model_company_context(company))
+    calculation_version = _model_calculation_version(model_run)
+    standardized = standardize_model_result(
+        model_name,
+        raw_result if isinstance(raw_result, dict) else {},
+        input_payload=input_periods if isinstance(input_periods, dict) else None,
+        company_context=_model_company_context(company),
+        calculation_version=calculation_version,
+    )
     return ModelPayload(
         schema_version="2.0",
         model_name=model_name,
         model_version=str(model_run.get("model_version") if isinstance(model_run, dict) else model_run.model_version),
+        calculation_version=calculation_version,
         created_at=created_at,
         input_periods=input_periods,
         result=_sanitize_model_result_for_strict_official_mode(model_name, standardized),
     )
+
+
+def _model_calculation_version(model_run: ModelRun | dict[str, Any]) -> str | None:
+    if isinstance(model_run, dict):
+        raw_value = model_run.get("calculation_version")
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+        result = model_run.get("result")
+        if isinstance(result, dict):
+            nested_value = result.get("calculation_version")
+            if isinstance(nested_value, str) and nested_value.strip():
+                return nested_value.strip()
+        return None
+    raw_value = getattr(model_run, "calculation_version", None)
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value.strip()
+    if isinstance(model_run.result, dict):
+        nested_value = model_run.result.get("calculation_version")
+        if isinstance(nested_value, str) and nested_value.strip():
+            return nested_value.strip()
+    return None
 
 
 def _model_company_context(company: Company) -> dict[str, Any]:

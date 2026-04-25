@@ -8,6 +8,7 @@ from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
+from app.model_engine.calculation_versions import has_current_calculation_version
 from app.models import (
     BeneficialOwnershipReport,
     CapitalMarketsEvent,
@@ -361,36 +362,26 @@ def get_company_models(
     model_names: list[str] | None = None,
     config_by_model: dict[str, dict[str, Any]] | None = None,
 ) -> list[ModelRun]:
-    base_statement = select(
-        ModelRun.id.label("id"),
-        func.row_number().over(
-            partition_by=func.lower(ModelRun.model_name),
-            order_by=(ModelRun.created_at.desc(), ModelRun.id.desc()),
-        ).label("rn"),
-    ).where(ModelRun.company_id == company_id)
+    rows_statement = select(ModelRun).where(ModelRun.company_id == company_id)
 
     normalized_names: list[str] = []
     if model_names:
         normalized_names = [model_name.lower() for model_name in model_names]
-        base_statement = base_statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
-
-    ranked = base_statement.subquery()
-    latest_ids_statement = select(ranked.c.id).where(ranked.c.rn == 1)
-    rows_statement = (
-        select(ModelRun)
-        .where(ModelRun.id.in_(latest_ids_statement))
-        .order_by(func.lower(ModelRun.model_name).asc())
-    )
+        rows_statement = rows_statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
+    rows_statement = rows_statement.order_by(func.lower(ModelRun.model_name).asc(), ModelRun.created_at.desc(), ModelRun.id.desc())
     rows = list(session.execute(rows_statement).scalars())
 
     latest_by_model: dict[str, ModelRun] = {}
     for row in rows:
         key = row.model_name.lower()
+        if key in latest_by_model:
+            continue
+        if not _model_run_has_current_calculation_version(row):
+            continue
         expected_config = config_by_model.get(key) if config_by_model else None
         if expected_config is not None and not _config_matches(row.input_periods, expected_config):
             continue
-        if key not in latest_by_model:
-            latest_by_model[key] = row
+        latest_by_model[key] = row
 
     if not model_names:
         return list(latest_by_model.values())
@@ -409,31 +400,23 @@ def get_company_models_by_company_ids(
         return {}
 
     normalized_names: list[str] = []
-    ranked_statement = select(
-        ModelRun.id.label("id"),
-        ModelRun.company_id.label("company_id"),
-        func.lower(ModelRun.model_name).label("model_name_key"),
-        func.row_number().over(
-            partition_by=(ModelRun.company_id, func.lower(ModelRun.model_name)),
-            order_by=(ModelRun.created_at.desc(), ModelRun.id.desc()),
-        ).label("rn"),
-    ).where(ModelRun.company_id.in_(normalized_ids))
+    rows_statement = select(ModelRun).where(ModelRun.company_id.in_(normalized_ids))
     if model_names:
         normalized_names = [model_name.lower() for model_name in model_names]
-        ranked_statement = ranked_statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
-
-    ranked = ranked_statement.subquery()
-    rows_statement = (
-        select(ModelRun)
-        .join(ranked, ModelRun.id == ranked.c.id)
-        .where(ranked.c.rn == 1)
-        .order_by(ModelRun.company_id.asc(), func.lower(ModelRun.model_name).asc())
+        rows_statement = rows_statement.where(func.lower(ModelRun.model_name).in_(normalized_names))
+    rows_statement = rows_statement.order_by(
+        ModelRun.company_id.asc(),
+        func.lower(ModelRun.model_name).asc(),
+        ModelRun.created_at.desc(),
+        ModelRun.id.desc(),
     )
     rows = list(session.execute(rows_statement).scalars())
 
     result: dict[int, dict[str, ModelRun]] = {company_id: {} for company_id in normalized_ids}
     for row in rows:
         key = row.model_name.lower()
+        if not _model_run_has_current_calculation_version(row):
+            continue
         expected_config = config_by_model.get(key) if config_by_model else None
         if expected_config is not None and not _config_matches(row.input_periods, expected_config):
             continue
@@ -465,6 +448,14 @@ def _config_matches(input_periods: Any, expected: dict[str, Any]) -> bool:
             return expected == {"mode": "auto"}
         return config == expected
     return False
+
+
+def _model_run_has_current_calculation_version(model_run: ModelRun) -> bool:
+    calculation_version = getattr(model_run, "calculation_version", None)
+    if not calculation_version and isinstance(model_run.result, dict):
+        raw_value = model_run.result.get("calculation_version")
+        calculation_version = raw_value if isinstance(raw_value, str) else None
+    return has_current_calculation_version(model_run.model_name, calculation_version)
 
 
 def _statement_effective_at(statement: FinancialStatement) -> datetime | None:

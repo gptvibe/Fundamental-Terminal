@@ -300,9 +300,10 @@ describe("CompanyModelsPage", () => {
           schema_version: "2.0",
           model_name: "dcf",
           model_version: "2.2.0",
+          calculation_version: "dcf_ev_bridge_v1",
           created_at: "2026-03-22T00:00:00Z",
           input_periods: {},
-          result: { model_status: "supported", fair_value_per_share: 88.2 },
+          result: { model_status: "supported", calculation_version: "dcf_ev_bridge_v1", fair_value_per_share: 88.2 },
         },
       ],
       provenance: [],
@@ -503,9 +504,10 @@ describe("CompanyModelsPage", () => {
           schema_version: "2.0",
           model_name: "dcf",
           model_version: "2.2.0",
+          calculation_version: "dcf_ev_bridge_v1",
           created_at: "2026-03-22T00:00:00Z",
           input_periods: {},
-          result: { model_status: "supported", fair_value_per_share: 90.4 },
+          result: { model_status: "supported", calculation_version: "dcf_ev_bridge_v1", fair_value_per_share: 90.4 },
         },
       ],
       provenance: [],
@@ -597,6 +599,147 @@ describe("CompanyModelsPage", () => {
 
     expect(screen.getByText("Signal unavailable")).toBeTruthy();
     expect(screen.getByText("Heuristic band: not enough comparable deltas")).toBeTruthy();
+  });
+
+  it("labels enterprise-value-proxy DCF payloads clearly and withholds proxy fair value in forecast handoff cards", async () => {
+    const handoffPayload: ForecastHandoffPayload = {
+      version: 1,
+      ticker: "ACME",
+      asOf: "2025-12-31",
+      forecastYear: 2026,
+      source: "user_scenario",
+      scenarioName: "Proxy Scenario",
+      overrideCount: 1,
+      metrics: [{ key: "free_cash_flow", label: "Free Cash Flow", unit: "usd", base: 200, scenario: 215 }],
+      createdAt: "2026-04-19T00:00:00Z",
+    };
+    mockedSearchParams = new URLSearchParams({ [FORECAST_HANDOFF_QUERY_PARAM]: encodeForecastHandoffPayload(handoffPayload) });
+
+    vi.mocked(getCompanyModels).mockResolvedValue({
+      company: {
+        ticker: "ACME",
+        cik: "0000001",
+        name: "Acme Corp",
+        sector: "Technology",
+        market_sector: "Technology",
+        market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: ["sector_not_oil_exposed"],
+        strict_official_mode: false,
+        last_checked: "2026-03-22T00:00:00Z",
+        last_checked_financials: "2026-03-22T00:00:00Z",
+        last_checked_prices: "2026-03-21T00:00:00Z",
+        last_checked_insiders: null,
+        last_checked_institutional: null,
+        last_checked_filings: null,
+        cache_state: "fresh",
+      },
+      requested_models: MODEL_NAMES,
+      models: [
+        {
+          schema_version: "2.0",
+          model_name: "dcf",
+          model_version: "2.4.0",
+          calculation_version: "dcf_ev_bridge_v1",
+          created_at: "2026-03-22T00:00:00Z",
+          input_periods: {},
+          result: {
+            model_status: "proxy",
+            calculation_version: "dcf_ev_bridge_v1",
+            value_basis: "enterprise_value_proxy",
+            enterprise_value_proxy: 12500000000,
+            capital_structure_proxied: true,
+            fair_value_per_share: null,
+            equity_value: null,
+          },
+        },
+      ],
+      provenance: [],
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-22T00:00:00Z",
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyFinancials).mockResolvedValue({
+      company: null,
+      financials: [],
+      price_history: [{ date: "2026-03-21", close: 123.45, volume: 1000 }],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getCompanyOilScenarioOverlay).mockResolvedValue(undefined as never);
+    vi.mocked(getCompanyMarketContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      curve_points: [],
+      slope_2s10s: { label: "2s10s", value: null, short_tenor: "2y", long_tenor: "10y", observation_date: null },
+      slope_3m10y: { label: "3m10y", value: null, short_tenor: "3m", long_tenor: "10y", observation_date: null },
+      fred_series: [],
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      provenance_details: {},
+      fetched_at: "2026-03-22T00:00:00Z",
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      rates_credit: [],
+      inflation_labor: [],
+      growth_activity: [],
+      cyclical_demand: [],
+      cyclical_costs: [],
+      relevant_series: [],
+      relevant_indicators: [],
+      sector_exposure: [],
+      hqm_snapshot: null,
+    });
+    vi.mocked(getCompanySectorContext).mockResolvedValue({
+      company: null,
+      status: "ok",
+      matched_plugin_ids: [],
+      plugins: [],
+      fetched_at: "2026-03-22T00:00:00Z",
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    });
+    vi.mocked(getCompanyCapitalStructure).mockResolvedValue({
+      company: null,
+      latest: null,
+      history: [],
+      last_capital_structure_check: null,
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: true },
+      confidence_flags: [],
+      refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
+    });
+    vi.mocked(getLatestModelEvaluation).mockResolvedValue({ run: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: { source_ids: [], source_tiers: [], primary_source_ids: [], fallback_source_ids: [], official_only: false }, confidence_flags: [] });
+
+    render(React.createElement(CompanyModelsPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("Forecast-backed Valuation Impact")).toBeTruthy();
+    });
+
+    expect(screen.getByText("DCF EV Proxy")).toBeTruthy();
+    expect(screen.getByText(/free cash flow is treated as an FCFF proxy/i)).toBeTruthy();
+    expect(screen.getByText(/Enterprise Value Proxy instead of a precise equity fair value/i)).toBeTruthy();
+    expect(screen.getByText("Current DCF fair value per share unavailable for this run")).toBeTruthy();
+    expect(screen.queryByText("Current DCF fair value per share (model-derived)")).toBeNull();
   });
 
   it("includes forecast source-state and accuracy metadata in JSON exports", async () => {
@@ -773,7 +916,7 @@ describe("CompanyModelsPage", () => {
           model_version: "2.2.0",
           created_at: "2026-03-22T00:00:00Z",
           input_periods: {},
-          result: { model_status: "supported", enterprise_value_proxy: 12500000000 },
+          result: { model_status: "supported", enterprise_value: 12500000000 },
         },
       ],
       provenance: [],

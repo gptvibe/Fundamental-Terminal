@@ -18,6 +18,7 @@ class ModelRun(Base):
     __table_args__ = (
         Index("ix_models_company_id", "company_id"),
         Index("ix_models_company_name_version", "company_id", "model_name", "model_version"),
+        Index("ix_models_company_name_calculation_version", "company_id", "model_name", "calculation_version"),
         Index("ix_models_company_name_created_id", "company_id", "model_name", "created_at", "id"),
         Index("ix_models_created_at", "created_at"),
     )
@@ -29,6 +30,7 @@ class ModelRun(Base):
     )
     model_name: Mapped[str] = mapped_column(String(100), nullable=False)
     model_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    calculation_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     input_periods: Mapped[list[dict[str, Any]] | dict[str, Any]] = mapped_column(JSONB, nullable=False)
     result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

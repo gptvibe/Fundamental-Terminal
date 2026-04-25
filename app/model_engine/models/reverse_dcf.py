@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import app.model_engine.models.dcf as dcf_basis
+from app.model_engine.calculation_versions import REVERSE_DCF_CALCULATION_VERSION
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import (
     annual_series,
@@ -17,13 +19,15 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "reverse_dcf"
-MODEL_VERSION = "1.3.0"
+MODEL_VERSION = "1.4.0"
+CALCULATION_VERSION = REVERSE_DCF_CALCULATION_VERSION
 
 PROJECTION_YEARS = 5
 MIN_SOLVE_GROWTH = -0.35
 MAX_SOLVE_GROWTH = 0.55
 SOLVE_ITERATIONS = 100
 HEATMAP_SHIFTS = (-0.03, -0.015, 0.0, 0.015, 0.03)
+ENTERPRISE_VALUE_BASIS = "enterprise_value"
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -87,7 +91,9 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     price = market_snapshot.latest_price if market_snapshot is not None else None
 
     risk_free = get_latest_risk_free_rate(dataset.as_of_date)
-    discount_rate = risk_free.rate_used + 0.055
+    sector_risk_premium = dcf_basis._sector_risk_premium(dataset)
+    company_risk_premium = dcf_basis.BASE_COMPANY_RISK_PREMIUM if used_fcf_margin_proxy else 0.0
+    discount_rate = risk_free.rate_used + dcf_basis.EQUITY_RISK_PREMIUM + sector_risk_premium + company_risk_premium
     terminal_growth = min(0.03, max(0.005, risk_free.rate_used * 0.6))
 
     can_directional = revenue not in (None, 0) and price not in (None, 0) and shares not in (None, 0)
@@ -118,21 +124,25 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "price_snapshot": _price_snapshot_payload(dataset),
         }
 
-    equity_value = float(price) * float(shares)
+    market_cap = float(price) * float(shares)
     cash_balance, cash_balance_proxied = _cash_balance(dataset)
     current_debt = latest_non_null(dataset, "current_debt")
     long_term_debt = latest_non_null(dataset, "long_term_debt")
     total_debt: float | None = None
     net_debt: float | None = None
-    capital_structure_proxied = False
-    target_value_basis = "equity_value"
-    target_equity_value = equity_value
+    target_value_basis = ENTERPRISE_VALUE_BASIS
 
     if current_debt is not None and long_term_debt is not None:
         total_debt = float(current_debt) + float(long_term_debt)
 
     if total_debt is not None and cash_balance is not None:
         net_debt = total_debt - float(cash_balance)
+
+    capital_structure_complete = net_debt is not None
+    capital_structure_proxied = cash_balance_proxied or not capital_structure_complete
+    target_enterprise_value = market_cap + net_debt if net_debt is not None else market_cap
+    if not capital_structure_complete:
+        target_value_basis = dcf_basis.ENTERPRISE_VALUE_PROXY_BASIS
 
     implied_fcf_margin = fcf_margin
     if implied_fcf_margin is None:
@@ -145,34 +155,35 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "price_snapshot": _price_snapshot_payload(dataset),
         }
 
-    proxy_used = used_fcf_margin_proxy or share_count_proxied
+    proxy_used = used_fcf_margin_proxy or share_count_proxied or capital_structure_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
-        can_compute_directional=target_equity_value > 0,
+        can_compute_directional=target_enterprise_value > 0,
     )
 
     starting_fcf = float(revenue) * float(implied_fcf_margin)
     solved_growth, solve_metadata = _solve_implied_growth(
-        target_equity_value=target_equity_value,
+        target_enterprise_value=target_enterprise_value,
         starting_fcf=starting_fcf,
         discount_rate=discount_rate,
         terminal_growth=terminal_growth,
     )
     solve_metadata["target_value_basis"] = target_value_basis
+    solve_metadata["discount_rate_basis"] = dcf_basis.DISCOUNT_RATE_BASIS
 
     grid = []
     for growth_shift in HEATMAP_SHIFTS:
         for margin_shift in HEATMAP_SHIFTS:
             growth = solved_growth + growth_shift
             margin = float(implied_fcf_margin) + margin_shift
-            implied_equity_value = _equity_value_from_growth(
+            implied_enterprise_value = _enterprise_value_from_growth(
                 growth=growth,
                 starting_fcf=float(revenue) * margin,
                 discount_rate=discount_rate,
                 terminal_growth=terminal_growth,
             )
-            value_gap = safe_divide(implied_equity_value - target_equity_value, target_equity_value)
+            value_gap = safe_divide(implied_enterprise_value - target_enterprise_value, target_enterprise_value)
             grid.append(
                 {
                     "growth": json_number(growth),
@@ -191,9 +202,14 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "implied_growth": json_number(solved_growth),
         "implied_margin": json_number(implied_fcf_margin),
         "current_operating_margin": json_number(operating_margin),
-        "market_cap_proxy": json_number(equity_value),
-        "enterprise_value_proxy": None,
+        "market_cap": json_number(market_cap),
+        "market_cap_proxy": json_number(market_cap),
+        "target_enterprise_value": json_number(target_enterprise_value),
+        "enterprise_value_proxy": json_number(target_enterprise_value) if target_value_basis == dcf_basis.ENTERPRISE_VALUE_PROXY_BASIS else None,
+        "target_value_basis": target_value_basis,
+        "discount_rate_basis": dcf_basis.DISCOUNT_RATE_BASIS,
         "net_debt": json_number(net_debt),
+        "capital_structure_proxied": capital_structure_proxied,
         "solve_metadata": solve_metadata,
         "assumption_provenance": {
             "risk_free_rate": {
@@ -205,17 +221,23 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "price_snapshot": _price_snapshot_payload(dataset),
             "target_value": {
                 "basis": target_value_basis,
-                "equity_value": json_number(equity_value),
+                "market_cap": json_number(market_cap),
                 "share_count": json_number(shares),
                 "share_count_source": share_count_source,
                 "cash": json_number(cash_balance),
                 "total_debt": json_number(total_debt),
                 "net_debt": json_number(net_debt),
-                "enterprise_value": None,
+                "enterprise_value": json_number(target_enterprise_value) if target_value_basis == ENTERPRISE_VALUE_BASIS else None,
+                "enterprise_value_proxy": json_number(target_enterprise_value) if target_value_basis == dcf_basis.ENTERPRISE_VALUE_PROXY_BASIS else None,
             },
             "discount_rate_inputs": {
+                "risk_free_rate": json_number(risk_free.rate_used),
+                "equity_risk_premium": json_number(dcf_basis.EQUITY_RISK_PREMIUM),
+                "sector_risk_premium": json_number(sector_risk_premium),
+                "company_risk_premium": json_number(company_risk_premium),
                 "discount_rate": json_number(discount_rate),
                 "terminal_growth": json_number(terminal_growth),
+                "discount_rate_basis": dcf_basis.DISCOUNT_RATE_BASIS,
             },
             "free_cash_flow_margin": {
                 "source": fcf_margin_source,
@@ -224,10 +246,10 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "capex": json_number(latest.data.get("capex")),
             },
             "valuation_framework": {
-                "cash_flow_basis": "free_cash_flow_to_equity_proxy",
-                "discount_rate_basis": "cost_of_equity_proxy",
-                "target_value_basis": "equity_value",
-                "net_debt_bridge_applied": False,
+                "cash_flow_basis": dcf_basis.CASH_FLOW_BASIS,
+                "discount_rate_basis": dcf_basis.DISCOUNT_RATE_BASIS,
+                "target_value_basis": target_value_basis,
+                "net_debt_bridge_applied": capital_structure_complete,
             },
         },
         "heatmap": grid,
@@ -270,7 +292,7 @@ def _cash_balance(dataset: CompanyDataset) -> tuple[float | None, bool]:
     return None, False
 
 
-def _equity_value_from_growth(
+def _enterprise_value_from_growth(
     *,
     growth: float,
     starting_fcf: float,
@@ -296,18 +318,18 @@ def _equity_value_from_growth(
 
 def _solve_implied_growth(
     *,
-    target_equity_value: float,
+    target_enterprise_value: float,
     starting_fcf: float,
     discount_rate: float,
     terminal_growth: float,
 ) -> tuple[float, dict[str, Any]]:
     def error(growth: float) -> float:
-        return _equity_value_from_growth(
+        return _enterprise_value_from_growth(
             growth=growth,
             starting_fcf=starting_fcf,
             discount_rate=discount_rate,
             terminal_growth=terminal_growth,
-        ) - target_equity_value
+        ) - target_enterprise_value
 
     low = MIN_SOLVE_GROWTH
     high = MAX_SOLVE_GROWTH
@@ -337,7 +359,7 @@ def _solve_implied_growth(
     for iteration in range(SOLVE_ITERATIONS):
         mid = (low + high) / 2
         mid_error = error(mid)
-        if abs(mid_error) <= max(target_equity_value * 1e-6, 1e-6):
+        if abs(mid_error) <= max(target_enterprise_value * 1e-6, 1e-6):
             return mid, {
                 "method": "bisection",
                 "iterations": iteration + 1,

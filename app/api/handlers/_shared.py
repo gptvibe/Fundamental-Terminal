@@ -255,7 +255,7 @@ HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
     "overview": "overview-response-v1",
     "workspace_bootstrap": "workspace-bootstrap-response-v1",
     "capital_structure": "capital-structure-response-v1",
-    "models": "models-response-v1",
+    "models": "models-response-v2",
     "oil_scenario_overlay": "oil-scenario-overlay-response-v1",
     "oil_scenario": "oil-scenario-response-v1",
     "peers": "peers-response-v1",
@@ -2055,18 +2055,33 @@ async def company_models(
                     financials = select_point_in_time_financials(financials, parsed_as_of)
                     price_history = filter_price_history_as_of(price_history, parsed_as_of)
 
-                if parsed_as_of is None and snapshot.cache_state == "fresh" and requested_models:
-                    model_job_results = ModelEngine(sync_session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
-                    if any(not result.cached for result in model_job_results):
-                        sync_session.commit()
-
                 if parsed_as_of is None:
+                    config_by_model = {"dupont": {"mode": dupont_model.get_mode()}}
                     models: list[ModelRun | dict[str, Any]] = get_company_models(
                         sync_session,
                         snapshot.company.id,
                         requested_models or None,
-                        config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+                        config_by_model=config_by_model,
                     )
+                    available_model_names = {_model_name(model_run).lower() for model_run in models}
+                    missing_requested_models = [
+                        model_name for model_name in requested_models if model_name.lower() not in available_model_names
+                    ]
+                    if requested_models and (snapshot.cache_state == "fresh" or missing_requested_models):
+                        model_names_to_compute = requested_models if snapshot.cache_state == "fresh" else missing_requested_models
+                        model_job_results = ModelEngine(sync_session).compute_models(
+                            snapshot.company.id,
+                            model_names=model_names_to_compute,
+                            force=False,
+                        )
+                        if any(not result.cached for result in model_job_results):
+                            sync_session.commit()
+                        models = get_company_models(
+                            sync_session,
+                            snapshot.company.id,
+                            requested_models or None,
+                            config_by_model=config_by_model,
+                        )
                 else:
                     latest_price = latest_price_as_of(price_history, parsed_as_of)
                     dataset = build_company_dataset(
@@ -8516,6 +8531,7 @@ def _model_result_payload(
     company_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     input_periods = model_run.get("input_periods") if isinstance(model_run, dict) else model_run.input_periods
+    calculation_version = _model_calculation_version(model_run)
     if isinstance(model_run, dict):
         result = model_run.get("result")
         raw_result = result if isinstance(result, dict) else {}
@@ -8524,6 +8540,7 @@ def _model_result_payload(
             raw_result,
             input_payload=input_periods if isinstance(input_periods, dict) else None,
             company_context=company_context,
+            calculation_version=calculation_version,
         )
     raw_result = model_run.result if isinstance(model_run.result, dict) else {}
     return standardize_model_result(
@@ -8531,6 +8548,7 @@ def _model_result_payload(
         raw_result,
         input_payload=input_periods if isinstance(input_periods, dict) else None,
         company_context=company_context,
+        calculation_version=calculation_version,
     )
 
 
@@ -8545,6 +8563,27 @@ def _model_created_at(model_run: ModelRun | dict[str, Any]) -> datetime | None:
         value = model_run.get("created_at")
         return value if isinstance(value, datetime) else None
     return model_run.created_at
+
+
+def _model_calculation_version(model_run: ModelRun | dict[str, Any]) -> str | None:
+    if isinstance(model_run, dict):
+        raw_value = model_run.get("calculation_version")
+        if isinstance(raw_value, str) and raw_value.strip():
+            return raw_value.strip()
+        result = model_run.get("result")
+        if isinstance(result, dict):
+            nested_value = result.get("calculation_version")
+            if isinstance(nested_value, str) and nested_value.strip():
+                return nested_value.strip()
+        return None
+    raw_value = getattr(model_run, "calculation_version", None)
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value.strip()
+    if isinstance(model_run.result, dict):
+        nested_value = model_run.result.get("calculation_version")
+        if isinstance(nested_value, str) and nested_value.strip():
+            return nested_value.strip()
+    return None
 
 
 def _serialize_model_payload(
@@ -8570,6 +8609,7 @@ def _serialize_model_payload(
             schema_version="2.0",
             model_name=model_name,
             model_version=model_version,
+            calculation_version=_model_calculation_version(model_run),
             created_at=created_at,
             input_periods=input_periods,
             result=_sanitize_model_result_for_strict_official_mode(
@@ -8582,6 +8622,7 @@ def _serialize_model_payload(
         schema_version="2.0",
         model_name=model_run.model_name,
         model_version=model_run.model_version,
+        calculation_version=_model_calculation_version(model_run),
         created_at=model_run.created_at,
         input_periods=model_run.input_periods if include_input_periods else None,
         result=_sanitize_model_result_for_strict_official_mode(

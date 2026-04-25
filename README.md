@@ -237,6 +237,37 @@ python scripts/run_performance_regression_gate.py --baseline-file scripts/perfor
 python scripts/run_model_evaluation.py
 ```
 
+Backfill calculation-versioned model rows after a valuation-basis migration:
+
+```bash
+python scripts/backfill_model_cache.py --help
+python scripts/backfill_model_cache.py --preflight-only
+python scripts/backfill_model_cache.py --dry-run --tickers AAPL --models dcf reverse_dcf piotroski --limit 1
+python scripts/backfill_model_cache.py --dry-run --tickers AAPL,MSFT HIMS --models dcf reverse_dcf piotroski --limit 5
+python scripts/backfill_model_cache.py --tickers AAPL MSFT HIMS --models dcf reverse_dcf piotroski
+python scripts/backfill_model_cache.py --all --models dcf reverse_dcf piotroski
+```
+
+Useful operational notes:
+
+- `--preflight-only` / `--check-db` creates the DB engine/session, runs `SELECT 1`, prints connectivity status, and exits without scanning cache rows.
+- `--db-timeout-seconds` defaults to `15` and is applied to DB connect time plus PostgreSQL `statement_timeout` where supported.
+- `--limit` caps ticker/model work items after scope expansion, which is useful for safe first-pass dry runs.
+- `--tickers` and `--models` accept space-delimited values plus comma-separated groups.
+- `--dry-run` never writes. It reports exactly which rows would be recomputed, which are skipped, and any failures discovered while selecting work.
+
+The backfill script is resumable. It logs engine/session creation, DB preflight, cache-row query phases, and per-row outcomes. Each ticker/model row is emitted as JSON with `old_version`, `new_version`, `status`, and `reason`.
+
+How to read row output:
+
+- `status=would_recompute`: the row is stale, legacy, or missing and would be recomputed in a real run.
+- `status=recomputed`: a new row was written for the current calculation version.
+- `status=cached`: another current row already existed by recompute time, so no new write was needed.
+- `status=skipped`: the row was already current, produced no new model output, or a newer calculation version already exists and will not be overwritten.
+- `status=failed`: the requested ticker was missing, the DB preflight/query failed, or the recomputation raised an error.
+
+On non-PostgreSQL URLs, the script still enforces bounded pool/connect waits but may not be able to apply SQL statement timeouts directly.
+
 ## Architecture Notes
 
 - Public routes still mount from `app.main:app`, while domain routers live under `app/api/routers/`.

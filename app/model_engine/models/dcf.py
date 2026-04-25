@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.model_engine.calculation_versions import DCF_CALCULATION_VERSION
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import (
     annual_series,
@@ -17,13 +18,18 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "2.3.0"
+MODEL_VERSION = "2.4.0"
+CALCULATION_VERSION = DCF_CALCULATION_VERSION
 
 EQUITY_RISK_PREMIUM = 0.05
 BASE_COMPANY_RISK_PREMIUM = 0.01
 MAX_GROWTH_RATE = 0.15
 MIN_GROWTH_RATE = -0.10
 PROJECTION_YEARS = 5
+CASH_FLOW_BASIS = "free_cash_flow_to_firm_proxy"
+DISCOUNT_RATE_BASIS = "proxy_wacc"
+EQUITY_VALUE_BASIS = "equity_value"
+ENTERPRISE_VALUE_PROXY_BASIS = "enterprise_value_proxy"
 
 # Sector-based additional risk premiums layered on top of ERP.
 # Positive values increase the discount rate; negative values reduce it.
@@ -195,24 +201,36 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     terminal_value = terminal_cash_flow / (discount_rate - terminal_growth_rate)
     terminal_present_value = terminal_value / ((1 + discount_rate) ** PROJECTION_YEARS)
 
-    equity_value = present_value_sum + terminal_present_value
+    enterprise_value = present_value_sum + terminal_present_value
     cash, cash_balance_proxied = _cash_balance(dataset)
 
     current_debt = latest_non_null(dataset, "current_debt")
     long_term_debt = latest_non_null(dataset, "long_term_debt")
+    total_debt: float | None = None
     net_debt: float | None = None
-    if cash is not None and current_debt is not None and long_term_debt is not None:
-        net_debt = (current_debt + long_term_debt) - cash
+    if current_debt is not None and long_term_debt is not None:
+        total_debt = current_debt + long_term_debt
 
     shares_outstanding = latest_non_null(dataset, "shares_outstanding") or latest_non_null(dataset, "weighted_average_diluted_shares")
-    fair_value_per_share = safe_divide(equity_value, shares_outstanding)
+    valuation_bridge = _bridge_enterprise_to_equity(
+        enterprise_value=enterprise_value,
+        total_debt=total_debt,
+        cash_balance=cash,
+        shares_outstanding=shares_outstanding,
+        cash_balance_proxied=cash_balance_proxied,
+    )
+    capital_structure_complete = bool(valuation_bridge["net_debt_bridge_applied"])
+    capital_structure_proxied = bool(valuation_bridge["capital_structure_proxied"])
+    value_basis = str(valuation_bridge["value_basis"])
+    net_debt = valuation_bridge["net_debt"]
+    equity_value = valuation_bridge["equity_value"]
+    fair_value_per_share = valuation_bridge["fair_value_per_share"]
 
-    capital_structure_proxied = False
-    proxy_used = starting_cash_flow_proxied
+    proxy_used = starting_cash_flow_proxied or capital_structure_proxied
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
-        can_compute_directional=equity_value > 0,
+        can_compute_directional=enterprise_value > 0,
     )
 
     confidence = trust_summary(missing_fields=missing_fields, proxy_used=proxy_used)
@@ -256,32 +274,61 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
                 "sector_risk_premium": json_number(sector_premium),
                 "company_risk_premium": json_number(BASE_COMPANY_RISK_PREMIUM if starting_cash_flow_proxied else 0.0),
+                "discount_rate_basis": DISCOUNT_RATE_BASIS,
             },
             "terminal_assumptions": {
                 "terminal_growth_rate": json_number(terminal_growth_rate),
                 "projection_years": PROJECTION_YEARS,
             },
             "valuation_framework": {
-                "cash_flow_basis": "free_cash_flow_to_equity_proxy",
-                "discount_rate_basis": "cost_of_equity_proxy",
-                "output_value_basis": "equity_value",
-                "net_debt_bridge_applied": False,
+                "cash_flow_basis": CASH_FLOW_BASIS,
+                "discount_rate_basis": DISCOUNT_RATE_BASIS,
+                "output_value_basis": value_basis,
+                "net_debt_bridge_applied": capital_structure_complete,
             },
         },
         "projected_free_cash_flow": projected_cash_flows,
         "present_value_of_cash_flows": json_number(present_value_sum),
         "terminal_value_present_value": json_number(terminal_present_value),
-        "enterprise_value": None,
-        "enterprise_value_proxy": None,
+        "enterprise_value": json_number(enterprise_value),
+        "enterprise_value_proxy": json_number(enterprise_value) if value_basis == ENTERPRISE_VALUE_PROXY_BASIS else None,
+        "total_debt": json_number(total_debt),
         "net_debt": json_number(net_debt),
         "equity_value": json_number(equity_value),
         "fair_value_per_share": json_number(fair_value_per_share),
+        "value_basis": value_basis,
+        "capital_structure_proxied": capital_structure_proxied,
+        "discount_rate_basis": DISCOUNT_RATE_BASIS,
         "missing_required_fields_last_3y": missing_fields,
         "input_quality": {
             "starting_cash_flow_proxied": starting_cash_flow_proxied,
             "capital_structure_proxied": capital_structure_proxied,
             "cash_balance_proxied": cash_balance_proxied,
         },
+    }
+
+
+def _bridge_enterprise_to_equity(
+    *,
+    enterprise_value: float,
+    total_debt: float | None,
+    cash_balance: float | None,
+    shares_outstanding: float | None,
+    cash_balance_proxied: bool,
+) -> dict[str, object]:
+    capital_structure_complete = total_debt is not None and cash_balance is not None
+    net_debt = (total_debt - cash_balance) if capital_structure_complete else None
+    value_basis = EQUITY_VALUE_BASIS if capital_structure_complete else ENTERPRISE_VALUE_PROXY_BASIS
+    equity_value = (enterprise_value - net_debt) if net_debt is not None else None
+    per_share_value = equity_value if equity_value is not None else enterprise_value
+    capital_structure_proxied = cash_balance_proxied or not capital_structure_complete
+    return {
+        "value_basis": value_basis,
+        "capital_structure_proxied": capital_structure_proxied,
+        "net_debt_bridge_applied": capital_structure_complete,
+        "net_debt": net_debt,
+        "equity_value": equity_value,
+        "fair_value_per_share": safe_divide(per_share_value, shares_outstanding),
     }
 
 

@@ -50,3 +50,4 @@ class ModelDefinition:
     name: str
     version: str
     compute: ModelCallable
+    calculation_version: str | None = None

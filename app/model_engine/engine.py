@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.session import SessionLocal, get_engine
 from app.observability import emit_structured_log
+from app.model_engine.calculation_versions import has_current_calculation_version
 from app.model_engine.registry import CORE_MODEL_NAMES, MODEL_REGISTRY
 from app.model_engine.types import CompanyDataset, FinancialPoint, MarketSnapshot, ModelDefinition
 from app.model_engine.utils import serialize_period
@@ -124,6 +125,7 @@ class ModelEngine:
                 company_id=company.id,
                 model_name=definition.name,
                 model_version=definition.version,
+                calculation_version=definition.calculation_version,
                 input_periods=input_payload,
                 result=computed_result,
             )
@@ -179,6 +181,7 @@ class ModelEngine:
                 {
                     "model_name": definition.name,
                     "model_version": definition.version,
+                    "calculation_version": definition.calculation_version,
                     "created_at": evaluated_at,
                     "input_periods": _build_input_payload(dataset, definition),
                     "result": definition.compute(dataset),
@@ -357,6 +360,8 @@ def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -
     market_snapshot_payload = _serialize_market_snapshot(dataset.market_snapshot)
     config = _model_config(dataset, definition)
     signature_input = {"periods": periods}
+    if definition.calculation_version is not None:
+        signature_input["calculation_version"] = definition.calculation_version
     if dataset.as_of_date is not None:
         signature_input["as_of_date"] = dataset.as_of_date.isoformat()
     if market_snapshot_payload:
@@ -369,6 +374,7 @@ def _build_input_payload(dataset: CompanyDataset, definition: ModelDefinition) -
     return {
         "model_name": definition.name,
         "model_version": definition.version,
+        "calculation_version": definition.calculation_version,
         "as_of_date": dataset.as_of_date.isoformat() if dataset.as_of_date is not None else None,
         "statement_type": CANONICAL_STATEMENT_TYPE,
         "signature": signature,
@@ -415,17 +421,7 @@ def _market_observation_timestamp(trade_date) -> datetime | None:
 
 
 def _latest_model_run(session: Session, company_id: int, definition: ModelDefinition) -> ModelRun | None:
-    statement = (
-        select(ModelRun)
-        .where(
-            ModelRun.company_id == company_id,
-            ModelRun.model_name == definition.name,
-            ModelRun.model_version == definition.version,
-        )
-        .order_by(ModelRun.created_at.desc(), ModelRun.id.desc())
-        .limit(1)
-    )
-    return session.execute(statement).scalar_one_or_none()
+    return _latest_model_runs(session, company_id, [definition]).get((definition.name, definition.version))
 
 
 def _latest_model_runs(
@@ -450,10 +446,15 @@ def _latest_model_runs(
     rows = list(session.execute(statement).scalars())
 
     latest: dict[tuple[str, str], ModelRun] = {}
+    definitions_by_key = {(definition.name, definition.version): definition for definition in definitions}
     for row in rows:
         key = (row.model_name, row.model_version)
-        if key not in latest:
-            latest[key] = row
+        if key in latest:
+            continue
+        definition = definitions_by_key.get(key)
+        if definition is not None and not _matches_current_calculation_version(row, definition):
+            continue
+        latest[key] = row
     return latest
 
 
@@ -461,3 +462,18 @@ def _matching_signature(existing_input: object, new_input: dict[str, Any]) -> bo
     if not isinstance(existing_input, dict):
         return False
     return existing_input.get("signature") == new_input.get("signature")
+
+
+def _model_run_calculation_version(model_run: ModelRun) -> str | None:
+    calculation_version = getattr(model_run, "calculation_version", None)
+    if isinstance(calculation_version, str) and calculation_version.strip():
+        return calculation_version.strip()
+    result = model_run.result if isinstance(model_run.result, dict) else {}
+    raw_value = result.get("calculation_version")
+    if isinstance(raw_value, str) and raw_value.strip():
+        return raw_value.strip()
+    return None
+
+
+def _matches_current_calculation_version(model_run: ModelRun, definition: ModelDefinition) -> bool:
+    return has_current_calculation_version(definition.name, _model_run_calculation_version(model_run))

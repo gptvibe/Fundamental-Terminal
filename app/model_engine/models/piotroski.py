@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.model_engine.calculation_versions import PIOTROSKI_CALCULATION_VERSION
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import (
     average,
@@ -13,7 +14,8 @@ from app.model_engine.utils import (
 )
 
 MODEL_NAME = "piotroski"
-MODEL_VERSION = "1.4.0"
+MODEL_VERSION = "1.5.0"
+CALCULATION_VERSION = PIOTROSKI_CALCULATION_VERSION
 
 
 def compute(dataset: CompanyDataset) -> dict[str, object]:
@@ -88,7 +90,6 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "score_max": 9,
         "available_criteria": available_criteria,
         "score_on_9_point_scale": json_number(score_on_9_point_scale),
-        "normalized_score_9": json_number(score_on_9_point_scale),
         "normalized_score_ratio": json_number(normalized_score_ratio),
         "criteria": criteria,
         "unavailable_criteria": [key for key, value in criteria.items() if value is None],

@@ -12,6 +12,7 @@ class ModelPayload(BaseModel):
     schema_version: str = "2.0"
     model_name: str
     model_version: str
+    calculation_version: str | None = None
     created_at: datetime
     input_periods: dict[str, Any] | list[dict[str, Any]] | None = None
     result: dict[str, Any]

@@ -34,6 +34,7 @@ import { describeOilOverlayAvailability, describeOilSupportReason, resolveOilOve
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { CompanyCapitalStructureResponse, CompanyChartsForecastAccuracyResponse, CompanyFinancialsResponse, CompanyMarketContextResponse, CompanyModelsResponse, CompanyOilScenarioResponse, CompanySectorContextResponse, ModelEvaluationResponse, ModelPayload } from "@/lib/types";
+import { describeDcfDisplayCaveat, resolveDcfDisplayState } from "@/lib/valuation-models";
 
 interface ModelsCoreData {
   modelData: CompanyModelsResponse;
@@ -567,11 +568,14 @@ export default function CompanyModelsPage() {
       .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? null;
     const piotroskiState = resolvePiotroskiScoreState(byName.piotroski?.result);
     const dupontBasisRaw = byName.dupont?.result?.basis;
+    const dcfState = resolveDcfDisplayState(byName.dcf);
 
     return {
       cachedCount: models.length,
       latestComputed,
-      dcfEnterpriseValue: asNumber(byName.dcf?.result?.enterprise_value_proxy),
+      dcfEnterpriseValue: dcfState.enterpriseValue,
+      dcfEnterpriseLabel: dcfState.isEnterpriseValueProxy ? "DCF EV Proxy" : "DCF EV",
+      dcfCaveat: describeDcfDisplayCaveat(dcfState),
       dupontRoe: asNumber(byName.dupont?.result?.return_on_equity),
       dupontBasis: typeof dupontBasisRaw === "string" ? dupontBasisRaw.toUpperCase() : null,
       piotroskiLabel: formatPiotroskiDisplay(piotroskiState),
@@ -748,7 +752,7 @@ export default function CompanyModelsPage() {
           { label: "Refresh", value: activeJobId ? "Model update running" : "Background-first", tone: activeJobId ? "cyan" : "green" }
         ]}
         summaries={[
-          { label: "DCF EV", value: formatCompactNumber(modelSummary.dcfEnterpriseValue), accent: modelSummary.dcfEnterpriseValue != null && modelSummary.dcfEnterpriseValue < 0 ? "red" : "cyan" },
+          { label: modelSummary.dcfEnterpriseLabel, value: formatCompactNumber(modelSummary.dcfEnterpriseValue), accent: modelSummary.dcfEnterpriseValue != null && modelSummary.dcfEnterpriseValue < 0 ? "red" : "cyan" },
           { label: "Piotroski", value: modelSummary.piotroskiLabel, accent: "cyan" },
           { label: "DuPont ROE", value: formatPercent(modelSummary.dupontRoe), accent: modelSummary.dupontRoe != null && modelSummary.dupontRoe < 0 ? "red" : "cyan" },
         { label: "Altman Z", value: formatSigned(modelSummary.altmanZ), accent: modelSummary.altmanZ != null && modelSummary.altmanZ < 0 ? "red" : "cyan" }
@@ -767,6 +771,10 @@ export default function CompanyModelsPage() {
             Strict official mode disables commercial equity price inputs. Fair value gap, reverse DCF, and price-comparison workflow steps stay unavailable until an official end-of-day price source is configured.
           </div>
         ) : null}
+        <div className="text-muted models-page-strict-note">
+          Valuation methodology: free cash flow is treated as an FCFF proxy, the discount rate is a proxy WACC, enterprise value is bridged to equity value through net debt, and incomplete capital-structure data produces an Enterprise Value Proxy instead of a precise equity fair value.
+        </div>
+        {modelSummary.dcfCaveat ? <div className="text-muted models-page-strict-note">{modelSummary.dcfCaveat}</div> : null}
         <div className="dupont-mode-bar">
           <div className="dupont-mode-select-col">
             <div className="metric-label">DuPont Basis</div>
@@ -1092,8 +1100,9 @@ export default function CompanyModelsPage() {
 
 function ForecastBackedValuationCard({ handoff, models, ticker, accuracy, accuracyLoading, accuracyError }: { handoff: ForecastHandoffPayload; models: ModelPayload[]; ticker: string; accuracy: CompanyChartsForecastAccuracyResponse | null; accuracyLoading: boolean; accuracyError: string | null }) {
   const dcfModel = models.find((model) => model.model_name === "dcf") ?? null;
-  const dcfResult = dcfModel?.result ?? null;
-  const baseFairValuePerShare = asNumber((dcfResult as Record<string, unknown> | null)?.fair_value_per_share);
+  const dcfState = resolveDcfDisplayState(dcfModel);
+  const dcfCaveat = describeDcfDisplayCaveat(dcfState);
+  const baseFairValuePerShare = dcfState.fairValuePerShare;
   const sourceState = resolveForecastHandoffSourceState(handoff) ?? "sec_default";
 
   const fcfMetric = findHandoffMetric(handoff.metrics, "free_cash_flow");
@@ -1115,9 +1124,9 @@ function ForecastBackedValuationCard({ handoff, models, ticker, accuracy, accura
 
       <div className="models-forecast-impact-grid">
         <div className="models-forecast-impact-card">
-          <div className="metric-label">Current DCF fair value per share (model-derived)</div>
+          <div className="metric-label">{baseFairValuePerShare == null ? "Current DCF fair value per share unavailable for this run" : "Current DCF fair value per share (model-derived)"}</div>
           <div className="models-forecast-impact-value">{formatCompactNumber(baseFairValuePerShare)}</div>
-          <div className="text-muted">From the latest persisted DCF run already stored in Models.</div>
+          <div className="text-muted">{dcfCaveat ?? "From the latest persisted DCF run already stored in Models."}</div>
         </div>
         <div className="models-forecast-impact-card">
           <div className="metric-label">Scenario impact signal (heuristic, no model rerun)</div>

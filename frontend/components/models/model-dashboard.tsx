@@ -29,6 +29,7 @@ import {
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import { formatPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { ModelPayload } from "@/lib/types";
+import { dcfEnterpriseValueLabel, describeDcfDisplayCaveat, resolveDcfDisplayState } from "@/lib/valuation-models";
 
 const MODEL_ORDER = ["dcf", "reverse_dcf", "residual_income", "roic", "capital_allocation", "dupont", "piotroski", "altman_z", "ratios"];
 export function ModelDashboard({ models }: { models: ModelPayload[] }) {
@@ -118,6 +119,8 @@ function DcfModelView({ model }: { model: ModelPayload }) {
     return <StateMessage result={result} />;
   }
 
+  const dcfState = resolveDcfDisplayState(model);
+  const dcfCaveat = describeDcfDisplayCaveat(dcfState);
   const assumptions = asRecord(result.assumptions);
   const priceSnapshot = asRecord(result.price_snapshot);
   const applicability = asRecord(result.applicability);
@@ -141,9 +144,9 @@ function DcfModelView({ model }: { model: ModelPayload }) {
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
         metrics={[
-          { label: "Enterprise Value", value: formatCompactNumber(asNumber(result.enterprise_value)) },
-          { label: "Equity Value", value: formatCompactNumber(asNumber(result.equity_value)) },
-          { label: "Fair Value / Share", value: formatCompactNumber(asNumber(result.fair_value_per_share)) },
+          { label: dcfEnterpriseValueLabel(dcfState), value: formatCompactNumber(dcfState.enterpriseValue) },
+          ...(dcfState.equityValue === null ? [] : [{ label: "Equity Value", value: formatCompactNumber(dcfState.equityValue) }]),
+          ...(dcfState.fairValuePerShare === null ? [] : [{ label: "Fair Value / Share", value: formatCompactNumber(dcfState.fairValuePerShare) }]),
           { label: "Net Debt", value: formatCompactNumber(asNumber(result.net_debt)) },
           { label: "PV Cash Flows", value: formatCompactNumber(asNumber(result.present_value_of_cash_flows)) },
           { label: "Terminal PV", value: formatCompactNumber(asNumber(result.terminal_value_present_value)) },
@@ -151,6 +154,8 @@ function DcfModelView({ model }: { model: ModelPayload }) {
           { label: "Confidence", value: String(result.confidence_summary ?? "—") }
         ]}
       />
+
+      {dcfCaveat ? <div className="text-muted">{dcfCaveat}</div> : null}
 
       <ChartShell title="Historical + Projected Free Cash Flow">
         <ResponsiveContainer>
@@ -184,6 +189,7 @@ function DcfModelView({ model }: { model: ModelPayload }) {
           ]}
           rows={[
             { metric: "Base Period End", value: String(result.base_period_end ?? "—") },
+            { metric: "Value Basis", value: String(result.value_basis ?? "—") },
             { metric: "Discount Rate", value: formatPercent(asNumber(assumptions.discount_rate)) },
             { metric: "Terminal Growth", value: formatPercent(asNumber(assumptions.terminal_growth_rate)) },
             { metric: "Starting FCF Growth", value: formatPercent(asNumber(assumptions.starting_growth_rate)) },

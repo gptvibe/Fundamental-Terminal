@@ -7,12 +7,12 @@
   },
   "metrics": {
     "dcf": {
-      "calibration": 0.0,
-      "mean_absolute_error": 0.969893,
-      "mean_signed_error": -0.969893,
-      "root_mean_square_error": 0.970686,
+      "calibration": 0.833333,
+      "mean_absolute_error": 0.340268,
+      "mean_signed_error": 0.215256,
+      "root_mean_square_error": 0.415895,
       "sample_count": 6,
-      "stability": 0.011003,
+      "stability": 0.217442,
       "status": "ok"
     },
     "earnings": {
@@ -34,12 +34,12 @@
       "status": "ok"
     },
     "reverse_dcf": {
-      "calibration": 1.0,
-      "mean_absolute_error": 0.464733,
-      "mean_signed_error": 0.464733,
-      "root_mean_square_error": 0.464758,
+      "calibration": 0.166667,
+      "mean_absolute_error": 0.389794,
+      "mean_signed_error": -0.333068,
+      "root_mean_square_error": 0.401991,
       "sample_count": 6,
-      "stability": 0.0,
+      "stability": 0.153298,
       "status": "ok"
     },
     "roic": {

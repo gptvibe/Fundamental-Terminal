@@ -27,6 +27,7 @@ def _model_run() -> SimpleNamespace:
     return SimpleNamespace(
         model_name="dcf",
         model_version="v2",
+        calculation_version="dcf_ev_bridge_v1",
         created_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
         input_periods={
             "period_end": "2025-12-31",
@@ -51,6 +52,7 @@ def _model_run() -> SimpleNamespace:
         },
         result={
             "model_status": "supported",
+            "calculation_version": "dcf_ev_bridge_v1",
             "base_period_end": "2025-12-31",
             "enterprise_value": 2_500_000_000_000,
             "equity_value": 2_420_000_000_000,
@@ -59,9 +61,15 @@ def _model_run() -> SimpleNamespace:
     )
 
 
+def _model_run_without_calculation_version_attr() -> SimpleNamespace:
+    payload = _model_run().__dict__.copy()
+    payload.pop("calculation_version", None)
+    return SimpleNamespace(**payload)
+
+
 class _AsyncScope:
     async def __aenter__(self) -> object:
-        return object()
+        return SimpleNamespace(commit=lambda: None)
 
     async def __aexit__(self, *_args) -> bool:
         return False
@@ -101,8 +109,27 @@ def test_models_route_omits_input_periods_by_default_and_reduces_payload(monkeyp
     expanded_payload = expanded_response.json()
 
     assert default_payload["models"][0]["input_periods"] is None
+    assert default_payload["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"
     assert expanded_payload["models"][0]["input_periods"]["period_end"] == "2025-12-31"
+    assert expanded_payload["models"][0]["result"]["calculation_version"] == "dcf_ev_bridge_v1"
     assert len(default_response.content) < len(expanded_response.content)
+
+
+def test_models_route_serializes_mocked_model_without_calculation_version_attribute(monkeypatch):
+    monkeypatch.setattr(main_module, "_session_scope", lambda: _AsyncScope())
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [_model_run_without_calculation_version_attr()])
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
+    monkeypatch.setattr(main_module, "_fill_hot_cached_payload", _fill_without_cache)
+
+    with TestClient(app) as client:
+        response = client.get("/api/companies/AAPL/models?model=dcf")
+
+    assert response.status_code == 200
+    assert response.json()["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"
 
 
 def test_models_route_rejects_unknown_expansion(monkeypatch):
@@ -111,3 +138,43 @@ def test_models_route_rejects_unknown_expansion(monkeypatch):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "expand must be one of: input_periods"
+
+
+def test_models_route_recomputes_missing_current_model_when_legacy_row_is_filtered(monkeypatch):
+    monkeypatch.setattr(main_module, "_session_scope", lambda: _AsyncScope())
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="stale", ticker="AAPL", job_id=None))
+    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
+    monkeypatch.setattr(main_module, "_fill_hot_cached_payload", _fill_without_cache)
+
+    call_count = {"get_company_models": 0}
+    observed_compute: list[list[str] | None] = []
+
+    def _get_company_models(*_args, **_kwargs):
+        call_count["get_company_models"] += 1
+        if call_count["get_company_models"] == 1:
+            return []
+        return [_model_run()]
+
+    class _FakeModelEngine:
+        def __init__(self, _session):
+            pass
+
+        def compute_models(self, company_id, *, model_names=None, force=False, reporter=None):
+            assert company_id == 1
+            assert force is False
+            assert reporter is None
+            observed_compute.append(model_names)
+            return [SimpleNamespace(cached=False)]
+
+    monkeypatch.setattr(main_module, "get_company_models", _get_company_models)
+    monkeypatch.setattr(main_module, "ModelEngine", _FakeModelEngine)
+
+    with TestClient(app) as client:
+        response = client.get("/api/companies/AAPL/models?model=dcf")
+
+    assert response.status_code == 200
+    assert observed_compute == [["dcf"]]
+    assert response.json()["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"

@@ -7,6 +7,7 @@ import { MetricLabel } from "@/components/ui/metric-label";
 import { formatPercent } from "@/lib/format";
 import { formatPiotroskiDisplay as formatResolvedPiotroskiDisplay, resolvePiotroskiScoreState } from "@/lib/piotroski";
 import type { FinancialPayload, ModelPayload, PriceHistoryPoint } from "@/lib/types";
+import { describeDcfDisplayCaveat, resolveDcfDisplayState } from "@/lib/valuation-models";
 
 const ANNUAL_FORMS = new Set(["10-K", "20-F", "40-F"]);
 
@@ -155,6 +156,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
   }
 
   const byName = Object.fromEntries(models.map((model) => [model.model_name, model])) as Record<string, ModelPayload | undefined>;
+  const dcfState = resolveDcfDisplayState(byName.dcf);
   const dcf = asRecord(byName.dcf?.result);
   const residualIncome = asRecord(byName.residual_income?.result);
   const ratios = asRecord(byName.ratios?.result);
@@ -163,10 +165,11 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
   const piotroski = asRecord(byName.piotroski?.result);
   const altman = asRecord(byName.altman_z?.result);
   const piotroskiState = resolvePiotroskiScoreState(piotroski);
+  const dcfCaveat = describeDcfDisplayCaveat(dcfState);
 
   const valuationState = normalizeModelState(dcf.model_status ?? dcf.status);
   const residualState = normalizeModelState(residualIncome.model_status ?? residualIncome.status);
-  const fairValuePerShare = safeNumber(dcf.fair_value_per_share);
+  const fairValuePerShare = dcfState.fairValuePerShare;
   const residualIntrinsicValue = safeNumber(asRecord(residualIncome.intrinsic_value).intrinsic_value_per_share);
   const valuationAnchors = [
     fairValuePerShare !== null ? { label: "DCF", value: fairValuePerShare, state: valuationState } : null,
@@ -185,7 +188,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
       : residualIntrinsicValue !== null
         ? { label: "Residual income", state: residualState }
         : { label: "None", state: valuationState !== "unknown" ? valuationState : residualState };
-  const netDebt = safeNumber(dcf.net_debt);
+  const netDebt = dcfState.isLegacy ? null : safeNumber(dcf.net_debt);
   const currentPrice = latestPrice?.close ?? null;
   const marginOfSafety =
     valuationMidpoint !== null && currentPrice !== null && currentPrice > 0 ? (valuationMidpoint - currentPrice) / currentPrice : null;
@@ -241,15 +244,26 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
     netMargin,
     debtToEquity,
     valuationRangeBasis:
-      valuationRange !== null && valuationAnchors.length > 1
+      dcfState.isLegacy
+        ? "Legacy cached DCF payload omitted until recomputed under the current EV-to-equity bridge."
+        : valuationRange !== null && valuationAnchors.length > 1
         ? "Range built from cached DCF and residual income anchors."
         : fairValuePerShare !== null
           ? "Single-anchor range from cached DCF equity value per share."
+          : dcfState.isEnterpriseValueProxy || dcfState.capitalStructureProxied
+            ? "DCF currently exposes an enterprise value proxy only; fair value per share is intentionally withheld."
           : residualIntrinsicValue !== null
             ? "Single-anchor range from cached residual income intrinsic value per share."
             : "Awaiting cached valuation anchors",
     priceDateLabel: latestPrice?.date ? `Latest close ${new Intl.DateTimeFormat("en-US", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(latestPrice.date))}` : "Awaiting cached market price",
-    netDebtLabel: netDebt === null ? "Net debt unavailable" : "From latest cached DCF run",
+    netDebtLabel:
+      dcfState.isLegacy
+        ? "Legacy DCF bridge withheld pending recompute"
+        : dcfState.capitalStructureProxied
+          ? "Capital structure incomplete; net-debt bridge is provisional"
+          : netDebt === null
+            ? "Net debt unavailable"
+            : "From latest cached DCF run",
     marginBand: valuationBandLabel(marginOfSafety),
     valuationLabel: valuationRatingLabel(valuationRating),
     gauges: [
@@ -279,6 +293,7 @@ function buildInvestmentSummary(models: ModelPayload[], financials: FinancialPay
         title: "Valuation View",
         copy: buildValuationSummary(marginOfSafety, valuationMidpoint, currentPrice, primaryValuation.state, primaryValuation.label)
       },
+      ...(dcfCaveat === null ? [] : [{ title: "DCF Caveat", copy: dcfCaveat }]),
       {
         title: "Financial Strength",
         copy: buildStrengthSummary(piotroskiScore, altmanZScore, debtToEquity, altmanApproximate, piotroskiState.isPartial)

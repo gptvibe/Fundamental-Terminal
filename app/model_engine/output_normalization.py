@@ -164,8 +164,11 @@ def standardize_model_result(
     input_payload: dict[str, Any] | None = None,
     dataset: CompanyDataset | None = None,
     company_context: dict[str, Any] | None = None,
+    calculation_version: str | None = None,
 ) -> dict[str, Any]:
     payload = dict(result or {})
+    if calculation_version is not None and not payload.get("calculation_version"):
+        payload["calculation_version"] = calculation_version
     status = normalize_model_status(str(payload.get("model_status") or payload.get("status") or ""))
     periods = _period_payloads(input_payload, dataset)
     market_snapshot = _market_snapshot_payload(input_payload, dataset)
@@ -321,13 +324,23 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
                 }
             )
         if input_quality.get("capital_structure_proxied"):
-            items.append(
-                {
-                    "target": "cash_and_short_term_investments",
-                    "proxy_fields": ["cash_and_cash_equivalents", "short_term_investments"],
-                    "reason": "Cash structure inputs were approximated from available cash and short-term investment balances.",
-                }
-            )
+            value_basis = result.get("value_basis")
+            if value_basis == "enterprise_value_proxy":
+                items.append(
+                    {
+                        "target": "equity_value",
+                        "proxy_fields": ["current_debt", "long_term_debt", "cash_and_short_term_investments", "cash_and_cash_equivalents", "short_term_investments"],
+                        "reason": "Capital structure inputs were incomplete, so the DCF output remains on an enterprise-value proxy basis instead of a bridged equity value.",
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        "target": "cash_and_short_term_investments",
+                        "proxy_fields": ["cash_and_cash_equivalents", "short_term_investments"],
+                        "reason": "Cash structure inputs were approximated from available cash and short-term investment balances for the net-debt bridge.",
+                    }
+                )
 
     if model_name == "reverse_dcf" and isinstance(input_quality, dict):
         if input_quality.get("starting_fcf_margin_proxied"):
@@ -339,13 +352,23 @@ def _proxy_usage(model_name: str, result: dict[str, Any]) -> dict[str, Any]:
                 }
             )
         if input_quality.get("capital_structure_proxied"):
-            items.append(
-                {
-                    "target": "enterprise_value",
-                    "proxy_fields": ["latest_price", "shares_outstanding", "weighted_average_diluted_shares"],
-                    "reason": "Reverse DCF fell back to an equity-value target because debt or cash inputs were incomplete.",
-                }
-            )
+            target_value_basis = result.get("target_value_basis")
+            if target_value_basis == "enterprise_value_proxy":
+                items.append(
+                    {
+                        "target": "enterprise_value",
+                        "proxy_fields": ["latest_price", "shares_outstanding", "weighted_average_diluted_shares", "current_debt", "long_term_debt", "cash_and_short_term_investments"],
+                        "reason": "Reverse DCF inferred against a market-cap-based enterprise-value proxy because debt or cash inputs were incomplete.",
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        "target": "cash_and_short_term_investments",
+                        "proxy_fields": ["cash_and_cash_equivalents", "short_term_investments"],
+                        "reason": "Reverse DCF approximated cash balances from available cash and short-term investment inputs for the enterprise-value bridge.",
+                    }
+                )
 
     data_quality = result.get("data_quality")
     if model_name == "residual_income" and isinstance(data_quality, dict) and data_quality.get("used_proxy_book_equity"):
