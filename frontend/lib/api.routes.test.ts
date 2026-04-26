@@ -27,6 +27,10 @@ import {
   getCompanyPeers,
   getCacheMetrics,
   getSourceRegistry,
+  getResearchWorkspace,
+  saveResearchWorkspace,
+  deleteResearchWorkspace,
+  importLocalResearchWorkspace,
   getWatchlistCalendar,
   getWatchlistSummary,
   updateCompanyChartsScenario,
@@ -133,6 +137,57 @@ describe("api route stability", () => {
         cache: "no-store",
         body: JSON.stringify({ tickers: ["AAPL", "MSFT"] }),
       })
+    );
+  });
+
+  it("keeps research workspace helper paths unchanged", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        workspace_key: "default",
+        saved_companies: [],
+        notes: [],
+        pinned_metrics: [],
+        pinned_charts: [],
+        compare_baskets: [],
+        memo_draft: null,
+        updated_at: "2026-04-26T00:00:00Z",
+      }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getResearchWorkspace("alpha");
+    await saveResearchWorkspace({
+      saved_companies: [],
+      notes: [],
+      pinned_metrics: [],
+      pinned_charts: [],
+      compare_baskets: [],
+      memo_draft: null,
+    }, { workspaceKey: "alpha" });
+    await deleteResearchWorkspace("alpha");
+    await importLocalResearchWorkspace({ watchlist: [], notes: {}, mode: "merge" }, { workspaceKey: "alpha" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/research-workspace?workspace_key=alpha",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/research-workspace/save?workspace_key=alpha",
+      expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/backend/api/research-workspace/delete?workspace_key=alpha",
+      expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/backend/api/research-workspace/import-local?workspace_key=alpha",
+      expect.objectContaining({ method: "POST", cache: "no-store" })
     );
   });
 

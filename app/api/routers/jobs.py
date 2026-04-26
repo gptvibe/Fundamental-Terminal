@@ -15,6 +15,7 @@ def build_router() -> APIRouter:
     add_internal_route(router, "/readyz", handlers.readiness_check, methods=["GET"])
     add_internal_route(router, "/api/internal/cache-metrics", handlers.cache_metrics, methods=["GET"])
     add_internal_route(router, "/api/internal/cache-metrics/invalidate", handlers.invalidate_cache_metrics, methods=["POST"])
+    add_internal_route(router, "/api/internal/observability", handlers.observability_snapshot, methods=["GET"])
     add_internal_route(router, "/api/internal/performance-audit", handlers.performance_audit_snapshot, methods=["GET"])
     add_internal_route(router, "/api/internal/performance-audit/reset", handlers.reset_performance_audit, methods=["POST"])
     add_user_visible_route(

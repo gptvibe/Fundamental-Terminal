@@ -1195,6 +1195,23 @@ function parseSavedScenarios(raw: string | null): SavedStudioScenario[] {
   }
 }
 
+function sanitizeOverridePayload(
+  overrides: Record<string, number>,
+  allowedKeys: ReadonlySet<string>
+): Record<string, number> {
+  if (!allowedKeys.size) {
+    return {};
+  }
+
+  const sanitized: Record<string, number> = {};
+  Object.entries(overrides).forEach(([key, value]) => {
+    if (allowedKeys.has(key) && Number.isFinite(value)) {
+      sanitized[key] = value;
+    }
+  });
+  return sanitized;
+}
+
 function mapRemoteScenario(candidate: CompanyChartsScenarioPayload): SavedStudioScenario {
   return {
     version: 1,
@@ -2061,14 +2078,16 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
     return buildChartsSourcePath(ticker, "studio");
   }, [loadedScenario?.sharePath, loadedScenario?.storage, ticker]);
   const baseControls = baseWhatIf?.driver_control_metadata ?? EMPTY_DRIVER_CONTROLS;
+  const allowedOverrideKeys = useMemo(() => new Set(baseControls.map((control) => control.key)), [baseControls]);
+  const sanitizedDraftOverrides = useMemo(() => sanitizeOverridePayload(draftOverrides, allowedOverrideKeys), [allowedOverrideKeys, draftOverrides]);
   const baseControlMap = useMemo(() => new Map(baseControls.map((control) => [control.key, control])), [baseControls]);
   const appliedOverrides = useMemo(
     () => new Map((visibleWhatIf?.overrides_applied ?? []).map((override) => [override.key, override])),
     [visibleWhatIf?.overrides_applied]
   );
   const clippedOverrides = useMemo(() => new Set((visibleWhatIf?.overrides_clipped ?? []).map((override) => override.key)), [visibleWhatIf?.overrides_clipped]);
-  const overrideSignature = useMemo(() => JSON.stringify(draftOverrides), [draftOverrides]);
-  const activeOverrideCount = Object.keys(draftOverrides).length;
+  const overrideSignature = useMemo(() => JSON.stringify(sanitizedDraftOverrides), [sanitizedDraftOverrides]);
+  const activeOverrideCount = Object.keys(sanitizedDraftOverrides).length;
   const shareSnapshot = useMemo(
     () =>
       buildStudioChartShareSnapshot(visiblePayload, {
@@ -2101,7 +2120,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
     setRecomputeError(null);
 
     const timeoutId = window.setTimeout(() => {
-      void getCompanyChartsWhatIf(ticker, { overrides: draftOverrides }, { asOf: requestedAsOf, signal: controller.signal })
+      void getCompanyChartsWhatIf(ticker, { overrides: sanitizedDraftOverrides }, { asOf: requestedAsOf, signal: controller.signal })
         .then((response) => {
           if (controller.signal.aborted) {
             return;
@@ -2130,7 +2149,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
         recomputeAbortRef.current = null;
       }
     };
-  }, [activeOverrideCount, baseControls.length, basePayload, draftOverrides, overrideSignature, recomputeRetryTick, requestedAsOf, ticker]);
+  }, [activeOverrideCount, baseControls.length, basePayload, overrideSignature, recomputeRetryTick, requestedAsOf, sanitizedDraftOverrides, ticker]);
 
   const scheduleSections = useMemo(() => visibleStudio.schedule_sections.map((section) => withCheckRows(section)), [visibleStudio.schedule_sections]);
   const baselineScheduleSections = useMemo(() => baseStudio.schedule_sections.map((section) => withCheckRows(section)), [baseStudio.schedule_sections]);
@@ -2178,8 +2197,8 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
 
     const [leftScenario, rightScenario] = comparedScenarios;
     void Promise.all([
-      getCompanyChartsWhatIf(ticker, { overrides: leftScenario.overrides }, { asOf: requestedAsOf, signal: controller.signal }),
-      getCompanyChartsWhatIf(ticker, { overrides: rightScenario.overrides }, { asOf: requestedAsOf, signal: controller.signal }),
+      getCompanyChartsWhatIf(ticker, { overrides: sanitizeOverridePayload(leftScenario.overrides, allowedOverrideKeys) }, { asOf: requestedAsOf, signal: controller.signal }),
+      getCompanyChartsWhatIf(ticker, { overrides: sanitizeOverridePayload(rightScenario.overrides, allowedOverrideKeys) }, { asOf: requestedAsOf, signal: controller.signal }),
     ])
       .then(([leftPayload, rightPayload]) => {
         if (cancelled) {
@@ -2202,7 +2221,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
       cancelled = true;
       controller.abort();
     };
-  }, [comparedScenarios, requestedAsOf, ticker]);
+  }, [allowedOverrideKeys, comparedScenarios, requestedAsOf, ticker]);
 
   const forecastHandoffPayload = useMemo<ForecastHandoffPayload | null>(() => {
     const metrics = buildForecastHandoffMetrics(baseStudio, visibleStudio, firstProjectedYear);
@@ -2272,7 +2291,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
       override_count: activeOverrideCount,
       forecast_year: firstProjectedYear,
       as_of: requestedAsOf,
-      overrides: { ...draftOverrides },
+      overrides: { ...sanitizedDraftOverrides },
       metrics: collectScenarioMetrics(visibleStudio, firstProjectedYear),
     };
   }
@@ -2289,7 +2308,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
       override_count: scenario.overrideCount,
       forecast_year: firstProjectedYear,
       as_of: requestedAsOf,
-      overrides: { ...scenario.overrides },
+      overrides: sanitizeOverridePayload(scenario.overrides, allowedOverrideKeys),
       metrics: scenario.metrics,
     };
   }
@@ -2306,7 +2325,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
       source: activeOverrideCount > 0 ? "user_scenario" : "sec_base_forecast",
       visibility,
       storage: "local",
-      overrides: { ...draftOverrides },
+      overrides: { ...sanitizedDraftOverrides },
       metrics: collectScenarioMetrics(visibleStudio, firstProjectedYear),
       sharePath: null,
       editable: true,
@@ -2380,7 +2399,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
 
     const existingScenario = savedScenarios.find((scenario) => scenario.id === requestedScenarioId) ?? null;
     if (existingScenario) {
-      setDraftOverrides({ ...existingScenario.overrides });
+      setDraftOverrides(sanitizeOverridePayload(existingScenario.overrides, allowedOverrideKeys));
       setLoadedScenarioId(existingScenario.id);
       return;
     }
@@ -2396,7 +2415,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
         const nextScenario = mapRemoteScenario(response.scenario);
         setScenarioViewer(response.viewer);
         setRemoteSavedScenarios((current) => [nextScenario, ...current.filter((scenario) => scenario.id !== nextScenario.id)]);
-        setDraftOverrides({ ...nextScenario.overrides });
+        setDraftOverrides(sanitizeOverridePayload(nextScenario.overrides, allowedOverrideKeys));
         setLoadedScenarioId(nextScenario.id);
       })
       .catch((error) => {
@@ -2409,7 +2428,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
       cancelled = true;
       controller.abort();
     };
-  }, [requestedScenarioId, savedScenarios, ticker]);
+  }, [allowedOverrideKeys, requestedScenarioId, savedScenarios, ticker]);
 
   function handleControlChange(key: string, rawValue: number) {
     const control = baseControlMap.get(key);
@@ -2619,7 +2638,7 @@ export function ProjectionStudio({ payload, studio, requestedAsOf = null, reques
   }
 
   function handleLoadScenario(scenario: SavedStudioScenario) {
-    setDraftOverrides({ ...scenario.overrides });
+    setDraftOverrides(sanitizeOverridePayload(scenario.overrides, allowedOverrideKeys));
     setLoadedScenarioId(scenario.id);
   }
 

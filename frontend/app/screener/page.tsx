@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { MetricConfidenceBadge, type MetricConfidenceMetadata } from "@/components/ui/metric-confidence-badge";
 import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useLocalScreener } from "@/hooks/use-local-screener";
@@ -711,6 +712,7 @@ export default function OfficialScreenerPage() {
                           <div className="screener-metric-cell">
                             <div className="screener-score-value">{formatMetricField(column.field, result)}</div>
                             <div className="screener-cell-note">{metricCellNote(column.field, result)}</div>
+                            <MetricConfidenceBadge metadata={buildScreenerMetricConfidence(column.field, result)} />
                           </div>
                         </td>
                       ))}
@@ -998,4 +1000,31 @@ function buildScreenerExportRows(results: ScreenerResultPayload[]) {
     flags: buildVisibleFlags(result).join(" | "),
     research_brief_url: `/company/${encodeURIComponent(result.company.ticker)}`,
   }));
+}
+
+function buildScreenerMetricConfidence(field: MetricColumnConfig["field"], result: ScreenerResultPayload): MetricConfidenceMetadata {
+  const metric = getScreenerMetricSnapshot(field, result);
+  const qualityFlags = metric.quality_flags ?? [];
+  const missingInputsCount = qualityFlags.filter((flag) => flag.includes("missing")).length;
+
+  return {
+    freshness: result.company.cache_state === "stale" ? "stale" : "fresh",
+    source: metric.source_key,
+    formulaVersion: null,
+    missingInputsCount,
+    proxyUsed: metric.is_proxy,
+    fallbackUsed: metric.source_key.includes("fallback") || qualityFlags.some((flag) => flag.includes("fallback")),
+    qualityFlags,
+    lastRefreshedAt: result.last_metrics_check,
+  };
+}
+
+function getScreenerMetricSnapshot(
+  field: MetricColumnConfig["field"],
+  result: ScreenerResultPayload
+) {
+  if (field === "filing_lag_days") {
+    return result.filing_quality.filing_lag_days;
+  }
+  return result.metrics[field];
 }

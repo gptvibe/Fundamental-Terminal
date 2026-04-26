@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date as DateType, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
 from app.api.schemas.events import AlertsSummaryPayload
@@ -260,3 +260,137 @@ class WatchlistCalendarResponse(BaseModel):
     window_start: DateType
     window_end: DateType
     events: list[WatchlistCalendarEventPayload]
+
+
+def _normalize_workspace_ticker(value: str) -> str:
+    normalized = value.strip().upper()
+    if not normalized:
+        raise ValueError("Ticker cannot be empty")
+    if len(normalized) > 12:
+        raise ValueError("Ticker must be 12 characters or fewer")
+    return normalized
+
+
+class ResearchWorkspaceSavedCompanyPayload(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    saved_at: datetime
+    updated_at: datetime
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, value: str) -> str:
+        return _normalize_workspace_ticker(value)
+
+
+class ResearchWorkspaceNotePayload(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    note: str
+    updated_at: datetime
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, value: str) -> str:
+        return _normalize_workspace_ticker(value)
+
+
+class ResearchWorkspacePinnedMetricPayload(BaseModel):
+    metric_key: str
+    label: str | None = None
+    updated_at: datetime
+
+
+class ResearchWorkspacePinnedChartPayload(BaseModel):
+    chart_key: str
+    label: str | None = None
+    updated_at: datetime
+
+
+class ResearchWorkspaceCompareBasketPayload(BaseModel):
+    basket_id: str
+    name: str
+    tickers: list[str] = Field(default_factory=list)
+    updated_at: datetime
+
+    @field_validator("tickers")
+    @classmethod
+    def _validate_tickers(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for ticker in value:
+            next_ticker = _normalize_workspace_ticker(ticker)
+            if next_ticker in seen:
+                continue
+            seen.add(next_ticker)
+            normalized.append(next_ticker)
+        return normalized
+
+
+class ResearchWorkspacePayload(BaseModel):
+    workspace_key: str
+    saved_companies: list[ResearchWorkspaceSavedCompanyPayload] = Field(default_factory=list)
+    notes: list[ResearchWorkspaceNotePayload] = Field(default_factory=list)
+    pinned_metrics: list[ResearchWorkspacePinnedMetricPayload] = Field(default_factory=list)
+    pinned_charts: list[ResearchWorkspacePinnedChartPayload] = Field(default_factory=list)
+    compare_baskets: list[ResearchWorkspaceCompareBasketPayload] = Field(default_factory=list)
+    memo_draft: str | None = None
+    updated_at: datetime
+
+    @field_validator("workspace_key")
+    @classmethod
+    def _validate_workspace_key(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("workspace_key cannot be empty")
+        if len(normalized) > 120:
+            raise ValueError("workspace_key must be 120 characters or fewer")
+        return normalized
+
+
+class ResearchWorkspaceUpsertRequest(BaseModel):
+    saved_companies: list[ResearchWorkspaceSavedCompanyPayload] = Field(default_factory=list)
+    notes: list[ResearchWorkspaceNotePayload] = Field(default_factory=list)
+    pinned_metrics: list[ResearchWorkspacePinnedMetricPayload] = Field(default_factory=list)
+    pinned_charts: list[ResearchWorkspacePinnedChartPayload] = Field(default_factory=list)
+    compare_baskets: list[ResearchWorkspaceCompareBasketPayload] = Field(default_factory=list)
+    memo_draft: str | None = None
+
+
+class ResearchWorkspaceDeleteResponse(BaseModel):
+    workspace_key: str
+    deleted: bool
+    updated_at: datetime
+
+
+class LocalImportWatchlistItemPayload(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    savedAt: datetime | None = None
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, value: str) -> str:
+        return _normalize_workspace_ticker(value)
+
+
+class LocalImportNotePayload(BaseModel):
+    ticker: str
+    name: str | None = None
+    sector: str | None = None
+    note: str
+    updatedAt: datetime | None = None
+
+    @field_validator("ticker")
+    @classmethod
+    def _validate_ticker(cls, value: str) -> str:
+        return _normalize_workspace_ticker(value)
+
+
+class ResearchWorkspaceImportLocalRequest(BaseModel):
+    watchlist: list[LocalImportWatchlistItemPayload] = Field(default_factory=list)
+    notes: dict[str, LocalImportNotePayload] = Field(default_factory=dict)
+    mode: Literal["merge", "replace"] = "merge"

@@ -168,6 +168,26 @@ def test_formula_endpoints_return_metadata(monkeypatch):
     assert details_response.json()["input_fields"]
 
 
+def test_formula_endpoint_supports_lazy_batch_lookup(monkeypatch):
+    with _client(monkeypatch) as client:
+        model_response = client.get("/api/companies/AAPL/models?model=dcf")
+
+        assert model_response.status_code == 200
+        formula_ids = list(model_response.json()["models"][0]["result"]["formula_ids"].values())
+
+        details_response = client.get(
+            "/api/formulas",
+            params={"ids": ",".join(formula_ids), "include_details": True},
+        )
+
+    assert details_response.status_code == 200
+    payload = details_response.json()
+    assert payload["include_details"] is True
+    assert {item["formula_id"] for item in payload["formulas"]} == set(formula_ids)
+    assert all(item["input_fields"] for item in payload["formulas"])
+    assert all(item["source_periods"] for item in payload["formulas"])
+
+
 def test_models_route_recomputes_missing_current_model_when_legacy_row_is_filtered(monkeypatch):
     monkeypatch.setattr(main_module, "_session_scope", lambda: _AsyncScope())
     monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())

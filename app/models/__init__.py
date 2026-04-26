@@ -33,6 +33,7 @@ from app.models.proxy_statement import ProxyStatement
 from app.models.proxy_vote_result import ProxyVoteResult
 from app.models.refresh_job import RefreshJob
 from app.models.refresh_job_event import RefreshJobEvent
+from app.models.research_workspace import ResearchWorkspace
 
 __all__ = [
     "BeneficialOwnershipParty",
@@ -70,4 +71,5 @@ __all__ = [
     "ProxyVoteResult",
     "RefreshJob",
     "RefreshJobEvent",
+    "ResearchWorkspace",
 ]

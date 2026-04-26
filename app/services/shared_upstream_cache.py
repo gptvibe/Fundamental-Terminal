@@ -12,6 +12,7 @@ from typing import Any, Callable, TypeVar
 import orjson
 
 from app.config import settings
+from app.observability import observe_redis_call, record_cache_event, record_singleflight_wait
 
 try:
     import redis
@@ -53,26 +54,32 @@ class SharedUpstreamCache:
         local_payload_bytes = self._get_local_bytes(logical_key)
         if local_payload_bytes is not None:
             self._increment_metric("local_hits")
+            record_cache_event("shared_upstream", "hit")
             return self._deserialize(local_payload_bytes)
 
         if self._redis is None:
             self._increment_metric("misses")
+            record_cache_event("shared_upstream", "miss")
             return None
 
         entry_key = self._entry_key(logical_key)
         try:
-            raw_payload, ttl_milliseconds = self._redis_get_and_pttl(entry_key)
+            with observe_redis_call():
+                raw_payload, ttl_milliseconds = self._redis_get_and_pttl(entry_key)
             if raw_payload is None:
                 self._increment_metric("misses")
+                record_cache_event("shared_upstream", "miss")
                 return None
             payload_bytes = self._coerce_to_bytes(raw_payload)
             payload = self._deserialize(payload_bytes)
             self._increment_metric("redis_hits")
+            record_cache_event("shared_upstream", "hit")
             if isinstance(ttl_milliseconds, int) and ttl_milliseconds > 0:
                 self._store_local_bytes(logical_key, payload_bytes, ttl_milliseconds / 1000.0)
             return payload
         except Exception:
             self._increment_metric("misses")
+            record_cache_event("shared_upstream", "miss")
             return None
 
     def store_json(self, logical_key: str, payload: Any, *, ttl_seconds: float) -> None:
@@ -87,7 +94,8 @@ class SharedUpstreamCache:
             return
 
         try:
-            self._redis.set(self._entry_key(logical_key), serialized, ex=max(1, math.ceil(normalized_ttl)))
+            with observe_redis_call():
+                self._redis.set(self._entry_key(logical_key), serialized, ex=max(1, math.ceil(normalized_ttl)))
         except Exception:
             return
 
@@ -123,10 +131,12 @@ class SharedUpstreamCache:
                 self._release_lock(logical_key, lease_token)
 
         self._increment_metric("singleflight_waits")
+        wait_started_at = time.perf_counter()
         deadline = time.monotonic() + settings.hot_response_cache_singleflight_wait_seconds
         while time.monotonic() < deadline:
             cached = wait_for()
             if cached is not None:
+                record_singleflight_wait((time.perf_counter() - wait_started_at) * 1000.0)
                 return cached
             if not self._lock_exists(logical_key):
                 lease_token = self._acquire_lock(logical_key)
@@ -134,12 +144,15 @@ class SharedUpstreamCache:
                     try:
                         cached = wait_for()
                         if cached is not None:
+                            record_singleflight_wait((time.perf_counter() - wait_started_at) * 1000.0)
                             return cached
+                        record_singleflight_wait((time.perf_counter() - wait_started_at) * 1000.0)
                         return fill()
                     finally:
                         self._release_lock(logical_key, lease_token)
             time.sleep(settings.hot_response_cache_singleflight_poll_seconds)
 
+        record_singleflight_wait((time.perf_counter() - wait_started_at) * 1000.0)
         return fill()
 
     def clear_local(self) -> None:

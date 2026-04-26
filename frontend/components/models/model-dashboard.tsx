@@ -17,6 +17,7 @@ import {
   YAxis
 } from "recharts";
 
+import { MetricConfidenceBadge, type MetricConfidenceMetadata } from "@/components/ui/metric-confidence-badge";
 import { MetricLabel } from "@/components/ui/metric-label";
 import {
   CHART_AXIS_COLOR,
@@ -139,10 +140,12 @@ function DcfModelView({ model }: { model: ModelPayload }) {
     ...historical.map((entry) => ({ label: entry.period, historicalFcf: entry.freeCashFlow, projectedFcf: null, presentValue: null })),
     ...projected.map((entry) => ({ label: entry.period, historicalFcf: null, projectedFcf: entry.freeCashFlow, presentValue: entry.presentValue }))
   ];
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: dcfEnterpriseValueLabel(dcfState), value: formatCompactNumber(dcfState.enterpriseValue) },
           ...(dcfState.equityValue === null ? [] : [{ label: "Equity Value", value: formatCompactNumber(dcfState.equityValue) }]),
@@ -236,10 +239,12 @@ function ReverseDcfModelView({ model }: { model: ModelPayload }) {
     label: `${formatPercent(asNumber(item.growth))} / ${formatPercent(asNumber(item.margin))}`,
     value: asNumber(item.value_gap),
   }));
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Implied Growth", value: formatPercent(asNumber(result.implied_growth)) },
           { label: "Implied Margin", value: formatPercent(asNumber(result.implied_margin)) },
@@ -287,10 +292,12 @@ function ResidualIncomeModelView({ model }: { model: ModelPayload }) {
     residualIncome: formatCompactNumber(asNumber(item.residual_income)),
     pvResidualIncome: formatCompactNumber(asNumber(item.pv_residual_income)),
   }));
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Intrinsic Value / Share", value: formatCompactNumber(asNumber(intrinsic.intrinsic_value_per_share)) },
           { label: "Book Equity / Share", value: formatCompactNumber(asNumber(intrinsic.book_equity_per_share)) },
@@ -350,10 +357,12 @@ function RoicModelView({ model }: { model: ModelPayload }) {
     reinvestment: asNumber(item.reinvestment_rate),
     spread: asNumber(item.spread_vs_capital_cost),
   }));
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "ROIC", value: formatPercent(asNumber(result.roic)) },
           { label: "Incremental ROIC", value: formatPercent(asNumber(result.incremental_roic)) },
@@ -391,10 +400,12 @@ function CapitalAllocationModelView({ model }: { model: ModelPayload }) {
     buybacks: asNumber(item.buybacks),
     sbc: asNumber(item.stock_based_compensation),
   }));
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Shareholder Yield", value: formatPercent(asNumber(result.shareholder_yield)) },
           { label: "Net Distribution", value: formatCompactNumber(asNumber(result.net_shareholder_distribution)) },
@@ -428,10 +439,12 @@ function DupontModelView({ model }: { model: ModelPayload }) {
     { label: "Equity Multiplier", value: asNumber(result.equity_multiplier), formatted: formatMultiple(asNumber(result.equity_multiplier)) },
     { label: "ROE", value: asNumber(result.return_on_equity), formatted: formatPercent(asNumber(result.return_on_equity)) }
   ];
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Net Margin", value: formatPercent(asNumber(result.net_profit_margin)) },
           { label: "Asset Turnover", value: formatMultiple(asNumber(result.asset_turnover)) },
@@ -492,10 +505,12 @@ function PiotroskiModelView({ model }: { model: ModelPayload }) {
   const availableCriteria = asNumber(result.available_criteria);
   const score = piotroskiState.rawScore;
   const normalizedScore = piotroskiState.score;
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Reported Score", value: formatPiotroskiDisplay(piotroskiState) },
           { label: "Available Signals", value: availableCriteria === null ? "—" : `${availableCriteria}/9` },
@@ -542,10 +557,12 @@ function AltmanModelView({ model }: { model: ModelPayload }) {
     value: asNumber(value),
     formatted: formatPercent(asNumber(value))
   }));
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Altman Z", value: formatSigned(asNumber(result.z_score_approximate)) },
           { label: "Status", value: String(result.status ?? "—") },
@@ -624,10 +641,12 @@ function RatiosModelView({ model }: { model: ModelPayload }) {
       : cadence === "annual"
         ? "Annual filing basis"
         : "Unknown basis";
+  const confidence = buildModelConfidenceMetadata(model, result);
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
       <MetricStrip
+        confidence={confidence}
         metrics={[
           { label: "Period End", value: String(result.period_end ?? "—") },
           { label: "Previous Period", value: String(result.previous_period_end ?? "—") },
@@ -749,15 +768,22 @@ function AssumptionProvenanceTable({ provenance }: { provenance: Record<string, 
   );
 }
 
-function MetricStrip({ metrics }: { metrics: Array<{ label: string; value: ReactNode; metricKey?: string }> }) {
+function MetricStrip({
+  metrics,
+  confidence,
+}: {
+  metrics: Array<{ label: string; value: ReactNode; metricKey?: string }>;
+  confidence?: MetricConfidenceMetadata | null;
+}) {
   return (
     <div className="metric-grid">
-      {metrics.map((metric) => (
+      {metrics.map((metric, index) => (
         <div key={metric.label} className="metric-card">
           <div className="metric-label">
             <MetricLabel label={metric.label} metricKey={metric.metricKey} />
           </div>
           <div className="metric-value">{metric.value}</div>
+          {index === 0 && confidence ? <MetricConfidenceBadge metadata={confidence} /> : null}
         </div>
       ))}
     </div>
@@ -930,6 +956,57 @@ function formatUnknown(value: unknown): string {
     return value;
   }
   return JSON.stringify(value);
+}
+
+function buildModelConfidenceMetadata(model: ModelPayload, result: Record<string, unknown>): MetricConfidenceMetadata {
+  const inputQuality = asRecord(result.input_quality);
+  const priceSnapshot = asRecord(result.price_snapshot);
+  const assumptionProvenance = asRecord(result.assumption_provenance);
+  const riskFreeRate = asRecord(assumptionProvenance.risk_free_rate);
+  const missingInputs = [
+    ...asArrayOfStrings(result.missing_inputs),
+    ...asArrayOfStrings(result.missing_factors),
+    ...asArrayOfStrings(inputQuality.missing_inputs),
+  ];
+  const uniqueMissingInputs = Array.from(new Set(missingInputs));
+
+  const status = String(result.model_status ?? result.status ?? "supported");
+  const proxyUsed =
+    status === "proxy" ||
+    Boolean(inputQuality.capital_structure_proxied) ||
+    Boolean(inputQuality.starting_cash_flow_proxied);
+
+  const fallbackUsed =
+    status === "partial" ||
+    String(result.confidence_summary ?? "").toLowerCase().includes("fallback");
+
+  return {
+    freshness: "unknown",
+    source:
+      asString(priceSnapshot.price_source) ??
+      asString(riskFreeRate.source_name) ??
+      model.model_name,
+    formulaVersion: asString(model.calculation_version) ?? model.model_version,
+    missingInputsCount: uniqueMissingInputs.length,
+    missingInputs: uniqueMissingInputs,
+    proxyUsed,
+    fallbackUsed,
+  };
+}
+
+function asArrayOfStrings(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 

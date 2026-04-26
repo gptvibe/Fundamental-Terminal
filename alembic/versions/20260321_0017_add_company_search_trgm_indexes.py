@@ -26,5 +26,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX IF EXISTS ix_companies_cik_trgm")
-    op.execute("DROP INDEX IF EXISTS ix_companies_name_trgm")
+    op.drop_index("ix_companies_cik_trgm", table_name="companies", if_exists=True)
+    op.drop_index("ix_companies_name_trgm", table_name="companies", if_exists=True)

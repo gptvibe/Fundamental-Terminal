@@ -253,6 +253,7 @@ class SharedStatusBroker:
         self._redis_async = self._build_async_redis_client()
         self._queue_key = f"{settings.hot_response_cache_namespace}:refresh-jobs:queue"
         self._event_channel_prefix = f"{settings.hot_response_cache_namespace}:refresh-jobs:events:"
+        self._worker_registry_key = f"{settings.hot_response_cache_namespace}:refresh-workers"
 
     @property
     def has_blocking_queue(self) -> bool:
@@ -392,6 +393,122 @@ class SharedStatusBroker:
                 session.commit()
         except SQLAlchemyError:
             return
+
+    def heartbeat_worker(
+        self,
+        worker_id: str,
+        *,
+        state: str,
+        current_job_id: str | None = None,
+        ticker: str | None = None,
+    ) -> None:
+        if self._redis is None:
+            return
+
+        now = datetime.now(timezone.utc)
+        ttl_seconds = max(
+            settings.worker_heartbeat_ttl_seconds,
+            int(settings.worker_heartbeat_interval_seconds) + 1,
+        )
+        normalized_worker_id = worker_id.strip()
+        if not normalized_worker_id:
+            return
+
+        payload = {
+            "worker_id": normalized_worker_id,
+            "state": (state or "idle").strip() or "idle",
+            "current_job_id": (current_job_id or "").strip(),
+            "ticker": (ticker or "").strip().upper(),
+            "seen_at": now.isoformat(),
+        }
+        try:
+            pipeline = self._redis.pipeline()
+            pipeline.sadd(self._worker_registry_key, normalized_worker_id)
+            pipeline.hset(self._worker_key(normalized_worker_id), mapping=payload)
+            pipeline.expire(self._worker_key(normalized_worker_id), ttl_seconds)
+            pipeline.execute()
+        except RedisError:
+            return
+
+    def clear_worker_heartbeat(self, worker_id: str) -> None:
+        if self._redis is None:
+            return
+
+        normalized_worker_id = worker_id.strip()
+        if not normalized_worker_id:
+            return
+
+        try:
+            pipeline = self._redis.pipeline()
+            pipeline.srem(self._worker_registry_key, normalized_worker_id)
+            pipeline.delete(self._worker_key(normalized_worker_id))
+            pipeline.execute()
+        except RedisError:
+            return
+
+    def worker_health_snapshot(self) -> dict[str, object]:
+        if self._redis is None:
+            return {
+                "registry_mode": "unavailable",
+                "healthy": False,
+                "live_worker_count": 0,
+                "workers": [],
+                "detail": "Worker heartbeat registry is unavailable because Redis is not configured or reachable.",
+            }
+
+        now = datetime.now(timezone.utc)
+        stale_members: list[str] = []
+        workers: list[dict[str, object]] = []
+        try:
+            for member in sorted(self._redis.smembers(self._worker_registry_key)):
+                worker_id = str(member).strip()
+                if not worker_id:
+                    continue
+                record = self._redis.hgetall(self._worker_key(worker_id))
+                if not record:
+                    stale_members.append(worker_id)
+                    continue
+
+                seen_at_text = str(record.get("seen_at") or "").strip()
+                try:
+                    seen_at = datetime.fromisoformat(seen_at_text) if seen_at_text else None
+                except ValueError:
+                    seen_at = None
+                if seen_at is not None and seen_at.tzinfo is None:
+                    seen_at = seen_at.replace(tzinfo=timezone.utc)
+                elif seen_at is not None:
+                    seen_at = seen_at.astimezone(timezone.utc)
+
+                age_seconds = None if seen_at is None else round(max((now - seen_at).total_seconds(), 0.0), 3)
+                workers.append(
+                    {
+                        "worker_id": worker_id,
+                        "state": str(record.get("state") or "idle"),
+                        "current_job_id": str(record.get("current_job_id") or "") or None,
+                        "ticker": str(record.get("ticker") or "") or None,
+                        "seen_at": seen_at.isoformat() if seen_at is not None else None,
+                        "age_seconds": age_seconds,
+                    }
+                )
+
+            if stale_members:
+                self._redis.srem(self._worker_registry_key, *stale_members)
+        except RedisError as exc:
+            return {
+                "registry_mode": "degraded",
+                "healthy": False,
+                "live_worker_count": 0,
+                "workers": [],
+                "detail": "Unable to query worker heartbeat registry.",
+                "error": str(exc),
+            }
+
+        return {
+            "registry_mode": "redis",
+            "healthy": len(workers) > 0,
+            "live_worker_count": len(workers),
+            "workers": workers,
+        }
 
     def claim_next_job(self, *, worker_id: str) -> ClaimedJob | None:
         now = datetime.now(timezone.utc)
@@ -972,6 +1089,9 @@ class SharedStatusBroker:
 
     def _event_channel(self, job_id: str) -> str:
         return f"{self._event_channel_prefix}{job_id}"
+
+    def _worker_key(self, worker_id: str) -> str:
+        return f"{self._worker_registry_key}:{worker_id}"
 
 
 class JobReporter:

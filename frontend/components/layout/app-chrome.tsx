@@ -9,6 +9,8 @@ import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplet
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
 import { APP_TOAST_EVENT, type AppToastDetail, showAppToast } from "@/lib/app-toast";
+import { rankCommandPaletteEntries, type CommandPaletteEntry } from "@/lib/command-palette";
+import { emitExportMemo, emitRefreshCurrentCompany } from "@/lib/command-palette-events";
 import { findExactSearchMatch, normalizeSearchText } from "@/lib/company-search";
 import type { PerformanceAuditContext } from "@/lib/performance-audit";
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
@@ -23,8 +25,70 @@ type LatestAutocompletePayload = {
   query: string;
   results: CompanyPayload[];
 };
+type CommandPaletteActionId =
+  | "open-ticker"
+  | "compare-tickers"
+  | "go-screener"
+  | "go-watchlist"
+  | "refresh-company"
+  | "export-memo"
+  | "search-filings"
+  | "toggle-data-source-panel";
+type CommandPaletteAction = CommandPaletteEntry & {
+  actionId: CommandPaletteActionId;
+};
 
 const AUTOCOMPLETE_DEBOUNCE_MS = 180;
+const COMMAND_PALETTE_ACTIONS: CommandPaletteAction[] = [
+  {
+    id: "open-ticker",
+    actionId: "open-ticker",
+    title: "Open ticker",
+    keywords: ["ticker", "company", "navigate", "open"],
+  },
+  {
+    id: "compare-tickers",
+    actionId: "compare-tickers",
+    title: "Compare tickers",
+    keywords: ["compare", "peer", "valuation", "tickers"],
+  },
+  {
+    id: "go-screener",
+    actionId: "go-screener",
+    title: "Go to screener",
+    keywords: ["screener", "filters", "rank", "universe"],
+  },
+  {
+    id: "go-watchlist",
+    actionId: "go-watchlist",
+    title: "Go to watchlist",
+    keywords: ["watchlist", "saved", "favorites"],
+  },
+  {
+    id: "refresh-company",
+    actionId: "refresh-company",
+    title: "Refresh current company",
+    keywords: ["refresh", "company", "cache", "queue"],
+  },
+  {
+    id: "export-memo",
+    actionId: "export-memo",
+    title: "Export memo",
+    keywords: ["export", "memo", "brief", "package"],
+  },
+  {
+    id: "search-filings",
+    actionId: "search-filings",
+    title: "Search filings",
+    keywords: ["filings", "sec", "documents", "events"],
+  },
+  {
+    id: "toggle-data-source-panel",
+    actionId: "toggle-data-source-panel",
+    title: "Toggle data source panel",
+    keywords: ["data", "source", "panel", "provenance"],
+  },
+];
 const TOPBAR_SEARCH_AUDIT_SOURCES = {
   autocomplete: "topbar:autocomplete-search",
   submit: "topbar:submit-search",
@@ -40,6 +104,7 @@ export function AppChrome({ children }: AppChromeProps) {
   const searchFormRef = useRef<HTMLFormElement>(null);
   const mobileSearchRef = useRef<HTMLDivElement>(null);
   const topbarRef = useRef<HTMLElement>(null);
+  const paletteInputRef = useRef<HTMLInputElement>(null);
   const [searchText, setSearchText] = useState(routeTicker);
   const [searchDirty, setSearchDirty] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>("dark");
@@ -51,6 +116,10 @@ export function AppChrome({ children }: AppChromeProps) {
   const [invalidMessage, setInvalidMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<AppToastDetail | null>(null);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [activeCommandIndex, setActiveCommandIndex] = useState(0);
+  const [dataSourcePanelOpen, setDataSourcePanelOpen] = useState(false);
   const autocompleteAbortControllerRef = useRef<AbortController | null>(null);
   const latestAutocompleteRef = useRef<LatestAutocompletePayload | null>(null);
   const searchRequestId = useRef(0);
@@ -66,6 +135,11 @@ export function AppChrome({ children }: AppChromeProps) {
   const showAutocomplete = autocompleteOpen && allowAutocomplete;
   const activeOptionId = showAutocomplete && autocompleteResults.length ? `app-topbar-autocomplete-option-${activeSuggestionIndex}` : undefined;
   const activeMobileOptionId = showAutocomplete && autocompleteResults.length ? `app-mobile-autocomplete-option-${activeSuggestionIndex}` : undefined;
+  const rankedCommandActions = useMemo(
+    () => rankCommandPaletteEntries(COMMAND_PALETTE_ACTIONS, commandPaletteQuery),
+    [commandPaletteQuery]
+  );
+  const activeCommand = rankedCommandActions[activeCommandIndex]?.entry ?? null;
 
   useEffect(() => {
     autocompleteAbortControllerRef.current?.abort();
@@ -79,12 +153,29 @@ export function AppChrome({ children }: AppChromeProps) {
     setHasNavigatedSuggestions(false);
     setInvalidMessage(null);
     setMobileSearchOpen(false);
+    setCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+    setActiveCommandIndex(0);
   }, [pathname, routeTicker]);
+
+  useEffect(() => {
+    if (!rankedCommandActions.length) {
+      setActiveCommandIndex(0);
+      return;
+    }
+
+    setActiveCommandIndex((current) => Math.min(current, rankedCommandActions.length - 1));
+  }, [rankedCommandActions]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isEditable = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen(true);
+        return;
+      }
       if (event.key === "/" && !isEditable) {
         event.preventDefault();
         desktopInputRef.current?.focus();
@@ -95,6 +186,19 @@ export function AppChrome({ children }: AppChromeProps) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  useEffect(() => {
+    if (!commandPaletteOpen) {
+      return;
+    }
+
+    const handle = window.requestAnimationFrame(() => {
+      paletteInputRef.current?.focus();
+      paletteInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(handle);
+  }, [commandPaletteOpen]);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("ft-theme");
@@ -270,6 +374,115 @@ export function AppChrome({ children }: AppChromeProps) {
 
   function selectSuggestion(result: CompanyPayload) {
     goToTicker(result.ticker);
+  }
+
+  function closeCommandPalette() {
+    setCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+    setActiveCommandIndex(0);
+  }
+
+  function runCommand(action: CommandPaletteAction | null) {
+    if (!action) {
+      return;
+    }
+
+    switch (action.actionId) {
+      case "open-ticker": {
+        const ticker = resolveTickerFromQuery(commandPaletteQuery, routeTicker);
+        if (!ticker) {
+          showAppToast({ message: "Type a ticker symbol, for example: open ticker MSFT.", tone: "danger" });
+          return;
+        }
+        goToTicker(ticker);
+        closeCommandPalette();
+        return;
+      }
+      case "compare-tickers": {
+        const tickers = resolveCompareTickersFromQuery(commandPaletteQuery, routeTicker);
+        if (tickers.length < 2) {
+          showAppToast({ message: "Include at least two ticker symbols to compare.", tone: "danger" });
+          return;
+        }
+        router.push(`/compare?tickers=${encodeURIComponent(tickers.join(","))}`);
+        closeCommandPalette();
+        return;
+      }
+      case "go-screener": {
+        router.push("/screener");
+        closeCommandPalette();
+        return;
+      }
+      case "go-watchlist": {
+        router.push("/watchlist");
+        closeCommandPalette();
+        return;
+      }
+      case "refresh-company": {
+        if (!routeTicker) {
+          showAppToast({ message: "Open a company workspace before refreshing.", tone: "danger" });
+          return;
+        }
+        emitRefreshCurrentCompany(routeTicker);
+        showAppToast({ message: `Refresh requested for ${routeTicker}.`, tone: "info" });
+        closeCommandPalette();
+        return;
+      }
+      case "export-memo": {
+        if (!routeTicker) {
+          showAppToast({ message: "Open a company brief before exporting a memo.", tone: "danger" });
+          return;
+        }
+        emitExportMemo(routeTicker);
+        closeCommandPalette();
+        return;
+      }
+      case "search-filings": {
+        const ticker = routeTicker || resolveTickerFromQuery(commandPaletteQuery, "");
+        if (!ticker) {
+          showAppToast({ message: "Type a ticker to search filings, for example: filings TSLA.", tone: "danger" });
+          return;
+        }
+        router.push(`/company/${encodeURIComponent(ticker)}/filings`);
+        closeCommandPalette();
+        return;
+      }
+      case "toggle-data-source-panel": {
+        setDataSourcePanelOpen((current) => !current);
+        closeCommandPalette();
+      }
+    }
+  }
+
+  function handleCommandPaletteKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!rankedCommandActions.length) {
+        return;
+      }
+      setActiveCommandIndex((current) => (current + 1) % rankedCommandActions.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!rankedCommandActions.length) {
+        return;
+      }
+      setActiveCommandIndex((current) => (current === 0 ? rankedCommandActions.length - 1 : current - 1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      runCommand(activeCommand as CommandPaletteAction | null);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCommandPalette();
+    }
   }
 
   async function submitSearch() {
@@ -580,8 +793,113 @@ export function AppChrome({ children }: AppChromeProps) {
       ) : null}
 
       <main className="content-shell">{children}</main>
+
+      {dataSourcePanelOpen ? (
+        <aside className="app-data-source-panel" role="complementary" aria-label="Data source panel">
+          <div className="app-data-source-panel-head">
+            <h2>Data Source Panel</h2>
+            <button type="button" className="app-data-source-panel-close" onClick={() => setDataSourcePanelOpen(false)} aria-label="Close data source panel">
+              Close
+            </button>
+          </div>
+          <p className="app-data-source-panel-copy">Review source provenance, cache freshness, and runtime ingestion status.</p>
+          <div className="app-data-source-panel-actions">
+            <button type="button" className="ticker-button" onClick={() => router.push("/data-sources")}>Open Data Sources</button>
+            {routeTicker ? (
+              <button type="button" className="ticker-button" onClick={() => router.push(`/company/${encodeURIComponent(routeTicker)}/filings`)}>Open {routeTicker} Filings</button>
+            ) : null}
+          </div>
+        </aside>
+      ) : null}
+
+      {commandPaletteOpen ? (
+        <div className="command-palette-overlay" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            closeCommandPalette();
+          }
+        }}>
+          <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette">
+            <div className="command-palette-input-shell">
+              <input
+                ref={paletteInputRef}
+                value={commandPaletteQuery}
+                onChange={(event) => {
+                  setCommandPaletteQuery(event.target.value);
+                  setActiveCommandIndex(0);
+                }}
+                onKeyDown={handleCommandPaletteKeyDown}
+                aria-label="Command search"
+                placeholder="Type a command or include tickers, e.g. compare tickers MSFT AAPL"
+                className="command-palette-input"
+              />
+            </div>
+            <ul id="command-palette-results" className="command-palette-results" aria-label="Command results">
+              {rankedCommandActions.length ? rankedCommandActions.map((item, index) => {
+                const selected = index === activeCommandIndex;
+                const action = item.entry as CommandPaletteAction;
+                return (
+                  <li key={action.id}>
+                    <button
+                      type="button"
+                      className={`command-palette-option${selected ? " is-active" : ""}`}
+                      onMouseMove={() => setActiveCommandIndex(index)}
+                      onClick={() => runCommand(action)}
+                    >
+                      <span className="command-palette-option-title">{action.title}</span>
+                      <span className="command-palette-option-shortcut">↵</span>
+                    </button>
+                  </li>
+                );
+              }) : (
+                <li className="command-palette-empty">No matching commands.</li>
+              )}
+            </ul>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+const COMMAND_TOKEN_STOPWORDS = new Set([
+  "open",
+  "ticker",
+  "tickers",
+  "compare",
+  "go",
+  "to",
+  "screener",
+  "watchlist",
+  "refresh",
+  "current",
+  "company",
+  "export",
+  "memo",
+  "search",
+  "filings",
+  "toggle",
+  "data",
+  "source",
+  "panel",
+]);
+
+function resolveTickerFromQuery(query: string, fallbackTicker: string): string | null {
+  const first = extractTickerTokens(query)[0] ?? fallbackTicker;
+  const normalized = first.trim().toUpperCase();
+  return normalized ? normalized : null;
+}
+
+function resolveCompareTickersFromQuery(query: string, fallbackTicker: string): string[] {
+  const tokens = extractTickerTokens(query);
+  if (fallbackTicker && !tokens.includes(fallbackTicker)) {
+    tokens.unshift(fallbackTicker);
+  }
+  return [...new Set(tokens)].slice(0, 5);
+}
+
+function extractTickerTokens(value: string): string[] {
+  const matches = value.match(/[A-Za-z][A-Za-z.-]{0,5}/g) ?? [];
+  return [...new Set(matches.map((token) => token.toUpperCase()).filter((token) => !COMMAND_TOKEN_STOPWORDS.has(token.toLowerCase())))];
 }
 
 function deriveTicker(pathname: string | null): string {

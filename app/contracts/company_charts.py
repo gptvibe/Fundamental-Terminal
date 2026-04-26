@@ -116,6 +116,28 @@ class CompanyChartsQuarterChangeItemPayload(BaseModel):
     label: str
     value: str
     detail: str | None = None
+    metric_diff: "CompanyChartsMetricDiffPayload | None" = None
+
+
+class CompanyChartsMetricDiffSourcePayload(BaseModel):
+    source_id: str
+    source_label: str
+    filing_type: str | None = None
+    filing_date: DateType | None = None
+    detail: str | None = None
+
+
+class CompanyChartsMetricDiffPayload(BaseModel):
+    metric_key: str
+    metric_label: str
+    previous_value: Number = None
+    current_value: Number = None
+    absolute_change: Number = None
+    percentage_change: Number = None
+    previous_value_missing: bool = False
+    stale_cache: bool = False
+    changed_input_fields: list[str] = Field(default_factory=list)
+    source: CompanyChartsMetricDiffSourcePayload | None = None
 
 
 class CompanyChartsQuarterChangePayload(BaseModel):

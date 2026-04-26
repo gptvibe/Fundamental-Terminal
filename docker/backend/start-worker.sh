@@ -20,6 +20,39 @@ INTERVAL="${WORKER_INTERVAL_SECONDS:-3600}"
 IDENTIFIERS="${WORKER_IDENTIFIERS:-AAPL MSFT NVDA}"
 QUEUE_POLL_INTERVAL="${REFRESH_QUEUE_POLL_SECONDS:-1}"
 
+ensure_queue_worker_running() {
+  if [ -z "${QUEUE_PID:-}" ]; then
+    return 0
+  fi
+  if ! kill -0 "${QUEUE_PID}" 2>/dev/null; then
+    echo "[worker] durable refresh queue consumer exited unexpectedly"
+    wait "${QUEUE_PID}" || true
+    exit 1
+  fi
+}
+
+monitored_sleep() {
+  remaining="${1:-0}"
+  while [ "${remaining}" != "0" ] && [ "${remaining}" != "0.0" ]; do
+    ensure_queue_worker_running
+    case "${remaining}" in
+      *.*)
+        sleep "${remaining}"
+        remaining=0
+        ;;
+      *)
+        if [ "${remaining}" -gt 5 ] 2>/dev/null; then
+          sleep 5
+          remaining=$((remaining - 5))
+        else
+          sleep "${remaining}"
+          remaining=0
+        fi
+        ;;
+    esac
+  done
+}
+
 if ! is_truthy "${ENABLED}"; then
   echo "[worker] data fetcher disabled by DATA_FETCHER_ENABLED=${ENABLED}"
   exit 0
@@ -27,7 +60,7 @@ fi
 
 if [ "${STARTUP_DELAY}" != "0" ] && [ "${STARTUP_DELAY}" != "0.0" ]; then
   echo "[worker] delaying startup for ${STARTUP_DELAY}s"
-  sleep "${STARTUP_DELAY}"
+  monitored_sleep "${STARTUP_DELAY}"
 fi
 
 echo "[worker] starting durable refresh queue consumer"
@@ -43,6 +76,7 @@ trap cleanup EXIT INT TERM
 FIRST_CYCLE=true
 
 while true; do
+  ensure_queue_worker_running
   if [ "${FIRST_CYCLE}" = "true" ] && ! is_truthy "${ENQUEUE_ON_STARTUP}"; then
     echo "[worker] skipping initial enqueue because DATA_FETCHER_ENQUEUE_ON_STARTUP=${ENQUEUE_ON_STARTUP}"
   else
@@ -61,5 +95,5 @@ while true; do
   FIRST_CYCLE=false
 
   echo "[worker] sleeping for ${INTERVAL}s"
-  sleep "${INTERVAL}"
+  monitored_sleep "${INTERVAL}"
 done

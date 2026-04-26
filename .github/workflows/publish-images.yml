@@ -177,6 +177,15 @@ jobs:
             -e API_HOST=0.0.0.0 \
             -e API_PORT=8000 \
             "$BACKEND_IMAGE"
+          docker run -d --name ft-verify-worker --network ft-release-verify \
+            -e DATABASE_URL=postgresql+psycopg://fundamental:fundamental@ft-verify-postgres:5432/fundamentals \
+            -e REDIS_URL=redis://ft-verify-redis:6379/0 \
+            -e SEC_USER_AGENT="FundamentalTerminalCI/1.0 (ci@example.com)" \
+            -e DATA_FETCHER_ENQUEUE_ON_STARTUP=false \
+            -e DATA_FETCHER_RUN_MACRO_WORKER=false \
+            -e WORKER_IDENTIFIERS=AAPL \
+            -e WORKER_INTERVAL_SECONDS=3600 \
+            "$BACKEND_IMAGE" /bin/sh /app/docker/backend/start-worker.sh
           docker run -d --name ft-verify-frontend --network ft-release-verify \
             -p 3000:3000 \
             -e BACKEND_API_BASE_URL=http://ft-verify-backend:8000 \
@@ -190,7 +199,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          for container in ft-verify-postgres ft-verify-redis ft-verify-backend ft-verify-frontend; do
+          for container in ft-verify-postgres ft-verify-redis ft-verify-backend ft-verify-worker ft-verify-frontend; do
             echo "===== ${container} ====="
             docker logs "$container" 2>&1 || true
           done
@@ -199,5 +208,5 @@ jobs:
         if: always()
         shell: bash
         run: |
-          docker rm -f ft-verify-frontend ft-verify-backend ft-verify-redis ft-verify-postgres >/dev/null 2>&1 || true
+          docker rm -f ft-verify-frontend ft-verify-worker ft-verify-backend ft-verify-redis ft-verify-postgres >/dev/null 2>&1 || true
           docker network rm ft-release-verify >/dev/null 2>&1 || true

@@ -4,6 +4,7 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import { useLocalUserData } from "@/hooks/use-local-user-data";
+import { importLocalResearchWorkspace } from "@/lib/api";
 import { showAppToast } from "@/lib/app-toast";
 import { formatDate } from "@/lib/format";
 
@@ -11,7 +12,33 @@ export function HomeSavedCompaniesPanel() {
   const router = useRouter();
   const importInputRef = useRef<HTMLInputElement>(null);
   const [importMode, setImportMode] = useState<"merge" | "replace">("merge");
+  const [workspaceKey, setWorkspaceKey] = useState("default");
+  const [syncingServer, setSyncingServer] = useState(false);
   const { savedCompanies, watchlistCount, noteCount, removeFromWatchlist, clearNote, exportData, importData, clearAll } = useLocalUserData();
+
+  async function handleImportToServer() {
+    const normalizedWorkspaceKey = workspaceKey.trim() || "default";
+    try {
+      setSyncingServer(true);
+      const payload = exportData();
+      const response = await importLocalResearchWorkspace(
+        {
+          watchlist: payload.watchlist,
+          notes: payload.notes,
+          mode: importMode,
+        },
+        { workspaceKey: normalizedWorkspaceKey }
+      );
+      showAppToast({
+        message: `Imported local data to server workspace \"${response.workspace_key}\" (${response.saved_companies.length.toLocaleString()} saved companies, ${response.notes.length.toLocaleString()} notes).`,
+        tone: "info",
+      });
+    } catch (error) {
+      showAppToast({ message: error instanceof Error ? error.message : "Unable to sync local data to server workspace.", tone: "danger" });
+    } finally {
+      setSyncingServer(false);
+    }
+  }
 
   function handleExport() {
     try {
@@ -68,9 +95,22 @@ export function HomeSavedCompaniesPanel() {
         <div className="saved-companies-transfer-actions">
           <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
           <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
+          <button type="button" className="ticker-button" onClick={handleImportToServer} disabled={syncingServer}>
+            {syncingServer ? "Syncing..." : "Import To Server Workspace"}
+          </button>
+          <button type="button" className="ticker-button" onClick={() => router.push("/research-workspace")}>Open Server Workspace</button>
         </div>
-        <div className="saved-companies-summary" style={{ marginTop: 12 }}>
+        <div className="saved-companies-summary saved-companies-summary-spaced">
           <span className="pill">Import mode: merge (default)</span>
+          <label className="pill workspace-key-pill">
+            Workspace key
+            <input
+              type="text"
+              value={workspaceKey}
+              onChange={(event) => setWorkspaceKey(event.target.value)}
+              className="workspace-key-input"
+            />
+          </label>
         </div>
         <input
           ref={importInputRef}
@@ -97,12 +137,16 @@ export function HomeSavedCompaniesPanel() {
       <div className="saved-companies-transfer-actions">
         <button type="button" className="ticker-button" onClick={handleExport}>Export JSON</button>
         <button type="button" className="ticker-button" onClick={() => importInputRef.current?.click()}>Import JSON</button>
+        <button type="button" className="ticker-button" onClick={handleImportToServer} disabled={syncingServer}>
+          {syncingServer ? "Syncing..." : "Import To Server Workspace"}
+        </button>
+        <button type="button" className="ticker-button" onClick={() => router.push("/research-workspace")}>Open Server Workspace</button>
         <button type="button" className="ticker-button" onClick={handleClearAll}>Clear All</button>
       </div>
 
       <div className="saved-companies-summary">
         <span className="pill">Import behavior</span>
-        <label className="pill" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <label className="pill workspace-choice-pill">
           <input
             type="radio"
             name="import-mode"
@@ -111,7 +155,7 @@ export function HomeSavedCompaniesPanel() {
           />
           Merge with existing
         </label>
-        <label className="pill" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <label className="pill workspace-choice-pill">
           <input
             type="radio"
             name="import-mode"
@@ -119,6 +163,15 @@ export function HomeSavedCompaniesPanel() {
             onChange={() => setImportMode("replace")}
           />
           Replace everything
+        </label>
+        <label className="pill workspace-key-pill">
+          Workspace key
+          <input
+            type="text"
+            value={workspaceKey}
+            onChange={(event) => setWorkspaceKey(event.target.value)}
+            className="workspace-key-input"
+          />
         </label>
       </div>
 

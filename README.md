@@ -177,6 +177,48 @@ npm run dev
 
 Useful optional environment variables live in [.env.example](.env.example).
 
+## Production Hardening
+
+The app now includes:
+
+- public API rate limiting with configurable limits and proxy awareness
+- opt-in auth enforcement for internal routes through bearer-token or forwarded-user modes
+- `/health` component checks for API, DB, Redis/cache backend, worker heartbeat visibility, and SEC upstream reachability
+- security headers on backend responses and frontend pages
+- a migration safety guard that runs before backend container migrations
+
+Operator guides:
+
+- [docs/deployment-runbook.md](docs/deployment-runbook.md)
+- [docs/postgres-backup-restore.md](docs/postgres-backup-restore.md)
+
+If you want frontend-driven auth, the shared API client exposes `setApiAuthHeadersProvider(...)` in `frontend/lib/api.ts` so an app-specific auth layer can inject bearer or forwarded-user headers without rewriting every request helper.
+
+## Observability
+
+The backend now ships with a lightweight internal observability layer for API routes, workers, cache activity, and upstream fetches.
+
+- `OBSERVABILITY_ENABLED=true` keeps the lightweight tracing middleware on. This is the default and powers `/api/internal/observability`.
+- `OBSERVABILITY_ENABLED=false` disables request and worker trace collection if you want the lowest-overhead local or production runtime.
+- `OBSERVABILITY_MAX_RECORDS=5000` controls how many recent request and worker records stay in memory for the internal endpoint.
+- `PERFORMANCE_AUDIT_ENABLED=true` keeps the legacy request-audit workflow explicitly enabled if you still use `/api/internal/performance-audit` during deep route triage.
+
+The main internal endpoint is:
+
+- `/api/internal/observability`
+
+It reports:
+
+- route duration with DB, Redis, upstream, serialization, and residual calculation time buckets
+- cache hit / stale / miss counts from the shared hot cache path
+- singleflight wait counts and total wait time
+- upstream request counts and durations
+- worker job durations and aggregate failed refresh count
+
+The route-level breakdown is intended to answer a simple question quickly: when a route is slow, is the time in DB work, Redis/cache coordination, upstream fetches, JSON serialization, or application-side calculation.
+
+For a longer operator guide, see [docs/observability.md](docs/observability.md).
+
 ## Key Workspaces
 
 - `/` - research launcher with search, macro backdrop, data health, recent companies, saved names, and recent change feed.
@@ -212,6 +254,7 @@ Useful diagnostics endpoints:
 
 - `/api/source-registry`
 - `/api/internal/cache-metrics`
+- `/api/internal/observability`
 - `/api/model-evaluations/latest`
 
 ## Testing And Diagnostics
@@ -285,7 +328,9 @@ On non-PostgreSQL URLs, the script still enforces bounded pool/connect waits but
 - [docs/cache-layers-architecture.md](docs/cache-layers-architecture.md)
 - [docs/data-provenance.md](docs/data-provenance.md)
 - [docs/model-evaluation-harness.md](docs/model-evaluation-harness.md)
+- [docs/deployment-runbook.md](docs/deployment-runbook.md)
 - [docs/performance-freshness-orchestration.md](docs/performance-freshness-orchestration.md)
+- [docs/postgres-backup-restore.md](docs/postgres-backup-restore.md)
 - [docs/release-process.md](docs/release-process.md)
 - [docs/sec-expansion-roadmap.md](docs/sec-expansion-roadmap.md)
 - [docs/sec-expansion-checklist.md](docs/sec-expansion-checklist.md)

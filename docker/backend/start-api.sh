@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+echo "[backend] validating migration safety"
+python /app/scripts/check_migration_safety.py
+
 echo "[backend] running migrations"
 alembic upgrade head
 

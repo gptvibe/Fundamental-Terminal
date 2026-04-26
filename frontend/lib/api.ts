@@ -56,6 +56,10 @@ import {
   OfficialScreenerSearchRequest,
   OfficialScreenerSearchResponse,
   SourceRegistryResponse,
+  ResearchWorkspaceDeleteResponse,
+  ResearchWorkspaceImportLocalRequest,
+  ResearchWorkspacePayload,
+  ResearchWorkspaceUpsertRequest,
   WatchlistCalendarResponse,
   WatchlistSummaryResponse,
   FinancialHistoryPoint,
@@ -119,6 +123,7 @@ const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
 const CACHE_INVALIDATION_STORAGE_KEY = `${CACHE_STORAGE_PREFIX}invalidation`;
 const AUDIT_RECORDED_ERROR = Symbol("auditRecordedError");
 const PROJECTION_STUDIO_VIEWER_STORAGE_KEY = "ft:projection-studio:viewer";
+type ApiAuthHeadersProvider = () => HeadersInit | null | undefined;
 
 const MEMORY_CACHE_MAX_ENTRIES = 160;
 const MEMORY_CACHE_MAX_BYTES = 8 * 1024 * 1024;
@@ -144,6 +149,7 @@ let cacheSyncInitialized = false;
 let memoryCacheApproxBytes = 0;
 let broadcastChannel: BroadcastChannel | null = null;
 let idbDatabasePromise: Promise<IDBDatabase | null> | null = null;
+let apiAuthHeadersProvider: ApiAuthHeadersProvider | null = null;
 
 function resolveReadPolicy(path: string): ReadCachePolicy {
   return READ_POLICY_BY_PATH.find((entry) => entry.pattern.test(path))?.policy ?? DEFAULT_READ_POLICY;
@@ -593,6 +599,31 @@ function requestKeyForPath(path: string): string {
   return withApiPrefix(path);
 }
 
+export function setApiAuthHeadersProvider(provider: ApiAuthHeadersProvider | null): void {
+  apiAuthHeadersProvider = provider;
+}
+
+function buildApiAuthHeaders(): Record<string, string> {
+  if (!apiAuthHeadersProvider) {
+    return {};
+  }
+
+  return normalizeHeaders(apiAuthHeadersProvider() ?? undefined);
+}
+
+function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+
+  const normalized = new Headers(headers);
+  const entries: Record<string, string> = {};
+  normalized.forEach((value, key) => {
+    entries[key.toLowerCase()] = value;
+  });
+  return entries;
+}
+
 function buildProjectionStudioViewerHeader(): Record<string, string> {
   if (typeof window === "undefined") {
     return {};
@@ -726,8 +757,9 @@ async function fetchAndParseWithAudit<T>(
       const response = await fetch(withApiPrefix(path), {
         ...init,
         headers: {
-          "Content-Type": "application/json",
-          ...(init?.headers ?? {})
+          ...buildApiAuthHeaders(),
+          "content-type": "application/json",
+          ...normalizeHeaders(init?.headers)
         },
         cache: init?.cache,
         signal: init?.signal
@@ -875,6 +907,7 @@ export function invalidateApiReadCacheForTicker(ticker: string): void {
 export async function __resetApiClientCacheForTests(): Promise<void> {
   invalidateApiReadCache("", { emitCrossTab: false });
   inflightRequests.clear();
+  apiAuthHeadersProvider = null;
   await removePersistentCacheByPrefix("");
 }
 
@@ -1574,6 +1607,56 @@ export function getWatchlistCalendar(tickers: string[]): Promise<WatchlistCalend
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/watchlist/calendar${suffix}`);
+}
+
+export function getResearchWorkspace(workspaceKey?: string): Promise<ResearchWorkspacePayload> {
+  const params = new URLSearchParams();
+  if (workspaceKey?.trim()) {
+    params.set("workspace_key", workspaceKey.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/research-workspace${suffix}`);
+}
+
+export function saveResearchWorkspace(
+  payload: ResearchWorkspaceUpsertRequest,
+  options?: { workspaceKey?: string }
+): Promise<ResearchWorkspacePayload> {
+  const params = new URLSearchParams();
+  if (options?.workspaceKey?.trim()) {
+    params.set("workspace_key", options.workspaceKey.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/research-workspace/save${suffix}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteResearchWorkspace(workspaceKey?: string): Promise<ResearchWorkspaceDeleteResponse> {
+  const params = new URLSearchParams();
+  if (workspaceKey?.trim()) {
+    params.set("workspace_key", workspaceKey.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/research-workspace/delete${suffix}`, {
+    method: "POST",
+  });
+}
+
+export function importLocalResearchWorkspace(
+  payload: ResearchWorkspaceImportLocalRequest,
+  options?: { workspaceKey?: string }
+): Promise<ResearchWorkspacePayload> {
+  const params = new URLSearchParams();
+  if (options?.workspaceKey?.trim()) {
+    params.set("workspace_key", options.workspaceKey.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/research-workspace/import-local${suffix}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getSourceRegistry(): Promise<SourceRegistryResponse> {

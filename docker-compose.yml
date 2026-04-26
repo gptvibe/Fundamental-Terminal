@@ -96,6 +96,12 @@ services:
       DATA_FETCHER_STARTUP_DELAY_SECONDS: ${DATA_FETCHER_STARTUP_DELAY_SECONDS:-45}
       DATA_FETCHER_ENQUEUE_ON_STARTUP: ${DATA_FETCHER_ENQUEUE_ON_STARTUP:-false}
       DATA_FETCHER_RUN_MACRO_WORKER: ${DATA_FETCHER_RUN_MACRO_WORKER:-true}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.services.status_stream import status_broker; import sys; snapshot = status_broker.worker_health_snapshot(); sys.exit(0 if int(snapshot.get('live_worker_count', 0) or 0) > 0 else 1)"]
+      interval: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 45s
     depends_on:
       backend:
         condition: service_healthy

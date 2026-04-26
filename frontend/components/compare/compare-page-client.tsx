@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { Panel } from "@/components/ui/panel";
+import { MetricConfidenceBadge, type MetricConfidenceMetadata } from "@/components/ui/metric-confidence-badge";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { getCompaniesCompare } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
@@ -197,11 +198,19 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                   {DERIVED_ROWS.map((row) => (
                     <tr key={row.key}>
                       <th className="compare-table-row-label"><MetricLabel metricKey={row.key} label={row.label} /></th>
-                      {companies.map((company) => (
-                        <td key={`${company.ticker}-${row.key}`} className="compare-table-value">
-                          {row.formatter(getDerivedMetricValue(company, row.key))}
-                        </td>
-                      ))}
+                      {companies.map((company) => {
+                        const metric = getDerivedMetric(company, row.key);
+                        return (
+                          <td key={`${company.ticker}-${row.key}`} className="compare-table-value">
+                            <div className="compare-metric-cell">
+                              <span>{row.formatter(metric?.metric_value)}</span>
+                              {metric ? (
+                                <MetricConfidenceBadge metadata={buildDerivedMetricConfidence(company, metric)} />
+                              ) : null}
+                            </div>
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -223,21 +232,45 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                 <tbody>
                   <tr>
                     <th className="compare-table-row-label"><MetricLabel metricKey="fair_value_per_share" label="DCF Fair Value" /></th>
-                    {companies.map((company) => (
-                      <td key={`${company.ticker}-dcf`} className="compare-table-value">{formatCurrency(getDcfFairValue(company))}</td>
-                    ))}
+                    {companies.map((company) => {
+                      const model = getModel(company, "dcf");
+                      return (
+                        <td key={`${company.ticker}-dcf`} className="compare-table-value">
+                          <div className="compare-metric-cell">
+                            <span>{formatCurrency(getDcfFairValue(company))}</span>
+                            {model ? <MetricConfidenceBadge metadata={buildModelConfidence(company, model)} /> : null}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                   <tr>
                     <th className="compare-table-row-label"><MetricLabel metricKey="piotroski_score" label="Piotroski F-Score" /></th>
-                    {companies.map((company) => (
-                      <td key={`${company.ticker}-piotroski`} className="compare-table-value">{formatPiotroski(company)}</td>
-                    ))}
+                    {companies.map((company) => {
+                      const model = getModel(company, "piotroski");
+                      return (
+                        <td key={`${company.ticker}-piotroski`} className="compare-table-value">
+                          <div className="compare-metric-cell">
+                            <span>{formatPiotroski(company)}</span>
+                            {model ? <MetricConfidenceBadge metadata={buildModelConfidence(company, model)} /> : null}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                   <tr>
                     <th className="compare-table-row-label"><MetricLabel metricKey="altman_z_score" label="Altman Z" /></th>
-                    {companies.map((company) => (
-                      <td key={`${company.ticker}-altman`} className="compare-table-value">{formatRatio(getAltmanZ(company))}</td>
-                    ))}
+                    {companies.map((company) => {
+                      const model = getModel(company, "altman_z");
+                      return (
+                        <td key={`${company.ticker}-altman`} className="compare-table-value">
+                          <div className="compare-metric-cell">
+                            <span>{formatRatio(getAltmanZ(company))}</span>
+                            {model ? <MetricConfidenceBadge metadata={buildModelConfidence(company, model)} /> : null}
+                          </div>
+                        </td>
+                      );
+                    })}
                   </tr>
                 </tbody>
               </table>
@@ -267,9 +300,23 @@ function getFinancialValue(period: FinancialPayload, key: keyof FinancialPayload
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function getDerivedMetricValue(company: CompanyCompareItemPayload, key: string): number | null {
+function getDerivedMetric(company: CompanyCompareItemPayload, key: string): { metric_value: number | null; is_proxy: boolean; provenance: Record<string, unknown>; quality_flags: string[] } | null {
   const metric = company.metrics_summary.metrics.find((item) => item.metric_key === key);
-  return typeof metric?.metric_value === "number" && Number.isFinite(metric.metric_value) ? metric.metric_value : null;
+  if (!metric) {
+    return null;
+  }
+
+  return {
+    metric_value: typeof metric.metric_value === "number" && Number.isFinite(metric.metric_value) ? metric.metric_value : null,
+    is_proxy: Boolean(metric.is_proxy),
+    provenance: toRecord(metric.provenance),
+    quality_flags: metric.quality_flags ?? [],
+  };
+}
+
+function getDerivedMetricValue(company: CompanyCompareItemPayload, key: string): number | null {
+  const metric = getDerivedMetric(company, key);
+  return metric?.metric_value ?? null;
 }
 
 function getModel(company: CompanyCompareItemPayload, modelName: string): ModelPayload | undefined {
@@ -320,4 +367,76 @@ function formatRatio(value: number | null | undefined): string {
 
 function asNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildDerivedMetricConfidence(
+  company: CompanyCompareItemPayload,
+  metric: { is_proxy: boolean; provenance: Record<string, unknown>; quality_flags: string[] }
+): MetricConfidenceMetadata {
+  const missingInputs = asStringArray(metric.provenance.missing_inputs);
+  const source = asString(
+    metric.provenance.source_key ?? metric.provenance.statement_source ?? metric.provenance.price_source ?? metric.provenance.source
+  );
+  const formulaVersion = asString(metric.provenance.formula_version);
+  const fallbackUsed =
+    (typeof metric.provenance.fallback_used === "boolean" ? metric.provenance.fallback_used : null) ??
+    metric.quality_flags.some((flag) => flag.includes("fallback")) ??
+    false;
+
+  return {
+    freshness: company.metrics_summary.staleness_reason ? "stale" : "fresh",
+    source,
+    formulaVersion,
+    missingInputsCount: missingInputs.length,
+    missingInputs,
+    proxyUsed: metric.is_proxy,
+    fallbackUsed,
+    qualityFlags: metric.quality_flags,
+    stalenessReason: company.metrics_summary.staleness_reason,
+  };
+}
+
+function buildModelConfidence(company: CompanyCompareItemPayload, model: ModelPayload): MetricConfidenceMetadata {
+  const result = toRecord(model.result);
+  const inputQuality = toRecord(result.input_quality);
+  const priceSnapshot = toRecord(result.price_snapshot);
+  const missingInputs = asStringArray(result.missing_inputs);
+  const formulaVersion = asString(model.calculation_version) ?? model.model_version;
+  const source = asString(priceSnapshot.price_source) ?? asString(result.source) ?? model.model_name;
+
+  return {
+    freshness: company.models.company?.cache_state === "stale" ? "stale" : "fresh",
+    source,
+    formulaVersion,
+    missingInputsCount: missingInputs.length,
+    missingInputs,
+    proxyUsed:
+      String(result.model_status ?? result.status ?? "supported") === "proxy" ||
+      Boolean(inputQuality.capital_structure_proxied) ||
+      Boolean(inputQuality.starting_cash_flow_proxied),
+    fallbackUsed: false,
+    stalenessReason: company.models.diagnostics?.stale_flags?.join(", ") || null,
+  };
 }

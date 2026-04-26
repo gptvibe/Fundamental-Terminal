@@ -21,7 +21,8 @@ from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
+from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status
+import httpx
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
@@ -33,8 +34,9 @@ from app.db import async_session_maker as async_session, bind_request_sync_sessi
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
 from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
 from app.model_engine.models import dupont as dupont_model
-from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement
+from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement, RefreshJob
 from app.models.dataset_refresh_state import DatasetRefreshState
+from app.observability import snapshot_request_observations, snapshot_worker_observations
 from app.performance_audit import reset as reset_performance_audit_store
 from app.performance_audit import snapshot as snapshot_performance_audit_store
 from app.query_params import DuplicateSingletonQueryParamError, read_singleton_query_param
@@ -162,6 +164,7 @@ from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
 from app.services.formula_registry import FORMULA_REGISTRY_VERSION, get_formula_metadata, list_formula_metadata
 from app.services.hot_cache import HotCacheLookup, _etag_for_json_bytes, _render_json_bytes, shared_hot_response_cache
+from app.services.shared_upstream_cache import shared_upstream_cache
 from app.services.refresh_state import get_dataset_last_checked
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
 from app.services.sec_sic import resolve_sec_sic_profile
@@ -286,11 +289,244 @@ PRICE_DEPENDENT_TIMESERIES_METRIC_KEYS = {"buyback_yield", "dividend_yield"}
 
 _filings_timeline_cache: dict[str, tuple[float, list[FilingPayload]]] = {}
 _redis_client = getattr(shared_hot_response_cache, "_redis", None)
+_api_started_at = datetime.now(timezone.utc)
+_sec_health_cache_lock = asyncio.Lock()
+_sec_health_cached_at = 0.0
+_sec_health_cached_payload: dict[str, Any] | None = None
+
+
+async def _database_health_payload() -> tuple[dict[str, Any], bool]:
+    try:
+        async with _session_scope() as session:
+            result = session.execute(select(1))
+            if inspect.isawaitable(result):
+                await result
+        pool_snapshot = get_async_pool_status()
+    except Exception as exc:
+        return {
+            "status": "unhealthy",
+            "detail": "Database connectivity check failed",
+            "error": str(exc),
+        }, False
+
+    return {
+        "status": "ok",
+        "pool": {
+            "label": pool_snapshot.label,
+            "checked_out": pool_snapshot.checked_out,
+            "current_capacity": pool_snapshot.current_capacity,
+            "total_capacity": pool_snapshot.total_capacity,
+            "utilization_ratio": pool_snapshot.utilization_ratio,
+            "queue_wait_time_ms": pool_snapshot.queue_wait_time_ms,
+            "average_queue_wait_time_ms": pool_snapshot.average_queue_wait_time_ms,
+            "max_queue_wait_time_ms": pool_snapshot.max_queue_wait_time_ms,
+        },
+    }, True
+
+
+async def _redis_health_payload() -> tuple[dict[str, Any], bool]:
+    try:
+        metrics = await shared_hot_response_cache.snapshot_metrics()
+    except Exception as exc:
+        return {
+            "status": "unhealthy",
+            "detail": "Redis/cache diagnostics failed",
+            "error": str(exc),
+        }, False
+
+    backend_details = metrics.get("backend_details") or {}
+    backend_status = str(backend_details.get("status") or "unknown")
+    normalized_status = "ok"
+    if backend_status in {"degraded", "fallback"}:
+        normalized_status = "degraded"
+    elif backend_status in {"unknown", "error"}:
+        normalized_status = "unhealthy"
+
+    return {
+        "status": normalized_status,
+        "backend": metrics.get("backend"),
+        "backend_mode": metrics.get("backend_mode"),
+        "summary": backend_details.get("summary"),
+        "redis_configured": backend_details.get("redis_configured"),
+        "cache_scope": backend_details.get("cache_scope"),
+        "fallback_active": backend_details.get("fallback_active"),
+    }, normalized_status != "unhealthy"
+
+
+def _sync_worker_health_snapshot(session: Session) -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    stale_cutoff = now - timedelta(seconds=max(settings.refresh_lock_timeout_seconds * 2, 30))
+
+    queued_count = int(
+        session.execute(
+            select(func.count()).select_from(RefreshJob).where(RefreshJob.status == "queued")
+        ).scalar_one()
+    )
+    running_count = int(
+        session.execute(
+            select(func.count()).select_from(RefreshJob).where(RefreshJob.status == "running")
+        ).scalar_one()
+    )
+    stale_running_count = int(
+        session.execute(
+            select(func.count()).select_from(RefreshJob).where(
+                RefreshJob.status == "running",
+                RefreshJob.last_heartbeat_at.is_not(None),
+                RefreshJob.last_heartbeat_at < stale_cutoff,
+            )
+        ).scalar_one()
+    )
+    latest_heartbeat = session.execute(
+        select(func.max(RefreshJob.last_heartbeat_at)).where(RefreshJob.status == "running")
+    ).scalar_one_or_none()
+    worker_registry = status_broker.worker_health_snapshot()
+    live_worker_count = int(worker_registry.get("live_worker_count", 0) or 0)
+    registry_mode = str(worker_registry.get("registry_mode") or "unknown")
+
+    if live_worker_count <= 0:
+        worker_status = "degraded"
+        healthy = False
+        detail = "No live refresh worker heartbeat detected."
+    elif stale_running_count > 0:
+        worker_status = "degraded"
+        healthy = False
+        detail = "One or more running refresh jobs stopped heartbeating."
+    elif running_count == 0:
+        worker_status = "idle"
+        healthy = True
+        detail = "Refresh worker heartbeat is live and the queue is currently idle."
+    else:
+        worker_status = "ok"
+        healthy = True
+        detail = "Refresh worker heartbeat is live and jobs are actively processing."
+
+    return {
+        "status": worker_status,
+        "detail": detail,
+        "queued_jobs": queued_count,
+        "running_jobs": running_count,
+        "stale_running_jobs": stale_running_count,
+        "latest_heartbeat_at": latest_heartbeat.isoformat() if latest_heartbeat is not None else None,
+        "registry_mode": registry_mode,
+        "live_worker_count": live_worker_count,
+        "workers": worker_registry.get("workers", []),
+        "registry_detail": worker_registry.get("detail"),
+        "registry_error": worker_registry.get("error"),
+        "healthy": healthy,
+    }
+
+
+async def _worker_health_payload() -> tuple[dict[str, Any], bool]:
+    try:
+        async with _session_scope() as session:
+            payload = await _run_with_session_binding(session, _sync_worker_health_snapshot)
+        healthy = bool(payload.get("healthy", True))
+        payload.pop("healthy", None)
+        return payload, healthy
+    except Exception as exc:
+        return {
+            "status": "unhealthy",
+            "detail": "Unable to inspect refresh worker queue",
+            "error": str(exc),
+        }, False
+
+
+async def _sec_upstream_health_payload() -> tuple[dict[str, Any], bool]:
+    global _sec_health_cached_at, _sec_health_cached_payload
+
+    if not settings.health_sec_check_enabled:
+        return {
+            "status": "skipped",
+            "detail": "SEC upstream probe disabled by configuration",
+        }, True
+
+    now_monotonic = time.monotonic()
+    cached_ttl = max(settings.health_sec_check_cache_seconds, 1)
+    async with _sec_health_cache_lock:
+        if _sec_health_cached_payload is not None and now_monotonic - _sec_health_cached_at < cached_ttl:
+            return dict(_sec_health_cached_payload), bool(_sec_health_cached_payload.get("healthy", False))
+
+    started_at = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.health_sec_check_timeout_seconds,
+            follow_redirects=True,
+            headers={"User-Agent": settings.sec_user_agent},
+        ) as client:
+            response = await client.get(settings.sec_ticker_lookup_url)
+        duration_ms = round((time.perf_counter() - started_at) * 1000.0, 3)
+        status_code = int(response.status_code)
+        healthy = 200 <= status_code < 400
+        status_label = "ok" if healthy else "degraded" if status_code < 500 else "unhealthy"
+        payload = {
+            "status": status_label,
+            "url": settings.sec_ticker_lookup_url,
+            "status_code": status_code,
+            "latency_ms": duration_ms,
+            "healthy": healthy,
+        }
+    except Exception as exc:
+        payload = {
+            "status": "degraded",
+            "url": settings.sec_ticker_lookup_url,
+            "detail": "SEC upstream probe failed",
+            "error": str(exc),
+            "healthy": False,
+        }
+
+    async with _sec_health_cache_lock:
+        _sec_health_cached_payload = payload
+        _sec_health_cached_at = time.monotonic()
+
+    return dict(payload), bool(payload.get("healthy", False))
 
 
 @app.get("/health")
-def healthcheck() -> dict[str, str]:
-    return {"status": "ok"}
+async def healthcheck() -> dict[str, Any]:
+    database, database_ok = await _database_health_payload()
+    redis, redis_ok = await _redis_health_payload()
+    worker, worker_ok = await _worker_health_payload()
+    sec_upstream, sec_ok = await _sec_upstream_health_payload()
+    sec_upstream.pop("healthy", None)
+
+    uptime_seconds = max(0, int((datetime.now(timezone.utc) - _api_started_at).total_seconds()))
+    component_health = {
+        "db": database_ok,
+        "redis": redis_ok,
+        "worker": worker_ok,
+        "sec_upstream": sec_ok,
+    }
+    degraded_components = [name for name, is_ok in component_health.items() if not is_ok]
+    overall_status = "ok" if all((database_ok, redis_ok, worker_ok, sec_ok)) else "degraded"
+    return {
+        "status": "ok",
+        "overall_status": overall_status,
+        "degraded_components": degraded_components,
+        "service": "api",
+        "version": "1.1.0",
+        "uptime_seconds": uptime_seconds,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "components": {
+            "api": {
+                "status": "ok",
+                "observability_enabled": settings.observability_enabled,
+                "performance_audit_enabled": settings.performance_audit_enabled,
+                "security_headers_enabled": settings.security_headers_enabled,
+                "auth_mode": settings.auth_mode,
+                "auth_required_path_prefixes": list(settings.auth_required_path_prefixes),
+                "rate_limit": {
+                    "enabled": settings.api_rate_limit_enabled,
+                    "requests": settings.api_rate_limit_requests,
+                    "window_seconds": settings.api_rate_limit_window_seconds,
+                    "trust_proxy": settings.api_rate_limit_trust_proxy,
+                },
+            },
+            "db": database,
+            "redis": redis,
+            "worker": worker,
+            "sec_upstream": sec_upstream,
+        },
+    }
 
 
 @app.get("/readyz")
@@ -357,6 +593,20 @@ def performance_audit_snapshot() -> dict[str, Any]:
 @app.post("/api/internal/performance-audit/reset")
 def reset_performance_audit() -> dict[str, Any]:
     return reset_performance_audit_store()
+
+
+@app.get("/api/internal/observability")
+async def observability_snapshot() -> dict[str, Any]:
+    hot_cache_metrics = await shared_hot_response_cache.snapshot_metrics()
+    return {
+        "enabled": settings.observability_enabled,
+        "requests": snapshot_request_observations(),
+        "workers": snapshot_worker_observations(),
+        "caches": {
+            "hot_response": hot_cache_metrics,
+            "shared_upstream": shared_upstream_cache.snapshot_metrics(),
+        },
+    }
 
 
 @app.get("/api/jobs/{job_id}/events")
@@ -3135,8 +3385,8 @@ def company_charts(
 @app.post("/api/companies/{ticker}/charts/what-if", response_model=CompanyChartsDashboardResponse)
 def company_charts_what_if(
     ticker: str,
-    payload: CompanyChartsWhatIfRequest,
     background_tasks: BackgroundTasks,
+    payload: CompanyChartsWhatIfRequest | None = Body(default=None),
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -3150,7 +3400,7 @@ def company_charts_what_if(
         background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
-        payload=payload,
+        payload=payload or CompanyChartsWhatIfRequest(),
     )
 
 

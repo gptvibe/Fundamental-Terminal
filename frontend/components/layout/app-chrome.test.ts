@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppChrome } from "@/components/layout/app-chrome";
+import { COMMAND_PALETTE_REFRESH_EVENT } from "@/lib/command-palette-events";
 
 const push = vi.fn();
 const mockUsePathname = vi.fn();
@@ -239,6 +240,74 @@ describe("AppChrome", () => {
     });
 
     expect(requests.get("MS")?.signal?.aborted).toBe(false);
+  });
+
+  it("opens and closes the command palette with keyboard", () => {
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("dialog", { name: "Command palette" })).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByLabelText("Command search"), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull();
+  });
+
+  it("supports fuzzy command search and executes route actions", () => {
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Command search"), { target: { value: "gtw" } });
+    fireEvent.keyDown(screen.getByLabelText("Command search"), { key: "Enter" });
+
+    expect(push).toHaveBeenLastCalledWith("/watchlist");
+  });
+
+  it("supports keyboard navigation across command results", () => {
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Command search"), { target: { value: "go to" } });
+    fireEvent.keyDown(screen.getByLabelText("Command search"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByLabelText("Command search"), { key: "Enter" });
+
+    const lastRoute = push.mock.calls.at(-1)?.[0];
+    expect(["/screener", "/watchlist"]).toContain(lastRoute);
+  });
+
+  it("handles ticker and filings command routes", () => {
+    mockUsePathname.mockReturnValue("/company/MSFT");
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    fireEvent.change(screen.getByLabelText("Command search"), { target: { value: "open ticker" } });
+    fireEvent.click(screen.getByRole("button", { name: /Open ticker/ }));
+
+    expect(push).toHaveBeenLastCalledWith("/company/MSFT");
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Command search"), { target: { value: "search filings" } });
+    fireEvent.click(screen.getByRole("button", { name: /Search filings/ }));
+
+    expect(push).toHaveBeenLastCalledWith("/company/MSFT/filings");
+  });
+
+  it("dispatches refresh events and toggles data source panel", () => {
+    const refreshListener = vi.fn();
+    window.addEventListener(COMMAND_PALETTE_REFRESH_EVENT, refreshListener as EventListener);
+
+    render(React.createElement(AppChrome, null, React.createElement("div", null, "workspace")));
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Command search"), { target: { value: "refresh current company" } });
+    fireEvent.keyDown(screen.getByLabelText("Command search"), { key: "Enter" });
+    expect(refreshListener).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Command search"), { target: { value: "toggle data source panel" } });
+    fireEvent.keyDown(screen.getByLabelText("Command search"), { key: "Enter" });
+    expect(screen.getByRole("complementary", { name: "Data source panel" })).toBeTruthy();
+
+    window.removeEventListener(COMMAND_PALETTE_REFRESH_EVENT, refreshListener as EventListener);
   });
 });
 

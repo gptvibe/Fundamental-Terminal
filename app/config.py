@@ -52,6 +52,14 @@ def _csv_env(name: str) -> tuple[str, ...]:
     return tuple(value for value in values if value)
 
 
+def _str_env(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value or default
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     database_url: str = os.getenv(
@@ -128,6 +136,8 @@ class Settings:
     refresh_queue_block_seconds: float = _float_env("REFRESH_QUEUE_BLOCK_SECONDS", 15.0, minimum=1.0)
     refresh_recovery_interval_seconds: float = _float_env("REFRESH_RECOVERY_INTERVAL_SECONDS", 30.0, minimum=5.0)
     refresh_status_poll_seconds: float = _float_env("REFRESH_STATUS_POLL_SECONDS", 5.0, minimum=0.1)
+    worker_heartbeat_interval_seconds: float = _float_env("WORKER_HEARTBEAT_INTERVAL_SECONDS", 15.0, minimum=2.0)
+    worker_heartbeat_ttl_seconds: int = _int_env("WORKER_HEARTBEAT_TTL_SECONDS", 45, minimum=5)
     refresh_aux_io_max_workers: int = _int_env("REFRESH_AUX_IO_MAX_WORKERS", 2, minimum=1)
     hot_response_cache_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1)
     hot_response_cache_stale_ttl_seconds: int = _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1)
@@ -137,10 +147,35 @@ class Settings:
     hot_response_cache_singleflight_poll_seconds: float = _float_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_POLL_SECONDS", 0.05, minimum=0.01)
     hot_response_cache_upstream_local_max_entries: int = _int_env("HOT_RESPONSE_CACHE_UPSTREAM_LOCAL_MAX_ENTRIES", 512, minimum=0)
     hot_response_cache_upstream_local_max_bytes: int = _int_env("HOT_RESPONSE_CACHE_UPSTREAM_LOCAL_MAX_BYTES", 16 * 1024 * 1024, minimum=0)
+    observability_enabled: bool = _bool_env("OBSERVABILITY_ENABLED", True)
+    observability_max_records: int = _int_env("OBSERVABILITY_MAX_RECORDS", 5000, minimum=100)
     performance_audit_enabled: bool = _bool_env("PERFORMANCE_AUDIT_ENABLED", False)
     performance_audit_max_records: int = _int_env("PERFORMANCE_AUDIT_MAX_RECORDS", 5000, minimum=100)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()
     valuation_workbench_enabled: bool = os.getenv("VALUATION_WORKBENCH_ENABLED", "true").strip().lower() not in {"0", "false", "no"}
+    api_rate_limit_enabled: bool = _bool_env("API_RATE_LIMIT_ENABLED", True)
+    api_rate_limit_requests: int = _int_env("API_RATE_LIMIT_REQUESTS", 180, minimum=1)
+    api_rate_limit_window_seconds: int = _int_env("API_RATE_LIMIT_WINDOW_SECONDS", 60, minimum=1)
+    api_rate_limit_trust_proxy: bool = _bool_env("API_RATE_LIMIT_TRUST_PROXY", True)
+    api_rate_limit_exempt_paths: tuple[str, ...] = _csv_env("API_RATE_LIMIT_EXEMPT_PATHS") or (
+        "/health",
+        "/readyz",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+    )
+    auth_mode: str = _str_env("AUTH_MODE", "off").lower()
+    auth_bearer_token: str | None = os.getenv("AUTH_BEARER_TOKEN", "").strip() or None
+    auth_forwarded_user_header: str = _str_env("AUTH_FORWARDED_USER_HEADER", "X-Forwarded-User")
+    auth_required_path_prefixes: tuple[str, ...] = _csv_env("AUTH_REQUIRED_PATH_PREFIXES") or ("/api/internal",)
+    auth_exempt_paths: tuple[str, ...] = _csv_env("AUTH_EXEMPT_PATHS") or (
+        "/health",
+        "/readyz",
+    )
+    health_sec_check_enabled: bool = _bool_env("HEALTH_SEC_CHECK_ENABLED", True)
+    health_sec_check_timeout_seconds: float = _float_env("HEALTH_SEC_CHECK_TIMEOUT_SECONDS", 2.5, minimum=0.5)
+    health_sec_check_cache_seconds: int = _int_env("HEALTH_SEC_CHECK_CACHE_SECONDS", 30, minimum=5)
+    security_headers_enabled: bool = _bool_env("SECURITY_HEADERS_ENABLED", True)
 
 
 @dataclass(frozen=True, slots=True)

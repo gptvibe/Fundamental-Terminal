@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import * as React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompanyChartsDashboard, MetricChartTooltipContent } from "@/components/company/charts-dashboard";
@@ -194,6 +194,24 @@ function makePayload(overrides?: Partial<CompanyChartsDashboardResponse>): Compa
           label: "Revenue",
           value: "+$20.0M (+20.00%)",
           detail: "FY2025 vs FY2024",
+          metric_diff: {
+            metric_key: "revenue",
+            metric_label: "Revenue",
+            previous_value: 100,
+            current_value: 120,
+            absolute_change: 20,
+            percentage_change: 0.2,
+            previous_value_missing: false,
+            stale_cache: false,
+            changed_input_fields: ["revenue"],
+            source: {
+              source_id: "sec_companyfacts",
+              source_label: "Official filing snapshot",
+              filing_type: "10-K",
+              filing_date: "2025-12-31",
+              detail: "10-K for FY2025 versus FY2024.",
+            },
+          },
         },
       ],
       empty_state: null,
@@ -488,6 +506,20 @@ describe("CompanyChartsDashboard", () => {
     expect(screen.getByRole("button", { name: "earnings" })).toBeTruthy();
     expect(screen.getByText("What changed since last quarter?")).toBeTruthy();
     expect(screen.getAllByText("FY2025 vs FY2024").length).toBeGreaterThan(0);
+  });
+
+  it("opens a why-changed dialog from metric cards", () => {
+    render(React.createElement(CompanyChartsDashboard, { payload: makePayload() }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Why changed Revenue" }));
+
+    expect(screen.getByText("Why Revenue changed")).toBeTruthy();
+    expect(screen.getByText("Old value")).toBeTruthy();
+    expect(screen.getByText("New value")).toBeTruthy();
+    expect(screen.getByText("Absolute change")).toBeTruthy();
+    expect(screen.getByText("Percentage change")).toBeTruthy();
+    expect(screen.getByText("Official filing snapshot")).toBeTruthy();
+    expect(screen.getAllByText("revenue").length).toBeGreaterThan(0);
   });
 
   it("omits optional forecast cards and keeps the strip graceful when fields are missing", () => {

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-09T04:09:04.198288+00:00",
+  "generated_at": "2026-04-26T06:57:10.031207+00:00",
   "schema_version": "performance_regression_baseline_v1",
   "suites": {
     "company_brief_concurrency": {
@@ -7,13 +7,13 @@
         "company_brief_ready": {
           "latency_ms": {
             "p50": {
-              "baseline": 19.39,
-              "budget": 31.02,
+              "baseline": 37.02,
+              "budget": 66.64,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 29.28,
-              "budget": 46.85,
+              "baseline": 45.41,
+              "budget": 90.82,
               "max_regression_pct": 60.0
             }
           },
@@ -44,13 +44,13 @@
         "company_search": {
           "latency_ms": {
             "p50": {
-              "baseline": 1.32,
-              "budget": 4.32,
+              "baseline": 9.04,
+              "budget": 16.27,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 2.37,
-              "budget": 8.37,
+              "baseline": 10.39,
+              "budget": 20.78,
               "max_regression_pct": 60.0
             }
           },
@@ -71,13 +71,13 @@
         "financials_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 5.24,
-              "budget": 8.38,
+              "baseline": 14.36,
+              "budget": 25.85,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 1.85,
-              "budget": 7.85,
+              "baseline": 27.14,
+              "budget": 54.28,
               "max_regression_pct": 60.0
             }
           },
@@ -98,20 +98,20 @@
         "metrics_timeseries_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 1.39,
-              "budget": 4.39,
+              "baseline": 3.33,
+              "budget": 6.33,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 1.64,
-              "budget": 7.64,
+              "baseline": 3.85,
+              "budget": 9.85,
               "max_regression_pct": 60.0
             }
           },
           "payload_bytes": {
             "avg": {
-              "baseline": 3615.0,
-              "budget": 4518.75,
+              "baseline": 3808.0,
+              "budget": 4760.0,
               "max_regression_pct": 20.0
             }
           },
@@ -125,20 +125,20 @@
         "models_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 4.8,
-              "budget": 7.68,
+              "baseline": 8.22,
+              "budget": 14.8,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 1.73,
-              "budget": 7.73,
+              "baseline": 12.71,
+              "budget": 25.42,
               "max_regression_pct": 60.0
             }
           },
           "payload_bytes": {
             "avg": {
-              "baseline": 5158.0,
-              "budget": 6447.5,
+              "baseline": 5273.0,
+              "budget": 6591.25,
               "max_regression_pct": 20.0
             }
           },
@@ -152,13 +152,13 @@
         "peers_payload": {
           "latency_ms": {
             "p50": {
-              "baseline": 4.77,
-              "budget": 7.63,
+              "baseline": 6.77,
+              "budget": 12.19,
               "max_regression_pct": 60.0
             },
             "p95": {
-              "baseline": 1.49,
-              "budget": 7.49,
+              "baseline": 10.35,
+              "budget": 20.7,
               "max_regression_pct": 60.0
             }
           },

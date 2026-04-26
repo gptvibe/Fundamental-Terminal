@@ -15,6 +15,7 @@ import { EvidenceMetaBlock } from "@/components/ui/evidence-meta-block";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { showAppToast } from "@/lib/app-toast";
+import { COMMAND_PALETTE_EXPORT_MEMO_EVENT, type CommandPaletteTickerDetail } from "@/lib/command-palette-events";
 import {
   getCompanyActivityOverview,
   getCompanyBeneficialOwnershipSummary,
@@ -485,6 +486,20 @@ export default function CompanyResearchBriefPage() {
       setExportingResearchPackage(false);
     }
   }
+
+  useEffect(() => {
+    function onCommandExportMemo(event: Event) {
+      const customEvent = event as CustomEvent<CommandPaletteTickerDetail>;
+      if (customEvent.detail?.ticker !== ticker) {
+        return;
+      }
+
+      void handleExportResearchPackage();
+    }
+
+    window.addEventListener(COMMAND_PALETTE_EXPORT_MEMO_EVENT, onCommandExportMemo as EventListener);
+    return () => window.removeEventListener(COMMAND_PALETTE_EXPORT_MEMO_EVENT, onCommandExportMemo as EventListener);
+  }, [ticker]);
 
   return (
     <CompanyWorkspaceShell

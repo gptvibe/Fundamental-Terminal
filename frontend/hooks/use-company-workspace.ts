@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
+import { COMMAND_PALETTE_REFRESH_EVENT, type CommandPaletteTickerDetail } from "@/lib/command-palette-events";
 import {
   getCompanyWorkspaceBootstrap,
   getCompanyFinancials,
@@ -112,7 +113,7 @@ export function useCompanyWorkspace(
   const trackedJobId = activeJobId ?? refreshState?.job_id;
   const { consoleEntries: streamEntries, connectionState, lastEvent } = useJobStream(trackedJobId);
 
-  async function runWithAudit<T>(source: string, work: () => Promise<T>): Promise<T> {
+  const runWithAudit = useCallback(async <T,>(source: string, work: () => Promise<T>): Promise<T> => {
     if (!auditPageRoute || !auditScenario) {
       return work();
     }
@@ -125,7 +126,7 @@ export function useCompanyWorkspace(
       },
       work
     );
-  }
+  }, [auditPageRoute, auditScenario]);
 
   useEffect(() => {
     if (
@@ -281,7 +282,7 @@ export function useCompanyWorkspace(
     rememberActiveJob(trackedJobId, ticker);
   }, [ticker, trackedJobId]);
 
-  async function queueRefresh(force = true) {
+  const queueRefresh = useCallback(async (force = true) => {
     try {
       setRefreshing(true);
       invalidateApiReadCacheForTicker(ticker);
@@ -295,7 +296,20 @@ export function useCompanyWorkspace(
     } finally {
       setRefreshing(false);
     }
-  }
+  }, [runWithAudit, ticker]);
+
+  useEffect(() => {
+    function onCommandRefresh(event: Event) {
+      const customEvent = event as CustomEvent<CommandPaletteTickerDetail>;
+      if (customEvent.detail?.ticker !== ticker) {
+        return;
+      }
+      void queueRefresh();
+    }
+
+    window.addEventListener(COMMAND_PALETTE_REFRESH_EVENT, onCommandRefresh as EventListener);
+    return () => window.removeEventListener(COMMAND_PALETTE_REFRESH_EVENT, onCommandRefresh as EventListener);
+  }, [queueRefresh, ticker]);
 
   const consoleEntries = useMemo(
     () => [...streamEntries, ...chartConsoleEntries].sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp)),

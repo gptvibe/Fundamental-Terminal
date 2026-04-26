@@ -9,6 +9,7 @@ import { HomeSavedCompaniesPanel } from "@/components/personal/home-saved-compan
 const push = vi.fn();
 const mockUseLocalUserData = vi.fn();
 const showAppToast = vi.fn();
+const importLocalResearchWorkspace = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push }),
@@ -22,6 +23,10 @@ vi.mock("@/lib/app-toast", () => ({
   showAppToast: (...args: unknown[]) => showAppToast(...args),
 }));
 
+vi.mock("@/lib/api", () => ({
+  importLocalResearchWorkspace: (...args: unknown[]) => importLocalResearchWorkspace(...args),
+}));
+
 describe("HomeSavedCompaniesPanel", () => {
   afterEach(() => {
     cleanup();
@@ -32,6 +37,17 @@ describe("HomeSavedCompaniesPanel", () => {
     push.mockReset();
     showAppToast.mockReset();
     mockUseLocalUserData.mockReset();
+    importLocalResearchWorkspace.mockReset();
+    importLocalResearchWorkspace.mockResolvedValue({
+      workspace_key: "default",
+      saved_companies: [],
+      notes: [],
+      pinned_metrics: [],
+      pinned_charts: [],
+      compare_baskets: [],
+      memo_draft: null,
+      updated_at: "2026-04-26T00:00:00Z",
+    });
   });
 
   it("shows transfer actions and runs export and clear-all handlers", () => {
@@ -110,6 +126,40 @@ describe("HomeSavedCompaniesPanel", () => {
 
     await waitFor(() => {
       expect(importData).toHaveBeenCalled();
+    });
+  });
+
+  it("imports current local data into server workspace", async () => {
+    mockUseLocalUserData.mockReturnValue({
+      savedCompanies: [
+        {
+          ticker: "MSFT",
+          name: "Microsoft",
+          sector: "Technology",
+          savedAt: "2026-03-22T00:00:00Z",
+          note: null,
+          noteUpdatedAt: null,
+          isInWatchlist: true,
+          hasNote: false,
+        },
+      ],
+      watchlistCount: 1,
+      noteCount: 0,
+      removeFromWatchlist: vi.fn(),
+      clearNote: vi.fn(),
+      exportData: vi.fn(() => ({
+        watchlist: [{ ticker: "MSFT", name: "Microsoft", sector: "Technology", savedAt: "2026-03-22T00:00:00Z" }],
+        notes: {},
+      })),
+      importData: vi.fn(),
+      clearAll: vi.fn(),
+    });
+
+    render(React.createElement(HomeSavedCompaniesPanel));
+    fireEvent.click(screen.getByRole("button", { name: "Import To Server Workspace" }));
+
+    await waitFor(() => {
+      expect(importLocalResearchWorkspace).toHaveBeenCalled();
     });
   });
 });

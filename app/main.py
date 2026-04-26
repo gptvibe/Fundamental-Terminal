@@ -9,20 +9,63 @@ from types import FunctionType
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request, Response, status
+from starlette.responses import JSONResponse
 
 from app.api import register_routers
 from app.api.handlers import _shared as _legacy_api
 from app.config import settings
 from app.db import async_session_maker, get_async_engine
+from app.observability import observability_enabled
 from app.performance_audit import PerformanceAuditJSONResponse, begin_request, complete_request, end_request, is_enabled, should_skip_path
 from app.query_params import DuplicateSingletonQueryParamError, read_singleton_query_param
+from app.services.auth import authenticate_request, is_auth_required_for_path
 from app.services.cache_queries import get_company_snapshot, get_company_snapshots_by_ticker
+from app.services.rate_limit import public_route_rate_limiter
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
 COMPANY_ROUTE_CACHE_CONTROL = "public, max-age=20, stale-while-revalidate=300"
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+}
+
+
+def _security_headers_for_request(request: Request) -> dict[str, str]:
+    headers = dict(_SECURITY_HEADERS)
+    if request.url.path.startswith("/api/") or request.url.path in {"/health", "/readyz"}:
+        headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    if request.headers.get("x-forwarded-proto", request.url.scheme).lower() == "https":
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return headers
+
+
+def _is_rate_limited_public_route(path: str) -> bool:
+    if not path.startswith("/api/"):
+        return False
+    if path.startswith("/api/internal/"):
+        return False
+    for exempt in settings.api_rate_limit_exempt_paths:
+        normalized = exempt.rstrip("/") or "/"
+        if path == normalized or path.startswith(f"{normalized}/"):
+            return False
+    return True
+
+
+def _client_identifier(request: Request) -> str:
+    if settings.api_rate_limit_trust_proxy:
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if forwarded_for:
+            first = forwarded_for.split(",", 1)[0].strip()
+            if first:
+                return first
+    client_host = getattr(request.client, "host", None)
+    return str(client_host or "unknown")
 
 
 def _should_apply_company_route_cache(path: str) -> bool:
@@ -482,6 +525,50 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Financial Cache API", version="1.1.0", default_response_class=PerformanceAuditJSONResponse)
 
     @app.middleware("http")
+    async def auth_and_rate_limit_middleware(request: Request, call_next):
+        path = request.url.path
+
+        if is_auth_required_for_path(path):
+            auth_context = authenticate_request(request)
+            request.state.auth_context = auth_context
+            if not auth_context.authenticated:
+                response = JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={
+                        "detail": "Authentication required",
+                        "reason": auth_context.reason,
+                        "mode": auth_context.mode,
+                    },
+                )
+                response.headers["WWW-Authenticate"] = "Bearer"
+                return response
+
+        if _is_rate_limited_public_route(path):
+            decision = await public_route_rate_limiter.evaluate(_client_identifier(request))
+            if not decision.allowed:
+                response = JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={
+                        "detail": "Rate limit exceeded",
+                        "limit": decision.limit,
+                        "retry_after_seconds": decision.retry_after_seconds,
+                    },
+                )
+                response.headers["Retry-After"] = str(decision.retry_after_seconds)
+                response.headers["X-RateLimit-Limit"] = str(decision.limit)
+                response.headers["X-RateLimit-Remaining"] = "0"
+                response.headers["X-RateLimit-Reset"] = str(decision.reset_at_epoch)
+                return response
+
+            response = await call_next(request)
+            response.headers["X-RateLimit-Limit"] = str(decision.limit)
+            response.headers["X-RateLimit-Remaining"] = str(decision.remaining)
+            response.headers["X-RateLimit-Reset"] = str(decision.reset_at_epoch)
+            return response
+
+        return await call_next(request)
+
+    @app.middleware("http")
     async def company_route_cache_middleware(request: Request, call_next):
         cache_metadata = await _resolve_company_route_cache_metadata(request)
         if cache_metadata is not None:
@@ -521,7 +608,7 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def performance_audit_middleware(request, call_next):
-        if not is_enabled() or should_skip_path(request.url.path):
+        if not (is_enabled() or observability_enabled()) or should_skip_path(request.url.path):
             return await call_next(request)
 
         metrics, token = begin_request(request)
@@ -538,6 +625,14 @@ def create_app() -> FastAPI:
             raise
         finally:
             end_request(token)
+
+    @app.middleware("http")
+    async def security_headers_middleware(request: Request, call_next):
+        response = await call_next(request)
+        if settings.security_headers_enabled:
+            for key, value in _security_headers_for_request(request).items():
+                response.headers.setdefault(key, value)
+        return response
 
     register_routers(app)
     return app

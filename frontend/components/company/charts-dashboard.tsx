@@ -18,6 +18,7 @@ import {
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
 import { ChartShareActions } from "@/components/company/chart-share-actions";
+import { Dialog } from "@/components/ui/dialog";
 import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
 import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
 import { buildOutlookChartShareSnapshot } from "@/lib/chart-share";
@@ -31,6 +32,7 @@ import type {
   CompanyChartsComparisonCardPayload,
   CompanyChartsDashboardResponse,
   CompanyChartsLegendItemPayload,
+  CompanyChartsMetricDiffPayload,
   CompanyChartsEventOverlayPayload,
   CompanyChartsEventPayload,
   CompanyChartsQuarterChangePayload,
@@ -141,11 +143,13 @@ export function CompanyChartsDashboard({
   const shareSnapshot = useMemo(() => buildOutlookChartShareSnapshot(payload), [payload]);
   const eventOverlay = outlookSpec.event_overlay ?? payload.event_overlay ?? EMPTY_EVENT_OVERLAY;
   const quarterChange = outlookSpec.quarter_change ?? payload.quarter_change ?? EMPTY_QUARTER_CHANGE;
+  const metricDiffByCard = useMemo(() => buildMetricDiffByCard(quarterChange), [quarterChange]);
   const defaultEnabledEventTypes = useMemo(
     () => eventOverlay.default_enabled_event_types.filter((eventType) => eventOverlay.available_event_types.includes(eventType)),
     [eventOverlay.available_event_types, eventOverlay.default_enabled_event_types]
   );
   const [enabledEventTypes, setEnabledEventTypes] = useState<Set<string>>(() => new Set(defaultEnabledEventTypes));
+  const [selectedMetricDiff, setSelectedMetricDiff] = useState<CompanyChartsMetricDiffPayload | null>(null);
 
   useEffect(() => {
     setEnabledEventTypes(new Set(defaultEnabledEventTypes));
@@ -264,6 +268,8 @@ export function CompanyChartsDashboard({
             className="charts-card-matrix"
             overlayEvents={eventOverlay.events}
             enabledEventTypes={enabledEventTypeList}
+            metricDiff={metricDiffByCard.get(card.key) ?? null}
+            onOpenMetricDiff={setSelectedMetricDiff}
           />
         ))}
         <GrowthSummaryCard card={primaryComparisonCard} className="charts-card-matrix" />
@@ -279,6 +285,8 @@ export function CompanyChartsDashboard({
               className={index === 0 ? "charts-card-wide" : undefined}
               overlayEvents={eventOverlay.events}
               enabledEventTypes={enabledEventTypeList}
+              metricDiff={metricDiffByCard.get(card.key) ?? null}
+              onOpenMetricDiff={setSelectedMetricDiff}
             />
           ))}
         </section>
@@ -291,6 +299,8 @@ export function CompanyChartsDashboard({
           ))}
         </section>
       ) : null}
+
+      <MetricDiffDialog diff={selectedMetricDiff} onClose={() => setSelectedMetricDiff(null)} />
     </div>
   );
 }
@@ -452,18 +462,70 @@ function QuarterChangePanel({ panel }: { panel: CompanyChartsQuarterChangePayloa
   );
 }
 
+function MetricDiffDialog({ diff, onClose }: { diff: CompanyChartsMetricDiffPayload | null; onClose: () => void }) {
+  if (!diff) {
+    return null;
+  }
+
+  const changeSummary = diff.absolute_change == null ? "No prior comparable value" : formatSignedValue(diff.absolute_change);
+  const percentSummary = diff.percentage_change == null ? "N/A" : formatPercent(diff.percentage_change);
+
+  return (
+    <Dialog open={Boolean(diff)} onClose={onClose} labelledBy="metric-diff-title" contentClassName="charts-metric-diff-dialog">
+      <div className="charts-metric-diff-header">
+        <h2 id="metric-diff-title" className="charts-card-title">Why {diff.metric_label} changed</h2>
+        <button type="button" className="charts-metric-diff-close" onClick={onClose} aria-label="Close metric change details">Close</button>
+      </div>
+      <div className="charts-metric-diff-grid">
+        <MetricDiffCell label="Old value" value={formatNullableValue(diff.previous_value)} />
+        <MetricDiffCell label="New value" value={formatNullableValue(diff.current_value)} />
+        <MetricDiffCell label="Absolute change" value={changeSummary} />
+        <MetricDiffCell label="Percentage change" value={percentSummary} />
+      </div>
+      <div className="charts-metric-diff-section">
+        <div className="charts-summary-section-title">Changed input fields</div>
+        <div className="charts-metric-diff-tags">
+          {diff.changed_input_fields.length ? diff.changed_input_fields.map((field) => <span key={field} className="charts-metric-diff-tag">{field}</span>) : <span className="charts-metric-diff-empty">No input field changes were detected.</span>}
+        </div>
+      </div>
+      <div className="charts-metric-diff-section">
+        <div className="charts-summary-section-title">Filing / source</div>
+        <div className="charts-metric-diff-source">{diff.source?.source_label ?? "Source unavailable"}</div>
+        {diff.source?.filing_type ? <div className="charts-metric-diff-source-detail">Type: {diff.source.filing_type}</div> : null}
+        {diff.source?.filing_date ? <div className="charts-metric-diff-source-detail">Date: {formatDate(diff.source.filing_date)}</div> : null}
+        {diff.source?.detail ? <div className="charts-metric-diff-source-detail">{diff.source.detail}</div> : null}
+      </div>
+      {diff.previous_value_missing ? <div className="charts-metric-diff-note">Previous value is missing, so absolute and percentage deltas are unavailable.</div> : null}
+      {diff.stale_cache ? <div className="charts-metric-diff-note">Snapshot cache is stale, so this explanation may lag newly filed updates.</div> : null}
+    </Dialog>
+  );
+}
+
+function MetricDiffCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="charts-metric-diff-cell">
+      <div className="charts-metric-diff-label">{label}</div>
+      <div className="charts-metric-diff-value">{value}</div>
+    </div>
+  );
+}
+
 function MetricChartCard({
   card,
   palette,
   className,
   overlayEvents,
   enabledEventTypes,
+  metricDiff,
+  onOpenMetricDiff,
 }: {
   card: CompanyChartsCardPayload;
   palette: string[];
   className?: string;
   overlayEvents: CompanyChartsEventPayload[];
   enabledEventTypes: string[];
+  metricDiff: CompanyChartsMetricDiffPayload | null;
+  onOpenMetricDiff: (diff: CompanyChartsMetricDiffPayload) => void;
 }) {
   const rows = useMemo(
     () => buildChartRows(card.series, overlayEvents, enabledEventTypes),
@@ -492,6 +554,16 @@ function MetricChartCard({
               </span>
             ))}
           </div>
+        ) : null}
+        {metricDiff ? (
+          <button
+            type="button"
+            className="charts-why-changed-button"
+            onClick={() => onOpenMetricDiff(metricDiff)}
+            aria-label={`Why changed ${card.title}`}
+          >
+            Why changed?
+          </button>
         ) : null}
       </div>
 
@@ -737,6 +809,42 @@ function ForecastAssumptionsCard({ card }: { card: CompanyChartsAssumptionsCardP
     </section>
   );
 }
+
+function buildMetricDiffByCard(panel: CompanyChartsQuarterChangePayload): Map<string, CompanyChartsMetricDiffPayload> {
+  const map = new Map<string, CompanyChartsMetricDiffPayload>();
+  for (const item of panel.items) {
+    const diff = item.metric_diff;
+    if (!diff) {
+      continue;
+    }
+    const cardKeys = CARD_KEYS_BY_METRIC_DIFF[item.key] ?? [];
+    for (const cardKey of cardKeys) {
+      map.set(cardKey, diff);
+    }
+  }
+  return map;
+}
+
+function formatNullableValue(value: number | null): string {
+  if (value == null || Number.isNaN(value)) {
+    return "N/A";
+  }
+  return formatCompactNumber(value);
+}
+
+function formatSignedValue(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "N/A";
+  }
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatCompactNumber(value)}`;
+}
+
+const CARD_KEYS_BY_METRIC_DIFF: Record<string, string[]> = {
+  revenue_delta: ["revenue", "revenue_growth", "revenue_outlook_bridge"],
+  eps_delta: ["eps", "profit_metric", "margin_path"],
+  fcf_delta: ["cash_flow_metric", "fcf_outlook"],
+};
 
 function buildChartRows(
   seriesList: CompanyChartsSeriesPayload[],

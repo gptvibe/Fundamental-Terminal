@@ -31,6 +31,9 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
+      - name: Run migration safety checks
+        run: python scripts/check_migration_safety.py
+
       - name: Run architecture boundary guard
         run: python scripts/check_architecture_boundaries.py
 
@@ -103,7 +106,7 @@ jobs:
 
       - name: Run frontend route stability tests
         working-directory: frontend
-        run: npm run test -- lib/api.routes.test.ts app/company/[ticker]/models/page.test.ts
+        run: npm run test -- lib/api.routes.test.ts lib/api.auth.test.ts next.config.test.ts app/company/[ticker]/models/page.test.ts
 
   model-evaluation-gate:
     name: Model Evaluation Gate

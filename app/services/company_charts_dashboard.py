@@ -36,6 +36,8 @@ from app.contracts.company_charts import (
     CompanyChartsMethodologyPayload,
     CompanyChartsProjectedRowPayload,
     CompanyChartsProjectionStudioPayload,
+    CompanyChartsMetricDiffPayload,
+    CompanyChartsMetricDiffSourcePayload,
     CompanyChartsQuarterChangeItemPayload,
     CompanyChartsQuarterChangePayload,
     CompanyChartsScheduleSectionPayload,
@@ -153,6 +155,16 @@ DEFAULT_ENABLED_CHART_EVENT_TYPES: tuple[str, ...] = (
     "restatement",
 )
 MAX_CHART_EVENTS = 18
+METRIC_DIFF_INPUT_FIELDS: dict[str, tuple[str, ...]] = {
+    "revenue": ("revenue",),
+    "eps": ("eps", "net_income", "weighted_average_diluted_shares"),
+    "free_cash_flow": ("free_cash_flow", "operating_cash_flow", "capex"),
+}
+METRIC_DIFF_RESTATEMENT_ALIASES: dict[str, tuple[str, ...]] = {
+    "revenue": ("revenue",),
+    "eps": ("eps", "diluted_eps", "net_income", "weighted_average_diluted_shares"),
+    "free_cash_flow": ("free_cash_flow", "operating_cash_flow", "capex"),
+}
 
 
 def get_company_charts_dashboard_snapshot(session: Session, company_id: int, *, as_of: datetime | None = None, schema_version: str = CHARTS_DASHBOARD_SCHEMA_VERSION) -> CompanyChartsDashboardSnapshot | None:
@@ -339,6 +351,8 @@ def build_company_charts_dashboard_response(
         annuals=annuals,
         event_overlay=event_overlay,
         forecast_state=forecast_state,
+        snapshot=snapshot,
+        restatements=restatements,
     )
     what_if_payload = (
         _build_company_charts_what_if_payload(baseline_driver_bundle, driver_bundle)
@@ -1171,6 +1185,8 @@ def _build_quarter_change_payload(
     annuals: list[Any],
     event_overlay: CompanyChartsEventOverlayPayload,
     forecast_state: dict[str, Any],
+    snapshot: Any,
+    restatements: list[Any],
 ) -> CompanyChartsQuarterChangePayload:
     if len(annuals) < 2:
         return CompanyChartsQuarterChangePayload(
@@ -1190,21 +1206,33 @@ def _build_quarter_change_payload(
     fcf_prior = _statement_value(prior, "free_cash_flow")
 
     items: list[CompanyChartsQuarterChangeItemPayload] = []
-    for key, label, current_value, previous_value in (
-        ("revenue_delta", "Revenue", revenue_latest, revenue_prior),
-        ("eps_delta", "EPS", eps_latest, eps_prior),
-        ("fcf_delta", "Free cash flow", fcf_latest, fcf_prior),
+    for key, label, metric_key, current_value, previous_value in (
+        ("revenue_delta", "Revenue", "revenue", revenue_latest, revenue_prior),
+        ("eps_delta", "EPS", "eps", eps_latest, eps_prior),
+        ("fcf_delta", "Free cash flow", "free_cash_flow", fcf_latest, fcf_prior),
     ):
+        if current_value is None:
+            continue
         delta = _safe_diff(current_value, previous_value)
         change = _growth_rate(current_value, previous_value)
-        if delta is None:
-            continue
+        metric_diff = _build_metric_diff_payload(
+            metric_key=metric_key,
+            metric_label=label,
+            current_value=current_value,
+            previous_value=previous_value,
+            latest_statement=latest,
+            prior_statement=prior,
+            restatements=restatements,
+            snapshot=snapshot,
+        )
+        value_text = _format_delta(delta, change) if delta is not None else "No prior comparable value"
         items.append(
             CompanyChartsQuarterChangeItemPayload(
                 key=key,
                 label=label,
-                value=_format_delta(delta, change),
+                value=value_text,
                 detail=f"{latest_label} vs {prior_label}",
+                metric_diff=metric_diff,
             )
         )
 
@@ -1400,6 +1428,129 @@ def _format_delta(delta: float, change: float | None) -> str:
     if change is None:
         return f"{direction}${magnitude}"
     return f"{direction}${magnitude} ({_pct(change)})"
+
+
+def _build_metric_diff_payload(
+    *,
+    metric_key: str,
+    metric_label: str,
+    current_value: float,
+    previous_value: float | None,
+    latest_statement: Any,
+    prior_statement: Any,
+    restatements: list[Any],
+    snapshot: Any,
+) -> CompanyChartsMetricDiffPayload:
+    restatement_record = _find_metric_restatement(metric_key, restatements, latest_statement, prior_statement)
+    stale_cache = getattr(snapshot, "cache_state", None) not in {None, "fresh"}
+    changed_input_fields = _resolve_metric_diff_input_fields(metric_key, restatement_record)
+
+    source = _build_metric_diff_source(
+        metric_key=metric_key,
+        latest_statement=latest_statement,
+        prior_statement=prior_statement,
+        restatement=restatement_record,
+        stale_cache=stale_cache,
+        snapshot=snapshot,
+    )
+    absolute_change = _safe_diff(current_value, previous_value)
+    percentage_change = _growth_rate(current_value, previous_value)
+    return CompanyChartsMetricDiffPayload(
+        metric_key=metric_key,
+        metric_label=metric_label,
+        previous_value=_round(previous_value, 4) if previous_value is not None else None,
+        current_value=_round(current_value, 4),
+        absolute_change=_round(absolute_change, 4) if absolute_change is not None else None,
+        percentage_change=_round(percentage_change, 6) if percentage_change is not None else None,
+        previous_value_missing=previous_value is None,
+        stale_cache=stale_cache,
+        changed_input_fields=changed_input_fields,
+        source=source,
+    )
+
+
+def _resolve_metric_diff_input_fields(metric_key: str, restatement: Any | None) -> list[str]:
+    fields: list[str] = list(METRIC_DIFF_INPUT_FIELDS.get(metric_key, (metric_key,)))
+    if restatement is None:
+        return fields
+
+    changed_keys = {
+        str(item).strip().lower()
+        for item in (getattr(restatement, "changed_metric_keys", None) or [])
+        if str(item).strip()
+    }
+    aliases = set(METRIC_DIFF_RESTATEMENT_ALIASES.get(metric_key, (metric_key,)))
+    restated_fields = sorted(changed_keys.intersection(aliases))
+    for field in restated_fields:
+        if field not in fields:
+            fields.append(field)
+    return fields
+
+
+def _find_metric_restatement(metric_key: str, restatements: list[Any], latest_statement: Any, prior_statement: Any) -> Any | None:
+    aliases = set(METRIC_DIFF_RESTATEMENT_ALIASES.get(metric_key, (metric_key,)))
+    relevant_years = {
+        getattr(latest_statement, "period_end", None).year if getattr(latest_statement, "period_end", None) is not None else None,
+        getattr(prior_statement, "period_end", None).year if getattr(prior_statement, "period_end", None) is not None else None,
+    }
+    latest_match: tuple[datetime, Any] | None = None
+    for record in restatements:
+        changed_keys = {
+            str(item).strip().lower()
+            for item in (getattr(record, "changed_metric_keys", None) or [])
+            if str(item).strip()
+        }
+        if changed_keys and aliases.isdisjoint(changed_keys):
+            continue
+        period_end = getattr(record, "period_end", None)
+        if period_end is not None and period_end.year not in relevant_years:
+            continue
+        event_time = _normalize_datetime(getattr(record, "filing_acceptance_at", None)) or datetime.min.replace(tzinfo=timezone.utc)
+        if latest_match is None or event_time > latest_match[0]:
+            latest_match = (event_time, record)
+    return latest_match[1] if latest_match is not None else None
+
+
+def _build_metric_diff_source(
+    *,
+    metric_key: str,
+    latest_statement: Any,
+    prior_statement: Any,
+    restatement: Any | None,
+    stale_cache: bool,
+    snapshot: Any,
+) -> CompanyChartsMetricDiffSourcePayload:
+    if restatement is not None:
+        filing_date = _restatement_event_date(restatement)
+        filing_type = _to_str_or_none(getattr(restatement, "filing_type", None)) or "10-K/A"
+        changed_keys = [str(item) for item in (getattr(restatement, "changed_metric_keys", None) or []) if str(item).strip()]
+        detail = f"Restated fields: {', '.join(changed_keys[:4])}" if changed_keys else "Restatement filing updated prior reported values."
+        return CompanyChartsMetricDiffSourcePayload(
+            source_id="sec_edgar",
+            source_label="SEC restatement filing",
+            filing_type=filing_type,
+            filing_date=filing_date,
+            detail=detail,
+        )
+
+    latest_period = getattr(latest_statement, "period_end", None)
+    prior_period = getattr(prior_statement, "period_end", None)
+    filing_type = _to_str_or_none(getattr(latest_statement, "filing_type", None))
+    detail = None
+    if latest_period is not None and prior_period is not None:
+        detail = f"{filing_type or 'Official filing'} for FY{latest_period.year} versus FY{prior_period.year}."
+    if stale_cache:
+        checked_at = _normalize_datetime(getattr(snapshot, "last_checked", None))
+        cache_note = f" Cache state is stale as of {checked_at.date().isoformat()}." if checked_at is not None else " Cache state is stale."
+        detail = (detail or "") + cache_note
+
+    return CompanyChartsMetricDiffSourcePayload(
+        source_id="sec_companyfacts",
+        source_label="Official filing snapshot",
+        filing_type=filing_type,
+        filing_date=latest_period,
+        detail=detail,
+    )
 
 
 def _to_str_or_none(value: Any) -> str | None:

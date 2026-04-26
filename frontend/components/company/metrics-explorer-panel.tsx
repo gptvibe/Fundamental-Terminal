@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useJobStream } from "@/hooks/use-job-stream";
+import { MetricConfidenceBadge, type MetricConfidenceMetadata } from "@/components/ui/metric-confidence-badge";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { getCompanyDerivedMetricsSummary, invalidateApiReadCacheForTicker } from "@/lib/api";
@@ -96,6 +97,7 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
     payload?.company?.regulated_entity && (BANK_DISPLAY_KEYS as readonly string[]).some((key) => metricMap.has(key))
   );
   const displayKeys = bankMode ? BANK_DISPLAY_KEYS : GENERAL_DISPLAY_KEYS;
+  const metricsAreStale = Boolean(payload?.staleness_reason);
 
   if (loading) {
     return <div className="text-muted">Loading derived metrics explorer...</div>;
@@ -136,18 +138,28 @@ export function MetricsExplorerPanel({ ticker, reloadKey }: MetricsExplorerPanel
       <div className="metric-grid">
         {displayKeys.map((key) => {
           const metric = metricMap.get(key);
-          return <MetricValueCard key={key} metricKey={key} metric={metric} />;
+          return <MetricValueCard key={key} metricKey={key} metric={metric} metricsAreStale={metricsAreStale} />;
         })}
       </div>
     </div>
   );
 }
 
-function MetricValueCard({ metricKey, metric }: { metricKey: string; metric?: DerivedMetricValuePayload }) {
+function MetricValueCard({
+  metricKey,
+  metric,
+  metricsAreStale,
+}: {
+  metricKey: string;
+  metric?: DerivedMetricValuePayload;
+  metricsAreStale: boolean;
+}) {
   const value = metric?.metric_value;
-  const unit = String(metric?.provenance?.unit ?? "").toLowerCase();
+  const provenance = asRecord(metric?.provenance);
+  const unit = String(provenance.unit ?? "").toLowerCase();
   const isPercent = unit === "ratio" && metricKey !== "current_ratio" && metricKey !== "cash_ratio";
   const label = metric?.metric_key ? metric.metric_key.replaceAll("_", " ") : metricKey.replaceAll("_", " ");
+  const confidence = buildMetricConfidenceMetadata(metric, provenance, metricsAreStale);
 
   return (
     <div className="metric-card">
@@ -155,6 +167,7 @@ function MetricValueCard({ metricKey, metric }: { metricKey: string; metric?: De
         <MetricLabel label={label} metricKey={metric?.metric_key ?? metricKey} />
       </div>
       <div className="metric-value">{formatMetricValue(value, isPercent)}</div>
+      {confidence ? <MetricConfidenceBadge metadata={confidence} /> : null}
       {metric?.quality_flags?.length ? (
         <div className="text-muted" style={{ fontSize: 11 }}>
           {metric.quality_flags.join(", ")}
@@ -162,6 +175,64 @@ function MetricValueCard({ metricKey, metric }: { metricKey: string; metric?: De
       ) : null}
     </div>
   );
+}
+
+function buildMetricConfidenceMetadata(
+  metric: DerivedMetricValuePayload | undefined,
+  provenance: Record<string, unknown>,
+  metricsAreStale: boolean
+): MetricConfidenceMetadata | null {
+  if (!metric) {
+    return null;
+  }
+
+  const source = asString(
+    provenance.source_key ?? provenance.statement_source ?? provenance.price_source ?? provenance.source
+  );
+  const formulaVersion = asString(provenance.formula_version);
+  const missingInputs = asStringArray(provenance.missing_inputs);
+  const qualityFlags = metric.quality_flags ?? [];
+  const fallbackUsed =
+    asBoolean(provenance.fallback_used) ??
+    qualityFlags.some((flag) => flag.includes("fallback")) ??
+    false;
+
+  return {
+    freshness: metricsAreStale ? "stale" : "fresh",
+    source,
+    formulaVersion,
+    missingInputsCount: missingInputs.length,
+    missingInputs,
+    proxyUsed: metric.is_proxy,
+    fallbackUsed,
+    qualityFlags,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function formatMetricValue(value: number | null | undefined, isPercent: boolean): string {

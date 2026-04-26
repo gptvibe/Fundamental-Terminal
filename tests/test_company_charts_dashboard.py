@@ -1339,6 +1339,104 @@ def test_build_company_charts_dashboard_response_event_overlay_sparse_fallback(m
     assert response.quarter_change.empty_state is None
 
 
+def test_build_metric_diff_payload_prefers_restatement_source() -> None:
+    latest = _statement(2025, {"revenue": 1200.0})
+    prior = _statement(2024, {"revenue": 1000.0})
+    restatement = SimpleNamespace(
+        filing_acceptance_at=datetime(2026, 2, 8, tzinfo=timezone.utc),
+        filing_date=date(2026, 2, 8),
+        filing_type="10-K/A",
+        period_end=date(2024, 12, 31),
+        changed_metric_keys=["revenue", "net_income"],
+    )
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+
+    payload = charts_service._build_metric_diff_payload(
+        metric_key="revenue",
+        metric_label="Revenue",
+        current_value=1200.0,
+        previous_value=1000.0,
+        latest_statement=latest,
+        prior_statement=prior,
+        restatements=[restatement],
+        snapshot=snapshot,
+    )
+
+    assert payload.absolute_change == pytest.approx(200.0)
+    assert payload.percentage_change == pytest.approx(0.2)
+    assert payload.source is not None
+    assert payload.source.source_label == "SEC restatement filing"
+    assert payload.source.filing_type == "10-K/A"
+    assert "revenue" in payload.changed_input_fields
+
+
+def test_build_metric_diff_payload_uses_latest_filing_source_for_new_filing() -> None:
+    latest = _statement(2025, {"eps": 2.4})
+    prior = _statement(2024, {"eps": 2.0})
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+
+    payload = charts_service._build_metric_diff_payload(
+        metric_key="eps",
+        metric_label="EPS",
+        current_value=2.4,
+        previous_value=2.0,
+        latest_statement=latest,
+        prior_statement=prior,
+        restatements=[],
+        snapshot=snapshot,
+    )
+
+    assert payload.source is not None
+    assert payload.source.source_id == "sec_companyfacts"
+    assert payload.source.source_label == "Official filing snapshot"
+    assert payload.source.filing_type == "10-K"
+    assert payload.previous_value_missing is False
+
+
+def test_build_metric_diff_payload_marks_stale_cache() -> None:
+    latest = _statement(2025, {"free_cash_flow": 180.0})
+    prior = _statement(2024, {"free_cash_flow": 150.0})
+    snapshot = SimpleNamespace(cache_state="stale", last_checked=datetime(2026, 4, 10, tzinfo=timezone.utc))
+
+    payload = charts_service._build_metric_diff_payload(
+        metric_key="free_cash_flow",
+        metric_label="Free cash flow",
+        current_value=180.0,
+        previous_value=150.0,
+        latest_statement=latest,
+        prior_statement=prior,
+        restatements=[],
+        snapshot=snapshot,
+    )
+
+    assert payload.stale_cache is True
+    assert payload.source is not None
+    assert payload.source.detail is not None
+    assert "stale" in payload.source.detail.lower()
+
+
+def test_build_metric_diff_payload_handles_missing_previous_value() -> None:
+    latest = _statement(2025, {"revenue": 980.0})
+    prior = _statement(2024, {"revenue": None})
+    snapshot = SimpleNamespace(cache_state="fresh", last_checked=datetime(2026, 4, 12, tzinfo=timezone.utc))
+
+    payload = charts_service._build_metric_diff_payload(
+        metric_key="revenue",
+        metric_label="Revenue",
+        current_value=980.0,
+        previous_value=None,
+        latest_statement=latest,
+        prior_statement=prior,
+        restatements=[],
+        snapshot=snapshot,
+    )
+
+    assert payload.previous_value_missing is True
+    assert payload.previous_value is None
+    assert payload.absolute_change is None
+    assert payload.percentage_change is None
+
+
 def test_build_company_charts_dashboard_response_applies_what_if_overrides_and_surfaces_trace_metadata(monkeypatch):
     company = SimpleNamespace(
         id=1,

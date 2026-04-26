@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import argparse
 import json
 import logging
 import statistics
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -16,12 +16,14 @@ from urllib.parse import urlencode
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import app.main as main_module
+from app.api.handlers import _shared as shared_handlers
 from app.db import get_db_session
 from app.main import app
 from app.services.hot_cache import shared_hot_response_cache
@@ -337,19 +339,32 @@ def _run_hot_endpoint_suite(*, rounds: int) -> dict[str, Any]:
 
 
 def _run_company_brief_suite(*, concurrency: int, requests_per_worker: int) -> dict[str, Any]:
+    return asyncio.run(
+        _run_company_brief_suite_async(
+            concurrency=concurrency,
+            requests_per_worker=requests_per_worker,
+        )
+    )
+
+
+async def _run_company_brief_suite_async(*, concurrency: int, requests_per_worker: int) -> dict[str, Any]:
     request_path = "/api/companies/AAPL/brief"
-    _clear_benchmark_caches()
+    await _clear_benchmark_caches_async()
     with _override_db_session():
-        with TestClient(app) as client:
-            response = client.get(request_path)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+            response = await client.get(request_path)
             if response.status_code >= 500:
                 raise RuntimeError(f"Warm-up request failed for company brief with status {response.status_code}")
+            warmup_responses = await asyncio.gather(*[client.get(request_path) for _ in range(concurrency)])
+            if any(response.status_code >= 500 for response in warmup_responses):
+                raise RuntimeError("Concurrent warm-up request failed for company brief")
 
-        worker_results: list[dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=concurrency) as executor:
-            futures = [executor.submit(_brief_worker, request_path, requests_per_worker) for _ in range(concurrency)]
-            for future in futures:
-                worker_results.append(future.result())
+        worker_results = await asyncio.gather(
+            *[
+                _brief_async_worker(request_path, requests_per_worker)
+                for _ in range(concurrency)
+            ]
+        )
 
     combined = _combine_measurements(worker_results)
     combined["name"] = "company_brief_ready"
@@ -365,13 +380,6 @@ def _run_company_brief_suite(*, concurrency: int, requests_per_worker: int) -> d
         },
         "results": [combined],
     }
-
-
-def _brief_worker(path: str, requests_per_worker: int) -> dict[str, Any]:
-    with TestClient(app) as client:
-        return _run_client_loop(client, path, requests=requests_per_worker)
-
-
 def _run_sequential_case(client: TestClient, name: str, path: str, *, rounds: int) -> dict[str, Any]:
     measurements = _run_client_loop(client, path, requests=rounds)
     measurements["name"] = name
@@ -391,6 +399,25 @@ def _run_client_loop(client: TestClient, path: str, *, requests: int) -> dict[st
         payload_sizes.append(len(response.content))
         status_codes.append(int(response.status_code))
     return _summarize_measurements(durations_ms, payload_sizes, status_codes)
+
+
+async def _run_async_client_loop(client: AsyncClient, path: str, *, requests: int) -> dict[str, Any]:
+    durations_ms: list[float] = []
+    payload_sizes: list[int] = []
+    status_codes: list[int] = []
+    for _ in range(requests):
+        started = time.perf_counter()
+        response = await client.get(path)
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        durations_ms.append(elapsed_ms)
+        payload_sizes.append(len(response.content))
+        status_codes.append(int(response.status_code))
+    return _summarize_measurements(durations_ms, payload_sizes, status_codes)
+
+
+async def _brief_async_worker(path: str, requests_per_worker: int) -> dict[str, Any]:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        return await _run_async_client_loop(client, path, requests=requests_per_worker)
 
 
 def _combine_measurements(measurements: list[dict[str, Any]]) -> dict[str, Any]:
@@ -471,6 +498,12 @@ def _override_db_session() -> Iterator[None]:
         app.dependency_overrides.pop(get_db_session, None)
 
 
+def _patch_benchmark_targets(stack: ExitStack, attribute: str, replacement: object) -> None:
+    for module in (main_module, shared_handlers):
+        if hasattr(module, attribute):
+            stack.enter_context(patch.object(module, attribute, replacement))
+
+
 @contextmanager
 def _synthetic_benchmark_environment() -> Iterator[None]:
     snapshot = _snapshot()
@@ -549,23 +582,21 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
     ]
 
     with ExitStack() as stack:
-        stack.enter_context(patch.object(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: []))
-        stack.enter_context(patch.object(main_module, "search_company_snapshots", lambda *_args, **_kwargs: [snapshot]))
-        stack.enter_context(patch.object(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot))
-        stack.enter_context(patch.object(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: snapshot))
-        stack.enter_context(patch.object(main_module, "_trigger_refresh", _fresh_trigger))
-        stack.enter_context(patch.object(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot))
-        stack.enter_context(patch.object(main_module, "get_company_financials", lambda *_args, **_kwargs: [financial_statement]))
-        stack.enter_context(patch.object(main_module, "get_company_price_history", lambda *_args, **_kwargs: [price_point]))
-        stack.enter_context(
-            patch.object(
-                main_module,
-                "get_company_price_cache_status",
-                lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"),
-            )
+        _patch_benchmark_targets(stack, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
+        _patch_benchmark_targets(stack, "search_company_snapshots", lambda *_args, **_kwargs: [snapshot])
+        _patch_benchmark_targets(stack, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+        _patch_benchmark_targets(stack, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: snapshot)
+        _patch_benchmark_targets(stack, "_trigger_refresh", _fresh_trigger)
+        _patch_benchmark_targets(stack, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+        _patch_benchmark_targets(stack, "get_company_financials", lambda *_args, **_kwargs: [financial_statement])
+        _patch_benchmark_targets(stack, "get_company_price_history", lambda *_args, **_kwargs: [price_point])
+        _patch_benchmark_targets(
+            stack,
+            "get_company_price_cache_status",
+            lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"),
         )
-        stack.enter_context(patch.object(main_module, "_refresh_for_financial_page", _fresh_refresh_for_snapshot))
-        stack.enter_context(patch.object(main_module, "_refresh_for_snapshot", _fresh_refresh_for_snapshot))
+        _patch_benchmark_targets(stack, "_refresh_for_financial_page", _fresh_refresh_for_snapshot)
+        _patch_benchmark_targets(stack, "_refresh_for_snapshot", _fresh_refresh_for_snapshot)
         stack.enter_context(
             patch.object(
                 main_module.ModelEngine,
@@ -573,19 +604,17 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
                 lambda *_args, **_kwargs: [SimpleNamespace(cached=True)],
             )
         )
-        stack.enter_context(patch.object(main_module, "get_company_models", lambda *_args, **_kwargs: [model_payload]))
-        stack.enter_context(patch.object(main_module, "build_peer_comparison", lambda *_args, **_kwargs: peer_payload))
-        stack.enter_context(patch.object(main_module, "build_metrics_timeseries", lambda *_args, **_kwargs: metrics_timeseries_payload))
-        stack.enter_context(
-            patch.object(
-                main_module,
-                "get_company_research_brief_snapshot",
-                lambda *_args, **_kwargs: SimpleNamespace(payload=brief_payload),
-            )
+        _patch_benchmark_targets(stack, "get_company_models", lambda *_args, **_kwargs: [model_payload])
+        _patch_benchmark_targets(stack, "build_peer_comparison", lambda *_args, **_kwargs: peer_payload)
+        _patch_benchmark_targets(stack, "build_metrics_timeseries", lambda *_args, **_kwargs: metrics_timeseries_payload)
+        _patch_benchmark_targets(
+            stack,
+            "get_company_research_brief_snapshot",
+            lambda *_args, **_kwargs: SimpleNamespace(payload=brief_payload),
         )
-        stack.enter_context(patch.object(main_module, "_visible_financials_for_company", lambda *_args, **_kwargs: [financial_statement]))
-        stack.enter_context(patch.object(main_module, "_visible_price_history", lambda *_args, **_kwargs: [price_point]))
-        stack.enter_context(patch.object(main_module, "_load_company_brief_filing_timeline", lambda *_args, **_kwargs: filing_timeline))
+        _patch_benchmark_targets(stack, "_visible_financials_for_company", lambda *_args, **_kwargs: [financial_statement])
+        _patch_benchmark_targets(stack, "_visible_price_history", lambda *_args, **_kwargs: [price_point])
+        _patch_benchmark_targets(stack, "_load_company_brief_filing_timeline", lambda *_args, **_kwargs: filing_timeline)
         yield
 
 
@@ -593,6 +622,11 @@ def _clear_benchmark_caches() -> None:
     main_module._search_response_cache.clear()
     main_module._hot_response_cache.clear()
     shared_hot_response_cache.clear_sync()
+
+
+async def _clear_benchmark_caches_async() -> None:
+    main_module._search_response_cache.clear()
+    await shared_hot_response_cache.clear()
 
 
 def _snapshot() -> SimpleNamespace:
@@ -681,9 +715,9 @@ def _build_brief_payload(
     filing_timeline: list[Any],
 ) -> dict[str, Any]:
     with ExitStack() as stack:
-        stack.enter_context(patch.object(main_module, "_visible_financials_for_company", lambda *_args, **_kwargs: [financial_statement]))
-        stack.enter_context(patch.object(main_module, "_visible_price_history", lambda *_args, **_kwargs: [price_point]))
-        stack.enter_context(patch.object(main_module, "_load_company_brief_filing_timeline", lambda *_args, **_kwargs: filing_timeline))
+        _patch_benchmark_targets(stack, "_visible_financials_for_company", lambda *_args, **_kwargs: [financial_statement])
+        _patch_benchmark_targets(stack, "_visible_price_history", lambda *_args, **_kwargs: [price_point])
+        _patch_benchmark_targets(stack, "_load_company_brief_filing_timeline", lambda *_args, **_kwargs: filing_timeline)
         response = main_module._build_company_brief_bootstrap_for_snapshot(
             object(),
             snapshot,

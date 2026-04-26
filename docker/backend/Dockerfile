@@ -13,6 +13,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY app ./app
 COPY docker/backend ./docker/backend
+COPY scripts/check_migration_safety.py ./scripts/check_migration_safety.py
 COPY README.md ./README.md
 
 RUN sed -i 's/\r$//' /app/docker/backend/*.sh && \

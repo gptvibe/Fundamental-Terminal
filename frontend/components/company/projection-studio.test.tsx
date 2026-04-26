@@ -1076,7 +1076,7 @@ describe("ProjectionStudio", () => {
         override_count: 1,
         forecast_year: 2026,
         as_of: null,
-        overrides: { price_growth: 0.08 },
+        overrides: { price_growth: 0.08, legacy_override: 0.25 },
         metrics: [{ key: "revenue", label: "Revenue", unit: "usd", value: 1300 }],
         share_path: "/company/ACME/charts?mode=studio&scenario=remote-2",
         cloned_from_scenario_id: null,

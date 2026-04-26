@@ -12,7 +12,7 @@ from hashlib import sha256
 from typing import Any, Awaitable, Callable
 
 from app.config import settings
-from app.observability import emit_structured_log
+from app.observability import emit_structured_log, observe_redis_call, record_cache_event, record_singleflight_wait
 
 logger = logging.getLogger(__name__)
 
@@ -116,14 +116,17 @@ class SharedHotResponseCache:
         if lookup is None:
             await self._record_metric(resolved_route, "requests")
             await self._record_metric(resolved_route, "misses")
+            record_cache_event("hot_response", "miss")
             return None
 
         await self._record_metric(resolved_route, "requests")
         if lookup.is_fresh:
             await self._record_metric(resolved_route, "hit_fresh")
+            record_cache_event("hot_response", "hit")
         else:
             await self._record_metric(resolved_route, "hit_stale")
             await self._record_metric(resolved_route, "stale_served")
+            record_cache_event("hot_response", "stale")
         return lookup
 
     async def store(
@@ -158,6 +161,10 @@ class SharedHotResponseCache:
                 return
             except RedisError as exc:
                 self._note_runtime_fallback(operation="store", exc=exc)
+            except RuntimeError as exc:
+                if not _is_closed_event_loop_runtime_error(exc):
+                    raise
+                self._note_runtime_fallback(operation="store", exc=exc)
 
         await self._store_local(
             logical_key,
@@ -187,6 +194,7 @@ class SharedHotResponseCache:
         leader, inflight = await self._acquire_local_inflight(logical_key)
         if not leader:
             await self._record_metric(resolved_route, "coalesced_waits")
+            wait_started_at = time.perf_counter()
             try:
                 await asyncio.wait_for(inflight.event.wait(), timeout=settings.hot_response_cache_singleflight_wait_seconds)
             except asyncio.TimeoutError:
@@ -195,7 +203,10 @@ class SharedHotResponseCache:
                 if inflight.error is not None:
                     raise inflight.error
                 if inflight.result is not None:
+                    record_singleflight_wait((time.perf_counter() - wait_started_at) * 1000.0)
                     return inflight.result
+
+            record_singleflight_wait((time.perf_counter() - wait_started_at) * 1000.0)
 
             cached = await self._read_entry(logical_key)
             if cached is not None:
@@ -238,6 +249,11 @@ class SharedHotResponseCache:
             try:
                 deleted = await self._invalidate_remote_async(tags)
             except RedisError as exc:
+                self._note_runtime_fallback(operation="invalidate", exc=exc)
+                deleted = await self._invalidate_local(tags)
+            except RuntimeError as exc:
+                if not _is_closed_event_loop_runtime_error(exc):
+                    raise
                 self._note_runtime_fallback(operation="invalidate", exc=exc)
                 deleted = await self._invalidate_local(tags)
         else:
@@ -308,6 +324,18 @@ class SharedHotResponseCache:
                 await self._clear_remote_async()
             except RedisError as exc:
                 self._note_runtime_fallback(operation="clear", exc=exc)
+                try:
+                    self._clear_remote()
+                except RedisError:
+                    pass
+            except RuntimeError as exc:
+                if not _is_closed_event_loop_runtime_error(exc):
+                    raise
+                self._note_runtime_fallback(operation="clear", exc=exc)
+                try:
+                    self._clear_remote()
+                except RedisError:
+                    pass
 
     def clear_sync(self) -> None:
         self._run_async_compat(self.clear())
@@ -535,32 +563,51 @@ class SharedHotResponseCache:
         if self._redis is None or self._redis_async is None:
             return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
 
-        lock_token = await self._acquire_remote_lock_async(logical_key)
-        if lock_token is not None:
-            try:
+        try:
+            lock_token = await self._acquire_remote_lock_async(logical_key)
+            if lock_token is not None:
+                try:
+                    cached = await self._read_entry(logical_key)
+                    if cached is not None:
+                        return _decode_lookup_payload(cached)
+                    return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
+                finally:
+                    try:
+                        await self._release_remote_lock_async(logical_key, lock_token)
+                    except RuntimeError as exc:
+                        if not _is_closed_event_loop_runtime_error(exc):
+                            raise
+                        self._note_runtime_fallback(operation="singleflight_release", exc=exc)
+
+            deadline = time.monotonic() + settings.hot_response_cache_singleflight_wait_seconds
+            while time.monotonic() < deadline:
                 cached = await self._read_entry(logical_key)
                 if cached is not None:
                     return _decode_lookup_payload(cached)
-                return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
-            finally:
-                await self._release_remote_lock_async(logical_key, lock_token)
-
-        deadline = time.monotonic() + settings.hot_response_cache_singleflight_wait_seconds
-        while time.monotonic() < deadline:
-            cached = await self._read_entry(logical_key)
-            if cached is not None:
-                return _decode_lookup_payload(cached)
-            if not await self._remote_lock_exists_async(logical_key):
-                lock_token = await self._acquire_remote_lock_async(logical_key)
-                if lock_token is not None:
-                    try:
-                        cached = await self._read_entry(logical_key)
-                        if cached is not None:
-                            return _decode_lookup_payload(cached)
-                        return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
-                    finally:
-                        await self._release_remote_lock_async(logical_key, lock_token)
-            await asyncio.sleep(settings.hot_response_cache_singleflight_poll_seconds)
+                if not await self._remote_lock_exists_async(logical_key):
+                    lock_token = await self._acquire_remote_lock_async(logical_key)
+                    if lock_token is not None:
+                        try:
+                            cached = await self._read_entry(logical_key)
+                            if cached is not None:
+                                return _decode_lookup_payload(cached)
+                            return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
+                        finally:
+                            try:
+                                await self._release_remote_lock_async(logical_key, lock_token)
+                            except RuntimeError as exc:
+                                if not _is_closed_event_loop_runtime_error(exc):
+                                    raise
+                                self._note_runtime_fallback(operation="singleflight_release", exc=exc)
+                await asyncio.sleep(settings.hot_response_cache_singleflight_poll_seconds)
+        except RedisError as exc:
+            self._note_runtime_fallback(operation="singleflight_coordination", exc=exc)
+            return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
+        except RuntimeError as exc:
+            if not _is_closed_event_loop_runtime_error(exc):
+                raise
+            self._note_runtime_fallback(operation="singleflight_coordination", exc=exc)
+            return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
 
         return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
 
@@ -602,26 +649,34 @@ class SharedHotResponseCache:
                 return await self._read_remote_async(logical_key)
             except RedisError as exc:
                 self._note_runtime_fallback(operation="read", exc=exc)
+            except RuntimeError as exc:
+                if not _is_closed_event_loop_runtime_error(exc):
+                    raise
+                self._note_runtime_fallback(operation="read", exc=exc)
         return await self._read_local(logical_key)
 
     def _read_remote(self, logical_key: str) -> HotCacheLookup | None:
         assert self._redis is not None
-        raw_record = self._redis.hgetall(self._record_key(logical_key))
+        with observe_redis_call():
+            raw_record = self._redis.hgetall(self._record_key(logical_key))
         if raw_record:
             return self._lookup_from_remote_record_sync(logical_key, raw_record)
 
-        raw_entry, raw_meta = self._redis.mget(self._entry_key(logical_key), self._meta_key(logical_key))
+        with observe_redis_call():
+            raw_entry, raw_meta = self._redis.mget(self._entry_key(logical_key), self._meta_key(logical_key))
         if raw_entry is None and raw_meta is None:
             return None
         return self._lookup_from_legacy_remote_sync(logical_key, raw_entry=raw_entry, raw_meta=raw_meta)
 
     async def _read_remote_async(self, logical_key: str) -> HotCacheLookup | None:
         assert self._redis_async is not None
-        raw_record = await self._redis_async.hgetall(self._record_key(logical_key))
+        with observe_redis_call():
+            raw_record = await self._redis_async.hgetall(self._record_key(logical_key))
         if raw_record:
             return await self._lookup_from_remote_record_async(logical_key, raw_record)
 
-        raw_entry, raw_meta = await self._redis_async.mget(self._entry_key(logical_key), self._meta_key(logical_key))
+        with observe_redis_call():
+            raw_entry, raw_meta = await self._redis_async.mget(self._entry_key(logical_key), self._meta_key(logical_key))
         if raw_entry is None and raw_meta is None:
             return None
         return await self._lookup_from_legacy_remote_async(logical_key, raw_entry=raw_entry, raw_meta=raw_meta)
@@ -703,7 +758,8 @@ class SharedHotResponseCache:
                 pipeline.srem(self._tag_key(previous_tag), logical_key)
         for tag in tags:
             pipeline.sadd(self._tag_key(tag), logical_key)
-        pipeline.execute()
+        with observe_redis_call():
+            pipeline.execute()
 
     async def _store_remote_async(
         self,
@@ -743,7 +799,8 @@ class SharedHotResponseCache:
                 pipeline.srem(self._tag_key(previous_tag), logical_key)
         for tag in tags:
             pipeline.sadd(self._tag_key(tag), logical_key)
-        await pipeline.execute()
+        with observe_redis_call():
+            await pipeline.execute()
 
     async def _store_local(
         self,
@@ -832,7 +889,8 @@ class SharedHotResponseCache:
 
     def _invalidate_remote(self, tags: tuple[str, ...]) -> int:
         assert self._redis is not None
-        logical_keys = self._resolve_remote_invalidation_keys(tags)
+        with observe_redis_call():
+            logical_keys = self._resolve_remote_invalidation_keys(tags)
         if not logical_keys:
             return 0
 
@@ -846,12 +904,14 @@ class SharedHotResponseCache:
             for tag in entry_tags:
                 pipeline.srem(self._tag_key(tag), logical_key)
             deleted += 1
-        pipeline.execute()
+        with observe_redis_call():
+            pipeline.execute()
         return deleted
 
     async def _invalidate_remote_async(self, tags: tuple[str, ...]) -> int:
         assert self._redis_async is not None
-        logical_keys = await self._resolve_remote_invalidation_keys_async(tags)
+        with observe_redis_call():
+            logical_keys = await self._resolve_remote_invalidation_keys_async(tags)
         if not logical_keys:
             return 0
 
@@ -866,7 +926,8 @@ class SharedHotResponseCache:
             for tag in entry_tags:
                 pipeline.srem(self._tag_key(tag), logical_key)
             deleted += 1
-        await pipeline.execute()
+        with observe_redis_call():
+            await pipeline.execute()
         for route in invalidated_routes:
             await self._record_metric(route, "invalidation_count")
         return deleted
@@ -1229,12 +1290,14 @@ class SharedHotResponseCache:
         keys_to_delete: list[Any] = []
         pattern = f"{self._namespace}:*"
         while True:
-            cursor, keys = await self._redis_async.scan(cursor=cursor, match=pattern, count=200)
+            with observe_redis_call():
+                cursor, keys = await self._redis_async.scan(cursor=cursor, match=pattern, count=200)
             keys_to_delete.extend(keys)
             if cursor == 0:
                 break
         if keys_to_delete:
-            await self._redis_async.delete(*keys_to_delete)
+            with observe_redis_call():
+                await self._redis_async.delete(*keys_to_delete)
 
     # New remote records live in one Redis hash per logical key. We still read and
     # clean up legacy entry/meta keys so existing caches stay valid during rollout.
@@ -1431,6 +1494,10 @@ class SharedHotResponseCache:
 
     def _route_registry_key(self) -> str:
         return f"{self._namespace}:routes"
+
+
+def _is_closed_event_loop_runtime_error(exc: RuntimeError) -> bool:
+    return "Event loop is closed" in str(exc)
 
 
 def _build_remote_record_mapping(

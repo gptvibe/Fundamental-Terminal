@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
-from statistics import median
+from dataclasses import dataclass
 from threading import Lock
 from time import perf_counter
 from typing import Any
@@ -17,7 +15,18 @@ from sqlalchemy.engine import Engine
 from starlette.responses import JSONResponse
 
 from app.config import settings
-from app.observability import emit_structured_log
+from app.observability import (
+    RequestObservation,
+    begin_request_observation,
+    complete_request_observation,
+    current_request_observation,
+    emit_structured_log,
+    end_request_observation,
+    observability_enabled,
+    record_sql_query,
+    reset_request_observations,
+    snapshot_request_observations,
+)
 
 try:
     import orjson
@@ -29,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 _SKIPPED_PATH_PREFIXES = (
     "/api/internal/performance-audit",
+    "/api/internal/observability",
     "/health",
 )
 _QUERY_PARAM_VALUE_ALLOWLIST = frozenset(
@@ -45,36 +55,18 @@ _QUERY_PARAM_VALUE_ALLOWLIST = frozenset(
 _REDACTED_QUERY_VALUE = "REDACTED"
 
 _REQUEST_RECORDS_LOCK = Lock()
-_REQUEST_RECORDS: list[dict[str, Any]] = []
 _INSTRUMENTED_ENGINES: set[int] = set()
-_CURRENT_REQUEST_METRICS: ContextVar[RequestMetrics | None] = ContextVar("performance_audit_request_metrics", default=None)
 
 
 @dataclass(slots=True)
-class RequestMetrics:
-    request_id: str
-    method: str
-    path: str
-    query_string: str
-    started_at: float
-    request_kind: str
-    route_path: str | None = None
-    status_code: int | None = None
-    duration_ms: float | None = None
-    sql_query_count: int = 0
-    sql_elapsed_ms: float = 0.0
-    serialization_ms: float = 0.0
-    response_bytes: int | None = None
-    error_type: str | None = None
-    notes: dict[str, Any] = field(default_factory=dict)
+class RequestMetrics(RequestObservation):
+    @property
+    def sql_query_count(self) -> int:
+        return self.db_query_count
 
-    def to_payload(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload["sql_elapsed_ms"] = round(self.sql_elapsed_ms, 3)
-        payload["serialization_ms"] = round(self.serialization_ms, 3)
-        if self.duration_ms is not None:
-            payload["duration_ms"] = round(self.duration_ms, 3)
-        return payload
+    @property
+    def sql_elapsed_ms(self) -> float:
+        return self.db_duration_ms
 
 
 class PerformanceAuditJSONResponse(JSONResponse):
@@ -86,7 +78,7 @@ class PerformanceAuditJSONResponse(JSONResponse):
             body = orjson.dumps(content)
         else:
             body = json.dumps(content, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        metrics = _CURRENT_REQUEST_METRICS.get()
+        metrics = current_request_observation()
         if metrics is not None:
             metrics.serialization_ms += (perf_counter() - started_at) * 1000.0
             metrics.response_bytes = len(body)
@@ -103,29 +95,47 @@ def should_skip_path(path: str) -> bool:
 
 def begin_request(request: Request) -> tuple[RequestMetrics, object]:
     raw_query_string = request.url.query
-    metrics = RequestMetrics(
+    metrics, token = begin_request_observation(
         request_id=str(uuid4()),
         method=request.method.upper(),
         path=request.url.path,
         query_string=_sanitize_query_string(request),
-        started_at=perf_counter(),
         request_kind=_classify_request_kind(request.method, request.url.path, raw_query_string),
     )
-    token = _CURRENT_REQUEST_METRICS.set(metrics)
-    return metrics, token
+    return RequestMetrics(
+        request_id=metrics.request_id,
+        method=metrics.method,
+        path=metrics.path,
+        query_string=metrics.query_string,
+        started_at=metrics.started_at,
+        request_kind=metrics.request_kind,
+        route_path=metrics.route_path,
+        status_code=metrics.status_code,
+        duration_ms=metrics.duration_ms,
+        db_query_count=metrics.db_query_count,
+        db_duration_ms=metrics.db_duration_ms,
+        redis_call_count=metrics.redis_call_count,
+        redis_duration_ms=metrics.redis_duration_ms,
+        cache_events=dict(metrics.cache_events),
+        singleflight_wait_count=metrics.singleflight_wait_count,
+        singleflight_wait_ms=metrics.singleflight_wait_ms,
+        upstream_request_count=metrics.upstream_request_count,
+        upstream_duration_ms=metrics.upstream_duration_ms,
+        upstream_sources=dict(metrics.upstream_sources),
+        serialization_ms=metrics.serialization_ms,
+        response_bytes=metrics.response_bytes,
+        error_type=metrics.error_type,
+    ), token
 
 
 def complete_request(request: Request, metrics: RequestMetrics, *, status_code: int | None, error_type: str | None = None) -> None:
-    metrics.status_code = status_code
-    metrics.error_type = error_type
     route = request.scope.get("route")
-    metrics.route_path = getattr(route, "path", None)
-    metrics.duration_ms = (perf_counter() - metrics.started_at) * 1000.0
-
-    with _REQUEST_RECORDS_LOCK:
-        _REQUEST_RECORDS.append(metrics.to_payload())
-        if len(_REQUEST_RECORDS) > settings.performance_audit_max_records:
-            del _REQUEST_RECORDS[: len(_REQUEST_RECORDS) - settings.performance_audit_max_records]
+    complete_request_observation(
+        metrics,
+        route_path=getattr(route, "path", None),
+        status_code=status_code,
+        error_type=error_type,
+    )
 
     emit_structured_log(
         logger,
@@ -138,20 +148,28 @@ def complete_request(request: Request, metrics: RequestMetrics, *, status_code: 
         request_kind=metrics.request_kind,
         status_code=metrics.status_code,
         duration_ms=round(metrics.duration_ms or 0.0, 3),
-        sql_query_count=metrics.sql_query_count,
-        sql_elapsed_ms=round(metrics.sql_elapsed_ms, 3),
+        sql_query_count=metrics.db_query_count,
+        sql_elapsed_ms=round(metrics.db_duration_ms, 3),
+        redis_call_count=metrics.redis_call_count,
+        redis_duration_ms=round(metrics.redis_duration_ms, 3),
+        singleflight_wait_count=metrics.singleflight_wait_count,
+        singleflight_wait_ms=round(metrics.singleflight_wait_ms, 3),
+        upstream_request_count=metrics.upstream_request_count,
+        upstream_duration_ms=round(metrics.upstream_duration_ms, 3),
         serialization_ms=round(metrics.serialization_ms, 3),
+        calculation_ms=round(metrics.calculation_ms, 3),
+        cache_events=metrics.cache_events,
         response_bytes=metrics.response_bytes,
         error_type=metrics.error_type,
     )
 
 
 def end_request(token: object) -> None:
-    _CURRENT_REQUEST_METRICS.reset(token)
+    end_request_observation(token)
 
 
 def install_sqlalchemy_instrumentation(engine: Engine) -> None:
-    if not is_enabled() or id(engine) in _INSTRUMENTED_ENGINES:
+    if not (is_enabled() or observability_enabled()) or id(engine) in _INSTRUMENTED_ENGINES:
         return
 
     @event.listens_for(engine, "before_cursor_execute")
@@ -185,31 +203,25 @@ def install_sqlalchemy_instrumentation(engine: Engine) -> None:
 
 
 def snapshot() -> dict[str, Any]:
-    with _REQUEST_RECORDS_LOCK:
-        records = [dict(record) for record in _REQUEST_RECORDS]
+    request_snapshot = snapshot_request_observations()
     return {
         "enabled": is_enabled(),
-        "record_count": len(records),
-        "records": records,
-        "route_summaries": _summarize_routes(records),
+        "observability_enabled": observability_enabled(),
+        "record_count": request_snapshot["record_count"],
+        "records": request_snapshot["records"],
+        "route_summaries": request_snapshot["route_summaries"],
     }
 
 
 def reset() -> dict[str, Any]:
-    with _REQUEST_RECORDS_LOCK:
-        cleared = len(_REQUEST_RECORDS)
-        _REQUEST_RECORDS.clear()
-    return {"enabled": is_enabled(), "cleared": cleared}
+    reset_payload = reset_request_observations()
+    return {"enabled": is_enabled(), "cleared": reset_payload["cleared"]}
 
 
 def _record_sql_timing(started_at: float | None) -> None:
     if started_at is None:
         return
-    metrics = _CURRENT_REQUEST_METRICS.get()
-    if metrics is None:
-        return
-    metrics.sql_query_count += 1
-    metrics.sql_elapsed_ms += (perf_counter() - started_at) * 1000.0
+    record_sql_query((perf_counter() - started_at) * 1000.0)
 
 
 def _sanitize_query_string(request: Request) -> str:
@@ -233,60 +245,3 @@ def _classify_request_kind(method: str, path: str, query_string: str) -> str:
     if "refresh=true" in normalized_query:
         return "refresh"
     return "read"
-
-
-def _percentile(values: list[float], quantile: float) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    index = max(0, min(len(ordered) - 1, round((len(ordered) - 1) * quantile)))
-    return ordered[index]
-
-
-def _summarize_routes(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for record in records:
-        route_path = str(record.get("route_path") or record.get("path") or "")
-        method = str(record.get("method") or "GET")
-        request_kind = str(record.get("request_kind") or "read")
-        grouped.setdefault((method, route_path, request_kind), []).append(record)
-
-    summaries: list[dict[str, Any]] = []
-    for (method, route_path, request_kind), route_records in grouped.items():
-        durations = [float(record.get("duration_ms") or 0.0) for record in route_records]
-        sql_counts = [int(record.get("sql_query_count") or 0) for record in route_records]
-        sql_elapsed = [float(record.get("sql_elapsed_ms") or 0.0) for record in route_records]
-        serialization = [float(record.get("serialization_ms") or 0.0) for record in route_records]
-        response_sizes = [int(record.get("response_bytes") or 0) for record in route_records if record.get("response_bytes") is not None]
-        summaries.append(
-            {
-                "method": method,
-                "route_path": route_path,
-                "request_kind": request_kind,
-                "count": len(route_records),
-                "latency_ms": {
-                    "p50": round(median(durations), 3),
-                    "p95": round(_percentile(durations, 0.95), 3),
-                    "max": round(max(durations), 3),
-                },
-                "sql_query_count": {
-                    "avg": round(sum(sql_counts) / len(sql_counts), 3),
-                    "max": max(sql_counts),
-                },
-                "sql_elapsed_ms": {
-                    "avg": round(sum(sql_elapsed) / len(sql_elapsed), 3),
-                    "p95": round(_percentile(sql_elapsed, 0.95), 3),
-                },
-                "serialization_ms": {
-                    "avg": round(sum(serialization) / len(serialization), 3),
-                    "p95": round(_percentile(serialization, 0.95), 3),
-                },
-                "response_bytes": {
-                    "avg": round(sum(response_sizes) / len(response_sizes), 3) if response_sizes else 0.0,
-                    "max": max(response_sizes) if response_sizes else 0,
-                },
-            }
-        )
-
-    summaries.sort(key=lambda item: (item["latency_ms"]["p95"], item["latency_ms"]["p50"]), reverse=True)
-    return summaries

@@ -2377,6 +2377,88 @@ export interface WatchlistCalendarResponse {
   events: WatchlistCalendarEventPayload[];
 }
 
+export interface ResearchWorkspaceSavedCompanyPayload {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  saved_at: string;
+  updated_at: string;
+}
+
+export interface ResearchWorkspaceNotePayload {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  note: string;
+  updated_at: string;
+}
+
+export interface ResearchWorkspacePinnedMetricPayload {
+  metric_key: string;
+  label: string | null;
+  updated_at: string;
+}
+
+export interface ResearchWorkspacePinnedChartPayload {
+  chart_key: string;
+  label: string | null;
+  updated_at: string;
+}
+
+export interface ResearchWorkspaceCompareBasketPayload {
+  basket_id: string;
+  name: string;
+  tickers: string[];
+  updated_at: string;
+}
+
+export interface ResearchWorkspacePayload {
+  workspace_key: string;
+  saved_companies: ResearchWorkspaceSavedCompanyPayload[];
+  notes: ResearchWorkspaceNotePayload[];
+  pinned_metrics: ResearchWorkspacePinnedMetricPayload[];
+  pinned_charts: ResearchWorkspacePinnedChartPayload[];
+  compare_baskets: ResearchWorkspaceCompareBasketPayload[];
+  memo_draft: string | null;
+  updated_at: string;
+}
+
+export interface ResearchWorkspaceUpsertRequest {
+  saved_companies: ResearchWorkspaceSavedCompanyPayload[];
+  notes: ResearchWorkspaceNotePayload[];
+  pinned_metrics: ResearchWorkspacePinnedMetricPayload[];
+  pinned_charts: ResearchWorkspacePinnedChartPayload[];
+  compare_baskets: ResearchWorkspaceCompareBasketPayload[];
+  memo_draft: string | null;
+}
+
+export interface ResearchWorkspaceDeleteResponse {
+  workspace_key: string;
+  deleted: boolean;
+  updated_at: string;
+}
+
+export interface ResearchWorkspaceLocalImportWatchlistItem {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  savedAt: string | null;
+}
+
+export interface ResearchWorkspaceLocalImportNotePayload {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  note: string;
+  updatedAt: string | null;
+}
+
+export interface ResearchWorkspaceImportLocalRequest {
+  watchlist: ResearchWorkspaceLocalImportWatchlistItem[];
+  notes: Record<string, ResearchWorkspaceLocalImportNotePayload>;
+  mode: "merge" | "replace";
+}
+
 export interface PeerOptionPayload {
   ticker: string;
   name: string;
@@ -2714,6 +2796,28 @@ export interface CompanyChartsQuarterChangeItemPayload {
   label: string;
   value: string;
   detail: string | null;
+  metric_diff?: CompanyChartsMetricDiffPayload | null;
+}
+
+export interface CompanyChartsMetricDiffSourcePayload {
+  source_id: string;
+  source_label: string;
+  filing_type: string | null;
+  filing_date: string | null;
+  detail: string | null;
+}
+
+export interface CompanyChartsMetricDiffPayload {
+  metric_key: string;
+  metric_label: string;
+  previous_value: number | null;
+  current_value: number | null;
+  absolute_change: number | null;
+  percentage_change: number | null;
+  previous_value_missing: boolean;
+  stale_cache: boolean;
+  changed_input_fields: string[];
+  source: CompanyChartsMetricDiffSourcePayload | null;
 }
 
 export interface CompanyChartsQuarterChangePayload {

@@ -7,7 +7,7 @@ from scripts.benchmark_hot_endpoints import build_cases
 from scripts.benchmark_market_profile_cache import benchmark_market_profile_cache
 from scripts.benchmark_model_computation import benchmark_models, build_benchmark_dataset
 from scripts.benchmark_refresh_service_reuse import benchmark_refresh_service_reuse
-from scripts.run_performance_regression_gate import build_baseline_payload, evaluate_summary_against_baseline
+from scripts.run_performance_regression_gate import build_baseline_payload, evaluate_summary_against_baseline, run_performance_benchmarks
 
 
 def test_hot_endpoint_benchmark_cases_cover_core_cached_routes() -> None:
@@ -160,3 +160,16 @@ def test_performance_regression_evaluator_flags_significant_latency_regression()
 
     assert evaluation["status"] == "regression"
     assert any(item["metric"] == "latency_ms.p95" for item in evaluation["failures"])
+
+
+def test_performance_regression_benchmarks_include_company_brief_suite() -> None:
+    summary = run_performance_benchmarks(
+        hot_rounds=1,
+        brief_concurrency=2,
+        brief_requests_per_worker=2,
+    )
+
+    suites = {suite["suite"]: suite for suite in summary["suites"]}
+    assert "company_brief_concurrency" in suites
+    assert suites["company_brief_concurrency"]["results"][0]["name"] == "company_brief_ready"
+    assert suites["company_brief_concurrency"]["results"][0]["request_count"] == 4

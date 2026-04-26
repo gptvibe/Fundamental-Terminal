@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.observability import reset_worker_observations, snapshot_worker_observations
 import app.worker as worker_module
 
 
@@ -20,6 +21,13 @@ class _FakeBroker:
         if self._jobs:
             return self._jobs.pop(0)
         return None
+
+    def heartbeat_worker(self, worker_id: str, *, state: str, current_job_id: str | None = None, ticker: str | None = None) -> None:
+        assert worker_id
+        assert state
+
+    def clear_worker_heartbeat(self, worker_id: str) -> None:
+        assert worker_id
 
 
 class _FakeThread:
@@ -100,3 +108,29 @@ def test_queue_worker_recreates_service_after_job_failure(monkeypatch) -> None:
     assert len(created_services) == 2
     assert created_services[0].close_calls == 1
     assert created_services[1].close_calls == 1
+
+
+def test_queue_worker_emits_failed_refresh_metric(monkeypatch) -> None:
+    reset_worker_observations()
+    created_services: list[_FakeService] = []
+
+    monkeypatch.setattr(worker_module, "status_broker", _FakeBroker([_job("job-1", ticker="AAPL"), None]))
+    monkeypatch.setattr(worker_module.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(
+        worker_module,
+        "EdgarIngestionService",
+        lambda: created_services.append(_FakeService(f"service-{len(created_services) + 1}")) or created_services[-1],
+    )
+
+    def _run_refresh_job(_identifier: str, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(worker_module, "run_refresh_job", _run_refresh_job)
+
+    result = worker_module.run_refresh_queue_worker(poll_interval_seconds=0.01, once=True)
+
+    assert result == 0
+    snapshot = snapshot_worker_observations()
+    assert snapshot["totals"]["failed_refresh_count"] == 1
+    assert snapshot["records"][0]["status"] == "failed"
+    assert snapshot["records"][0]["ticker"] == "AAPL"

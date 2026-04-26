@@ -14,12 +14,49 @@ import app.services.hot_cache as hot_cache_module
 from app.api.handlers import _shared as shared_handlers
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState
 from app.api.schemas.financials import CompanyFinancialsResponse
+from app.observability import begin_request_observation, complete_request_observation, end_request_observation, reset_request_observations, snapshot_request_observations
 from app.services.hot_cache import HotCacheLookup, SharedHotResponseCache, shared_hot_response_cache
 
 
 def _disable_remote(monkeypatch, cache: SharedHotResponseCache) -> None:
     monkeypatch.setattr(cache, "_redis", None)
     monkeypatch.setattr(cache, "_redis_async", None)
+
+
+def test_hot_cache_emits_request_cache_and_redis_metrics(monkeypatch) -> None:
+    reset_request_observations()
+    cache = SharedHotResponseCache()
+    backend = _FakeRedisBackend()
+    sync_client, async_client = backend.make_clients()
+    monkeypatch.setattr(cache, "_redis", sync_client)
+    monkeypatch.setattr(cache, "_redis_async", async_client)
+
+    async def _exercise() -> None:
+        metrics, token = begin_request_observation(
+            request_id="req-hot-cache",
+            method="GET",
+            path="/api/companies/AAPL/overview",
+            query_string="",
+            request_kind="read",
+        )
+        try:
+            await cache.store("overview:AAPL", route="overview", payload={"ticker": "AAPL"})
+            lookup = await cache.get("overview:AAPL", route="overview")
+            assert lookup is not None
+            complete_request_observation(
+                metrics,
+                route_path="/api/companies/{ticker}/overview",
+                status_code=200,
+            )
+        finally:
+            end_request_observation(token)
+
+    asyncio.run(_exercise())
+
+    snapshot = snapshot_request_observations()
+    record = snapshot["records"][0]
+    assert record["cache_events"]["hot_response"] == {"hit": 1}
+    assert record["redis_call_count"] >= 1
 
 
 class _FakeRedisBackend:
@@ -684,6 +721,35 @@ def test_shared_hot_cache_remote_redis_unavailable_falls_back_to_local(monkeypat
 
     async def _raise_read(*_args, **_kwargs):
         raise hot_cache_module.RedisError("boom")
+
+    monkeypatch.setattr(cache, "_read_remote_async", _raise_read)
+
+    asyncio.run(
+        cache._store_local(
+            "financials:ON:asof=latest",
+            route="financials",
+            content=b'{"value":1}',
+            tags=(cache.build_ticker_tag("ON"),),
+            stored_at=time.time(),
+            fresh_until=time.time() + 60,
+            stale_until=time.time() + 120,
+            etag='W/"abc"',
+            last_modified=None,
+        )
+    )
+
+    lookup = asyncio.run(cache.get("financials:ON:asof=latest", route="financials"))
+
+    assert lookup is not None
+    assert json.loads(lookup.content) == {"value": 1}
+    assert cache.backend_mode == "redis_with_local_fallbacks"
+
+
+def test_shared_hot_cache_closed_event_loop_falls_back_to_local(monkeypatch) -> None:
+    cache, _backend = _build_remote_cache(monkeypatch)
+
+    async def _raise_read(*_args, **_kwargs):
+        raise RuntimeError("Event loop is closed")
 
     monkeypatch.setattr(cache, "_read_remote_async", _raise_read)
 
