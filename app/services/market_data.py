@@ -176,6 +176,79 @@ def get_company_price_history(session: Session, company_id: int) -> list[PriceHi
     return list(session.execute(statement).scalars())
 
 
+def get_company_price_history_latest(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int,
+    end_date: date | None = None,
+    source: str | None = None,
+) -> list[PriceHistory]:
+    normalized_limit = max(1, int(limit))
+    statement: Select[tuple[PriceHistory]] = select(PriceHistory).where(PriceHistory.company_id == company_id)
+    if end_date is not None:
+        statement = statement.where(PriceHistory.trade_date <= end_date)
+    if source is not None:
+        statement = statement.where(PriceHistory.source == source)
+    statement = statement.order_by(PriceHistory.trade_date.desc(), PriceHistory.id.desc()).limit(normalized_limit)
+    rows = list(session.execute(statement).scalars())
+    rows.sort(key=lambda row: (row.trade_date, row.id))
+    return rows
+
+
+def get_company_price_history_between(
+    session: Session,
+    company_id: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    source: str | None = None,
+) -> list[PriceHistory]:
+    statement: Select[tuple[PriceHistory]] = select(PriceHistory).where(PriceHistory.company_id == company_id)
+    if start_date is not None:
+        statement = statement.where(PriceHistory.trade_date >= start_date)
+    if end_date is not None:
+        statement = statement.where(PriceHistory.trade_date <= end_date)
+    if source is not None:
+        statement = statement.where(PriceHistory.source == source)
+    statement = statement.order_by(PriceHistory.trade_date.asc(), PriceHistory.id.asc())
+    return list(session.execute(statement).scalars())
+
+
+def get_company_price_history_for_chart(
+    session: Session,
+    company_id: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    latest_n: int | None = None,
+    max_points: int | None = None,
+    source: str | None = None,
+) -> list[PriceHistory]:
+    if latest_n is not None and latest_n > 0:
+        rows = get_company_price_history_latest(
+            session,
+            company_id,
+            limit=latest_n,
+            end_date=end_date,
+            source=source,
+        )
+        if start_date is not None:
+            rows = [row for row in rows if row.trade_date >= start_date]
+    else:
+        rows = get_company_price_history_between(
+            session,
+            company_id,
+            start_date=start_date,
+            end_date=end_date,
+            source=source,
+        )
+
+    if max_points is not None and max_points > 0:
+        rows = _decimate_price_rows(rows, target_points=max_points)
+    return rows
+
+
 def get_company_price_last_checked(session: Session, company_id: int) -> datetime | None:
     state_last_checked, state_cache = cache_state_for_dataset(session, company_id, "prices")
     if state_cache != "missing":
@@ -222,6 +295,33 @@ def get_company_price_history_tail(
         PriceBar(trade_date=trade_date, close=close, volume=volume)
         for trade_date, close, volume in session.execute(statement)
     ]
+
+
+def _decimate_price_rows(rows: list[PriceHistory], *, target_points: int) -> list[PriceHistory]:
+    if target_points <= 0 or len(rows) <= target_points:
+        return rows
+
+    deduped: list[PriceHistory] = []
+    for row in sorted(rows, key=lambda item: (item.trade_date, getattr(item, "id", 0))):
+        if deduped and deduped[-1].trade_date == row.trade_date:
+            deduped[-1] = row
+        else:
+            deduped.append(row)
+
+    if len(deduped) <= target_points:
+        return deduped
+
+    if target_points == 1:
+        return [deduped[-1]]
+
+    max_index = len(deduped) - 1
+    selected_indices = {
+        int(round((index * max_index) / (target_points - 1)))
+        for index in range(target_points)
+    }
+    selected_indices.add(0)
+    selected_indices.add(max_index)
+    return [deduped[index] for index in sorted(selected_indices)]
 
 
 def upsert_price_history(

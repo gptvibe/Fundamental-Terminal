@@ -651,6 +651,9 @@ class SharedStatusBroker:
                     await self._poll_job_events_async(job_id, queue, stop_event, last_sequence=last_sequence)
                     return
 
+                if stop_event.is_set():
+                    return
+
                 event = _job_event_from_pubsub(message)
                 if event is not None:
                     if event.sequence > last_sequence + 1:

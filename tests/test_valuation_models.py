@@ -584,7 +584,7 @@ def test_piotroski_scales_partial_criteria_without_overstating_normalized_ratio(
     assert result["model_status"] == "partial"
 
 
-def test_dcf_prefers_point_in_time_shares_outstanding_for_per_share_value(monkeypatch):
+def test_dcf_prefers_weighted_average_shares_for_per_share_value(monkeypatch):
     monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
     points = _base_points()
@@ -593,8 +593,10 @@ def test_dcf_prefers_point_in_time_shares_outstanding_for_per_share_value(monkey
 
     result = dcf_model.compute(_dataset(points))
 
-    assert result["fair_value_per_share"] == pytest.approx(result["equity_value"] / 200, rel=1e-9)
-    assert result["fair_value_per_share"] != pytest.approx(result["equity_value"] / 100, rel=1e-9)
+    assert result["fair_value_per_share"] == pytest.approx(result["equity_value"] / 100, rel=1e-9)
+    assert result["fair_value_per_share"] != pytest.approx(result["equity_value"] / 200, rel=1e-9)
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source"] == "weighted_average_diluted_shares"
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source_is_proxy"] is False
 
 
 def test_dcf_cash_fallback_no_longer_changes_equity_value_framework(monkeypatch):
@@ -671,7 +673,8 @@ def test_dcf_missing_capital_structure_returns_enterprise_value_proxy(monkeypatc
     assert result["net_debt"] is None
     assert result["equity_value"] is None
     assert result["enterprise_value"] is not None
-    assert result["fair_value_per_share"] == pytest.approx(result["enterprise_value"] / 120.0, rel=1e-9)
+    assert result["fair_value_per_share"] == pytest.approx(result["enterprise_value"] / 118.0, rel=1e-9)
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source"] == "weighted_average_diluted_shares"
 
 
 def test_dcf_starting_cash_flow_proxy_flag_only_tracks_fcf_proxying(monkeypatch):
@@ -787,6 +790,8 @@ def test_capital_allocation_uses_latest_market_cap_for_shareholder_yield():
     assert result["shareholder_yield_basis"]["metric_definition"] == "annualized_net_shareholder_distribution_divided_by_market_cap"
     assert result["shareholder_yield_basis"]["numerator_horizon_years"] == 3
     assert result["shareholder_yield_basis"]["market_cap_observations_used"] == 1
+    assert result["shareholder_yield_basis"]["market_cap_share_source"] == "shares_outstanding"
+    assert result["shareholder_yield_basis"]["market_cap_share_source_is_proxy"] is False
 
 
 def test_capital_allocation_missing_price_returns_none_for_shareholder_yield():
@@ -796,6 +801,8 @@ def test_capital_allocation_missing_price_returns_none_for_shareholder_yield():
     assert result["shareholder_yield"] is None
     assert result["shareholder_yield_basis"]["method"] is None
     assert result["shareholder_yield_basis"]["market_cap_denominator"] is None
+    assert result["shareholder_yield_basis"]["market_cap_share_source"] is None
+    assert result["shareholder_yield_basis"]["market_cap_share_source_is_proxy"] is True
     assert result["net_shareholder_distribution"] == pytest.approx(212.0)
 
 
@@ -845,6 +852,53 @@ def test_capital_allocation_has_no_eps_based_fallback_for_shareholder_yield():
     assert result["shareholder_yield"] != pytest.approx(11.0 / (100.0 * 5000.0 * 12.0), rel=1e-6)
     assert result["shareholder_yield_basis"]["method"] == "latest_market_cap"
     assert result["shareholder_yield_basis"]["market_cap_denominator"] == pytest.approx(1000.0)
+    assert result["shareholder_yield_basis"]["market_cap_share_source"] == "shares_outstanding"
+    assert result["shareholder_yield_basis"]["market_cap_share_source_is_proxy"] is False
+
+
+def test_capital_allocation_marks_diluted_share_market_cap_as_proxy():
+    points = [
+        _point(
+            2025,
+            {
+                "dividends": 10,
+                "share_buybacks": 2,
+                "stock_based_compensation": 1,
+                "debt_changes": 0,
+                "shares_outstanding": None,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "dividends": 10,
+                "share_buybacks": 2,
+                "stock_based_compensation": 1,
+                "debt_changes": 0,
+                "shares_outstanding": None,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+        _point(
+            2023,
+            {
+                "dividends": 10,
+                "share_buybacks": 2,
+                "stock_based_compensation": 1,
+                "debt_changes": 0,
+                "shares_outstanding": None,
+                "weighted_average_diluted_shares": 120,
+            },
+        ),
+    ]
+
+    result = capital_allocation_model.compute(_dataset(points, price=10.0))
+
+    assert result["shareholder_yield_basis"]["method"] == "latest_market_cap_proxy_shares"
+    assert result["shareholder_yield_basis"]["market_cap_denominator"] == pytest.approx(1200.0)
+    assert result["shareholder_yield_basis"]["market_cap_share_source"] == "weighted_average_diluted_shares"
+    assert result["shareholder_yield_basis"]["market_cap_share_source_is_proxy"] is True
 
 
 def test_ratios_quarterly_stock_flow_metrics_are_annualized_and_disclosed():

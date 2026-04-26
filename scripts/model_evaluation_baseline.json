@@ -8,11 +8,11 @@
   "metrics": {
     "dcf": {
       "calibration": 0.833333,
-      "mean_absolute_error": 0.340268,
-      "mean_signed_error": 0.215256,
-      "root_mean_square_error": 0.415895,
+      "mean_absolute_error": 0.348712,
+      "mean_signed_error": 0.2299,
+      "root_mean_square_error": 0.427732,
       "sample_count": 6,
-      "stability": 0.217442,
+      "stability": 0.219525,
       "status": "ok"
     },
     "earnings": {
@@ -26,11 +26,11 @@
     },
     "residual_income": {
       "calibration": 0.0,
-      "mean_absolute_error": 1.148806,
-      "mean_signed_error": -1.148806,
-      "root_mean_square_error": 1.148979,
+      "mean_absolute_error": 1.148237,
+      "mean_signed_error": -1.148237,
+      "root_mean_square_error": 1.148411,
       "sample_count": 6,
-      "stability": 0.005621,
+      "stability": 0.005673,
       "status": "ok"
     },
     "reverse_dcf": {

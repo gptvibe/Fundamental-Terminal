@@ -14,6 +14,7 @@ from app.model_engine.utils import (
     valuation_applicability,
 )
 from app.services.risk_free_rate import get_latest_risk_free_rate
+from app.services.share_count_selection import shares_for_per_share_metric
 
 MODEL_NAME = "residual_income"
 MODEL_VERSION = "1.1.0"
@@ -85,9 +86,14 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     net_income = float(net_income)
 
     # Shares outstanding
-    shares = latest_non_null(dataset, "shares_outstanding")
-    if shares is None:
-        shares = latest_non_null(dataset, "weighted_average_diluted_shares")
+    share_selection = shares_for_per_share_metric(
+        {
+            "weighted_average_diluted_shares": latest_non_null(dataset, "weighted_average_diluted_shares"),
+            "weighted_average_basic_shares": latest_non_null(dataset, "weighted_average_basic_shares"),
+            "shares_outstanding": latest_non_null(dataset, "shares_outstanding"),
+        }
+    )
+    shares = share_selection.value
     if shares is None or shares <= 0:
         return {
             "status": "insufficient_data",
@@ -211,6 +217,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "missing_fields": missing_fields_list,
             "used_proxy_book_equity": used_proxy,
             "historical_roe_years": len(historical_roes),
+            "share_count_proxied": share_selection.is_proxy,
         },
         "assumption_provenance": {
             "risk_free_rate": {
@@ -222,6 +229,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "equity_risk_premium": json_number(EQUITY_RISK_PREMIUM),
             "financial_firm_additional_risk": json_number(financial_firm_additional_risk),
             "cost_of_equity": json_number(coe),
+            "per_share_share_source": share_selection.source,
+            "per_share_share_source_is_proxy": share_selection.is_proxy,
         },
         "trust_summary": trust_summary(missing_fields=missing_fields_list, proxy_used=used_proxy),
     }

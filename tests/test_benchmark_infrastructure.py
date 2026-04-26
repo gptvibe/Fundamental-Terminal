@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from scripts.benchmark_refresh_bootstrap_parallelism import benchmark_refresh_bootstrap_parallelism
+from scripts.benchmark_derived_metrics_price_matching import benchmark_price_matching
 from scripts.benchmark_incremental_price_refresh import benchmark_incremental_price_refresh
 from scripts.benchmark_hot_endpoints import build_cases
 from scripts.benchmark_market_profile_cache import benchmark_market_profile_cache
@@ -85,6 +86,14 @@ def test_refresh_bootstrap_parallelism_benchmark_reports_serial_and_parallel_pat
     }
     for result in payload["results"]:
         assert result["latency_ms"]["avg"] >= 0
+
+
+def test_derived_metrics_price_matching_benchmark_reports_equivalence_and_lower_index_operations() -> None:
+    payload = benchmark_price_matching(financial_rows=40, price_rows=2000, rounds=2)
+
+    assert payload["equivalent_output"] is True
+    assert payload["optimized"]["price_index_build_operations"] < payload["baseline_legacy"]["price_index_build_operations"]
+    assert payload["comparison"]["index_operation_reduction_pct"] > 0
 
 
 def test_performance_regression_baseline_builder_tracks_hot_routes_and_brief_budget() -> None:

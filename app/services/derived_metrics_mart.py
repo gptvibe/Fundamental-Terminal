@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, DerivedMetricPoint, FinancialStatement, PriceHistory
+from app.services.formula_registry import formula_id_for_derived_metric
 from app.services.regulated_financials import BANK_REGULATORY_STATEMENT_TYPE, select_preferred_financials
 from app.services.refresh_state import build_payload_version_hash, mark_dataset_checked
+from app.services.share_count_selection import shares_for_market_cap, shares_for_per_share_metric
 
 ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 QUARTERLY_FORMS = {"10-Q", "6-K", "CALL", "FR Y-9C"}
@@ -34,7 +36,7 @@ FLOW_FIELDS = {
     "pretax_income",
     "provision_for_credit_losses",
 }
-FORMULA_VERSION = "sec_metrics_mart_v1"
+FORMULA_VERSION = "sec_metrics_mart_v2"
 DERIVED_METRICS_PAYLOAD_VERSION = "derived-metrics-v1"
 POSTGRES_MAX_BIND_PARAMS = 65535
 DERIVED_METRIC_UPSERT_COLUMN_COUNT = 14
@@ -193,6 +195,7 @@ def to_period_payload(rows: list[DerivedMetricPoint]) -> list[dict[str, Any]]:
                         "metric_key": metric.metric_key,
                         "metric_value": metric.metric_value,
                         "is_proxy": metric.is_proxy,
+                        "formula_id": str((metric.provenance or {}).get("formula_id") or "") or None,
                         "provenance": metric.provenance,
                         "quality_flags": metric.quality_flags,
                     }
@@ -223,6 +226,7 @@ def to_period_payload_from_points(rows: list[dict[str, Any]]) -> list[dict[str, 
                         "metric_key": metric.get("metric_key"),
                         "metric_value": metric.get("metric_value"),
                         "is_proxy": bool(metric.get("is_proxy")),
+                        "formula_id": str((metric.get("provenance") or {}).get("formula_id") or "") or None,
                         "provenance": metric.get("provenance") or {},
                         "quality_flags": list(metric.get("quality_flags") or []),
                     }
@@ -257,6 +261,7 @@ def build_summary_payload(rows: list[DerivedMetricPoint], period_type: str) -> d
                 "metric_key": row.metric_key,
                 "metric_value": row.metric_value,
                 "is_proxy": row.is_proxy,
+                "formula_id": str((row.provenance or {}).get("formula_id") or "") or None,
                 "provenance": row.provenance,
                 "quality_flags": row.quality_flags,
             }
@@ -289,6 +294,7 @@ def build_summary_payload_from_points(rows: list[dict[str, Any]], period_type: s
                 "metric_key": row.get("metric_key"),
                 "metric_value": row.get("metric_value"),
                 "is_proxy": bool(row.get("is_proxy")),
+                "formula_id": str((row.get("provenance") or {}).get("formula_id") or "") or None,
                 "provenance": row.get("provenance") or {},
                 "quality_flags": list(row.get("quality_flags") or []),
             }
@@ -303,6 +309,9 @@ def _build_points_for_cadence(rows: list[dict[str, Any]], period_type: str, pric
     for index, row in enumerate(rows):
         previous = rows[index - 1] if index > 0 else None
         price_point = _price_on_or_before(prices, row["period_end"])
+        row_data = row.get("data") or {}
+        market_cap_shares = shares_for_market_cap(row_data)
+        per_share_shares = shares_for_per_share_metric(row_data)
         context = MetricContext(
             period_type=period_type,
             current=row,
@@ -326,11 +335,16 @@ def _build_points_for_cadence(rows: list[dict[str, Any]], period_type: str, pric
                     "is_proxy": is_proxy,
                     "provenance": {
                         "formula_version": FORMULA_VERSION,
+                        "formula_id": formula_id_for_derived_metric(definition.key),
                         "unit": definition.unit,
                         "statement_type": row["statement_type"],
                         "statement_source": row["source"],
                         "price_source": price_point["source"] if price_point else None,
                         "period_type": period_type,
+                        "market_cap_share_source": market_cap_shares.source,
+                        "market_cap_share_source_is_proxy": market_cap_shares.is_proxy,
+                        "per_share_metric_share_source": per_share_shares.source,
+                        "per_share_metric_share_source_is_proxy": per_share_shares.is_proxy,
                     },
                     "source_statement_ids": row["statement_ids"],
                     "quality_flags": sorted(set(period_flags + flags)),
@@ -434,13 +448,6 @@ def _first_num(context: MetricContext, key: str) -> float | None:
     if context.first is None:
         return None
     return _to_float((context.first.get("data") or {}).get(key))
-
-
-def _shares_proxy(data: dict[str, Any]) -> float | None:
-    return _first_non_null(
-        _to_float(data.get("weighted_average_diluted_shares")),
-        _to_float(data.get("shares_outstanding")),
-    )
 
 
 def _price_on_or_before(prices: list[dict[str, Any]], period_end: date) -> dict[str, Any] | None:
@@ -593,15 +600,15 @@ def _cash_ratio(context: MetricContext) -> tuple[float | None, bool, list[str]]:
 
 
 def _dilution_trend(context: MetricContext) -> tuple[float | None, bool, list[str]]:
-    current_shares = _shares_proxy(context.current.get("data") or {})
-    previous_shares = _shares_proxy(context.previous.get("data") or {}) if context.previous else None
+    current_shares = shares_for_per_share_metric(context.current.get("data") or {}).value
+    previous_shares = shares_for_per_share_metric(context.previous.get("data") or {}).value if context.previous else None
     value = _pct_change(current_shares, previous_shares)
     return value, True, (["shares_history_unavailable"] if value is None else [])
 
 
 def _shares_cagr(context: MetricContext) -> tuple[float | None, bool, list[str]]:
-    current_shares = _shares_proxy(context.current.get("data") or {})
-    first_shares = _shares_proxy(context.first.get("data") or {}) if context.first else None
+    current_shares = shares_for_per_share_metric(context.current.get("data") or {}).value
+    first_shares = shares_for_per_share_metric(context.first.get("data") or {}).value if context.first else None
     current_end = context.current.get("period_end")
     first_end = context.first.get("period_end") if context.first else None
     if current_shares is None or first_shares is None or first_shares <= 0:
@@ -618,7 +625,7 @@ def _sbc_to_revenue(context: MetricContext) -> tuple[float | None, bool, list[st
 
 def _market_cap(context: MetricContext) -> float | None:
     price = context.price_point.get("close") if context.price_point else None
-    shares = _shares_proxy(context.current.get("data") or {})
+    shares = shares_for_market_cap(context.current.get("data") or {}).value
     if price is None or shares is None:
         return None
     return price * shares
@@ -745,7 +752,7 @@ def _uninsured_deposit_ratio(context: MetricContext) -> tuple[float | None, bool
 
 
 def _tangible_book_value_per_share(context: MetricContext) -> tuple[float | None, bool, list[str]]:
-    value = _safe_div(_num(context, "tangible_common_equity"), _shares_proxy(context.current.get("data") or {}))
+    value = _safe_div(_num(context, "tangible_common_equity"), shares_for_per_share_metric(context.current.get("data") or {}).value)
     return value, True, (["tangible_book_inputs_missing"] if value is None else [])
 
 

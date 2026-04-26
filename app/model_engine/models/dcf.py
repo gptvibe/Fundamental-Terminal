@@ -16,6 +16,7 @@ from app.model_engine.utils import (
     valuation_applicability,
 )
 from app.services.risk_free_rate import get_latest_risk_free_rate
+from app.services.share_count_selection import shares_for_per_share_metric
 
 MODEL_NAME = "dcf"
 MODEL_VERSION = "2.4.0"
@@ -211,7 +212,14 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     if current_debt is not None and long_term_debt is not None:
         total_debt = current_debt + long_term_debt
 
-    shares_outstanding = latest_non_null(dataset, "shares_outstanding") or latest_non_null(dataset, "weighted_average_diluted_shares")
+    share_selection = shares_for_per_share_metric(
+        {
+            "weighted_average_diluted_shares": latest_non_null(dataset, "weighted_average_diluted_shares"),
+            "weighted_average_basic_shares": latest_non_null(dataset, "weighted_average_basic_shares"),
+            "shares_outstanding": latest_non_null(dataset, "shares_outstanding"),
+        }
+    )
+    shares_outstanding = share_selection.value
     valuation_bridge = _bridge_enterprise_to_equity(
         enterprise_value=enterprise_value,
         total_debt=total_debt,
@@ -285,6 +293,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "discount_rate_basis": DISCOUNT_RATE_BASIS,
                 "output_value_basis": value_basis,
                 "net_debt_bridge_applied": capital_structure_complete,
+                "per_share_share_source": share_selection.source,
+                "per_share_share_source_is_proxy": share_selection.is_proxy,
             },
         },
         "projected_free_cash_flow": projected_cash_flows,
@@ -304,6 +314,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "starting_cash_flow_proxied": starting_cash_flow_proxied,
             "capital_structure_proxied": capital_structure_proxied,
             "cash_balance_proxied": cash_balance_proxied,
+            "share_count_proxied": share_selection.is_proxy,
         },
     }
 

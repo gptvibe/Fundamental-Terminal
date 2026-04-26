@@ -143,6 +143,7 @@ from app.services.market_context import (
     get_market_context_snapshot,
     get_market_context_v2,
 )
+import app.services.market_data as market_data_service
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
 from app.services.oil_scenario import build_company_oil_scenario_public_payload
@@ -159,6 +160,7 @@ from app.services.screener import build_official_screener_filter_catalog, run_of
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
+from app.services.formula_registry import FORMULA_REGISTRY_VERSION, get_formula_metadata, list_formula_metadata
 from app.services.hot_cache import HotCacheLookup, _etag_for_json_bytes, _render_json_bytes, shared_hot_response_cache
 from app.services.refresh_state import get_dataset_last_checked
 from app.services.regulated_financials import build_regulated_entity_payload, classify_regulated_entity, select_preferred_financials
@@ -255,7 +257,7 @@ HOT_CACHE_SCHEMA_VERSIONS: dict[str, str] = {
     "overview": "overview-response-v1",
     "workspace_bootstrap": "workspace-bootstrap-response-v1",
     "capital_structure": "capital-structure-response-v1",
-    "models": "models-response-v2",
+    "models": "models-response-v3",
     "oil_scenario_overlay": "oil-scenario-overlay-response-v1",
     "oil_scenario": "oil-scenario-response-v1",
     "peers": "peers-response-v1",
@@ -641,6 +643,10 @@ async def company_financials(
     ticker: str,
     background_tasks: BackgroundTasks,
     view: str | None = Query(default=None, description="response shape: full|core_segments|core"),
+    price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
+    price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
+    price_latest_n: int | None = Query(default=None, ge=1, le=20000, description="Optional latest-N price points"),
+    price_max_points: int | None = Query(default=None, ge=2, le=5000, description="Optional decimation target points"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyFinancialsResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -650,7 +656,19 @@ async def company_financials(
         requested_as_of=requested_as_of,
         view=requested_view,
     )
-    hot_key = f"financials:{normalized_ticker}:view={normalized_view}:asof={normalized_as_of}"
+    resolved_price_start_date, resolved_price_end_date, resolved_price_latest_n, resolved_price_max_points = _normalize_price_history_query_controls(
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+    )
+    price_token = _price_history_cache_token(
+        start_date=resolved_price_start_date,
+        end_date=resolved_price_end_date,
+        latest_n=resolved_price_latest_n,
+        max_points=resolved_price_max_points,
+    )
+    hot_key = f"financials:{normalized_ticker}:view={normalized_view}:asof={normalized_as_of}:prices={price_token}"
     legacy_hot_key = f"financials:{normalized_ticker}:asof={normalized_as_of}" if normalized_view == "full" else None
     hot_tags = _build_hot_cache_tags(
         ticker=normalized_ticker,
@@ -696,6 +714,10 @@ async def company_financials(
                 requested_as_of=requested_as_of,
                 parsed_as_of=parsed_as_of,
                 view=normalized_view,
+                price_start_date=resolved_price_start_date,
+                price_end_date=resolved_price_end_date,
+                price_latest_n=resolved_price_latest_n,
+                price_max_points=resolved_price_max_points,
             )
 
         payload = await _fill_hot_cached_payload(
@@ -722,6 +744,10 @@ def company_overview(
     request: Request = None,
     http_response: Response = None,
     financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
+    price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
+    price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
+    price_latest_n: int | None = Query(default=None, ge=1, le=20000, description="Optional latest-N price points"),
+    price_max_points: int | None = Query(default=None, ge=2, le=5000, description="Optional decimation target points"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyOverviewResponse:
@@ -732,10 +758,23 @@ def company_overview(
         requested_as_of=requested_as_of,
         view=requested_financials_view,
     )
+    resolved_price_start_date, resolved_price_end_date, resolved_price_latest_n, resolved_price_max_points = _normalize_price_history_query_controls(
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+    )
+    price_token = _price_history_cache_token(
+        start_date=resolved_price_start_date,
+        end_date=resolved_price_end_date,
+        latest_n=resolved_price_latest_n,
+        max_points=resolved_price_max_points,
+    )
     hot_key = _company_overview_hot_key(
         normalized_ticker,
         financials_view=normalized_financials_view,
         as_of=normalized_as_of,
+        price_token=price_token,
     )
     cached_hot = shared_hot_response_cache.get_sync(hot_key, route="overview") if request is not None and http_response is not None else None
     if cached_hot is not None and cached_hot.is_fresh:
@@ -750,6 +789,10 @@ def company_overview(
         parsed_as_of=parsed_as_of,
         snapshot=snapshot,
         view=normalized_financials_view,
+        price_start_date=resolved_price_start_date,
+        price_end_date=resolved_price_end_date,
+        price_latest_n=resolved_price_latest_n,
+        price_max_points=resolved_price_max_points,
     )
     brief = _build_company_research_brief_response(
         session,
@@ -788,6 +831,10 @@ def company_workspace_bootstrap(
     include_institutional: bool = Query(default=False),
     include_earnings_summary: bool = Query(default=False),
     financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
+    price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
+    price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
+    price_latest_n: int | None = Query(default=None, ge=1, le=20000, description="Optional latest-N price points"),
+    price_max_points: int | None = Query(default=None, ge=2, le=5000, description="Optional decimation target points"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyWorkspaceBootstrapResponse:
@@ -798,6 +845,18 @@ def company_workspace_bootstrap(
         requested_as_of=requested_as_of,
         view=requested_financials_view,
     )
+    resolved_price_start_date, resolved_price_end_date, resolved_price_latest_n, resolved_price_max_points = _normalize_price_history_query_controls(
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+    )
+    price_token = _price_history_cache_token(
+        start_date=resolved_price_start_date,
+        end_date=resolved_price_end_date,
+        latest_n=resolved_price_latest_n,
+        max_points=resolved_price_max_points,
+    )
     hot_key = _company_workspace_bootstrap_hot_key(
         normalized_ticker,
         financials_view=normalized_financials_view,
@@ -806,6 +865,7 @@ def company_workspace_bootstrap(
         include_insiders=include_insiders,
         include_institutional=include_institutional,
         include_earnings_summary=include_earnings_summary,
+        price_token=price_token,
     )
     cached_hot = (
         shared_hot_response_cache.get_sync(hot_key, route="workspace_bootstrap")
@@ -825,6 +885,10 @@ def company_workspace_bootstrap(
                 background_tasks=background_tasks,
                 request=request,
                 financials_view=normalized_financials_view,
+                price_start_date=resolved_price_start_date.isoformat() if resolved_price_start_date is not None else None,
+                price_end_date=resolved_price_end_date.isoformat() if resolved_price_end_date is not None else None,
+                price_latest_n=resolved_price_latest_n,
+                price_max_points=resolved_price_max_points,
                 as_of=requested_as_of,
                 session=session,
             )
@@ -838,6 +902,10 @@ def company_workspace_bootstrap(
                 requested_as_of=requested_as_of,
                 parsed_as_of=parsed_as_of,
                 view=normalized_financials_view,
+                price_start_date=resolved_price_start_date,
+                price_end_date=resolved_price_end_date,
+                price_latest_n=resolved_price_latest_n,
+                price_max_points=resolved_price_max_points,
             )
     else:
         financials = _build_company_financials_response(
@@ -847,6 +915,10 @@ def company_workspace_bootstrap(
             requested_as_of=requested_as_of,
             parsed_as_of=parsed_as_of,
             view=normalized_financials_view,
+            price_start_date=resolved_price_start_date,
+            price_end_date=resolved_price_end_date,
+            price_latest_n=resolved_price_latest_n,
+            price_max_points=resolved_price_max_points,
         )
 
     insider_trades: CompanyInsiderTradesResponse | None = None
@@ -1971,7 +2043,7 @@ async def company_models(
     ticker: str,
     background_tasks: BackgroundTasks,
     model: str | None = Query(default=None),
-    expand: str | None = Query(default=None, description="optional expansions: input_periods"),
+    expand: str | None = Query(default=None, description="optional expansions: input_periods, formula_details"),
     dupont_mode: str | None = Query(default=None, description="optional DuPont basis: auto|annual|ttm"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyModelsResponse:
@@ -1986,6 +2058,7 @@ async def company_models(
     )
     requested_models = _parse_requested_models(model)
     include_input_periods = "input_periods" in requested_expansions
+    include_formula_details = "formula_details" in requested_expansions
     if not settings.valuation_workbench_enabled:
         requested_models = [
             item
@@ -2112,6 +2185,7 @@ async def company_models(
                         model_run,
                         company_context=company_context,
                         include_input_periods=include_input_periods,
+                        include_formula_details=include_formula_details,
                     )
                     for model_run in models
                 ]
@@ -2153,6 +2227,31 @@ async def company_models(
     finally:
         if token is not None:
             dupont_model.reset_mode_override(token)
+
+
+@app.get("/api/formulas", response_model=FormulaListResponse)
+def list_formulas(
+    ids: str | None = Query(default=None, description="Optional comma-separated formula ids"),
+    include_details: bool = Query(default=False),
+) -> FormulaListResponse:
+    formula_ids = [item.strip() for item in (ids or "").split(",") if item.strip()] or None
+    formulas = list_formula_metadata(formula_ids=formula_ids, include_details=include_details)
+    return FormulaListResponse(
+        schema_version=FORMULA_REGISTRY_VERSION,
+        include_details=include_details,
+        formulas=[
+            FormulaMetadataPayload.model_validate(item) if include_details else FormulaSummaryPayload.model_validate(item)
+            for item in formulas
+        ],
+    )
+
+
+@app.get("/api/formulas/{formula_id}", response_model=FormulaMetadataPayload)
+def get_formula(formula_id: str) -> FormulaMetadataPayload:
+    metadata = get_formula_metadata(formula_id)
+    if metadata is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="formula not found")
+    return FormulaMetadataPayload.model_validate(metadata.as_dict())
 
 
 async def company_oil_scenario_overlay(
@@ -5881,8 +5980,9 @@ def _company_overview_hot_key(
     *,
     financials_view: str,
     as_of: str,
+    price_token: str = "default",
 ) -> str:
-    return f"overview:{normalized_ticker}:view={financials_view}:asof={as_of}"
+    return f"overview:{normalized_ticker}:view={financials_view}:asof={as_of}:prices={price_token}"
 
 
 def _company_workspace_bootstrap_hot_key(
@@ -5894,6 +5994,7 @@ def _company_workspace_bootstrap_hot_key(
     include_insiders: bool,
     include_institutional: bool,
     include_earnings_summary: bool,
+    price_token: str = "default",
 ) -> str:
     return (
         f"workspace_bootstrap:{normalized_ticker}:view={financials_view}:asof={as_of}"
@@ -5901,6 +6002,7 @@ def _company_workspace_bootstrap_hot_key(
         f":insiders={1 if include_insiders else 0}"
         f":institutional={1 if include_institutional else 0}"
         f":earnings={1 if include_earnings_summary else 0}"
+        f":prices={price_token}"
     )
 
 
@@ -5947,10 +6049,36 @@ def _visible_price_cache_status(session: Session, company_id: int) -> tuple[date
     return get_company_price_cache_status(session, company_id)
 
 
-def _visible_price_history(session: Session, company_id: int) -> list[PriceHistory]:
+def _visible_price_history(
+    session: Session,
+    company_id: int,
+    *,
+    start_date: DateType | None = None,
+    end_date: DateType | None = None,
+    latest_n: int | None = None,
+    max_points: int | None = None,
+) -> list[PriceHistory]:
     if settings.strict_official_mode:
         return []
-    return get_company_price_history(session, company_id)
+    # Prefer cached query helper for baseline windows because tests commonly stub this path.
+    if latest_n is None and max_points is None:
+        history = list(get_company_price_history(session, company_id))
+        if start_date is not None:
+            history = [point for point in history if point.trade_date >= start_date]
+        if end_date is not None:
+            history = [point for point in history if point.trade_date <= end_date]
+        history.sort(key=lambda point: point.trade_date)
+        return history
+    if not hasattr(session, "execute"):
+        return list(get_company_price_history(session, company_id))
+    return market_data_service.get_company_price_history_for_chart(
+        session,
+        company_id,
+        start_date=start_date,
+        end_date=end_date,
+        latest_n=latest_n,
+        max_points=max_points,
+    )
 
 
 def _visible_financials_for_company(
@@ -5975,6 +6103,10 @@ def _build_company_financials_response(
     parsed_as_of: datetime | None,
     snapshot: CompanyCacheSnapshot | None = None,
     view: str = "full",
+    price_start_date: DateType | None = None,
+    price_end_date: DateType | None = None,
+    price_latest_n: int | None = None,
+    price_max_points: int | None = None,
 ) -> CompanyFinancialsResponse:
     resolved_snapshot = snapshot or _resolve_cached_company_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
@@ -5991,7 +6123,20 @@ def _build_company_financials_response(
     financials = _visible_financials_for_company(session, resolved_snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, resolved_snapshot.company.id)
     refresh = _refresh_for_financial_page(background_tasks, resolved_snapshot, price_cache_state, financials)
-    price_history = _visible_price_history(session, resolved_snapshot.company.id)
+    effective_price_end_date = price_end_date
+    if parsed_as_of is not None:
+        parsed_as_of_date = parsed_as_of.date()
+        if effective_price_end_date is None or parsed_as_of_date < effective_price_end_date:
+            effective_price_end_date = parsed_as_of_date
+
+    price_history = _visible_price_history(
+        session,
+        resolved_snapshot.company.id,
+        start_date=price_start_date,
+        end_date=effective_price_end_date,
+        latest_n=price_latest_n,
+        max_points=price_max_points,
+    )
     compare_financials = financials
     compare_price_history = price_history
     if parsed_as_of is not None:
@@ -6458,8 +6603,12 @@ def _normalize_company_models_query_controls(
 ) -> tuple[datetime | None, set[str], str | None, str]:
     parsed_as_of = _validated_as_of(requested_as_of)
     requested_expansions = {item.strip().lower() for item in (expand or "").split(",") if item.strip()}
-    if requested_expansions - {"input_periods"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expand must be one of: input_periods")
+    allowed_expansions = {"input_periods", "formula_details"}
+    if requested_expansions - allowed_expansions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="expand must be one of: formula_details, input_periods",
+        )
 
     normalized_mode = (dupont_mode or "").lower() or None
     if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
@@ -6481,6 +6630,66 @@ def _normalize_company_financials_query_controls(
 
     normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
     return parsed_as_of, normalized_view, normalized_as_of
+
+
+def _normalize_price_history_query_controls(
+    *,
+    price_start_date: str | None,
+    price_end_date: str | None,
+    price_latest_n: int | None,
+    price_max_points: int | None,
+) -> tuple[DateType | None, DateType | None, int | None, int | None]:
+    if price_start_date is not None and not isinstance(price_start_date, str):
+        price_start_date = getattr(price_start_date, "default", None)
+    if price_end_date is not None and not isinstance(price_end_date, str):
+        price_end_date = getattr(price_end_date, "default", None)
+    if price_latest_n is not None and not isinstance(price_latest_n, int):
+        price_latest_n = getattr(price_latest_n, "default", None)
+    if price_max_points is not None and not isinstance(price_max_points, int):
+        price_max_points = getattr(price_max_points, "default", None)
+
+    parsed_start: DateType | None = None
+    parsed_end: DateType | None = None
+    if price_start_date:
+        try:
+            parsed_start = DateType.fromisoformat(price_start_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="price_start_date must be ISO date (YYYY-MM-DD)") from exc
+    if price_end_date:
+        try:
+            parsed_end = DateType.fromisoformat(price_end_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="price_end_date must be ISO date (YYYY-MM-DD)") from exc
+
+    if parsed_start is not None and parsed_end is not None and parsed_start > parsed_end:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="price_start_date must be <= price_end_date")
+
+    latest_n = int(price_latest_n) if price_latest_n is not None else None
+    if latest_n is not None and latest_n <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="price_latest_n must be positive")
+
+    max_points = int(price_max_points) if price_max_points is not None else None
+    if max_points is not None and max_points < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="price_max_points must be >= 2")
+
+    return parsed_start, parsed_end, latest_n, max_points
+
+
+def _price_history_cache_token(
+    *,
+    start_date: DateType | None,
+    end_date: DateType | None,
+    latest_n: int | None,
+    max_points: int | None,
+) -> str:
+    if start_date is None and end_date is None and latest_n is None and max_points is None:
+        return "default"
+    return (
+        f"start={start_date.isoformat() if start_date is not None else 'none'}"
+        f";end={end_date.isoformat() if end_date is not None else 'none'}"
+        f";latest={latest_n if latest_n is not None else 'none'}"
+        f";points={max_points if max_points is not None else 'none'}"
+    )
 
 
 def _apply_requested_as_of(payload: BaseModel, as_of: str | None) -> Any:
@@ -8591,6 +8800,7 @@ def _serialize_model_payload(
     company_context: dict[str, Any] | None = None,
     *,
     include_input_periods: bool = True,
+    include_formula_details: bool = False,
 ) -> ModelPayload:
     if isinstance(model_run, dict):
         model_name = _model_name(model_run)
@@ -8605,6 +8815,10 @@ def _serialize_model_payload(
                 input_periods = {}
         else:
             input_periods = None
+        result_payload = _sanitize_model_result_for_strict_official_mode(
+            model_name,
+            _model_result_payload(model_run, company_context=company_context),
+        )
         return ModelPayload(
             schema_version="2.0",
             model_name=model_name,
@@ -8612,12 +8826,14 @@ def _serialize_model_payload(
             calculation_version=_model_calculation_version(model_run),
             created_at=created_at,
             input_periods=input_periods,
-            result=_sanitize_model_result_for_strict_official_mode(
-                model_name,
-                _model_result_payload(model_run, company_context=company_context),
-            ),
+            result=result_payload,
+            formula_details=_formula_details_for_model_result(result_payload) if include_formula_details else None,
         )
 
+    result_payload = _sanitize_model_result_for_strict_official_mode(
+        model_run.model_name,
+        _model_result_payload(model_run, company_context=company_context),
+    )
     return ModelPayload(
         schema_version="2.0",
         model_name=model_run.model_name,
@@ -8625,11 +8841,24 @@ def _serialize_model_payload(
         calculation_version=_model_calculation_version(model_run),
         created_at=model_run.created_at,
         input_periods=model_run.input_periods if include_input_periods else None,
-        result=_sanitize_model_result_for_strict_official_mode(
-            model_run.model_name,
-            _model_result_payload(model_run, company_context=company_context),
-        ),
+        result=result_payload,
+        formula_details=_formula_details_for_model_result(result_payload) if include_formula_details else None,
     )
+
+
+def _formula_details_for_model_result(result_payload: dict[str, Any]) -> dict[str, Any]:
+    formula_ids = result_payload.get("formula_ids")
+    if not isinstance(formula_ids, dict):
+        return {}
+    details: dict[str, Any] = {}
+    for output_key, formula_id in formula_ids.items():
+        if not isinstance(output_key, str) or not isinstance(formula_id, str):
+            continue
+        metadata = get_formula_metadata(formula_id)
+        if metadata is None:
+            continue
+        details[output_key] = metadata.as_dict()
+    return details
 
 
 def _serialize_recent_filings(cik: str, filing_index: dict[str, FilingMetadata]) -> list[FilingPayload]:

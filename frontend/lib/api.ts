@@ -921,11 +921,31 @@ function appendAsOf(params: URLSearchParams, asOf?: string | null): void {
 
 export function getCompanyFinancials(
   ticker: string,
-  options?: { asOf?: string | null; view?: "full" | "core_segments" | "core"; signal?: AbortSignal }
+  options?: {
+    asOf?: string | null;
+    view?: "full" | "core_segments" | "core";
+    priceStartDate?: string | null;
+    priceEndDate?: string | null;
+    priceLatestN?: number;
+    priceMaxPoints?: number;
+    signal?: AbortSignal;
+  }
 ): Promise<CompanyFinancialsResponse> {
   const params = new URLSearchParams();
   if (options?.view && options.view !== "full") {
     params.set("view", options.view);
+  }
+  if (options?.priceStartDate) {
+    params.set("price_start_date", options.priceStartDate);
+  }
+  if (options?.priceEndDate) {
+    params.set("price_end_date", options.priceEndDate);
+  }
+  if (options?.priceLatestN != null) {
+    params.set("price_latest_n", String(options.priceLatestN));
+  }
+  if (options?.priceMaxPoints != null) {
+    params.set("price_max_points", String(options.priceMaxPoints));
   }
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -934,17 +954,49 @@ export function getCompanyFinancials(
 
 export function getCompanyOverview(
   ticker: string,
-  options?: { asOf?: string | null; financialsView?: "full" | "core_segments" | "core"; signal?: AbortSignal }
+  options?: {
+    asOf?: string | null;
+    financialsView?: "full" | "core_segments" | "core";
+    priceStartDate?: string | null;
+    priceEndDate?: string | null;
+    priceLatestN?: number;
+    priceMaxPoints?: number;
+    signal?: AbortSignal;
+  }
 ): Promise<CompanyOverviewResponse> {
   const params = new URLSearchParams();
   if (options?.financialsView && options.financialsView !== "full") {
     params.set("financials_view", options.financialsView);
+  }
+  if (options?.priceStartDate) {
+    params.set("price_start_date", options.priceStartDate);
+  }
+  if (options?.priceEndDate) {
+    params.set("price_end_date", options.priceEndDate);
+  }
+  if (options?.priceLatestN != null) {
+    params.set("price_latest_n", String(options.priceLatestN));
+  }
+  if (options?.priceMaxPoints != null) {
+    params.set("price_max_points", String(options.priceMaxPoints));
   }
   appendAsOf(params, options?.asOf);
   const suffix = params.toString() ? `?${params.toString()}` : "";
   const financialsParams = new URLSearchParams();
   if (options?.financialsView && options.financialsView !== "full") {
     financialsParams.set("view", options.financialsView);
+  }
+  if (options?.priceStartDate) {
+    financialsParams.set("price_start_date", options.priceStartDate);
+  }
+  if (options?.priceEndDate) {
+    financialsParams.set("price_end_date", options.priceEndDate);
+  }
+  if (options?.priceLatestN != null) {
+    financialsParams.set("price_latest_n", String(options.priceLatestN));
+  }
+  if (options?.priceMaxPoints != null) {
+    financialsParams.set("price_max_points", String(options.priceMaxPoints));
   }
   appendAsOf(financialsParams, options?.asOf);
   const financialsSuffix = financialsParams.toString() ? `?${financialsParams.toString()}` : "";
@@ -960,6 +1012,10 @@ export function getCompanyWorkspaceBootstrap(
   options?: {
     asOf?: string | null;
     financialsView?: "full" | "core_segments" | "core";
+    priceStartDate?: string | null;
+    priceEndDate?: string | null;
+    priceLatestN?: number;
+    priceMaxPoints?: number;
     includeOverviewBrief?: boolean;
     includeInsiders?: boolean;
     includeInstitutional?: boolean;
@@ -970,6 +1026,18 @@ export function getCompanyWorkspaceBootstrap(
   const params = new URLSearchParams();
   if (options?.financialsView && options.financialsView !== "full") {
     params.set("financials_view", options.financialsView);
+  }
+  if (options?.priceStartDate) {
+    params.set("price_start_date", options.priceStartDate);
+  }
+  if (options?.priceEndDate) {
+    params.set("price_end_date", options.priceEndDate);
+  }
+  if (options?.priceLatestN != null) {
+    params.set("price_latest_n", String(options.priceLatestN));
+  }
+  if (options?.priceMaxPoints != null) {
+    params.set("price_max_points", String(options.priceMaxPoints));
   }
   if (options?.includeOverviewBrief) {
     params.set("include_overview_brief", "true");
@@ -990,6 +1058,18 @@ export function getCompanyWorkspaceBootstrap(
   const financialsParams = new URLSearchParams();
   if (options?.financialsView && options.financialsView !== "full") {
     financialsParams.set("view", options.financialsView);
+  }
+  if (options?.priceStartDate) {
+    financialsParams.set("price_start_date", options.priceStartDate);
+  }
+  if (options?.priceEndDate) {
+    financialsParams.set("price_end_date", options.priceEndDate);
+  }
+  if (options?.priceLatestN != null) {
+    financialsParams.set("price_latest_n", String(options.priceLatestN));
+  }
+  if (options?.priceMaxPoints != null) {
+    financialsParams.set("price_max_points", String(options.priceMaxPoints));
   }
   appendAsOf(financialsParams, options?.asOf);
   const financialsSuffix = financialsParams.toString() ? `?${financialsParams.toString()}` : "";

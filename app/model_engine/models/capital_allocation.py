@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import annual_series, json_number, safe_divide, status_explanation, status_from_data_quality, trust_summary
+from app.services.share_count_selection import shares_for_market_cap
 
 MODEL_NAME = "capital_allocation"
 MODEL_VERSION = "1.3.0"
@@ -63,7 +64,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
 
     shareholder_distribution = total_dividends + total_buybacks - total_sbc
     annualized_shareholder_distribution = safe_divide(shareholder_distribution, periods_used)
-    market_cap_denominator, denominator_method, market_cap_proxy_used = _latest_market_cap(annuals[0], latest_price, missing_fields)
+    market_cap_denominator, denominator_method, market_cap_proxy_used, share_source = _latest_market_cap(annuals[0], latest_price, missing_fields)
     proxy_used = proxy_used or market_cap_proxy_used
 
     shareholder_yield = safe_divide(annualized_shareholder_distribution, market_cap_denominator)
@@ -103,6 +104,8 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             "market_cap_horizon_years": 1 if market_cap_denominator is not None else None,
             "market_cap_observations_used": 1 if market_cap_denominator is not None else 0,
             "share_count_periods_used": 1 if market_cap_denominator is not None else 0,
+            "market_cap_share_source": share_source,
+            "market_cap_share_source_is_proxy": market_cap_proxy_used,
         },
         "series": rows,
         "missing_required_fields_last_3y": sorted(missing_fields),
@@ -113,20 +116,18 @@ def _latest_market_cap(
     latest_annual: object,
     latest_price: float | None,
     missing_fields: set[str],
-) -> tuple[float | None, str | None, bool]:
+) -> tuple[float | None, str | None, bool, str | None]:
     if latest_price in (None, 0):
         missing_fields.add("latest_price")
-        return None, None, True
+        return None, None, True, None
 
     data = getattr(latest_annual, "data", {}) or {}
-    latest_shares = data.get("shares_outstanding")
-    if latest_shares not in (None, 0):
-        return abs(float(latest_price) * float(latest_shares)), "latest_market_cap", False
+    share_selection = shares_for_market_cap(data)
+    if share_selection.source != "shares_outstanding":
+        missing_fields.add("shares_outstanding")
+    if share_selection.source is None:
+        missing_fields.add("weighted_average_diluted_shares")
+        return None, None, True, None
 
-    diluted_shares = data.get("weighted_average_diluted_shares")
-    missing_fields.add("shares_outstanding")
-    if diluted_shares not in (None, 0):
-        return abs(float(latest_price) * float(diluted_shares)), "latest_market_cap_proxy_shares", True
-
-    missing_fields.add("weighted_average_diluted_shares")
-    return None, None, True
+    method = "latest_market_cap" if not share_selection.is_proxy else "latest_market_cap_proxy_shares"
+    return abs(float(latest_price) * float(share_selection.value)), method, share_selection.is_proxy, share_selection.source

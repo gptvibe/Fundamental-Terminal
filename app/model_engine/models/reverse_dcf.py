@@ -17,6 +17,7 @@ from app.model_engine.utils import (
     valuation_applicability,
 )
 from app.services.risk_free_rate import get_latest_risk_free_rate
+from app.services.share_count_selection import shares_for_market_cap
 
 MODEL_NAME = "reverse_dcf"
 MODEL_VERSION = "1.4.0"
@@ -78,14 +79,15 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
             if used_fcf_margin_proxy:
                 fcf_margin_source = "operating_cash_flow_less_capex"
 
-    shares = latest_non_null(dataset, "shares_outstanding")
-    share_count_proxied = False
-    share_count_source = "shares_outstanding"
-    if shares is None:
-        shares = latest_non_null(dataset, "weighted_average_diluted_shares")
-        share_count_proxied = shares is not None
-        if share_count_proxied:
-            share_count_source = "weighted_average_diluted_shares"
+    share_selection = shares_for_market_cap(
+        {
+            "shares_outstanding": latest_non_null(dataset, "shares_outstanding"),
+            "weighted_average_diluted_shares": latest_non_null(dataset, "weighted_average_diluted_shares"),
+        }
+    )
+    shares = share_selection.value
+    share_count_proxied = share_selection.is_proxy
+    share_count_source = share_selection.source
 
     market_snapshot = dataset.market_snapshot
     price = market_snapshot.latest_price if market_snapshot is not None else None

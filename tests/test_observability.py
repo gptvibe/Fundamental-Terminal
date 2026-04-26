@@ -51,7 +51,12 @@ def test_model_engine_emits_structured_logs(monkeypatch: pytest.MonkeyPatch, cap
         market_snapshot=None,
         financials=(SimpleNamespace(period_end="2025-12-31"),),
     )
-    fake_definition = SimpleNamespace(name="ratios", version="test-v1", compute=lambda _dataset: {"model_status": "ok"})
+    fake_definition = SimpleNamespace(
+        name="ratios",
+        version="test-v1",
+        calculation_version="ratios_formula_v1",
+        compute=lambda _dataset: {"model_status": "ok"},
+    )
 
     class _FakeSession:
         def __init__(self) -> None:

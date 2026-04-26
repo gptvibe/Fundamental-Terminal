@@ -439,6 +439,22 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ),
     (
         "GET",
+        "/api/formulas",
+    ): _derived_official_contract(
+        "ft_model_engine",
+        "ft_derived_metrics_engine",
+        "ft_derived_metrics_mart",
+    ),
+    (
+        "GET",
+        "/api/formulas/{formula_id}",
+    ): _derived_official_contract(
+        "ft_model_engine",
+        "ft_derived_metrics_engine",
+        "ft_derived_metrics_mart",
+    ),
+    (
+        "GET",
         "/api/model-evaluations/latest",
     ): SourceContract(
         allowed_source_ids=(

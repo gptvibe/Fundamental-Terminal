@@ -101,17 +101,25 @@ def test_models_route_omits_input_periods_by_default_and_reduces_payload(monkeyp
     with _client(monkeypatch) as client:
         default_response = client.get("/api/companies/AAPL/models?model=dcf")
         expanded_response = client.get("/api/companies/AAPL/models?model=dcf&expand=input_periods")
+        formula_response = client.get("/api/companies/AAPL/models?model=dcf&expand=formula_details")
 
     assert default_response.status_code == 200
     assert expanded_response.status_code == 200
+    assert formula_response.status_code == 200
 
     default_payload = default_response.json()
     expanded_payload = expanded_response.json()
+    formula_payload = formula_response.json()
 
     assert default_payload["models"][0]["input_periods"] is None
     assert default_payload["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"
+    assert "formula_ids" in default_payload["models"][0]["result"]
+    assert "fair_value_per_share" in default_payload["models"][0]["result"]["formula_ids"]
+    assert default_payload["models"][0]["formula_details"] is None
     assert expanded_payload["models"][0]["input_periods"]["period_end"] == "2025-12-31"
     assert expanded_payload["models"][0]["result"]["calculation_version"] == "dcf_ev_bridge_v1"
+    assert "fair_value_per_share" in formula_payload["models"][0]["formula_details"]
+    assert formula_payload["models"][0]["formula_details"]["fair_value_per_share"]["formula_id"].startswith("model.dcf")
     assert len(default_response.content) < len(expanded_response.content)
 
 
@@ -137,7 +145,27 @@ def test_models_route_rejects_unknown_expansion(monkeypatch):
         response = client.get("/api/companies/AAPL/models?expand=foo")
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "expand must be one of: input_periods"
+    assert response.json()["detail"] == "expand must be one of: formula_details, input_periods"
+
+
+def test_formula_endpoints_return_metadata(monkeypatch):
+    with _client(monkeypatch) as client:
+        summary_response = client.get("/api/formulas")
+        details_response = client.get(
+            "/api/formulas/model.dcf.fair_value_per_share.model_output_v1"
+        )
+
+    assert summary_response.status_code == 200
+    assert summary_response.json()["schema_version"] == "formula_registry_v1"
+    assert summary_response.json()["include_details"] is False
+    assert any(
+        item["formula_id"] == "model.dcf.fair_value_per_share.model_output_v1"
+        for item in summary_response.json()["formulas"]
+    )
+
+    assert details_response.status_code == 200
+    assert details_response.json()["formula_id"] == "model.dcf.fair_value_per_share.model_output_v1"
+    assert details_response.json()["input_fields"]
 
 
 def test_models_route_recomputes_missing_current_model_when_legacy_row_is_filtered(monkeypatch):

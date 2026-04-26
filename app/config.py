@@ -135,6 +135,8 @@ class Settings:
     hot_response_cache_singleflight_lock_seconds: int = _int_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_LOCK_SECONDS", 30, minimum=1)
     hot_response_cache_singleflight_wait_seconds: float = _float_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_WAIT_SECONDS", 15.0, minimum=0.1)
     hot_response_cache_singleflight_poll_seconds: float = _float_env("HOT_RESPONSE_CACHE_SINGLEFLIGHT_POLL_SECONDS", 0.05, minimum=0.01)
+    hot_response_cache_upstream_local_max_entries: int = _int_env("HOT_RESPONSE_CACHE_UPSTREAM_LOCAL_MAX_ENTRIES", 512, minimum=0)
+    hot_response_cache_upstream_local_max_bytes: int = _int_env("HOT_RESPONSE_CACHE_UPSTREAM_LOCAL_MAX_BYTES", 16 * 1024 * 1024, minimum=0)
     performance_audit_enabled: bool = _bool_env("PERFORMANCE_AUDIT_ENABLED", False)
     performance_audit_max_records: int = _int_env("PERFORMANCE_AUDIT_MAX_RECORDS", 5000, minimum=100)
     dupont_mode: str = os.getenv("DUPONT_MODE", "auto").lower()

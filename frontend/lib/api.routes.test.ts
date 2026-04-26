@@ -297,6 +297,50 @@ describe("api route stability", () => {
     );
   });
 
+  it("serializes bounded price-history query params for chart-oriented financial helpers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyFinancials("AAPL", {
+      view: "core",
+      priceStartDate: "2020-01-01",
+      priceEndDate: "2025-01-01",
+      priceLatestN: 1200,
+      priceMaxPoints: 320,
+    });
+    await getCompanyOverview("AAPL", {
+      financialsView: "core_segments",
+      priceLatestN: 2400,
+      priceMaxPoints: 480,
+    });
+    await getCompanyWorkspaceBootstrap("AAPL", {
+      financialsView: "core_segments",
+      priceLatestN: 2400,
+      priceMaxPoints: 480,
+      includeOverviewBrief: true,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/companies/AAPL/financials?view=core&price_start_date=2020-01-01&price_end_date=2025-01-01&price_latest_n=1200&price_max_points=320",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/AAPL/overview?financials_view=core_segments&price_latest_n=2400&price_max_points=480",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/backend/api/companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=2400&price_max_points=480&include_overview_brief=true",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
   it("keeps charts helper paths unchanged", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

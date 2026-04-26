@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import copy
-import json
 import math
+from collections import OrderedDict
 import time
 import uuid
+from dataclasses import dataclass
 from hashlib import sha256
 from threading import Lock
 from typing import Any, Callable, TypeVar
+
+import orjson
 
 from app.config import settings
 
@@ -20,34 +22,57 @@ except Exception:  # pragma: no cover - optional dependency
 T = TypeVar("T")
 
 
+@dataclass(slots=True)
+class _LocalEntry:
+    expires_at: float
+    payload_bytes: bytes
+    size_bytes: int
+
+
 class SharedUpstreamCache:
     def __init__(self) -> None:
         self._namespace = f"{settings.hot_response_cache_namespace}:upstream"
         self._redis = self._build_redis_client()
-        self._local_entries: dict[str, tuple[float, Any]] = {}
+        self._local_max_entries = max(0, int(getattr(settings, "hot_response_cache_upstream_local_max_entries", 512)))
+        self._local_max_bytes = max(0, int(getattr(settings, "hot_response_cache_upstream_local_max_bytes", 16 * 1024 * 1024)))
+        self._local_entries: OrderedDict[str, _LocalEntry] = OrderedDict()
+        self._local_total_bytes = 0
         self._local_entries_lock = Lock()
         self._local_locks: dict[str, tuple[str, float]] = {}
         self._local_locks_guard = Lock()
+        self._metrics_lock = Lock()
+        self._metrics = {
+            "local_hits": 0,
+            "redis_hits": 0,
+            "misses": 0,
+            "evictions": 0,
+            "singleflight_waits": 0,
+        }
 
     def get_json(self, logical_key: str) -> Any | None:
-        cached = self._get_local(logical_key)
-        if cached is not None:
-            return copy.deepcopy(cached)
+        local_payload_bytes = self._get_local_bytes(logical_key)
+        if local_payload_bytes is not None:
+            self._increment_metric("local_hits")
+            return self._deserialize(local_payload_bytes)
 
         if self._redis is None:
+            self._increment_metric("misses")
             return None
 
         entry_key = self._entry_key(logical_key)
         try:
-            raw_payload = self._redis.get(entry_key)
+            raw_payload, ttl_milliseconds = self._redis_get_and_pttl(entry_key)
             if raw_payload is None:
+                self._increment_metric("misses")
                 return None
-            payload = json.loads(raw_payload)
-            ttl_milliseconds = self._redis.pttl(entry_key)
+            payload_bytes = self._coerce_to_bytes(raw_payload)
+            payload = self._deserialize(payload_bytes)
+            self._increment_metric("redis_hits")
             if isinstance(ttl_milliseconds, int) and ttl_milliseconds > 0:
-                self._store_local(logical_key, payload, ttl_milliseconds / 1000.0)
+                self._store_local_bytes(logical_key, payload_bytes, ttl_milliseconds / 1000.0)
             return payload
         except Exception:
+            self._increment_metric("misses")
             return None
 
     def store_json(self, logical_key: str, payload: Any, *, ttl_seconds: float) -> None:
@@ -55,8 +80,8 @@ class SharedUpstreamCache:
         if normalized_ttl <= 0:
             return
 
-        serialized = json.dumps(payload, separators=(",", ":"))
-        self._store_local(logical_key, payload, normalized_ttl)
+        serialized = orjson.dumps(payload)
+        self._store_local_bytes(logical_key, serialized, normalized_ttl)
 
         if self._redis is None:
             return
@@ -97,6 +122,7 @@ class SharedUpstreamCache:
             finally:
                 self._release_lock(logical_key, lease_token)
 
+        self._increment_metric("singleflight_waits")
         deadline = time.monotonic() + settings.hot_response_cache_singleflight_wait_seconds
         while time.monotonic() < deadline:
             cached = wait_for()
@@ -119,8 +145,19 @@ class SharedUpstreamCache:
     def clear_local(self) -> None:
         with self._local_entries_lock:
             self._local_entries.clear()
+            self._local_total_bytes = 0
         with self._local_locks_guard:
             self._local_locks.clear()
+
+    def snapshot_metrics(self) -> dict[str, int]:
+        with self._metrics_lock:
+            counters = dict(self._metrics)
+        with self._local_entries_lock:
+            counters["local_entries"] = len(self._local_entries)
+            counters["local_bytes"] = self._local_total_bytes
+            counters["local_max_entries"] = self._local_max_entries
+            counters["local_max_bytes"] = self._local_max_bytes
+        return counters
 
     def _build_redis_client(self):
         if redis is None:
@@ -137,21 +174,101 @@ class SharedUpstreamCache:
         except Exception:
             return None
 
-    def _get_local(self, logical_key: str) -> Any | None:
+    def _get_local_bytes(self, logical_key: str) -> bytes | None:
         now = time.monotonic()
         with self._local_entries_lock:
-            cached = self._local_entries.get(logical_key)
-            if cached is None:
+            entry = self._local_entries.get(logical_key)
+            if entry is None:
                 return None
-            expires_at, payload = cached
-            if expires_at <= now:
-                self._local_entries.pop(logical_key, None)
+            if entry.expires_at <= now:
+                self._delete_local_entry_locked(logical_key)
                 return None
-            return payload
+            self._local_entries.move_to_end(logical_key)
+            return entry.payload_bytes
 
-    def _store_local(self, logical_key: str, payload: Any, ttl_seconds: float) -> None:
+    def _store_local_bytes(self, logical_key: str, payload_bytes: bytes, ttl_seconds: float) -> None:
+        if ttl_seconds <= 0:
+            return
+        if self._local_max_entries <= 0 or self._local_max_bytes <= 0:
+            return
+
+        entry_size = len(payload_bytes)
+        if entry_size > self._local_max_bytes:
+            return
+
+        now = time.monotonic()
         with self._local_entries_lock:
-            self._local_entries[logical_key] = (time.monotonic() + ttl_seconds, copy.deepcopy(payload))
+            if logical_key in self._local_entries:
+                self._delete_local_entry_locked(logical_key)
+            self._local_entries[logical_key] = _LocalEntry(
+                expires_at=now + ttl_seconds,
+                payload_bytes=payload_bytes,
+                size_bytes=entry_size,
+            )
+            self._local_total_bytes += entry_size
+            self._prune_local_locked(now)
+
+    def _prune_local_locked(self, now: float) -> None:
+        for key, entry in list(self._local_entries.items()):
+            if entry.expires_at <= now:
+                self._delete_local_entry_locked(key)
+
+        evicted = 0
+        while self._local_entries and (
+            len(self._local_entries) > self._local_max_entries or self._local_total_bytes > self._local_max_bytes
+        ):
+            _, entry = self._local_entries.popitem(last=False)
+            self._local_total_bytes -= entry.size_bytes
+            evicted += 1
+
+        if evicted > 0:
+            self._increment_metric("evictions", delta=evicted)
+
+    def _delete_local_entry_locked(self, logical_key: str) -> None:
+        entry = self._local_entries.pop(logical_key, None)
+        if entry is not None:
+            self._local_total_bytes -= entry.size_bytes
+
+    def _redis_get_and_pttl(self, entry_key: str) -> tuple[Any | None, int | None]:
+        if self._redis is None:
+            return None, None
+
+        try:
+            pipeline = self._redis.pipeline(transaction=False)
+            pipeline.get(entry_key)
+            pipeline.pttl(entry_key)
+            results = pipeline.execute()
+            if isinstance(results, (list, tuple)) and len(results) == 2:
+                ttl_value = results[1] if isinstance(results[1], int) else None
+                return results[0], ttl_value
+        except Exception:
+            pass
+
+        raw_payload = self._redis.get(entry_key)
+        if raw_payload is None:
+            return None, None
+        ttl_milliseconds = self._redis.pttl(entry_key)
+        return raw_payload, ttl_milliseconds if isinstance(ttl_milliseconds, int) else None
+
+    def _increment_metric(self, name: str, *, delta: int = 1) -> None:
+        with self._metrics_lock:
+            self._metrics[name] += delta
+
+    @staticmethod
+    def _coerce_to_bytes(raw_payload: Any) -> bytes:
+        if isinstance(raw_payload, bytes):
+            return raw_payload
+        if isinstance(raw_payload, bytearray):
+            return bytes(raw_payload)
+        if isinstance(raw_payload, memoryview):
+            return raw_payload.tobytes()
+        if isinstance(raw_payload, str):
+            return raw_payload.encode("utf-8")
+        raise TypeError("Unsupported cache payload type")
+
+    @staticmethod
+    def _deserialize(payload_bytes: bytes) -> Any:
+        return orjson.loads(payload_bytes)
 
     def _acquire_lock(self, logical_key: str) -> str | None:
         token = uuid.uuid4().hex

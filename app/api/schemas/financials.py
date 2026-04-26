@@ -453,7 +453,12 @@ class MetricsProvenancePayload(BaseModel):
     statement_source: str
     price_source: str | None = None
     formula_version: str
+    formula_ids: dict[str, str] = Field(default_factory=dict)
     metric_semantics: dict[str, Literal["annualized", "period_based", "ttm"]] = Field(default_factory=dict)
+    market_cap_share_source: str | None = None
+    market_cap_share_source_is_proxy: bool | None = None
+    per_share_metric_share_source: str | None = None
+    per_share_metric_share_source_is_proxy: bool | None = None
 
 
 class MetricsQualityPayload(BaseModel):
@@ -487,6 +492,7 @@ class DerivedMetricValuePayload(BaseModel):
     metric_key: str
     metric_value: Number = None
     is_proxy: bool
+    formula_id: str | None = None
     provenance: dict[str, Any]
     quality_flags: list[str] = Field(default_factory=list)
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from app.model_engine.types import CompanyDataset
 from app.model_engine.utils import ANNUAL_FORMS, UNSUPPORTED_FINANCIAL_KEYWORDS, json_number
+from app.services.formula_registry import formula_ids_for_model_result
 from app.services.oil_exposure import classify_oil_exposure
 
 MODEL_STATUS_SUPPORTED = "supported"
@@ -206,6 +207,7 @@ def standardize_model_result(
     payload["confidence_summary"] = _confidence_summary(confidence_score, confidence_reasons)
     payload["status_flags"] = _status_flags(status, missing_fields, proxy_usage, stale_inputs, sector_suitability)
     payload.setdefault("explanation", _status_explanation(status))
+    payload["formula_ids"] = formula_ids_for_model_result(model_name, payload)
     return payload
 
 

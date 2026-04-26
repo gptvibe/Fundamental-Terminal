@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.handlers import models as handlers
 from app.api.source_contracts import add_user_visible_route
+from app.api.schemas.formulas import FormulaListResponse, FormulaMetadataPayload
 from app.api.schemas.model_evaluations import ModelEvaluationResponse
 from app.api.schemas.models import CompanyModelsResponse
 from app.api.schemas.oil_scenario import CompanyOilScenarioResponse
@@ -18,6 +19,20 @@ def build_router() -> APIRouter:
         handlers.company_models,
         methods=["GET"],
         response_model=CompanyModelsResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/formulas",
+        handlers.list_formulas,
+        methods=["GET"],
+        response_model=FormulaListResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/formulas/{formula_id}",
+        handlers.get_formula,
+        methods=["GET"],
+        response_model=FormulaMetadataPayload,
     )
     add_user_visible_route(
         router,

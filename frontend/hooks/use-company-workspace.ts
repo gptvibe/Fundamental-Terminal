@@ -54,6 +54,8 @@ export interface LoadCompanyWorkspaceDataResult {
 }
 
 const COMPATIBILITY_FALLBACK_STATUSES = new Set([404, 405, 501]);
+const WORKSPACE_PRICE_HISTORY_LATEST_N = 3200;
+const WORKSPACE_PRICE_HISTORY_MAX_POINTS = 480;
 
 export function useCompanyWorkspace(
   ticker: string,
@@ -379,6 +381,8 @@ async function loadCompanyWorkspaceData(
   try {
     const bootstrap = await getCompanyWorkspaceBootstrap(ticker, {
       financialsView,
+      priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
+      priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
       includeOverviewBrief: options.includeOverviewBrief,
       includeInsiders: options.includeInsiders,
       includeInstitutional: options.includeInstitutional,
@@ -426,7 +430,12 @@ async function loadCompanyWorkspaceDataLegacy(
   let earningsSummaryData: CompanyEarningsSummaryResponse | null = null;
   if (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional) {
     try {
-      const overviewData = await getCompanyOverview(ticker, { financialsView, signal: options.signal });
+      const overviewData = await getCompanyOverview(ticker, {
+        financialsView,
+        priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
+        priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
+        signal: options.signal,
+      });
       financialData = overviewData.financials;
       briefData = overviewData.brief;
     } catch (error) {
@@ -436,10 +445,20 @@ async function loadCompanyWorkspaceDataLegacy(
       if (!shouldUseCompatibilityFallback(error)) {
         throw error;
       }
-      financialData = await getCompanyFinancials(ticker, { view: financialsView, signal: options.signal });
+      financialData = await getCompanyFinancials(ticker, {
+        view: financialsView,
+        priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
+        priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
+        signal: options.signal,
+      });
     }
   } else {
-    financialData = await getCompanyFinancials(ticker, { view: financialsView, signal: options.signal });
+    financialData = await getCompanyFinancials(ticker, {
+      view: financialsView,
+      priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
+      priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
+      signal: options.signal,
+    });
   }
   let activeJobId = financialData.refresh.job_id ?? briefData?.refresh.job_id ?? null;
   let insiderData: CompanyInsiderTradesResponse | null = null;

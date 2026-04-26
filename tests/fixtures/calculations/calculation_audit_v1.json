@@ -1,0 +1,1145 @@
+{
+  "formula_versions": {
+    "derived_metrics": "sec_metrics_v3",
+    "dcf": "dcf_ev_bridge_v1",
+    "reverse_dcf": "reverse_dcf_ev_target_v1",
+    "piotroski": "piotroski_ratio_scale_v1",
+    "roic_model_version": "1.2.1",
+    "ratios_model_version": "1.2.0",
+    "altman_z_model_version": "2.0.0"
+  },
+  "cases": [
+    {
+      "id": "standard_tech",
+      "label": "standard industrial/tech company",
+      "for_model_audit": true,
+      "for_derived_metrics_audit": true,
+      "company": {
+        "ticker": "TECH",
+        "name": "Fixture Tech Inc.",
+        "sector": "Technology",
+        "market_sector": "Technology",
+        "market_industry": "Software"
+      },
+      "market_snapshot": {
+        "latest_price": 85.0,
+        "price_date": "2026-03-21",
+        "price_source": "yahoo_finance"
+      },
+      "price_history": [
+        {
+          "trade_date": "2025-12-31",
+          "close": 85.0,
+          "source": "yahoo_finance"
+        }
+      ],
+      "statement_type": "canonical_xbrl",
+      "financials": [
+        {
+          "statement_id": 2025,
+          "filing_type": "10-K",
+          "period_start": "2025-01-01",
+          "period_end": "2025-12-31",
+          "data": {
+            "revenue": 1250.0,
+            "gross_profit": 620.0,
+            "operating_income": 260.0,
+            "net_income": 190.0,
+            "income_tax_expense": 42.0,
+            "free_cash_flow": 210.0,
+            "operating_cash_flow": 280.0,
+            "capex": 70.0,
+            "cash_and_short_term_investments": 340.0,
+            "cash_and_cash_equivalents": 280.0,
+            "short_term_investments": 60.0,
+            "current_debt": 90.0,
+            "long_term_debt": 410.0,
+            "shares_outstanding": 120.0,
+            "weighted_average_diluted_shares": 118.0,
+            "stockholders_equity": 980.0,
+            "total_assets": 2200.0,
+            "total_liabilities": 1220.0,
+            "current_assets": 800.0,
+            "current_liabilities": 420.0,
+            "retained_earnings": 420.0,
+            "interest_expense": 25.0,
+            "dividends": 45.0,
+            "share_buybacks": 65.0,
+            "debt_changes": -20.0,
+            "stock_based_compensation": 30.0,
+            "eps": 6.0,
+            "accounts_receivable": 210.0,
+            "inventory": 90.0,
+            "accounts_payable": 150.0,
+            "segment_breakdown": [
+              {
+                "segment_name": "Products",
+                "revenue": 780.0
+              },
+              {
+                "segment_name": "Services",
+                "revenue": 470.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 2024,
+          "filing_type": "10-K",
+          "period_start": "2024-01-01",
+          "period_end": "2024-12-31",
+          "data": {
+            "revenue": 1160.0,
+            "gross_profit": 560.0,
+            "operating_income": 235.0,
+            "net_income": 170.0,
+            "income_tax_expense": 39.0,
+            "free_cash_flow": 190.0,
+            "operating_cash_flow": 258.0,
+            "capex": 68.0,
+            "cash_and_short_term_investments": 320.0,
+            "cash_and_cash_equivalents": 265.0,
+            "short_term_investments": 55.0,
+            "current_debt": 95.0,
+            "long_term_debt": 420.0,
+            "shares_outstanding": 121.0,
+            "weighted_average_diluted_shares": 119.0,
+            "stockholders_equity": 930.0,
+            "total_assets": 2100.0,
+            "total_liabilities": 1170.0,
+            "current_assets": 760.0,
+            "current_liabilities": 410.0,
+            "retained_earnings": 390.0,
+            "interest_expense": 24.0,
+            "dividends": 40.0,
+            "share_buybacks": 58.0,
+            "debt_changes": -15.0,
+            "stock_based_compensation": 28.0,
+            "eps": 5.6,
+            "accounts_receivable": 196.0,
+            "inventory": 84.0,
+            "accounts_payable": 142.0,
+            "segment_breakdown": [
+              {
+                "segment_name": "Products",
+                "revenue": 720.0
+              },
+              {
+                "segment_name": "Services",
+                "revenue": 440.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 2023,
+          "filing_type": "10-K",
+          "period_start": "2023-01-01",
+          "period_end": "2023-12-31",
+          "data": {
+            "revenue": 1085.0,
+            "gross_profit": 520.0,
+            "operating_income": 220.0,
+            "net_income": 160.0,
+            "income_tax_expense": 35.0,
+            "free_cash_flow": 175.0,
+            "operating_cash_flow": 245.0,
+            "capex": 66.0,
+            "cash_and_short_term_investments": 300.0,
+            "cash_and_cash_equivalents": 246.0,
+            "short_term_investments": 54.0,
+            "current_debt": 105.0,
+            "long_term_debt": 430.0,
+            "shares_outstanding": 122.0,
+            "weighted_average_diluted_shares": 120.0,
+            "stockholders_equity": 900.0,
+            "total_assets": 2000.0,
+            "total_liabilities": 1100.0,
+            "current_assets": 730.0,
+            "current_liabilities": 400.0,
+            "retained_earnings": 360.0,
+            "interest_expense": 23.0,
+            "dividends": 36.0,
+            "share_buybacks": 52.0,
+            "debt_changes": -10.0,
+            "stock_based_compensation": 26.0,
+            "eps": 5.2,
+            "accounts_receivable": 184.0,
+            "inventory": 80.0,
+            "accounts_payable": 138.0,
+            "segment_breakdown": [
+              {
+                "segment_name": "Products",
+                "revenue": 670.0
+              },
+              {
+                "segment_name": "Services",
+                "revenue": 415.0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "models": {
+          "dcf": {
+            "model_status": "supported",
+            "fair_value_per_share": 23.918567872983534,
+            "value_basis": "equity_value",
+            "capital_structure_proxied": false,
+            "calculation_version": "dcf_ev_bridge_v1"
+          },
+          "reverse_dcf": {
+            "model_status": "supported",
+            "implied_growth": 0.55,
+            "target_value_basis": "enterprise_value",
+            "calculation_version": "reverse_dcf_ev_target_v1"
+          },
+          "roic": {
+            "model_status": "supported",
+            "roic": 0.18017543859649124,
+            "spread_vs_capital_cost_proxy": 0.09317543859649124
+          },
+          "ratios": {
+            "model_status": "supported",
+            "cadence": "annual",
+            "gross_margin": 0.496,
+            "return_on_assets": 0.08837209302325581
+          },
+          "piotroski": {
+            "model_status": "supported",
+            "score": 9,
+            "available_criteria": 9,
+            "calculation_version": "piotroski_ratio_scale_v1"
+          },
+          "altman_z": {
+            "model_status": "supported",
+            "z_score_approximate": 6.449120715350224,
+            "variant": "classic_public_company_1968"
+          }
+        },
+        "derived_metrics": {
+          "cadences": [
+            "annual"
+          ],
+          "latest_formula_version": "sec_metrics_v3",
+          "latest_flags": []
+        }
+      }
+    },
+    {
+      "id": "bank",
+      "label": "bank",
+      "for_model_audit": true,
+      "for_derived_metrics_audit": true,
+      "company": {
+        "ticker": "BANK",
+        "name": "Fixture Bank",
+        "sector": "Financial Services",
+        "market_sector": "Financial Services",
+        "market_industry": "Banking"
+      },
+      "market_snapshot": {
+        "latest_price": 40.0,
+        "price_date": "2026-03-21",
+        "price_source": "yahoo_finance"
+      },
+      "price_history": [
+        {
+          "trade_date": "2025-03-31",
+          "close": 40.0,
+          "source": "yahoo_finance"
+        }
+      ],
+      "statement_type": "canonical_bank_regulatory",
+      "financials": [
+        {
+          "statement_id": 1,
+          "filing_type": "CALL",
+          "period_start": "2025-01-01",
+          "period_end": "2025-03-31",
+          "data": {
+            "net_income": 13.0,
+            "total_assets": 1030.0,
+            "stockholders_equity": 103.0,
+            "net_interest_income": 33.0,
+            "provision_for_credit_losses": 4.0,
+            "deposits_total": 730.0,
+            "core_deposits": 515.0,
+            "uninsured_deposits": 108.0,
+            "net_interest_margin": 0.034,
+            "nonperforming_assets_ratio": 0.013,
+            "common_equity_tier1_ratio": 0.114,
+            "tier1_risk_weighted_ratio": 0.123,
+            "total_risk_based_capital_ratio": 0.143,
+            "tangible_common_equity": 85.0,
+            "weighted_average_diluted_shares": 10.0,
+            "shares_outstanding": 10.0
+          }
+        },
+        {
+          "statement_id": 2,
+          "filing_type": "CALL",
+          "period_start": "2024-01-01",
+          "period_end": "2024-03-31",
+          "data": {
+            "net_income": 12.0,
+            "total_assets": 1020.0,
+            "stockholders_equity": 102.0,
+            "net_interest_income": 32.0,
+            "provision_for_credit_losses": 4.0,
+            "deposits_total": 720.0,
+            "core_deposits": 510.0,
+            "uninsured_deposits": 105.0,
+            "net_interest_margin": 0.033,
+            "nonperforming_assets_ratio": 0.012,
+            "common_equity_tier1_ratio": 0.113,
+            "tier1_risk_weighted_ratio": 0.122,
+            "total_risk_based_capital_ratio": 0.142,
+            "tangible_common_equity": 84.0,
+            "weighted_average_diluted_shares": 10.0,
+            "shares_outstanding": 10.0
+          }
+        }
+      ],
+      "expected": {
+        "models": {
+          "dcf": {
+            "model_status": "unsupported",
+            "fair_value_per_share": null,
+            "value_basis": null,
+            "capital_structure_proxied": null,
+            "calculation_version": "dcf_ev_bridge_v1"
+          },
+          "reverse_dcf": {
+            "model_status": "unsupported",
+            "implied_growth": null,
+            "target_value_basis": null,
+            "calculation_version": "reverse_dcf_ev_target_v1"
+          },
+          "roic": {
+            "model_status": "insufficient_data",
+            "roic": null,
+            "spread_vs_capital_cost_proxy": null
+          },
+          "ratios": {
+            "model_status": "partial",
+            "cadence": "quarterly",
+            "gross_margin": null,
+            "return_on_assets": 0.050731707317073174
+          },
+          "piotroski": {
+            "model_status": "insufficient_data",
+            "score": null,
+            "available_criteria": null,
+            "calculation_version": "piotroski_ratio_scale_v1"
+          },
+          "altman_z": {
+            "model_status": "partial",
+            "z_score_approximate": null,
+            "variant": "classic_public_company_1968"
+          }
+        },
+        "derived_metrics": {
+          "cadences": [
+            "quarterly"
+          ],
+          "latest_formula_version": "sec_metrics_v3",
+          "latest_flags": [
+            "segment_data_unavailable"
+          ]
+        }
+      }
+    },
+    {
+      "id": "reit",
+      "label": "REIT",
+      "for_model_audit": true,
+      "for_derived_metrics_audit": false,
+      "company": {
+        "ticker": "REIT",
+        "name": "Fixture REIT",
+        "sector": "Real Estate",
+        "market_sector": "Real Estate",
+        "market_industry": "REIT"
+      },
+      "market_snapshot": {
+        "latest_price": 32.0,
+        "price_date": "2026-03-21",
+        "price_source": "yahoo_finance"
+      },
+      "price_history": [],
+      "statement_type": "canonical_xbrl",
+      "financials": [
+        {
+          "statement_id": 1,
+          "filing_type": "10-K",
+          "period_start": "2025-01-01",
+          "period_end": "2025-12-31",
+          "data": {
+            "revenue": 500.0,
+            "operating_income": 140.0,
+            "net_income": 90.0,
+            "free_cash_flow": 40.0,
+            "operating_cash_flow": 120.0,
+            "capex": 80.0,
+            "current_debt": 120.0,
+            "long_term_debt": 900.0,
+            "cash_and_short_term_investments": 30.0,
+            "shares_outstanding": 200.0,
+            "weighted_average_diluted_shares": 198.0,
+            "stockholders_equity": 700.0,
+            "total_assets": 2200.0,
+            "total_liabilities": 1500.0,
+            "current_assets": 150.0,
+            "current_liabilities": 210.0,
+            "retained_earnings": 100.0
+          }
+        },
+        {
+          "statement_id": 2,
+          "filing_type": "10-K",
+          "period_start": "2024-01-01",
+          "period_end": "2024-12-31",
+          "data": {
+            "revenue": 470.0,
+            "operating_income": 130.0,
+            "net_income": 80.0,
+            "free_cash_flow": 35.0,
+            "operating_cash_flow": 110.0,
+            "capex": 75.0,
+            "current_debt": 120.0,
+            "long_term_debt": 880.0,
+            "cash_and_short_term_investments": 25.0,
+            "shares_outstanding": 202.0,
+            "weighted_average_diluted_shares": 199.0,
+            "stockholders_equity": 680.0,
+            "total_assets": 2150.0,
+            "total_liabilities": 1470.0,
+            "current_assets": 145.0,
+            "current_liabilities": 205.0,
+            "retained_earnings": 95.0
+          }
+        }
+      ],
+      "expected": {
+        "models": {
+          "dcf": {
+            "model_status": "supported",
+            "fair_value_per_share": -0.8648950217837449,
+            "value_basis": "equity_value",
+            "capital_structure_proxied": false,
+            "calculation_version": "dcf_ev_bridge_v1"
+          },
+          "reverse_dcf": {
+            "model_status": "supported",
+            "implied_growth": 0.55,
+            "target_value_basis": "enterprise_value",
+            "calculation_version": "reverse_dcf_ev_target_v1"
+          },
+          "roic": {
+            "model_status": "supported",
+            "roic": 0.06544378698224852,
+            "spread_vs_capital_cost_proxy": -0.02155621301775147
+          },
+          "ratios": {
+            "model_status": "partial",
+            "cadence": "annual",
+            "gross_margin": null,
+            "return_on_assets": 0.041379310344827586
+          },
+          "piotroski": {
+            "model_status": "partial",
+            "score": 8,
+            "available_criteria": 8,
+            "calculation_version": "piotroski_ratio_scale_v1"
+          },
+          "altman_z": {
+            "model_status": "supported",
+            "z_score_approximate": 3.0281818181818183,
+            "variant": "classic_public_company_1968"
+          }
+        }
+      }
+    },
+    {
+      "id": "negative_fcf",
+      "label": "negative FCF company",
+      "for_model_audit": true,
+      "for_derived_metrics_audit": false,
+      "company": {
+        "ticker": "NFCF",
+        "name": "Fixture Negative FCF",
+        "sector": "Technology",
+        "market_sector": "Technology",
+        "market_industry": "Software"
+      },
+      "market_snapshot": {
+        "latest_price": 20.0,
+        "price_date": "2026-03-21",
+        "price_source": "yahoo_finance"
+      },
+      "price_history": [],
+      "statement_type": "canonical_xbrl",
+      "financials": [
+        {
+          "statement_id": 1,
+          "filing_type": "10-K",
+          "period_start": "2025-01-01",
+          "period_end": "2025-12-31",
+          "data": {
+            "revenue": 900.0,
+            "gross_profit": 300.0,
+            "operating_income": -40.0,
+            "net_income": -65.0,
+            "income_tax_expense": 0.0,
+            "free_cash_flow": -120.0,
+            "operating_cash_flow": 20.0,
+            "capex": 140.0,
+            "cash_and_short_term_investments": 120.0,
+            "current_debt": 70.0,
+            "long_term_debt": 260.0,
+            "shares_outstanding": 150.0,
+            "weighted_average_diluted_shares": 149.0,
+            "stockholders_equity": 420.0,
+            "total_assets": 1200.0,
+            "total_liabilities": 780.0,
+            "current_assets": 300.0,
+            "current_liabilities": 260.0,
+            "retained_earnings": -40.0,
+            "interest_expense": 12.0
+          }
+        },
+        {
+          "statement_id": 2,
+          "filing_type": "10-K",
+          "period_start": "2024-01-01",
+          "period_end": "2024-12-31",
+          "data": {
+            "revenue": 860.0,
+            "gross_profit": 295.0,
+            "operating_income": -25.0,
+            "net_income": -50.0,
+            "income_tax_expense": 0.0,
+            "free_cash_flow": -95.0,
+            "operating_cash_flow": 35.0,
+            "capex": 130.0,
+            "cash_and_short_term_investments": 110.0,
+            "current_debt": 68.0,
+            "long_term_debt": 250.0,
+            "shares_outstanding": 150.0,
+            "weighted_average_diluted_shares": 149.0,
+            "stockholders_equity": 430.0,
+            "total_assets": 1180.0,
+            "total_liabilities": 750.0,
+            "current_assets": 310.0,
+            "current_liabilities": 250.0,
+            "retained_earnings": -20.0,
+            "interest_expense": 11.0
+          }
+        },
+        {
+          "statement_id": 3,
+          "filing_type": "10-K",
+          "period_start": "2023-01-01",
+          "period_end": "2023-12-31",
+          "data": {
+            "revenue": 840.0,
+            "gross_profit": 285.0,
+            "operating_income": -15.0,
+            "net_income": -35.0,
+            "income_tax_expense": 0.0,
+            "free_cash_flow": -70.0,
+            "operating_cash_flow": 50.0,
+            "capex": 120.0,
+            "cash_and_short_term_investments": 105.0,
+            "current_debt": 65.0,
+            "long_term_debt": 245.0,
+            "shares_outstanding": 149.0,
+            "weighted_average_diluted_shares": 148.0,
+            "stockholders_equity": 440.0,
+            "total_assets": 1160.0,
+            "total_liabilities": 720.0,
+            "current_assets": 305.0,
+            "current_liabilities": 245.0,
+            "retained_earnings": 0.0,
+            "interest_expense": 10.0
+          }
+        }
+      ],
+      "expected": {
+        "models": {
+          "dcf": {
+            "model_status": "insufficient_data",
+            "fair_value_per_share": -9.389568366405697,
+            "value_basis": "equity_value",
+            "capital_structure_proxied": false,
+            "calculation_version": "dcf_ev_bridge_v1"
+          },
+          "reverse_dcf": {
+            "model_status": "supported",
+            "implied_growth": -0.35,
+            "target_value_basis": "enterprise_value",
+            "calculation_version": "reverse_dcf_ev_target_v1"
+          },
+          "roic": {
+            "model_status": "supported",
+            "roic": -0.05015873015873016,
+            "spread_vs_capital_cost_proxy": -0.13715873015873015
+          },
+          "ratios": {
+            "model_status": "partial",
+            "cadence": "annual",
+            "gross_margin": 0.3333333333333333,
+            "return_on_assets": -0.0546218487394958
+          },
+          "piotroski": {
+            "model_status": "supported",
+            "score": 4,
+            "available_criteria": 9,
+            "calculation_version": "piotroski_ratio_scale_v1"
+          },
+          "altman_z": {
+            "model_status": "supported",
+            "z_score_approximate": 2.941025641025641,
+            "variant": "classic_public_company_1968"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing_quarter",
+      "label": "missing quarter company",
+      "for_model_audit": false,
+      "for_derived_metrics_audit": true,
+      "company": {
+        "ticker": "MISSQ",
+        "name": "Fixture Missing Quarter",
+        "sector": "Industrials",
+        "market_sector": "Industrials",
+        "market_industry": "Machinery"
+      },
+      "market_snapshot": null,
+      "price_history": [
+        {
+          "trade_date": "2025-12-31",
+          "close": 30.0,
+          "source": "yahoo_finance"
+        }
+      ],
+      "statement_type": "canonical_xbrl",
+      "financials": [
+        {
+          "statement_id": 1,
+          "filing_type": "10-Q",
+          "period_start": "2025-01-01",
+          "period_end": "2025-03-31",
+          "data": {
+            "revenue": 100.0,
+            "gross_profit": 40.0,
+            "operating_income": 20.0,
+            "net_income": 12.0,
+            "operating_cash_flow": 18.0,
+            "free_cash_flow": 12.0,
+            "total_assets": 200.0,
+            "current_assets": 80.0,
+            "current_liabilities": 40.0,
+            "current_debt": 8.0,
+            "long_term_debt": 30.0,
+            "stockholders_equity": 95.0,
+            "weighted_average_diluted_shares": 100.0,
+            "shares_outstanding": 100.0,
+            "stock_based_compensation": 3.0,
+            "share_buybacks": -2.0,
+            "dividends": -1.0,
+            "accounts_receivable": 20.0,
+            "inventory": 8.0,
+            "accounts_payable": 12.0,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 70.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 30.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 2,
+          "filing_type": "10-Q",
+          "period_start": "2025-07-01",
+          "period_end": "2025-09-30",
+          "data": {
+            "revenue": 120.0,
+            "gross_profit": 50.0,
+            "operating_income": 24.0,
+            "net_income": 14.0,
+            "operating_cash_flow": 22.0,
+            "free_cash_flow": 14.0,
+            "total_assets": 210.0,
+            "current_assets": 84.0,
+            "current_liabilities": 42.0,
+            "current_debt": 9.0,
+            "long_term_debt": 29.0,
+            "stockholders_equity": 100.0,
+            "weighted_average_diluted_shares": 100.0,
+            "shares_outstanding": 100.0,
+            "stock_based_compensation": 3.2,
+            "share_buybacks": -2.2,
+            "dividends": -1.1,
+            "accounts_receivable": 21.0,
+            "inventory": 8.4,
+            "accounts_payable": 12.6,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 84.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 36.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 3,
+          "filing_type": "10-Q",
+          "period_start": "2025-10-01",
+          "period_end": "2025-12-31",
+          "data": {
+            "revenue": 130.0,
+            "gross_profit": 52.0,
+            "operating_income": 26.0,
+            "net_income": 16.0,
+            "operating_cash_flow": 23.0,
+            "free_cash_flow": 15.0,
+            "total_assets": 220.0,
+            "current_assets": 88.0,
+            "current_liabilities": 44.0,
+            "current_debt": 10.0,
+            "long_term_debt": 28.0,
+            "stockholders_equity": 104.0,
+            "weighted_average_diluted_shares": 101.0,
+            "shares_outstanding": 101.0,
+            "stock_based_compensation": 3.3,
+            "share_buybacks": -2.3,
+            "dividends": -1.2,
+            "accounts_receivable": 22.0,
+            "inventory": 8.8,
+            "accounts_payable": 13.2,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 90.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 40.0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "derived_metrics": {
+          "cadences": [
+            "quarterly"
+          ],
+          "latest_formula_version": "sec_metrics_v3",
+          "latest_flags": [],
+          "latest_quarterly_revenue_growth": 0.08333333333333326
+        }
+      }
+    },
+    {
+      "id": "restated_filing",
+      "label": "restated filing company",
+      "for_model_audit": false,
+      "for_derived_metrics_audit": true,
+      "company": {
+        "ticker": "REST",
+        "name": "Fixture Restatement",
+        "sector": "Industrials",
+        "market_sector": "Industrials",
+        "market_industry": "Machinery"
+      },
+      "market_snapshot": null,
+      "price_history": [
+        {
+          "trade_date": "2025-12-31",
+          "close": 30.0,
+          "source": "yahoo_finance"
+        }
+      ],
+      "statement_type": "canonical_xbrl",
+      "financials": [
+        {
+          "statement_id": 11,
+          "filing_type": "10-Q",
+          "period_start": "2025-01-01",
+          "period_end": "2025-03-31",
+          "data": {
+            "revenue": 100.0,
+            "gross_profit": 40.0,
+            "operating_income": 20.0,
+            "net_income": 12.0,
+            "operating_cash_flow": 18.0,
+            "free_cash_flow": 12.0,
+            "total_assets": 200.0,
+            "current_assets": 80.0,
+            "current_liabilities": 40.0,
+            "current_debt": 8.0,
+            "long_term_debt": 30.0,
+            "stockholders_equity": 95.0,
+            "weighted_average_diluted_shares": 100.0,
+            "shares_outstanding": 100.0,
+            "stock_based_compensation": 3.0,
+            "share_buybacks": -2.0,
+            "dividends": -1.0,
+            "accounts_receivable": 20.0,
+            "inventory": 8.0,
+            "accounts_payable": 12.0,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 70.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 30.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 12,
+          "filing_type": "10-Q",
+          "period_start": "2025-01-01",
+          "period_end": "2025-03-31",
+          "data": {
+            "revenue": 98.0,
+            "gross_profit": 39.0,
+            "operating_income": 19.0,
+            "net_income": 11.0,
+            "operating_cash_flow": 17.0,
+            "free_cash_flow": 11.0,
+            "total_assets": 200.0,
+            "current_assets": 80.0,
+            "current_liabilities": 40.0,
+            "current_debt": 8.0,
+            "long_term_debt": 30.0,
+            "stockholders_equity": 95.0,
+            "weighted_average_diluted_shares": 100.0,
+            "shares_outstanding": 100.0,
+            "stock_based_compensation": 3.0,
+            "share_buybacks": -2.0,
+            "dividends": -1.0,
+            "accounts_receivable": 20.0,
+            "inventory": 8.0,
+            "accounts_payable": 12.0,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 68.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 30.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 13,
+          "filing_type": "10-Q",
+          "period_start": "2025-04-01",
+          "period_end": "2025-06-30",
+          "data": {
+            "revenue": 110.0,
+            "gross_profit": 44.0,
+            "operating_income": 22.0,
+            "net_income": 13.0,
+            "operating_cash_flow": 20.0,
+            "free_cash_flow": 13.0,
+            "total_assets": 205.0,
+            "current_assets": 82.0,
+            "current_liabilities": 41.0,
+            "current_debt": 8.0,
+            "long_term_debt": 30.0,
+            "stockholders_equity": 97.0,
+            "weighted_average_diluted_shares": 100.0,
+            "shares_outstanding": 100.0,
+            "stock_based_compensation": 3.1,
+            "share_buybacks": -2.1,
+            "dividends": -1.0,
+            "accounts_receivable": 20.5,
+            "inventory": 8.2,
+            "accounts_payable": 12.3,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 76.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 34.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 14,
+          "filing_type": "10-Q",
+          "period_start": "2025-07-01",
+          "period_end": "2025-09-30",
+          "data": {
+            "revenue": 120.0,
+            "gross_profit": 48.0,
+            "operating_income": 24.0,
+            "net_income": 14.0,
+            "operating_cash_flow": 22.0,
+            "free_cash_flow": 14.0,
+            "total_assets": 210.0,
+            "current_assets": 84.0,
+            "current_liabilities": 42.0,
+            "current_debt": 9.0,
+            "long_term_debt": 29.0,
+            "stockholders_equity": 100.0,
+            "weighted_average_diluted_shares": 100.0,
+            "shares_outstanding": 100.0,
+            "stock_based_compensation": 3.2,
+            "share_buybacks": -2.2,
+            "dividends": -1.1,
+            "accounts_receivable": 21.0,
+            "inventory": 8.4,
+            "accounts_payable": 12.6,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 84.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 36.0
+              }
+            ]
+          }
+        },
+        {
+          "statement_id": 15,
+          "filing_type": "10-Q",
+          "period_start": "2025-10-01",
+          "period_end": "2025-12-31",
+          "data": {
+            "revenue": 130.0,
+            "gross_profit": 52.0,
+            "operating_income": 26.0,
+            "net_income": 16.0,
+            "operating_cash_flow": 23.0,
+            "free_cash_flow": 15.0,
+            "total_assets": 220.0,
+            "current_assets": 88.0,
+            "current_liabilities": 44.0,
+            "current_debt": 10.0,
+            "long_term_debt": 28.0,
+            "stockholders_equity": 104.0,
+            "weighted_average_diluted_shares": 101.0,
+            "shares_outstanding": 101.0,
+            "stock_based_compensation": 3.3,
+            "share_buybacks": -2.3,
+            "dividends": -1.2,
+            "accounts_receivable": 22.0,
+            "inventory": 8.8,
+            "accounts_payable": 13.2,
+            "segment_breakdown": [
+              {
+                "segment_name": "A",
+                "revenue": 90.0
+              },
+              {
+                "segment_name": "B",
+                "revenue": 40.0
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "derived_metrics": {
+          "cadences": [
+            "quarterly",
+            "ttm"
+          ],
+          "latest_formula_version": "sec_metrics_v3",
+          "latest_flags": [
+            "low_metric_coverage",
+            "ttm_restatement_ambiguity"
+          ],
+          "latest_ttm_validation_status": "invalid",
+          "latest_ttm_construction": "four_reported_quarters"
+        }
+      }
+    },
+    {
+      "id": "adr_foreign_cadence",
+      "label": "ADR/foreign reporting cadence company",
+      "for_model_audit": true,
+      "for_derived_metrics_audit": true,
+      "company": {
+        "ticker": "ADR",
+        "name": "Fixture ADR",
+        "sector": "Industrials",
+        "market_sector": "Industrials",
+        "market_industry": "Capital Goods"
+      },
+      "market_snapshot": {
+        "latest_price": 27.0,
+        "price_date": "2026-03-21",
+        "price_source": "yahoo_finance"
+      },
+      "price_history": [
+        {
+          "trade_date": "2025-03-31",
+          "close": 27.0,
+          "source": "yahoo_finance"
+        }
+      ],
+      "statement_type": "canonical_xbrl",
+      "financials": [
+        {
+          "statement_id": 21,
+          "filing_type": "20-F",
+          "period_start": "2024-01-01",
+          "period_end": "2024-12-31",
+          "data": {
+            "revenue": 700.0,
+            "gross_profit": 280.0,
+            "operating_income": 105.0,
+            "net_income": 80.0,
+            "operating_cash_flow": 120.0,
+            "free_cash_flow": 70.0,
+            "capex": 50.0,
+            "current_debt": 40.0,
+            "long_term_debt": 210.0,
+            "cash_and_short_term_investments": 180.0,
+            "shares_outstanding": 220.0,
+            "weighted_average_diluted_shares": 219.0,
+            "stockholders_equity": 520.0,
+            "total_assets": 1500.0,
+            "total_liabilities": 980.0,
+            "current_assets": 520.0,
+            "current_liabilities": 330.0,
+            "retained_earnings": 190.0,
+            "interest_expense": 13.0
+          }
+        },
+        {
+          "statement_id": 22,
+          "filing_type": "20-F",
+          "period_start": "2023-01-01",
+          "period_end": "2023-12-31",
+          "data": {
+            "revenue": 660.0,
+            "gross_profit": 262.0,
+            "operating_income": 98.0,
+            "net_income": 74.0,
+            "operating_cash_flow": 112.0,
+            "free_cash_flow": 64.0,
+            "capex": 48.0,
+            "current_debt": 42.0,
+            "long_term_debt": 215.0,
+            "cash_and_short_term_investments": 175.0,
+            "shares_outstanding": 221.0,
+            "weighted_average_diluted_shares": 220.0,
+            "stockholders_equity": 500.0,
+            "total_assets": 1450.0,
+            "total_liabilities": 950.0,
+            "current_assets": 500.0,
+            "current_liabilities": 320.0,
+            "retained_earnings": 180.0,
+            "interest_expense": 12.0
+          }
+        },
+        {
+          "statement_id": 23,
+          "filing_type": "6-K",
+          "period_start": "2025-01-01",
+          "period_end": "2025-03-31",
+          "data": {
+            "revenue": 190.0,
+            "gross_profit": 76.0,
+            "operating_income": 30.0,
+            "net_income": 22.0,
+            "operating_cash_flow": 33.0,
+            "free_cash_flow": 19.0,
+            "current_debt": 43.0,
+            "long_term_debt": 208.0,
+            "cash_and_short_term_investments": 182.0,
+            "shares_outstanding": 220.0,
+            "weighted_average_diluted_shares": 219.0,
+            "stockholders_equity": 525.0,
+            "total_assets": 1510.0,
+            "total_liabilities": 985.0,
+            "current_assets": 525.0,
+            "current_liabilities": 332.0,
+            "interest_expense": 3.0
+          }
+        }
+      ],
+      "expected": {
+        "models": {
+          "dcf": {
+            "model_status": "supported",
+            "fair_value_per_share": 4.84155442970442,
+            "value_basis": "equity_value",
+            "capital_structure_proxied": false,
+            "calculation_version": "dcf_ev_bridge_v1"
+          },
+          "reverse_dcf": {
+            "model_status": "supported",
+            "implied_growth": 0.55,
+            "target_value_basis": "enterprise_value",
+            "calculation_version": "reverse_dcf_ev_target_v1"
+          },
+          "roic": {
+            "model_status": "supported",
+            "roic": 0.14059322033898305,
+            "spread_vs_capital_cost_proxy": 0.05359322033898306
+          },
+          "ratios": {
+            "model_status": "partial",
+            "cadence": "quarterly",
+            "gross_margin": 0.4,
+            "return_on_assets": 0.05827814569536424
+          },
+          "piotroski": {
+            "model_status": "supported",
+            "score": 9,
+            "available_criteria": 9,
+            "calculation_version": "piotroski_ratio_scale_v1"
+          },
+          "altman_z": {
+            "model_status": "supported",
+            "z_score_approximate": 4.663734693877551,
+            "variant": "classic_public_company_1968"
+          }
+        },
+        "derived_metrics": {
+          "cadences": [
+            "annual",
+            "quarterly"
+          ],
+          "latest_formula_version": "sec_metrics_v3",
+          "latest_flags": [
+            "low_metric_coverage",
+            "segment_data_unavailable"
+          ]
+        }
+      }
+    }
+  ]
+}

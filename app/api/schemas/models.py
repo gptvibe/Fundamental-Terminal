@@ -16,6 +16,7 @@ class ModelPayload(BaseModel):
     created_at: datetime
     input_periods: dict[str, Any] | list[dict[str, Any]] | None = None
     result: dict[str, Any]
+    formula_details: dict[str, Any] | None = None
 
 
 class CompanyModelsResponse(ProvenanceEnvelope):

@@ -23,9 +23,11 @@ except Exception:  # pragma: no cover - optional dependency during bootstrap
 
 try:
     import redis
+    import redis.asyncio as redis_async
     from redis.exceptions import RedisError
 except Exception:  # pragma: no cover - optional dependency
     redis = None
+    redis_async = None
 
     class RedisError(Exception):
         pass
@@ -76,7 +78,8 @@ class SharedHotResponseCache:
         self._last_fallback_at: datetime | None = None
         self._logged_runtime_fallback_operations: set[str] = set()
         self._redis = None
-        self._redis = self._build_redis_client()
+        self._redis_async = None
+        self._redis, self._redis_async = self._build_redis_clients()
 
     @property
     def backend(self) -> str:
@@ -139,9 +142,9 @@ class SharedHotResponseCache:
         content = _render_json_bytes(payload)
         etag = _etag_for_json_bytes(content)
         last_modified = _extract_last_modified_header(payload)
-        if self._redis is not None:
+        if self._redis is not None and self._redis_async is not None:
             try:
-                self._store_remote(
+                await self._store_remote_async(
                     logical_key,
                     route=resolved_route,
                     content=content,
@@ -231,9 +234,9 @@ class SharedHotResponseCache:
         if not tags:
             raise ValueError("At least one invalidation dimension is required")
 
-        if self._redis is not None:
+        if self._redis is not None and self._redis_async is not None:
             try:
-                deleted = self._invalidate_remote(tags)
+                deleted = await self._invalidate_remote_async(tags)
             except RedisError as exc:
                 self._note_runtime_fallback(operation="invalidate", exc=exc)
                 deleted = await self._invalidate_local(tags)
@@ -300,9 +303,9 @@ class SharedHotResponseCache:
             self._local_metrics = {"overall": {}}
             self._local_routes.clear()
 
-        if self._redis is not None:
+        if self._redis is not None and self._redis_async is not None:
             try:
-                self._clear_remote()
+                await self._clear_remote_async()
             except RedisError as exc:
                 self._note_runtime_fallback(operation="clear", exc=exc)
 
@@ -478,29 +481,35 @@ class SharedHotResponseCache:
             "invalidated_keys": deleted,
         }
 
-    def _build_redis_client(self):
-        if redis is None:
+    def _build_redis_clients(self):
+        if redis is None or redis_async is None:
             self._startup_backend_reason = "redis_dependency_missing"
             self._emit_backend_log(
                 level=logging.WARNING,
                 reason=self._startup_backend_reason,
                 error="redis client dependency unavailable",
             )
-            return None
+            return None, None
         try:
-            client = redis.Redis.from_url(
+            sync_client = redis.Redis.from_url(
                 settings.redis_url,
                 decode_responses=False,
                 socket_timeout=0.5,
                 socket_connect_timeout=0.5,
             )
-            client.ping()
+            sync_client.ping()
+            async_client = redis_async.Redis.from_url(
+                settings.redis_url,
+                decode_responses=False,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+            )
             self._startup_backend_reason = "redis_connected"
             self._emit_backend_log(
                 level=logging.INFO,
                 reason=self._startup_backend_reason,
             )
-            return client
+            return sync_client, async_client
         except Exception as exc:
             self._startup_backend_reason = "redis_connect_failed"
             self._note_runtime_fallback(
@@ -513,7 +522,7 @@ class SharedHotResponseCache:
                 reason=self._startup_backend_reason,
                 error=self._last_fallback_error,
             )
-            return None
+            return None, None
 
     async def _fill_or_wait_remote(
         self,
@@ -523,10 +532,10 @@ class SharedHotResponseCache:
         tags: tuple[str, ...],
         fill: Callable[[], Any],
     ) -> dict[str, Any]:
-        if self._redis is None:
+        if self._redis is None or self._redis_async is None:
             return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
 
-        lock_token = self._acquire_remote_lock(logical_key)
+        lock_token = await self._acquire_remote_lock_async(logical_key)
         if lock_token is not None:
             try:
                 cached = await self._read_entry(logical_key)
@@ -534,15 +543,15 @@ class SharedHotResponseCache:
                     return _decode_lookup_payload(cached)
                 return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
             finally:
-                self._release_remote_lock(logical_key, lock_token)
+                await self._release_remote_lock_async(logical_key, lock_token)
 
         deadline = time.monotonic() + settings.hot_response_cache_singleflight_wait_seconds
         while time.monotonic() < deadline:
             cached = await self._read_entry(logical_key)
             if cached is not None:
                 return _decode_lookup_payload(cached)
-            if not self._remote_lock_exists(logical_key):
-                lock_token = self._acquire_remote_lock(logical_key)
+            if not await self._remote_lock_exists_async(logical_key):
+                lock_token = await self._acquire_remote_lock_async(logical_key)
                 if lock_token is not None:
                     try:
                         cached = await self._read_entry(logical_key)
@@ -550,7 +559,7 @@ class SharedHotResponseCache:
                             return _decode_lookup_payload(cached)
                         return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
                     finally:
-                        self._release_remote_lock(logical_key, lock_token)
+                        await self._release_remote_lock_async(logical_key, lock_token)
             await asyncio.sleep(settings.hot_response_cache_singleflight_poll_seconds)
 
         return await self._fill_now(logical_key, route=route, tags=tags, fill=fill)
@@ -588,48 +597,34 @@ class SharedHotResponseCache:
         return payload
 
     async def _read_entry(self, logical_key: str) -> HotCacheLookup | None:
-        if self._redis is not None:
+        if self._redis is not None and self._redis_async is not None:
             try:
-                return self._read_remote(logical_key)
+                return await self._read_remote_async(logical_key)
             except RedisError as exc:
                 self._note_runtime_fallback(operation="read", exc=exc)
         return await self._read_local(logical_key)
 
     def _read_remote(self, logical_key: str) -> HotCacheLookup | None:
         assert self._redis is not None
-        entry_key = self._entry_key(logical_key)
-        meta_key = self._meta_key(logical_key)
-        raw_entry = self._redis.get(entry_key)
-        raw_meta = self._redis.get(meta_key)
-        if raw_entry is None or raw_meta is None:
-            if raw_entry is not None or raw_meta is not None:
-                self._delete_remote_entry(logical_key, [])
-            return None
+        raw_record = self._redis.hgetall(self._record_key(logical_key))
+        if raw_record:
+            return self._lookup_from_remote_record_sync(logical_key, raw_record)
 
-        try:
-            payload = _json_loads(raw_meta)
-        except Exception:
-            self._delete_remote_entry(logical_key, [])
+        raw_entry, raw_meta = self._redis.mget(self._entry_key(logical_key), self._meta_key(logical_key))
+        if raw_entry is None and raw_meta is None:
             return None
+        return self._lookup_from_legacy_remote_sync(logical_key, raw_entry=raw_entry, raw_meta=raw_meta)
 
-        now = time.time()
-        stale_until = float(payload.get("stale_until", 0.0) or 0.0)
-        if now > stale_until:
-            self._delete_remote_entry(logical_key, payload.get("tags") or [])
+    async def _read_remote_async(self, logical_key: str) -> HotCacheLookup | None:
+        assert self._redis_async is not None
+        raw_record = await self._redis_async.hgetall(self._record_key(logical_key))
+        if raw_record:
+            return await self._lookup_from_remote_record_async(logical_key, raw_record)
+
+        raw_entry, raw_meta = await self._redis_async.mget(self._entry_key(logical_key), self._meta_key(logical_key))
+        if raw_entry is None and raw_meta is None:
             return None
-
-        fresh_until = float(payload.get("fresh_until", 0.0) or 0.0)
-        etag = str(payload.get("etag") or "")
-        if not etag:
-            self._delete_remote_entry(logical_key, payload.get("tags") or [])
-            return None
-
-        return HotCacheLookup(
-            content=raw_entry,
-            etag=etag,
-            last_modified=_optional_text(payload.get("last_modified")),
-            is_fresh=now <= fresh_until,
-        )
+        return await self._lookup_from_legacy_remote_async(logical_key, raw_entry=raw_entry, raw_meta=raw_meta)
 
     async def _read_local(self, logical_key: str) -> HotCacheLookup | None:
         now = time.time()
@@ -684,40 +679,71 @@ class SharedHotResponseCache:
         last_modified: str | None,
     ) -> None:
         assert self._redis is not None
-        entry_key = self._entry_key(logical_key)
-        meta_key = self._meta_key(logical_key)
-        previous = self._redis.get(meta_key)
-        previous_tags = []
-        if previous:
-            try:
-                previous_payload = _json_loads(previous)
-                previous_tags = list(previous_payload.get("tags") or [])
-            except Exception:
-                previous_tags = []
-
-        record = _json_dumps_bytes(
-            {
-                "fresh_until": fresh_until,
-                "stale_until": stale_until,
-                "stored_at": stored_at,
-                "route": route,
-                "tags": list(tags),
-                "etag": etag,
-                "last_modified": last_modified,
-            },
-            sort_keys=True,
-        )
+        previous_tags = self._load_remote_tags(logical_key)
         ttl_seconds = max(int(stale_until - stored_at) + 1, 1)
         pipeline = self._redis.pipeline()
         pipeline.sadd(self._route_registry_key(), route)
-        pipeline.set(entry_key, content, ex=ttl_seconds)
-        pipeline.set(meta_key, record, ex=ttl_seconds)
+        pipeline.hset(
+            self._record_key(logical_key),
+            mapping=_build_remote_record_mapping(
+                content=content,
+                fresh_until=fresh_until,
+                stale_until=stale_until,
+                stored_at=stored_at,
+                route=route,
+                tags=tags,
+                etag=etag,
+                last_modified=last_modified,
+            ),
+        )
+        pipeline.expire(self._record_key(logical_key), ttl_seconds)
+        pipeline.delete(self._entry_key(logical_key), self._meta_key(logical_key))
         if previous_tags:
             for previous_tag in previous_tags:
                 pipeline.srem(self._tag_key(previous_tag), logical_key)
         for tag in tags:
             pipeline.sadd(self._tag_key(tag), logical_key)
         pipeline.execute()
+
+    async def _store_remote_async(
+        self,
+        logical_key: str,
+        *,
+        route: str,
+        content: bytes,
+        tags: tuple[str, ...],
+        stored_at: float,
+        fresh_until: float,
+        stale_until: float,
+        etag: str,
+        last_modified: str | None,
+    ) -> None:
+        assert self._redis_async is not None
+        previous_tags = await self._load_remote_tags_async(logical_key)
+        ttl_seconds = max(int(stale_until - stored_at) + 1, 1)
+        pipeline = self._redis_async.pipeline()
+        pipeline.sadd(self._route_registry_key(), route)
+        pipeline.hset(
+            self._record_key(logical_key),
+            mapping=_build_remote_record_mapping(
+                content=content,
+                fresh_until=fresh_until,
+                stale_until=stale_until,
+                stored_at=stored_at,
+                route=route,
+                tags=tags,
+                etag=etag,
+                last_modified=last_modified,
+            ),
+        )
+        pipeline.expire(self._record_key(logical_key), ttl_seconds)
+        pipeline.delete(self._entry_key(logical_key), self._meta_key(logical_key))
+        if previous_tags:
+            for previous_tag in previous_tags:
+                pipeline.srem(self._tag_key(previous_tag), logical_key)
+        for tag in tags:
+            pipeline.sadd(self._tag_key(tag), logical_key)
+        await pipeline.execute()
 
     async def _store_local(
         self,
@@ -781,11 +807,18 @@ class SharedHotResponseCache:
     def _delete_remote_entry(self, logical_key: str, tags: list[str]) -> None:
         assert self._redis is not None
         pipeline = self._redis.pipeline()
-        pipeline.delete(self._entry_key(logical_key))
-        pipeline.delete(self._meta_key(logical_key))
+        pipeline.delete(self._record_key(logical_key), self._entry_key(logical_key), self._meta_key(logical_key))
         for tag in tags:
             pipeline.srem(self._tag_key(tag), logical_key)
         pipeline.execute()
+
+    async def _delete_remote_entry_async(self, logical_key: str, tags: list[str]) -> None:
+        assert self._redis_async is not None
+        pipeline = self._redis_async.pipeline()
+        pipeline.delete(self._record_key(logical_key), self._entry_key(logical_key), self._meta_key(logical_key))
+        for tag in tags:
+            pipeline.srem(self._tag_key(tag), logical_key)
+        await pipeline.execute()
 
     def _delete_local_entry_locked(self, logical_key: str, tags: tuple[str, ...] | list[str]) -> None:
         self._local_entries.pop(logical_key, None)
@@ -806,23 +839,36 @@ class SharedHotResponseCache:
         deleted = 0
         pipeline = self._redis.pipeline()
         for logical_key in logical_keys:
-            raw_entry = self._redis.get(self._meta_key(logical_key))
-            entry_tags: list[str] = []
-            if raw_entry:
-                try:
-                    parsed = _json_loads(raw_entry)
-                    entry_tags = list(parsed.get("tags") or [])
-                    route = str(parsed.get("route") or "")
-                    if route:
-                        self._record_metric_sync(route, "invalidation_count")
-                except Exception:
-                    entry_tags = []
-            pipeline.delete(self._entry_key(logical_key))
-            pipeline.delete(self._meta_key(logical_key))
+            route, entry_tags = self._load_remote_entry_metadata(logical_key)
+            if route:
+                self._record_metric_sync(route, "invalidation_count")
+            pipeline.delete(self._record_key(logical_key), self._entry_key(logical_key), self._meta_key(logical_key))
             for tag in entry_tags:
                 pipeline.srem(self._tag_key(tag), logical_key)
             deleted += 1
         pipeline.execute()
+        return deleted
+
+    async def _invalidate_remote_async(self, tags: tuple[str, ...]) -> int:
+        assert self._redis_async is not None
+        logical_keys = await self._resolve_remote_invalidation_keys_async(tags)
+        if not logical_keys:
+            return 0
+
+        deleted = 0
+        invalidated_routes: list[str] = []
+        pipeline = self._redis_async.pipeline()
+        for logical_key in logical_keys:
+            route, entry_tags = await self._load_remote_entry_metadata_async(logical_key)
+            if route:
+                invalidated_routes.append(route)
+            pipeline.delete(self._record_key(logical_key), self._entry_key(logical_key), self._meta_key(logical_key))
+            for tag in entry_tags:
+                pipeline.srem(self._tag_key(tag), logical_key)
+            deleted += 1
+        await pipeline.execute()
+        for route in invalidated_routes:
+            await self._record_metric(route, "invalidation_count")
         return deleted
 
     async def _invalidate_local(self, tags: tuple[str, ...]) -> int:
@@ -868,6 +914,14 @@ class SharedHotResponseCache:
         tag_keys = [self._tag_key(tag) for tag in tags]
         return {_decode_redis_text(value) for value in self._redis.sinter(tag_keys)}
 
+    async def _resolve_remote_invalidation_keys_async(self, tags: tuple[str, ...]) -> set[str]:
+        assert self._redis_async is not None
+        if len(tags) == 1:
+            return {_decode_redis_text(value) for value in await self._redis_async.smembers(self._tag_key(tags[0]))}
+
+        tag_keys = [self._tag_key(tag) for tag in tags]
+        return {_decode_redis_text(value) for value in await self._redis_async.sinter(tag_keys)}
+
     def _resolve_local_invalidation_keys_locked(self, tags: tuple[str, ...]) -> set[str]:
         if not tags:
             return set()
@@ -883,9 +937,9 @@ class SharedHotResponseCache:
         if amount == 0:
             return
         normalized_route = route or "overall"
-        if self._redis is not None:
+        if self._redis is not None and self._redis_async is not None:
             try:
-                self._record_remote_metric(normalized_route, field, amount)
+                await self._record_remote_metric_async(normalized_route, field, amount)
                 return
             except RedisError as exc:
                 self._note_runtime_fallback(operation="metrics_write", exc=exc)
@@ -918,6 +972,17 @@ class SharedHotResponseCache:
                 pipeline.hincrbyfloat(metrics_key, field, amount)
         pipeline.execute()
 
+    async def _record_remote_metric_async(self, route: str, field: str, amount: float) -> None:
+        assert self._redis_async is not None
+        pipeline = self._redis_async.pipeline()
+        pipeline.sadd(self._route_registry_key(), route)
+        for metrics_key in {self._metrics_key("overall"), self._metrics_key(route)}:
+            if float(amount).is_integer():
+                pipeline.hincrby(metrics_key, field, int(amount))
+            else:
+                pipeline.hincrbyfloat(metrics_key, field, amount)
+        await pipeline.execute()
+
     async def _record_local_metric(self, route: str, field: str, amount: float) -> None:
         async with self._local_lock:
             self._local_routes.add(route)
@@ -928,9 +993,9 @@ class SharedHotResponseCache:
                 route_metrics[field] = float(route_metrics.get(field, 0.0)) + amount
 
     async def _snapshot_metrics(self) -> dict[str, dict[str, float]]:
-        if self._redis is not None:
+        if self._redis is not None and self._redis_async is not None:
             try:
-                return self._snapshot_remote_metrics()
+                return await self._snapshot_remote_metrics_async()
             except RedisError as exc:
                 self._note_runtime_fallback(operation="metrics_snapshot", exc=exc)
         async with self._local_lock:
@@ -1076,6 +1141,22 @@ class SharedHotResponseCache:
             metrics[route] = parsed
         return metrics
 
+    async def _snapshot_remote_metrics_async(self) -> dict[str, dict[str, float]]:
+        assert self._redis_async is not None
+        routes = {_decode_redis_text(value) for value in await self._redis_async.smembers(self._route_registry_key())}
+        routes.add("overall")
+        metrics: dict[str, dict[str, float]] = {}
+        for route in routes:
+            raw_values = await self._redis_async.hgetall(self._metrics_key(route))
+            parsed: dict[str, float] = {}
+            for key, value in raw_values.items():
+                try:
+                    parsed[_decode_redis_text(key)] = float(_decode_redis_text(value))
+                except (TypeError, ValueError):
+                    continue
+            metrics[route] = parsed
+        return metrics
+
     async def _acquire_local_inflight(self, logical_key: str) -> tuple[bool, _InflightFill]:
         async with self._inflight_lock:
             current = self._inflight.get(logical_key)
@@ -1099,6 +1180,14 @@ class SharedHotResponseCache:
             return token
         return None
 
+    async def _acquire_remote_lock_async(self, logical_key: str) -> str | None:
+        if self._redis_async is None:
+            return None
+        token = sha256(f"{logical_key}:{time.time_ns()}".encode("utf-8")).hexdigest()
+        if await self._redis_async.set(self._lock_key(logical_key), token, nx=True, ex=settings.hot_response_cache_singleflight_lock_seconds):
+            return token
+        return None
+
     def _release_remote_lock(self, logical_key: str, token: str) -> None:
         if self._redis is None:
             return
@@ -1107,8 +1196,19 @@ class SharedHotResponseCache:
         if _optional_text(current) == token:
             self._redis.delete(lock_key)
 
+    async def _release_remote_lock_async(self, logical_key: str, token: str) -> None:
+        if self._redis_async is None:
+            return
+        lock_key = self._lock_key(logical_key)
+        current = await self._redis_async.get(lock_key)
+        if _optional_text(current) == token:
+            await self._redis_async.delete(lock_key)
+
     def _remote_lock_exists(self, logical_key: str) -> bool:
         return bool(self._redis and self._redis.exists(self._lock_key(logical_key)))
+
+    async def _remote_lock_exists_async(self, logical_key: str) -> bool:
+        return bool(self._redis_async and await self._redis_async.exists(self._lock_key(logical_key)))
 
     def _clear_remote(self) -> None:
         assert self._redis is not None
@@ -1122,6 +1222,175 @@ class SharedHotResponseCache:
                 break
         if keys_to_delete:
             self._redis.delete(*keys_to_delete)
+
+    async def _clear_remote_async(self) -> None:
+        assert self._redis_async is not None
+        cursor = 0
+        keys_to_delete: list[Any] = []
+        pattern = f"{self._namespace}:*"
+        while True:
+            cursor, keys = await self._redis_async.scan(cursor=cursor, match=pattern, count=200)
+            keys_to_delete.extend(keys)
+            if cursor == 0:
+                break
+        if keys_to_delete:
+            await self._redis_async.delete(*keys_to_delete)
+
+    # New remote records live in one Redis hash per logical key. We still read and
+    # clean up legacy entry/meta keys so existing caches stay valid during rollout.
+    def _lookup_from_remote_record_sync(self, logical_key: str, raw_record: dict[Any, Any]) -> HotCacheLookup | None:
+        record = _parse_remote_record(raw_record)
+        if record is None:
+            self._delete_remote_entry(logical_key, [])
+            return None
+        return self._lookup_from_record(logical_key, record, delete_remote=self._delete_remote_entry)
+
+    async def _lookup_from_remote_record_async(self, logical_key: str, raw_record: dict[Any, Any]) -> HotCacheLookup | None:
+        record = _parse_remote_record(raw_record)
+        if record is None:
+            await self._delete_remote_entry_async(logical_key, [])
+            return None
+        return await self._lookup_from_record_async(logical_key, record)
+
+    def _lookup_from_legacy_remote_sync(
+        self,
+        logical_key: str,
+        *,
+        raw_entry: Any,
+        raw_meta: Any,
+    ) -> HotCacheLookup | None:
+        if raw_entry is None or raw_meta is None:
+            self._delete_remote_entry(logical_key, [])
+            return None
+        try:
+            record = _build_record_from_legacy(raw_entry, raw_meta)
+        except Exception:
+            self._delete_remote_entry(logical_key, [])
+            return None
+        return self._lookup_from_record(logical_key, record, delete_remote=self._delete_remote_entry)
+
+    async def _lookup_from_legacy_remote_async(
+        self,
+        logical_key: str,
+        *,
+        raw_entry: Any,
+        raw_meta: Any,
+    ) -> HotCacheLookup | None:
+        if raw_entry is None or raw_meta is None:
+            await self._delete_remote_entry_async(logical_key, [])
+            return None
+        try:
+            record = _build_record_from_legacy(raw_entry, raw_meta)
+        except Exception:
+            await self._delete_remote_entry_async(logical_key, [])
+            return None
+        return await self._lookup_from_record_async(logical_key, record)
+
+    def _lookup_from_record(
+        self,
+        logical_key: str,
+        record: dict[str, Any],
+        *,
+        delete_remote: Callable[[str, list[str]], None],
+    ) -> HotCacheLookup | None:
+        now = time.time()
+        stale_until = float(record.get("stale_until", 0.0) or 0.0)
+        tags = _normalize_tags(record.get("tags"))
+        if now > stale_until:
+            delete_remote(logical_key, tags)
+            return None
+
+        fresh_until = float(record.get("fresh_until", 0.0) or 0.0)
+        etag = str(record.get("etag") or "")
+        content = record.get("content")
+        if not etag or not isinstance(content, (bytes, bytearray)):
+            delete_remote(logical_key, tags)
+            return None
+
+        return HotCacheLookup(
+            content=bytes(content),
+            etag=etag,
+            last_modified=_optional_text(record.get("last_modified")),
+            is_fresh=now <= fresh_until,
+        )
+
+    async def _lookup_from_record_async(self, logical_key: str, record: dict[str, Any]) -> HotCacheLookup | None:
+        now = time.time()
+        stale_until = float(record.get("stale_until", 0.0) or 0.0)
+        tags = _normalize_tags(record.get("tags"))
+        if now > stale_until:
+            await self._delete_remote_entry_async(logical_key, tags)
+            return None
+
+        fresh_until = float(record.get("fresh_until", 0.0) or 0.0)
+        etag = str(record.get("etag") or "")
+        content = record.get("content")
+        if not etag or not isinstance(content, (bytes, bytearray)):
+            await self._delete_remote_entry_async(logical_key, tags)
+            return None
+
+        return HotCacheLookup(
+            content=bytes(content),
+            etag=etag,
+            last_modified=_optional_text(record.get("last_modified")),
+            is_fresh=now <= fresh_until,
+        )
+
+    def _load_remote_tags(self, logical_key: str) -> list[str]:
+        assert self._redis is not None
+        pipeline = self._redis.pipeline()
+        pipeline.hget(self._record_key(logical_key), "tags")
+        pipeline.get(self._meta_key(logical_key))
+        raw_tags, raw_meta = pipeline.execute()
+        tags = _parse_tags_field(raw_tags)
+        if tags:
+            return tags
+        return _parse_legacy_tags(raw_meta)
+
+    async def _load_remote_tags_async(self, logical_key: str) -> list[str]:
+        assert self._redis_async is not None
+        pipeline = self._redis_async.pipeline()
+        pipeline.hget(self._record_key(logical_key), "tags")
+        pipeline.get(self._meta_key(logical_key))
+        raw_tags, raw_meta = await pipeline.execute()
+        tags = _parse_tags_field(raw_tags)
+        if tags:
+            return tags
+        return _parse_legacy_tags(raw_meta)
+
+    def _load_remote_entry_metadata(self, logical_key: str) -> tuple[str, list[str]]:
+        assert self._redis is not None
+        raw_record = self._redis.hgetall(self._record_key(logical_key))
+        if raw_record:
+            record = _parse_remote_record(raw_record)
+            if record is not None:
+                return str(record.get("route") or ""), _normalize_tags(record.get("tags"))
+
+        raw_meta = self._redis.get(self._meta_key(logical_key))
+        if raw_meta is None:
+            return "", []
+        try:
+            payload = _json_loads(raw_meta)
+        except Exception:
+            return "", []
+        return str(payload.get("route") or ""), _normalize_tags(payload.get("tags"))
+
+    async def _load_remote_entry_metadata_async(self, logical_key: str) -> tuple[str, list[str]]:
+        assert self._redis_async is not None
+        raw_record = await self._redis_async.hgetall(self._record_key(logical_key))
+        if raw_record:
+            record = _parse_remote_record(raw_record)
+            if record is not None:
+                return str(record.get("route") or ""), _normalize_tags(record.get("tags"))
+
+        raw_meta = await self._redis_async.get(self._meta_key(logical_key))
+        if raw_meta is None:
+            return "", []
+        try:
+            payload = _json_loads(raw_meta)
+        except Exception:
+            return "", []
+        return str(payload.get("route") or ""), _normalize_tags(payload.get("tags"))
 
     def _build_invalidation_tags(
         self,
@@ -1145,6 +1414,9 @@ class SharedHotResponseCache:
     def _entry_key(self, logical_key: str) -> str:
         return f"{self._namespace}:entry:{_digest(logical_key)}"
 
+    def _record_key(self, logical_key: str) -> str:
+        return f"{self._namespace}:record:{_digest(logical_key)}"
+
     def _meta_key(self, logical_key: str) -> str:
         return f"{self._namespace}:meta:{_digest(logical_key)}"
 
@@ -1159,6 +1431,87 @@ class SharedHotResponseCache:
 
     def _route_registry_key(self) -> str:
         return f"{self._namespace}:routes"
+
+
+def _build_remote_record_mapping(
+    *,
+    content: bytes,
+    fresh_until: float,
+    stale_until: float,
+    stored_at: float,
+    route: str,
+    tags: tuple[str, ...],
+    etag: str,
+    last_modified: str | None,
+) -> dict[str, bytes]:
+    return {
+        "content": content,
+        "fresh_until": str(fresh_until).encode("utf-8"),
+        "stale_until": str(stale_until).encode("utf-8"),
+        "stored_at": str(stored_at).encode("utf-8"),
+        "route": route.encode("utf-8"),
+        "tags": _json_dumps_bytes(list(tags), sort_keys=True),
+        "etag": etag.encode("utf-8"),
+        "last_modified": (last_modified or "").encode("utf-8"),
+        "format": b"v2-hash",
+    }
+
+
+def _parse_remote_record(raw_record: dict[Any, Any]) -> dict[str, Any] | None:
+    if not raw_record:
+        return None
+    normalized_record = {_decode_redis_text(key): value for key, value in raw_record.items()}
+    content = normalized_record.get("content")
+    if not isinstance(content, (bytes, bytearray)):
+        return None
+    return {
+        "content": bytes(content),
+        "fresh_until": _float_from_redis_value(normalized_record.get("fresh_until")),
+        "stale_until": _float_from_redis_value(normalized_record.get("stale_until")),
+        "stored_at": _float_from_redis_value(normalized_record.get("stored_at")),
+        "route": _decode_redis_text(normalized_record.get("route", b"")),
+        "tags": _parse_tags_field(normalized_record.get("tags")),
+        "etag": _decode_redis_text(normalized_record.get("etag", b"")),
+        "last_modified": _optional_text(normalized_record.get("last_modified")),
+    }
+
+
+def _build_record_from_legacy(raw_entry: Any, raw_meta: Any) -> dict[str, Any]:
+    payload = _json_loads(raw_meta)
+    return {
+        "content": bytes(raw_entry),
+        "fresh_until": float(payload.get("fresh_until", 0.0) or 0.0),
+        "stale_until": float(payload.get("stale_until", 0.0) or 0.0),
+        "stored_at": float(payload.get("stored_at", 0.0) or 0.0),
+        "route": str(payload.get("route") or ""),
+        "tags": _normalize_tags(payload.get("tags")),
+        "etag": str(payload.get("etag") or ""),
+        "last_modified": _optional_text(payload.get("last_modified")),
+    }
+
+
+def _parse_tags_field(raw_tags: Any) -> list[str]:
+    if raw_tags in (None, b"", ""):
+        return []
+    try:
+        return _normalize_tags(_json_loads(raw_tags))
+    except Exception:
+        return []
+
+
+def _parse_legacy_tags(raw_meta: Any) -> list[str]:
+    if raw_meta in (None, b"", ""):
+        return []
+    try:
+        return _normalize_tags(_json_loads(raw_meta).get("tags"))
+    except Exception:
+        return []
+
+
+def _normalize_tags(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return [str(tag) for tag in value if str(tag)]
 
 
 def _digest(value: str) -> str:
@@ -1236,9 +1589,18 @@ def _json_loads(payload: Any) -> dict[str, Any]:
 
 
 def _decode_redis_text(value: Any) -> str:
+    if value is None:
+        return ""
     if isinstance(value, bytes):
         return value.decode("utf-8")
     return str(value)
+
+
+def _float_from_redis_value(value: Any) -> float:
+    try:
+        return float(_decode_redis_text(value))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _optional_text(value: Any) -> str | None:

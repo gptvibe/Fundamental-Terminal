@@ -135,7 +135,7 @@ def test_build_derived_metric_points_outputs_provenance_and_quality_flags():
     assert points
     point = next(item for item in points if item["period_type"] == "ttm" and item["metric_key"] == "gross_margin")
     assert point["metric_value"] is not None
-    assert point["provenance"]["formula_version"] == "sec_metrics_mart_v1"
+    assert point["provenance"]["formula_version"] == "sec_metrics_mart_v2"
     assert "quality_flags" in point
 
 
@@ -339,7 +339,7 @@ def test_derived_metric_upsert_batches_stay_under_postgres_parameter_limit():
             "metric_value": float(index),
             "metric_date": date(2025, 3, 31),
             "is_proxy": False,
-            "provenance": {"formula_version": "sec_metrics_mart_v1"},
+            "provenance": {"formula_version": "sec_metrics_mart_v2"},
             "source_statement_ids": [index],
             "quality_flags": [],
             "last_updated": datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -355,3 +355,52 @@ def test_derived_metric_upsert_batches_stay_under_postgres_parameter_limit():
     compiled = insert(DerivedMetricPoint).values(batches[0]).compile(dialect=postgresql_dialect())
     assert len(compiled.params) == DERIVED_METRIC_UPSERT_BATCH_SIZE * 14
     assert len(compiled.params) <= 65535
+
+
+def test_market_cap_share_fallback_and_provenance_are_explicit() -> None:
+    statements = [
+        _statement(
+            1,
+            date(2025, 1, 1),
+            date(2025, 3, 31),
+            "10-Q",
+            {
+                **_build_quarter(100.0, 120.0),
+                "shares_outstanding": None,
+                "weighted_average_diluted_shares": 120.0,
+            },
+        )
+    ]
+    prices = [_price(date(2025, 3, 31), 10.0)]
+
+    points = build_derived_metric_points(statements, prices)
+    buyback = next(item for item in points if item["metric_key"] == "buyback_yield_proxy")
+
+    assert buyback["metric_value"] == pytest.approx((2.0 / 1200.0) * 4.0, rel=1e-9)
+    assert buyback["provenance"]["market_cap_share_source"] == "weighted_average_diluted_shares"
+    assert buyback["provenance"]["market_cap_share_source_is_proxy"] is True
+
+
+def test_per_share_metric_uses_weighted_average_basic_with_provenance() -> None:
+    statements = [
+        _statement(
+            1,
+            date(2025, 1, 1),
+            date(2025, 3, 31),
+            "10-Q",
+            {
+                **_build_quarter(100.0, 100.0),
+                "weighted_average_diluted_shares": None,
+                "weighted_average_basic_shares": 120.0,
+                "tangible_common_equity": 240.0,
+            },
+            statement_type="canonical_bank_regulatory",
+        )
+    ]
+
+    points = build_derived_metric_points(statements, [])
+    tbv = next(item for item in points if item["metric_key"] == "tangible_book_value_per_share")
+
+    assert tbv["metric_value"] == pytest.approx(2.0, rel=1e-9)
+    assert tbv["provenance"]["per_share_metric_share_source"] == "weighted_average_basic_shares"
+    assert tbv["provenance"]["per_share_metric_share_source_is_proxy"] is False

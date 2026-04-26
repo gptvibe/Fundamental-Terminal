@@ -233,6 +233,8 @@ Targeted performance and reliability checks:
 
 ```bash
 python scripts/benchmark_hot_endpoints.py --base-url http://127.0.0.1:8000 --ticker AAPL --rounds 20
+python scripts/benchmark_api_routes.py --base-url http://127.0.0.1:8000 --ticker AAPL --compare-tickers AAPL,MSFT --rounds 12 --cache-mode both --json-out artifacts/performance/api-route-benchmark.json
+python scripts/benchmark_derived_metrics_price_matching.py --financial-rows 240 --price-rows 20000 --rounds 5
 python scripts/run_performance_regression_gate.py --baseline-file scripts/performance_regression_baseline.json --fail-on-regression --json-out artifacts/performance/backend-performance-summary.json --markdown-out artifacts/performance/backend-performance-summary.md
 python scripts/run_model_evaluation.py
 ```
@@ -279,6 +281,7 @@ On non-PostgreSQL URLs, the script still enforces bounded pool/connect waits but
 ## Further Reading
 
 - [docs/backend-architecture-boundaries.md](docs/backend-architecture-boundaries.md)
+- [docs/api-route-benchmark-harness.md](docs/api-route-benchmark-harness.md)
 - [docs/cache-layers-architecture.md](docs/cache-layers-architecture.md)
 - [docs/data-provenance.md](docs/data-provenance.md)
 - [docs/model-evaluation-harness.md](docs/model-evaluation-harness.md)
