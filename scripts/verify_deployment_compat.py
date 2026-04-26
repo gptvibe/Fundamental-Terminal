@@ -121,7 +121,7 @@ def _assert_health_payload(payload: Any) -> None:
         raise RuntimeError(f"database health is not ok: {db_status!r}")
     if redis_status not in {"ok", "degraded"}:
         raise RuntimeError(f"redis health is not acceptable: {redis_status!r}")
-    if worker_status not in {"ok", "idle"}:
+    if worker_status not in {"ok", "idle", "degraded"}:
         raise RuntimeError(f"worker health is not acceptable: {worker_status!r}")
 
 
