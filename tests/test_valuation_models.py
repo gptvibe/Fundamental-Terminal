@@ -584,19 +584,20 @@ def test_piotroski_scales_partial_criteria_without_overstating_normalized_ratio(
     assert result["model_status"] == "partial"
 
 
-def test_dcf_prefers_weighted_average_shares_for_per_share_value(monkeypatch):
+def test_dcf_prefers_point_in_time_shares_for_equity_value_per_share(monkeypatch):
     monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
     points = _base_points()
-    points[0].data["shares_outstanding"] = 200
-    points[0].data["weighted_average_diluted_shares"] = 100
+    points[0].data["shares_outstanding"] = 100
+    points[0].data["weighted_average_diluted_shares"] = 80
 
     result = dcf_model.compute(_dataset(points))
 
     assert result["fair_value_per_share"] == pytest.approx(result["equity_value"] / 100, rel=1e-9)
-    assert result["fair_value_per_share"] != pytest.approx(result["equity_value"] / 200, rel=1e-9)
-    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source"] == "weighted_average_diluted_shares"
+    assert result["fair_value_per_share"] != pytest.approx(result["equity_value"] / 80, rel=1e-9)
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source"] == "shares_outstanding"
     assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source_is_proxy"] is False
+    assert result["input_quality"]["share_count_proxied"] is False
 
 
 def test_dcf_cash_fallback_no_longer_changes_equity_value_framework(monkeypatch):
@@ -654,6 +655,32 @@ def test_dcf_bridges_enterprise_value_to_equity_value_with_net_cash():
     assert result["fair_value_per_share"] == pytest.approx(11.0)
 
 
+def test_dcf_compute_ev_and_equity_bridge_identity(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    result = dcf_model.compute(_dataset(points, sector="Healthcare"))
+
+    assert result["enterprise_value"] == pytest.approx(
+        result["present_value_of_cash_flows"] + result["terminal_value_present_value"],
+        rel=1e-9,
+    )
+    assert result["equity_value"] == pytest.approx(result["enterprise_value"] - result["net_debt"], rel=1e-9)
+
+
+def test_dcf_discloses_fcff_proxy_warning_in_status_and_provenance(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    result = dcf_model.compute(_dataset(_base_points()))
+
+    assert dcf_model.VALUATION_WARNING_FLAG in result["status_flags"]
+    assert result["assumption_provenance"]["valuation_framework"]["cash_flow_basis"] == "free_cash_flow_to_firm_proxy"
+    assert result["discount_rate_basis"] == "proxy_wacc"
+    assert result["assumption_provenance"]["valuation_framework"]["upstream_free_cash_flow_derivation"] == "operating_cash_flow_minus_capex"
+    assert result["valuation_warnings"]
+    assert "operating_cash_flow minus capex" in result["valuation_warnings"][0]
+
+
 def test_dcf_missing_capital_structure_returns_enterprise_value_proxy(monkeypatch):
     monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
 
@@ -673,8 +700,27 @@ def test_dcf_missing_capital_structure_returns_enterprise_value_proxy(monkeypatc
     assert result["net_debt"] is None
     assert result["equity_value"] is None
     assert result["enterprise_value"] is not None
-    assert result["fair_value_per_share"] == pytest.approx(result["enterprise_value"] / 118.0, rel=1e-9)
+    assert result["fair_value_per_share"] == pytest.approx(result["enterprise_value"] / 120.0, rel=1e-9)
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source"] == "shares_outstanding"
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source_is_proxy"] is False
+    assert result["input_quality"]["share_count_proxied"] is False
+
+
+def test_dcf_marks_diluted_fallback_share_count_as_proxy(monkeypatch):
+    monkeypatch.setattr(dcf_model, "get_latest_risk_free_rate", _mock_risk_free)
+
+    points = _base_points()
+    for point in points:
+        point.data["shares_outstanding"] = None
+        point.data["weighted_average_diluted_shares"] = 80
+
+    result = dcf_model.compute(_dataset(points))
+
+    assert result["model_status"] == "proxy"
+    assert result["fair_value_per_share"] == pytest.approx(result["equity_value"] / 80, rel=1e-9)
     assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source"] == "weighted_average_diluted_shares"
+    assert result["assumption_provenance"]["valuation_framework"]["per_share_share_source_is_proxy"] is True
+    assert result["input_quality"]["share_count_proxied"] is True
 
 
 def test_dcf_starting_cash_flow_proxy_flag_only_tracks_fcf_proxying(monkeypatch):
@@ -1019,6 +1065,60 @@ def test_ratios_capex_intensity_uses_abs_capex_for_negative_outflow():
     assert result["model_status"] == "supported"
     assert result["values"]["capex_intensity"] == pytest.approx(0.25, rel=1e-9)
     assert result["values"]["capex_intensity"] > 0
+
+
+def test_ratios_net_debt_to_fcf_requires_complete_debt_and_cash_inputs():
+    points = [
+        _point(
+            2025,
+            {
+                "revenue": 100,
+                "gross_profit": 55,
+                "operating_income": 20,
+                "net_income": 10,
+                "operating_cash_flow": 18,
+                "free_cash_flow": 12,
+                "capex": -6,
+                "interest_expense": -5,
+                "stock_based_compensation": 2,
+                "dividends": -3,
+                "total_assets": 200,
+                "total_liabilities": 80,
+                "stockholders_equity": 120,
+                "current_debt": 15,
+                "long_term_debt": None,
+                "cash_and_short_term_investments": 20,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "revenue": 90,
+                "gross_profit": 50,
+                "operating_income": 18,
+                "net_income": 9,
+                "operating_cash_flow": 16,
+                "free_cash_flow": 11,
+                "capex": -5,
+                "interest_expense": -4,
+                "stock_based_compensation": 2,
+                "dividends": -2,
+                "total_assets": 190,
+                "total_liabilities": 78,
+                "stockholders_equity": 112,
+                "current_debt": 14,
+                "long_term_debt": 42,
+                "cash_and_short_term_investments": 18,
+            },
+        ),
+    ]
+
+    result = ratios_model.compute(_dataset(points))
+
+    assert result["values"]["net_debt_to_fcf"] is None
+    assert "net_debt_to_fcf" in result["missing_required_fields_last_3y"]
+    assert "long_term_debt" in result["missing_required_fields_last_3y"]
+    assert result["model_status"] == "partial"
 
 
 def test_ratios_without_any_computable_values_return_insufficient_data():
@@ -1434,6 +1534,172 @@ def test_roic_missing_cash_uses_gross_capital_as_proxy_and_marks_missing_field(m
     assert "stockholders_equity" not in result["missing_required_fields_last_3y"]
     assert "current_debt" not in result["missing_required_fields_last_3y"]
     assert "long_term_debt" not in result["missing_required_fields_last_3y"]
+
+
+def test_roic_computes_normally_when_both_debt_components_present(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "pretax_income": 100,
+                "income_tax_expense": 20,
+                "stockholders_equity": 500,
+                "current_debt": 50,
+                "long_term_debt": 150,
+                "cash_and_short_term_investments": 100,
+                "capex": 40,
+                "operating_cash_flow": 200,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "pretax_income": 90,
+                "income_tax_expense": 18,
+                "stockholders_equity": 450,
+                "current_debt": 40,
+                "long_term_debt": 140,
+                "cash_and_short_term_investments": 80,
+                "capex": 35,
+                "operating_cash_flow": 180,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["roic"] == pytest.approx(160.0 / 600.0, abs=1e-9)
+    assert result["model_status"] == "supported"
+    assert "current_debt" not in result["missing_required_fields_last_3y"]
+    assert "long_term_debt" not in result["missing_required_fields_last_3y"]
+
+
+def test_roic_does_not_compute_latest_period_when_current_debt_missing_without_total_debt(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "pretax_income": 100,
+                "income_tax_expense": 20,
+                "stockholders_equity": 500,
+                "current_debt": None,
+                "long_term_debt": 150,
+                "cash_and_short_term_investments": 100,
+                "capex": 40,
+                "operating_cash_flow": 200,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "pretax_income": 90,
+                "income_tax_expense": 18,
+                "stockholders_equity": 450,
+                "current_debt": 40,
+                "long_term_debt": 140,
+                "cash_and_short_term_investments": 80,
+                "capex": 35,
+                "operating_cash_flow": 180,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["trend"][-1]["roic"] is None
+    assert result["model_status"] != "proxy"
+    assert "current_debt" in result["missing_required_fields_last_3y"]
+    assert "long_term_debt" not in result["missing_required_fields_last_3y"]
+
+
+def test_roic_does_not_compute_latest_period_when_long_term_debt_missing_without_total_debt(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "pretax_income": 100,
+                "income_tax_expense": 20,
+                "stockholders_equity": 500,
+                "current_debt": 50,
+                "long_term_debt": None,
+                "cash_and_short_term_investments": 100,
+                "capex": 40,
+                "operating_cash_flow": 200,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "pretax_income": 90,
+                "income_tax_expense": 18,
+                "stockholders_equity": 450,
+                "current_debt": 40,
+                "long_term_debt": 140,
+                "cash_and_short_term_investments": 80,
+                "capex": 35,
+                "operating_cash_flow": 180,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["trend"][-1]["roic"] is None
+    assert result["model_status"] != "proxy"
+    assert "current_debt" not in result["missing_required_fields_last_3y"]
+    assert "long_term_debt" in result["missing_required_fields_last_3y"]
+
+
+def test_roic_prefers_total_debt_and_marks_missing_component_when_proxying(monkeypatch):
+    monkeypatch.setattr(roic_model, "get_latest_risk_free_rate", _mock_risk_free)
+    points = [
+        _point(
+            2025,
+            {
+                "operating_income": 200,
+                "pretax_income": 100,
+                "income_tax_expense": 20,
+                "stockholders_equity": 500,
+                "current_debt": None,
+                "long_term_debt": 150,
+                "total_debt": 250,
+                "cash_and_short_term_investments": 100,
+                "capex": 40,
+                "operating_cash_flow": 200,
+            },
+        ),
+        _point(
+            2024,
+            {
+                "operating_income": 180,
+                "pretax_income": 90,
+                "income_tax_expense": 18,
+                "stockholders_equity": 450,
+                "current_debt": 40,
+                "long_term_debt": 140,
+                "total_debt": 220,
+                "cash_and_short_term_investments": 80,
+                "capex": 35,
+                "operating_cash_flow": 180,
+            },
+        ),
+    ]
+
+    result = roic_model.compute(_dataset(points))
+
+    assert result["model_status"] == "proxy"
+    assert result["trend"][-1]["roic"] == pytest.approx(160.0 / 650.0, abs=1e-9)
+    assert result["trend"][-1]["roic"] != pytest.approx(160.0 / 550.0, abs=1e-9)
+    assert "current_debt" in result["missing_required_fields_last_3y"]
 
 
 def test_roic_missing_field_list_only_includes_truly_missing_capital_inputs(monkeypatch):

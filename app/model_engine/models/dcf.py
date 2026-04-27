@@ -16,10 +16,10 @@ from app.model_engine.utils import (
     valuation_applicability,
 )
 from app.services.risk_free_rate import get_latest_risk_free_rate
-from app.services.share_count_selection import shares_for_per_share_metric
+from app.services.share_count_selection import shares_for_equity_value_per_share
 
 MODEL_NAME = "dcf"
-MODEL_VERSION = "2.4.0"
+MODEL_VERSION = "2.5.0"
 CALCULATION_VERSION = DCF_CALCULATION_VERSION
 
 EQUITY_RISK_PREMIUM = 0.05
@@ -27,10 +27,17 @@ BASE_COMPANY_RISK_PREMIUM = 0.01
 MAX_GROWTH_RATE = 0.15
 MIN_GROWTH_RATE = -0.10
 PROJECTION_YEARS = 5
+# Canonical free_cash_flow is sourced from statement-level OCF-capex construction,
+# so this model treats it as an FCFF-style proxy rather than pure FCFF.
 CASH_FLOW_BASIS = "free_cash_flow_to_firm_proxy"
 DISCOUNT_RATE_BASIS = "proxy_wacc"
 EQUITY_VALUE_BASIS = "equity_value"
 ENTERPRISE_VALUE_PROXY_BASIS = "enterprise_value_proxy"
+VALUATION_WARNING_FLAG = "cash_flow_basis_proxy_interest_and_debt"
+VALUATION_WARNING_TEXT = (
+    "Canonical free_cash_flow is typically derived as operating_cash_flow minus capex; "
+    "interest and financing effects are not fully normalized to pure FCFF, so EV-to-equity results are proxy-grade."
+)
 
 # Sector-based additional risk premiums layered on top of ERP.
 # Positive values increase the discount rate; negative values reduce it.
@@ -212,7 +219,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     if current_debt is not None and long_term_debt is not None:
         total_debt = current_debt + long_term_debt
 
-    share_selection = shares_for_per_share_metric(
+    share_selection = shares_for_equity_value_per_share(
         {
             "weighted_average_diluted_shares": latest_non_null(dataset, "weighted_average_diluted_shares"),
             "weighted_average_basic_shares": latest_non_null(dataset, "weighted_average_basic_shares"),
@@ -234,7 +241,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     equity_value = valuation_bridge["equity_value"]
     fair_value_per_share = valuation_bridge["fair_value_per_share"]
 
-    proxy_used = starting_cash_flow_proxied or capital_structure_proxied
+    proxy_used = starting_cash_flow_proxied or capital_structure_proxied or share_selection.is_proxy
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=proxy_used,
@@ -247,6 +254,9 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         status_flags.append("partial_inputs")
     if proxy_used:
         status_flags.append("proxy_output")
+    status_flags.append(VALUATION_WARNING_FLAG)
+
+    valuation_warnings = [VALUATION_WARNING_TEXT]
 
     return {
         "status": status,
@@ -295,6 +305,9 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
                 "net_debt_bridge_applied": capital_structure_complete,
                 "per_share_share_source": share_selection.source,
                 "per_share_share_source_is_proxy": share_selection.is_proxy,
+                "basis_warning_flags": [VALUATION_WARNING_FLAG],
+                "basis_warnings": valuation_warnings,
+                "upstream_free_cash_flow_derivation": "operating_cash_flow_minus_capex",
             },
         },
         "projected_free_cash_flow": projected_cash_flows,
@@ -309,6 +322,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         "value_basis": value_basis,
         "capital_structure_proxied": capital_structure_proxied,
         "discount_rate_basis": DISCOUNT_RATE_BASIS,
+        "valuation_warnings": valuation_warnings,
         "missing_required_fields_last_3y": missing_fields,
         "input_quality": {
             "starting_cash_flow_proxied": starting_cash_flow_proxied,

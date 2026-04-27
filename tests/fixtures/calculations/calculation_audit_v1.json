@@ -1,11 +1,11 @@
 {
   "formula_versions": {
-    "derived_metrics": "sec_metrics_v3",
-    "dcf": "dcf_ev_bridge_v1",
+    "derived_metrics": "sec_metrics_v4",
+    "dcf": "dcf_ev_bridge_v2",
     "reverse_dcf": "reverse_dcf_ev_target_v1",
     "piotroski": "piotroski_ratio_scale_v1",
-    "roic_model_version": "1.2.1",
-    "ratios_model_version": "1.2.0",
+    "roic_model_version": "1.2.2",
+    "ratios_model_version": "1.2.1",
     "altman_z_model_version": "2.0.0"
   },
   "cases": [
@@ -184,10 +184,10 @@
         "models": {
           "dcf": {
             "model_status": "supported",
-            "fair_value_per_share": 23.918567872983534,
+            "fair_value_per_share": 23.519925075100478,
             "value_basis": "equity_value",
             "capital_structure_proxied": false,
-            "calculation_version": "dcf_ev_bridge_v1"
+            "calculation_version": "dcf_ev_bridge_v2"
           },
           "reverse_dcf": {
             "model_status": "supported",
@@ -222,7 +222,7 @@
           "cadences": [
             "annual"
           ],
-          "latest_formula_version": "sec_metrics_v3",
+          "latest_formula_version": "sec_metrics_v4",
           "latest_flags": []
         }
       }
@@ -309,7 +309,7 @@
             "fair_value_per_share": null,
             "value_basis": null,
             "capital_structure_proxied": null,
-            "calculation_version": "dcf_ev_bridge_v1"
+            "calculation_version": "dcf_ev_bridge_v2"
           },
           "reverse_dcf": {
             "model_status": "unsupported",
@@ -344,7 +344,7 @@
           "cadences": [
             "quarterly"
           ],
-          "latest_formula_version": "sec_metrics_v3",
+          "latest_formula_version": "sec_metrics_v4",
           "latest_flags": [
             "segment_data_unavailable"
           ]
@@ -429,7 +429,7 @@
             "fair_value_per_share": -0.8648950217837449,
             "value_basis": "equity_value",
             "capital_structure_proxied": false,
-            "calculation_version": "dcf_ev_bridge_v1"
+            "calculation_version": "dcf_ev_bridge_v2"
           },
           "reverse_dcf": {
             "model_status": "supported",
@@ -571,10 +571,10 @@
         "models": {
           "dcf": {
             "model_status": "insufficient_data",
-            "fair_value_per_share": -9.389568366405697,
+            "fair_value_per_share": -9.326971243962992,
             "value_basis": "equity_value",
             "capital_structure_proxied": false,
-            "calculation_version": "dcf_ev_bridge_v1"
+            "calculation_version": "dcf_ev_bridge_v2"
           },
           "reverse_dcf": {
             "model_status": "supported",
@@ -749,7 +749,7 @@
           "cadences": [
             "quarterly"
           ],
-          "latest_formula_version": "sec_metrics_v3",
+          "latest_formula_version": "sec_metrics_v4",
           "latest_flags": [],
           "latest_quarterly_revenue_growth": 0.08333333333333326
         }
@@ -974,7 +974,7 @@
             "quarterly",
             "ttm"
           ],
-          "latest_formula_version": "sec_metrics_v3",
+          "latest_formula_version": "sec_metrics_v4",
           "latest_flags": [
             "low_metric_coverage",
             "ttm_restatement_ambiguity"
@@ -1097,7 +1097,7 @@
             "fair_value_per_share": 4.84155442970442,
             "value_basis": "equity_value",
             "capital_structure_proxied": false,
-            "calculation_version": "dcf_ev_bridge_v1"
+            "calculation_version": "dcf_ev_bridge_v2"
           },
           "reverse_dcf": {
             "model_status": "supported",
@@ -1133,7 +1133,7 @@
             "annual",
             "quarterly"
           ],
-          "latest_formula_version": "sec_metrics_v3",
+          "latest_formula_version": "sec_metrics_v4",
           "latest_flags": [
             "low_metric_coverage",
             "segment_data_unavailable"

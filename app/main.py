@@ -50,7 +50,8 @@ def _is_rate_limited_public_route(path: str) -> bool:
         return False
     if path.startswith("/api/internal/"):
         return False
-    for exempt in settings.api_rate_limit_exempt_paths:
+    exempt_paths = getattr(settings, "api_rate_limit_exempt_paths", []) or []
+    for exempt in exempt_paths:
         normalized = exempt.rstrip("/") or "/"
         if path == normalized or path.startswith(f"{normalized}/"):
             return False
@@ -58,7 +59,7 @@ def _is_rate_limited_public_route(path: str) -> bool:
 
 
 def _client_identifier(request: Request) -> str:
-    if settings.api_rate_limit_trust_proxy:
+    if bool(getattr(settings, "api_rate_limit_trust_proxy", False)):
         forwarded_for = request.headers.get("x-forwarded-for", "")
         if forwarded_for:
             first = forwarded_for.split(",", 1)[0].strip()
@@ -629,7 +630,7 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next):
         response = await call_next(request)
-        if settings.security_headers_enabled:
+        if bool(getattr(settings, "security_headers_enabled", True)):
             for key, value in _security_headers_for_request(request).items():
                 response.headers.setdefault(key, value)
         return response

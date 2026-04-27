@@ -12,7 +12,7 @@ from app.model_engine.utils import (
 from app.services.risk_free_rate import get_latest_risk_free_rate
 
 MODEL_NAME = "roic"
-MODEL_VERSION = "1.2.1"
+MODEL_VERSION = "1.2.2"
 
 MIN_INVESTED_CAPITAL_DELTA = 1e-6
 
@@ -61,16 +61,35 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         equity = data.get("stockholders_equity")
         current_debt = data.get("current_debt")
         long_term_debt = data.get("long_term_debt")
-        if equity is not None and (current_debt is not None or long_term_debt is not None):
-            invested_capital = float(equity) + float(current_debt or 0) + float(long_term_debt or 0)
-            cash = data.get("cash_and_short_term_investments")
-            if cash is not None:
-                invested_capital -= float(cash)
+        total_debt = data.get("total_debt")
+        if equity is not None:
+            debt_component: float | None = None
+            if total_debt is not None:
+                debt_component = float(total_debt)
+                if current_debt is None:
+                    proxy_used = True
+                    missing_fields.add("current_debt")
+                if long_term_debt is None:
+                    proxy_used = True
+                    missing_fields.add("long_term_debt")
+            elif current_debt is not None and long_term_debt is not None:
+                debt_component = float(current_debt) + float(long_term_debt)
             else:
-                # Keep the gross-capital denominator as a proxy when excess cash is missing,
-                # but surface the missing input and downgrade confidence accordingly.
-                proxy_used = True
-                missing_fields.add("cash_and_short_term_investments")
+                if current_debt is None:
+                    missing_fields.add("current_debt")
+                if long_term_debt is None:
+                    missing_fields.add("long_term_debt")
+
+            if debt_component is not None:
+                invested_capital = float(equity) + debt_component
+                cash = data.get("cash_and_short_term_investments")
+                if cash is not None:
+                    invested_capital -= float(cash)
+                else:
+                    # Keep the gross-capital denominator as a proxy when excess cash is missing,
+                    # but surface the missing input and downgrade confidence accordingly.
+                    proxy_used = True
+                    missing_fields.add("cash_and_short_term_investments")
         else:
             if equity is None:
                 missing_fields.add("stockholders_equity")

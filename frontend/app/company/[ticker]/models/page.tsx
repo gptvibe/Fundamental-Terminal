@@ -162,7 +162,15 @@ export default function CompanyModelsPage() {
   }, [companyLayout]);
 
   useEffect(() => {
-    companyLayout?.setCompany(null);
+    if (!companyLayout) {
+      return;
+    }
+
+    if (companyLayout.company?.ticker?.toUpperCase() === ticker) {
+      return;
+    }
+
+    companyLayout.setCompany(null);
   }, [companyLayout, ticker]);
 
   useEffect(() => {

@@ -232,6 +232,9 @@ function buildFreshnessIndicator(freshness: CompanyHeaderFreshness): {
     label = hasData ? "Some data failed to load" : "Company data failed to load";
   } else if (freshness.loading && !hasData) {
     label = "Fetching first company snapshot";
+  } else if (freshness.loading && hasData) {
+    tone = "fresh";
+    label = "Updating cached snapshot";
   } else if (cacheState === "fresh" || (refreshState?.reason === "fresh" && hasData)) {
     tone = "fresh";
     label = refreshQueued ? "Fresh snapshot, refresh queued" : "Fresh snapshot";

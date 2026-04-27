@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-DCF_CALCULATION_VERSION = "dcf_ev_bridge_v1"
+DCF_CALCULATION_VERSION = "dcf_ev_bridge_v2"
 REVERSE_DCF_CALCULATION_VERSION = "reverse_dcf_ev_target_v1"
 PIOTROSKI_CALCULATION_VERSION = "piotroski_ratio_scale_v1"
 

@@ -8,11 +8,30 @@ import {
   getCompanyFinancials,
   getCompanyOverview,
   getCompanyResearchBrief,
+  getWatchlistSummary,
   invalidateApiReadCacheForTicker,
   refreshCompany,
+  searchCompanies,
 } from "@/lib/api";
 
 describe("api read cache", () => {
+  function buildFinancialsPayload(ticker = "AAPL", reason = "none") {
+    return {
+      company: { ticker, name: `${ticker} Inc.`, cache_state: "fresh" },
+      financials: [],
+      price_history: [],
+      refresh: { triggered: false, reason, ticker, job_id: null },
+      diagnostics: null,
+    };
+  }
+
+  function buildOkJsonResponse(payload: unknown) {
+    return {
+      ok: true,
+      json: async () => payload,
+    };
+  }
+
   beforeEach(async () => {
     await __resetApiClientCacheForTests();
   });
@@ -22,27 +41,126 @@ describe("api read cache", () => {
     vi.restoreAllMocks();
   });
 
-  it("dedupes repeated read requests", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        company: null,
-        financials: [],
-        price_history: [],
-        refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null },
-      }),
-    });
+  it("serves a fresh cache hit for stable financials", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildOkJsonResponse(buildFinancialsPayload("AAPL", "first-load")));
 
     vi.stubGlobal("fetch", fetchMock);
 
-    await getCompanyFinancials("AAPL");
-    await getCompanyFinancials("AAPL");
+    const first = await getCompanyFinancials("AAPL");
+    const second = await getCompanyFinancials("AAPL");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(first.refresh.reason).toBe("first-load");
+    expect(second.refresh.reason).toBe("first-load");
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/financials",
       expect.objectContaining({ cache: "no-store" })
     );
+  });
+
+  it("serves stale financials and triggers background revalidation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00Z"));
+
+    let resolveRevalidate: ((value: unknown) => void) | null = null;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildOkJsonResponse(buildFinancialsPayload("AAPL", "initial")))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRevalidate = resolve;
+          })
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const initial = await getCompanyFinancials("AAPL");
+    expect(initial.refresh.reason).toBe("initial");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-04-27T00:11:00Z"));
+    const stale = await getCompanyFinancials("AAPL");
+
+    expect(stale.refresh.reason).toBe("initial");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    resolveRevalidate?.(buildOkJsonResponse(buildFinancialsPayload("AAPL", "revalidated")));
+
+    await vi.waitFor(async () => {
+      const latest = await getCompanyFinancials("AAPL");
+      expect(latest.refresh.reason).toBe("revalidated");
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it("bypasses read cache for refresh=true query requests", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(buildOkJsonResponse({ query: "AAPL", total: 0, results: [] }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchCompanies("AAPL", { refresh: true });
+    await searchCompanies("AAPL", { refresh: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/companies/search?query=AAPL&refresh=true",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/search?query=AAPL&refresh=true",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("bypasses read cache for POST requests", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(buildOkJsonResponse({ as_of: null, tickers: {}, generated_at: null, refresh: { triggered: false, reason: "none", ticker: null, job_id: null } }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getWatchlistSummary(["AAPL", "MSFT"]);
+    await getWatchlistSummary(["AAPL", "MSFT"]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/backend/api/watchlist/summary",
+      expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/watchlist/summary",
+      expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+  });
+
+  it("clears cached reads when ticker cache is invalidated", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildOkJsonResponse(buildFinancialsPayload("AAPL", "initial")))
+      .mockResolvedValueOnce(buildOkJsonResponse(buildFinancialsPayload("AAPL", "after-invalidation")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getCompanyFinancials("AAPL");
+    const cached = await getCompanyFinancials("AAPL");
+    expect(first.refresh.reason).toBe("initial");
+    expect(cached.refresh.reason).toBe("initial");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    invalidateApiReadCacheForTicker("AAPL");
+
+    const refetched = await getCompanyFinancials("AAPL");
+    expect(refetched.refresh.reason).toBe("after-invalidation");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("uses response.json in success path even when performance audit is enabled", async () => {

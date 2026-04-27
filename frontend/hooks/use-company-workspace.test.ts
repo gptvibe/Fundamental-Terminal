@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as React from "react";
 
+import { CompanyLayoutProvider } from "@/components/layout/company-layout-context";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import {
   getCompanyWorkspaceBootstrap,
@@ -112,6 +114,35 @@ function buildApiError(status: number, statusText = "Error") {
 
 function buildAbortError() {
   return new DOMException("The operation was aborted.", "AbortError");
+}
+
+function WorkspaceProbe({
+  ticker,
+  mode,
+}: {
+  ticker: string;
+  mode: "overview" | "peers";
+}) {
+  const workspace = useCompanyWorkspace(ticker, mode === "overview" ? { includeOverviewBrief: true } : {});
+  const phase = workspace.loading && !workspace.company && workspace.financials.length === 0
+    ? "skeleton"
+    : workspace.updating
+      ? "updating"
+      : "ready";
+
+  return React.createElement(
+    "div",
+    { "data-testid": "workspace-phase" },
+    `${mode}:${phase}:${workspace.company?.ticker ?? "none"}:${workspace.financials.length}`
+  );
+}
+
+function WorkspaceHost({ mode }: { mode: "overview" | "peers" }) {
+  return React.createElement(
+    CompanyLayoutProvider,
+    null,
+    React.createElement(WorkspaceProbe, { key: mode, ticker: "RKLB", mode })
+  );
 }
 
 describe("useCompanyWorkspace", () => {
@@ -430,6 +461,63 @@ describe("useCompanyWorkspace", () => {
     });
 
     expect(fetchFinancials).toHaveBeenCalledWith("RKLB", expect.objectContaining({ view: "core_segments", signal: expect.anything() }));
+  });
+
+  it("keeps workspace data between tab remounts and avoids duplicate fresh-cache requests", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+
+    fetchBootstrap.mockImplementation(async (_ticker, options) => {
+      const overviewMode = Boolean(options?.includeOverviewBrief);
+      return {
+        company: { ticker: "RKLB", name: "Rocket Lab Corp", cache_state: "fresh" },
+        financials: buildFinancialsResponse({
+          company: {
+            ticker: "RKLB",
+            name: "Rocket Lab Corp",
+            sector: "Space",
+            market_sector: "Space",
+            last_checked: "2026-03-31T00:00:00Z",
+            cache_state: "fresh",
+          },
+          financials: [
+            {
+              filing_type: "10-K",
+              period_end: overviewMode ? "2025-12-31" : "2025-09-30",
+              revenue: overviewMode ? 601800000 : 582000000,
+              eps: null,
+              free_cash_flow: -321810000,
+            },
+          ],
+          refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
+        }),
+        brief: overviewMode ? buildResearchBriefResponse() : null,
+        earnings_summary: null,
+        insider_trades: null,
+        institutional_holdings: null,
+        errors: { insider: null, institutional: null, earnings_summary: null },
+      } as never;
+    });
+
+    const { rerender } = render(React.createElement(WorkspaceHost, { mode: "overview" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace-phase").textContent).toContain("overview:ready:RKLB:1");
+    });
+
+    rerender(React.createElement(WorkspaceHost, { mode: "peers" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace-phase").textContent).toContain("peers:ready:RKLB:1");
+    });
+
+    rerender(React.createElement(WorkspaceHost, { mode: "overview" }));
+
+    expect(screen.getByTestId("workspace-phase").textContent).toContain("overview:ready:RKLB:1");
+    expect(screen.getByTestId("workspace-phase").textContent).not.toContain("overview:skeleton");
+
+    const overviewBootstrapCalls = fetchBootstrap.mock.calls.filter(([, options]) => Boolean(options?.includeOverviewBrief));
+    const peersBootstrapCalls = fetchBootstrap.mock.calls.filter(([, options]) => !options?.includeOverviewBrief);
+    expect(overviewBootstrapCalls).toHaveLength(1);
+    expect(peersBootstrapCalls).toHaveLength(1);
   });
 
   it("aborts the prior workspace request bundle when ticker changes", async () => {

@@ -36,7 +36,7 @@ def _metric_row(period_type: str, period_end: date, metric_key: str, value: floa
         is_proxy=False,
         provenance={
             "formula_version": "sec_metrics_mart_v2",
-            "formula_id": f"derived_metric.{metric_key}.sec_metrics_v3",
+            "formula_id": f"derived_metric.{metric_key}.sec_metrics_v4",
             "unit": "ratio",
             "statement_source": "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json",
             "price_source": "yahoo_finance",
@@ -90,7 +90,7 @@ def test_metrics_endpoint_returns_typed_payload(monkeypatch):
     assert payload["periods"][0]["period_type"] == "ttm"
     assert payload["periods"][0]["metrics"][0]["metric_key"] in {"gross_margin", "revenue_growth"}
     revenue_growth_metric = next(metric for metric in payload["periods"][0]["metrics"] if metric["metric_key"] == "revenue_growth")
-    assert revenue_growth_metric["formula_id"] == "derived_metric.revenue_growth.sec_metrics_v3"
+    assert revenue_growth_metric["formula_id"] == "derived_metric.revenue_growth.sec_metrics_v4"
     assert "price_source" in revenue_growth_metric["provenance"]
     assert revenue_growth_metric["provenance"]["price_source"] == "yahoo_finance"
     assert "available_metric_keys" in payload

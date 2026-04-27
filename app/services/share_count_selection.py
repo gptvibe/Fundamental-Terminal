@@ -25,6 +25,13 @@ def weighted_average_diluted_shares(data: Mapping[str, Any]) -> float | None:
 
 def shares_for_market_cap(data: Mapping[str, Any]) -> ShareSelection:
     # Market cap should use point-in-time shares whenever possible.
+    return shares_for_equity_value_per_share(data)
+
+
+def shares_for_equity_value_per_share(data: Mapping[str, Any]) -> ShareSelection:
+    # Equity value per share is a point-in-time stock measure, so prefer current
+    # shares_outstanding and only fall back to weighted-average diluted shares as
+    # a proxy when current shares are unavailable.
     point_in_time = point_in_time_shares_outstanding(data)
     if point_in_time is not None:
         return ShareSelection(value=point_in_time, source="shares_outstanding", is_proxy=False)

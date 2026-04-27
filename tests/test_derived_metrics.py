@@ -20,6 +20,8 @@ def _statement(
     shares: float,
     *,
     segment_breakdown: list[dict[str, float]] | None = None,
+    statement_type: str = "canonical_xbrl",
+    source: str = "https://data.sec.gov/example",
 ):
     data = {
         "revenue": revenue,
@@ -33,6 +35,7 @@ def _statement(
         "current_liabilities": revenue * 0.4,
         "current_debt": revenue * 0.05,
         "long_term_debt": revenue * 0.3,
+        "cash_and_short_term_investments": revenue * 0.15,
         "stockholders_equity": revenue * 0.9,
         "shares_outstanding": shares,
         "weighted_average_diluted_shares": shares,
@@ -49,8 +52,8 @@ def _statement(
         period_start=period_start,
         period_end=period_end,
         filing_type=filing_type,
-        statement_type="canonical_xbrl",
-        source="https://data.sec.gov/example",
+        statement_type=statement_type,
+        source=source,
         last_updated=datetime.now(timezone.utc),
         data=data,
     )
@@ -121,7 +124,7 @@ def test_build_metrics_timeseries_includes_quarterly_annual_and_ttm_rows():
     assert latest_ttm["metrics"]["segment_concentration"] is not None
     assert latest_ttm["quality"]["coverage_ratio"] > 0.8
     assert latest_ttm["provenance"]["price_source"] == "yahoo_finance"
-    assert latest_ttm["provenance"]["formula_version"] == "sec_metrics_v3"
+    assert latest_ttm["provenance"]["formula_version"] == "sec_metrics_v4"
     assert latest_quarterly["provenance"]["metric_semantics"]["buyback_yield"] == "annualized"
     assert latest_quarterly["provenance"]["metric_semantics"]["dividend_yield"] == "annualized"
     assert latest_quarterly["provenance"]["metric_semantics"]["working_capital_days"] == "annualized"
@@ -460,6 +463,21 @@ def test_market_cap_diluted_fallback_is_marked_proxy_in_provenance() -> None:
     assert point["provenance"]["market_cap_share_source_is_proxy"] is True
 
 
+def test_derived_metrics_require_complete_debt_and_cash_for_leverage_and_roic_proxy() -> None:
+    statement = _statement(date(2025, 1, 1), date(2025, 12, 31), "10-K", 100, 100)
+    statement.data["current_debt"] = 5.0
+    statement.data["long_term_debt"] = None
+    statement.data["cash_and_short_term_investments"] = 20.0
+
+    series = build_metrics_timeseries([statement], [])
+    point = [item for item in series if item["cadence"] == "annual"][0]
+
+    assert point["metrics"]["leverage_ratio"] is None
+    assert point["metrics"]["roic_proxy"] is None
+    assert "leverage_ratio" in point["quality"]["missing_metrics"]
+    assert "roic_proxy" in point["quality"]["missing_metrics"]
+
+
 def test_per_share_metric_prefers_weighted_average_basic_when_diluted_missing() -> None:
     statement = _statement(date(2025, 1, 1), date(2025, 12, 31), "10-K", 100, 100)
     statement.data["weighted_average_diluted_shares"] = None
@@ -489,6 +507,45 @@ def test_ttm_clean_four_quarters_emits_validated_ttm() -> None:
     assert ttm["provenance"]["ttm_construction"] == "four_reported_quarters"
     assert "ttm_missing_quarter" not in ttm["quality"]["flags"]
     assert ttm["metrics"]["gross_margin"] is not None
+
+
+def test_ttm_flow_metric_is_none_when_any_component_quarter_is_missing() -> None:
+    statements = [
+        _statement(date(2025, 1, 1), date(2025, 3, 31), "10-Q", 100, 100),
+        _statement(date(2025, 4, 1), date(2025, 6, 30), "10-Q", 110, 100),
+        _statement(date(2025, 7, 1), date(2025, 9, 30), "10-Q", 120, 100),
+        _statement(date(2025, 10, 1), date(2025, 12, 31), "10-Q", 130, 100),
+    ]
+    statements[2].data["free_cash_flow"] = None
+
+    rows = derived_metrics_module._normalize_financial_rows(statements)
+    quarterly_rows = [row for row in rows if row["filing_type"] in derived_metrics_module.QUARTERLY_FORMS]
+    ttm_rows = derived_metrics_module._build_ttm_rows(quarterly_rows, [])
+
+    assert ttm_rows
+    latest_ttm = ttm_rows[-1]
+    assert latest_ttm["data"]["free_cash_flow"] is None
+    assert "ttm_metric_missing_component:free_cash_flow" in latest_ttm["ttm_validation_flags"]
+
+
+def test_ttm_revenue_aggregates_while_free_cash_flow_stays_none_when_missing_component() -> None:
+    statements = [
+        _statement(date(2025, 1, 1), date(2025, 3, 31), "10-Q", 100, 100),
+        _statement(date(2025, 4, 1), date(2025, 6, 30), "10-Q", 110, 100),
+        _statement(date(2025, 7, 1), date(2025, 9, 30), "10-Q", 120, 100),
+        _statement(date(2025, 10, 1), date(2025, 12, 31), "10-Q", 130, 100),
+    ]
+    statements[1].data["free_cash_flow"] = None
+
+    rows = derived_metrics_module._normalize_financial_rows(statements)
+    quarterly_rows = [row for row in rows if row["filing_type"] in derived_metrics_module.QUARTERLY_FORMS]
+    ttm_rows = derived_metrics_module._build_ttm_rows(quarterly_rows, [])
+
+    assert ttm_rows
+    latest_ttm = ttm_rows[-1]
+    assert latest_ttm["data"]["revenue"] == pytest.approx(460.0, rel=1e-9)
+    assert latest_ttm["data"]["free_cash_flow"] is None
+    assert "ttm_metric_missing_component:free_cash_flow" in latest_ttm["ttm_validation_flags"]
 
 
 def test_ttm_missing_quarter_marks_unavailable_with_quality_flags() -> None:
@@ -523,6 +580,49 @@ def test_ttm_duplicate_restatement_quarter_is_flagged_ambiguous() -> None:
     assert "ttm_restatement_ambiguity" in ttm["quality"]["flags"]
 
 
+def test_ttm_excludes_apparent_consecutive_quarters_when_statement_type_differs() -> None:
+    statements = [
+        _statement(date(2025, 1, 1), date(2025, 3, 31), "10-Q", 100, 100),
+        _statement(date(2025, 4, 1), date(2025, 6, 30), "10-Q", 110, 100),
+        _statement(
+            date(2025, 7, 1),
+            date(2025, 9, 30),
+            "CALL",
+            120,
+            100,
+            statement_type="canonical_bank_regulatory",
+            source="https://api.fdic.gov/banks/financials",
+        ),
+        _statement(date(2025, 10, 1), date(2025, 12, 31), "10-Q", 130, 100),
+    ]
+
+    series = build_metrics_timeseries(statements, [])
+    ttm_points = [point for point in series if point["cadence"] == "ttm"]
+
+    assert ttm_points == []
+
+
+def test_ttm_excludes_windows_when_source_family_differs_even_if_statement_type_matches() -> None:
+    statements = [
+        _statement(date(2025, 1, 1), date(2025, 3, 31), "10-Q", 100, 100, source="https://data.sec.gov/example"),
+        _statement(date(2025, 4, 1), date(2025, 6, 30), "10-Q", 110, 100, source="https://data.sec.gov/example"),
+        _statement(
+            date(2025, 7, 1),
+            date(2025, 9, 30),
+            "10-Q",
+            120,
+            100,
+            source="https://api.fdic.gov/banks/financials",
+        ),
+        _statement(date(2025, 10, 1), date(2025, 12, 31), "10-Q", 130, 100, source="https://data.sec.gov/example"),
+    ]
+
+    series = build_metrics_timeseries(statements, [])
+    ttm_points = [point for point in series if point["cadence"] == "ttm"]
+
+    assert ttm_points == []
+
+
 def test_ttm_derives_q4_from_annual_minus_q1_q3_when_quality_is_sufficient() -> None:
     q1 = _statement(date(2025, 1, 1), date(2025, 3, 31), "10-Q", 100, 100)
     q2 = _statement(date(2025, 4, 1), date(2025, 6, 30), "10-Q", 110, 100)
@@ -536,6 +636,46 @@ def test_ttm_derives_q4_from_annual_minus_q1_q3_when_quality_is_sufficient() -> 
     assert ttm["provenance"]["ttm_construction"] == "annual_minus_q1_q3_derived_q4"
     assert "ttm_q4_derived_from_annual" in ttm["quality"]["flags"]
     assert ttm["provenance"]["ttm_formula"]
+
+
+def test_ttm_does_not_derive_q4_from_annual_when_annual_source_is_incompatible() -> None:
+    q1 = _statement(
+        date(2025, 1, 1),
+        date(2025, 3, 31),
+        "10-Q",
+        100,
+        100,
+        source="https://data.sec.gov/example",
+    )
+    q2 = _statement(
+        date(2025, 4, 1),
+        date(2025, 6, 30),
+        "10-Q",
+        110,
+        100,
+        source="https://data.sec.gov/example",
+    )
+    q3 = _statement(
+        date(2025, 7, 1),
+        date(2025, 9, 30),
+        "10-Q",
+        120,
+        100,
+        source="https://data.sec.gov/example",
+    )
+    annual = _statement(
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+        "10-K",
+        500,
+        100,
+        source="https://api.fdic.gov/banks/financials",
+    )
+
+    series = build_metrics_timeseries([q1, q2, q3, annual], [])
+    ttm_points = [point for point in series if point["cadence"] == "ttm"]
+
+    assert ttm_points == []
 
 
 def test_ttm_semiannual_foreign_data_not_treated_as_valid_quarters() -> None:

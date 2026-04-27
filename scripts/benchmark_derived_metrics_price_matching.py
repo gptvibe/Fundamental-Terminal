@@ -139,6 +139,10 @@ def _build_cadence_points_legacy(
             cadence=cadence,
             statement_type=row["statement_type"],
         )
+        quality_flags = list(metrics["flags"])
+        if cadence == "ttm":
+            quality_flags.extend(row.get("ttm_validation_flags", []))
+            quality_flags = sorted(set(quality_flags))
         output.append(
             {
                 "cadence": cadence,
@@ -162,7 +166,7 @@ def _build_cadence_points_legacy(
                     "available_metrics": metrics["available_metrics"],
                     "missing_metrics": metrics["missing_metrics"],
                     "coverage_ratio": metrics["coverage_ratio"],
-                    "flags": metrics["flags"],
+                    "flags": quality_flags,
                 },
             }
         )

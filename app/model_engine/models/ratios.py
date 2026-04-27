@@ -16,7 +16,7 @@ from app.model_engine.utils import (
 )
 
 MODEL_NAME = "ratios"
-MODEL_VERSION = "1.2.0"
+MODEL_VERSION = "1.2.1"
 
 STOCK_FLOW_RATIO_KEYS = {
     "return_on_assets",
@@ -38,17 +38,11 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
     previous_equity = book_equity(previous) if previous else None
     average_assets = average(statement_value(current, "total_assets"), statement_value(previous, "total_assets") if previous else None)
     average_equity = average(current_equity, previous_equity)
-    net_debt = (
-        float(statement_value(current, "current_debt") or 0)
-        + float(statement_value(current, "long_term_debt") or 0)
-        - float(statement_value(current, "cash_and_short_term_investments") or 0)
-    ) if any(
-        statement_value(current, key) is not None
-        for key in ("current_debt", "long_term_debt", "cash_and_short_term_investments")
-    ) else None
+    net_debt = _net_debt(current)
     revenue = statement_value(current, "revenue")
     free_cash_flow = statement_value(current, "free_cash_flow")
     annualized_free_cash_flow = _annualize_flow(free_cash_flow, annualization_factor)
+    capital_structure_missing = _missing_net_debt_inputs(current)
 
     ratios = {
         "gross_margin": safe_divide(statement_value(current, "gross_profit"), revenue),
@@ -76,7 +70,7 @@ def compute(dataset: CompanyDataset) -> dict[str, object]:
         for key in ratios
     }
 
-    missing_fields = sorted(key for key, value in ratios.items() if value is None)
+    missing_fields = sorted({key for key, value in ratios.items() if value is None} | set(capital_structure_missing))
     status = status_from_data_quality(
         missing_fields=missing_fields,
         proxy_used=False,
@@ -112,3 +106,38 @@ def _annualize_flow(value: float | int | None, annualization_factor: float) -> f
     if value is None:
         return None
     return float(value) * annualization_factor
+
+
+def _net_debt(point) -> float | None:
+    cash = statement_value(point, "cash_and_short_term_investments")
+    if cash is None:
+        return None
+
+    total_debt = statement_value(point, "total_debt")
+    if total_debt is not None:
+        return float(total_debt) - float(cash)
+
+    current_debt = statement_value(point, "current_debt")
+    long_term_debt = statement_value(point, "long_term_debt")
+    if current_debt is None or long_term_debt is None:
+        return None
+
+    return float(current_debt) + float(long_term_debt) - float(cash)
+
+
+def _missing_net_debt_inputs(point) -> list[str]:
+    cash = statement_value(point, "cash_and_short_term_investments")
+    total_debt = statement_value(point, "total_debt")
+    current_debt = statement_value(point, "current_debt")
+    long_term_debt = statement_value(point, "long_term_debt")
+
+    missing: list[str] = []
+    if cash is None:
+        missing.append("cash_and_short_term_investments")
+
+    if total_debt is None and current_debt is None:
+        missing.append("current_debt")
+    if total_debt is None and long_term_debt is None:
+        missing.append("long_term_debt")
+
+    return missing

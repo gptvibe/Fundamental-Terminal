@@ -761,6 +761,7 @@ async def search_companies(
             return payload
 
         payload = await _run_with_session_binding(session, build_search_payload)
+        _store_cached_search_response(normalized_query, payload)
         await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
         not_modified = _apply_conditional_headers(
             request,
@@ -6027,7 +6028,28 @@ def _refresh_for_earnings_workspace(
 
 
 def _get_cached_search_response(_query: str) -> CompanySearchResponse | None:
-    return None
+    cached = _search_response_cache.get(_query)
+    if cached is None:
+        return None
+
+    expires_at, payload = cached
+    if expires_at < time.monotonic():
+        _search_response_cache.pop(_query, None)
+        return None
+
+    return CompanySearchResponse.model_validate(deepcopy(payload))
+
+
+def _store_cached_search_response(query: str, payload: CompanySearchResponse) -> None:
+    ttl_seconds = max(0, int(getattr(settings, "hot_response_cache_ttl_seconds", 20)))
+    if ttl_seconds <= 0:
+        _search_response_cache.pop(query, None)
+        return
+
+    _search_response_cache[query] = (
+        time.monotonic() + ttl_seconds,
+        payload.model_dump(mode="json"),
+    )
 
 
 async def _get_hot_cached_payload(key: str) -> HotCacheLookup | None:

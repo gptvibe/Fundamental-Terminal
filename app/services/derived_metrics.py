@@ -3,6 +3,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from datetime import date, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 from app.models import FinancialStatement, PriceHistory
 from app.services.formula_registry import formula_ids_for_derived_metrics
@@ -56,7 +57,7 @@ FLOW_FIELDS = {
     "provision_for_credit_losses",
 }
 METRIC_KEYS = [*GENERAL_METRIC_KEYS, *BANK_METRIC_KEYS]
-FORMULA_VERSION = "sec_metrics_v3"
+FORMULA_VERSION = "sec_metrics_v4"
 TTM_MIN_QUARTER_DAYS = 70
 TTM_MAX_QUARTER_DAYS = 110
 TTM_MIN_CONSECUTIVE_GAP_DAYS = 70
@@ -145,60 +146,68 @@ def _build_ttm_rows(
     annual_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     quarterly_candidates = _augment_quarterly_rows_with_derived_q4(quarterly_rows, annual_rows)
-    quarterly_candidates = sorted(quarterly_candidates, key=lambda row: row["period_end"])
-    if len(quarterly_candidates) < 4:
-        return []
-
     output: list[dict[str, Any]] = []
-    for index in range(3, len(quarterly_candidates)):
-        trailing_rows = quarterly_candidates[index - 3 : index + 1]
-        latest = trailing_rows[-1]
-        validation_flags = _validate_ttm_window(trailing_rows)
-        is_valid_window = len(validation_flags) == 0
-        ttm_flags = list(validation_flags)
+    grouped_candidates: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for row in quarterly_candidates:
+        grouped_candidates.setdefault(_ttm_compatibility_key(row), []).append(row)
 
-        if any(bool(row.get("q4_derived_from_annual")) for row in trailing_rows):
-            ttm_flags.append("ttm_q4_derived_from_annual")
+    for group_rows in grouped_candidates.values():
+        group_rows = sorted(group_rows, key=lambda row: row["period_end"])
+        if len(group_rows) < 4:
+            continue
 
-        aggregated_data: dict[str, Any] = {}
-        if is_valid_window:
-            for metric in FLOW_FIELDS:
-                values = [_to_float(row["data"].get(metric)) for row in trailing_rows]
-                non_null = [value for value in values if value is not None]
-                aggregated_data[metric] = sum(non_null) if non_null else None
-        else:
-            # If periods are not comparable, TTM flows are explicitly unavailable.
-            for metric in FLOW_FIELDS:
-                aggregated_data[metric] = None
+        for index in range(3, len(group_rows)):
+            trailing_rows = group_rows[index - 3 : index + 1]
+            latest = trailing_rows[-1]
+            validation_flags = _validate_ttm_window(trailing_rows)
+            is_valid_window = len(validation_flags) == 0
+            ttm_flags = list(validation_flags)
 
-        latest_data = latest["data"]
-        for key, value in latest_data.items():
-            if key in FLOW_FIELDS:
-                continue
-            aggregated_data[key] = value
+            if any(bool(row.get("q4_derived_from_annual")) for row in trailing_rows):
+                ttm_flags.append("ttm_q4_derived_from_annual")
 
-        ttm_construction = "four_reported_quarters"
-        if "ttm_q4_derived_from_annual" in ttm_flags:
-            ttm_construction = "annual_minus_q1_q3_derived_q4"
+            aggregated_data: dict[str, Any] = {}
+            if is_valid_window:
+                for metric in FLOW_FIELDS:
+                    values = [_to_float(row["data"].get(metric)) for row in trailing_rows]
+                    if any(value is None for value in values):
+                        aggregated_data[metric] = None
+                        ttm_flags.append(f"ttm_metric_missing_component:{metric}")
+                        continue
+                    aggregated_data[metric] = sum(values)
+            else:
+                # If periods are not comparable, TTM flows are explicitly unavailable.
+                for metric in FLOW_FIELDS:
+                    aggregated_data[metric] = None
 
-        output.append(
-            {
-                "period_start": trailing_rows[0]["period_start"],
-                "period_end": latest["period_end"],
-                "filing_type": "TTM",
-                "statement_type": latest["statement_type"],
-                "source": latest["source"],
-                "data": aggregated_data,
-                "ttm_validation_flags": sorted(set(ttm_flags)),
-                "ttm_validation_status": "valid" if is_valid_window else "invalid",
-                "ttm_construction": ttm_construction,
-                "ttm_component_period_ends": [row["period_end"] for row in trailing_rows],
-                "ttm_component_filing_types": [str(row["filing_type"]) for row in trailing_rows],
-                "ttm_component_statement_ids": [row.get("statement_id") for row in trailing_rows if row.get("statement_id") is not None],
-            }
-        )
+            latest_data = latest["data"]
+            for key, value in latest_data.items():
+                if key in FLOW_FIELDS:
+                    continue
+                aggregated_data[key] = value
 
-    return output
+            ttm_construction = "four_reported_quarters"
+            if "ttm_q4_derived_from_annual" in ttm_flags:
+                ttm_construction = "annual_minus_q1_q3_derived_q4"
+
+            output.append(
+                {
+                    "period_start": trailing_rows[0]["period_start"],
+                    "period_end": latest["period_end"],
+                    "filing_type": "TTM",
+                    "statement_type": latest["statement_type"],
+                    "source": latest["source"],
+                    "data": aggregated_data,
+                    "ttm_validation_flags": sorted(set(ttm_flags)),
+                    "ttm_validation_status": "valid" if is_valid_window else "invalid",
+                    "ttm_construction": ttm_construction,
+                    "ttm_component_period_ends": [row["period_end"] for row in trailing_rows],
+                    "ttm_component_filing_types": [str(row["filing_type"]) for row in trailing_rows],
+                    "ttm_component_statement_ids": [row.get("statement_id") for row in trailing_rows if row.get("statement_id") is not None],
+                }
+            )
+
+    return sorted(output, key=lambda row: row["period_end"])
 
 
 def _augment_quarterly_rows_with_derived_q4(
@@ -214,6 +223,7 @@ def _augment_quarterly_rows_with_derived_q4(
     for annual in annual_rows:
         annual_start = annual["period_start"]
         annual_end = annual["period_end"]
+        annual_compatibility_key = _ttm_compatibility_key(annual)
         annual_days = (annual_end - annual_start).days + 1
         if annual_days < 330:
             continue
@@ -224,6 +234,7 @@ def _augment_quarterly_rows_with_derived_q4(
             row
             for row in quarterly_rows
             if row["statement_type"] == annual["statement_type"]
+            and _ttm_compatibility_key(row) == annual_compatibility_key
             and annual_start <= row["period_start"] <= row["period_end"] <= annual_end
         ]
         in_year_quarters = sorted(in_year_quarters, key=lambda row: row["period_end"])
@@ -287,6 +298,10 @@ def _validate_ttm_window(rows: list[dict[str, Any]]) -> list[str]:
     if max(quarter_lengths) - min(quarter_lengths) > 20:
         flags.append("ttm_mixed_fiscal_calendars")
 
+    compatibility_keys = {_ttm_compatibility_key(row) for row in rows}
+    if len(compatibility_keys) > 1:
+        flags.append("ttm_incompatible_statement_group")
+
     if any(bool(row.get("restatement_ambiguous")) for row in rows):
         flags.append("ttm_restatement_ambiguity")
 
@@ -314,6 +329,41 @@ def _validate_consecutive_quarters(rows: list[dict[str, Any]]) -> list[str]:
 
 def _quarter_length_days(row: dict[str, Any]) -> int:
     return (row["period_end"] - row["period_start"]).days + 1
+
+
+def _ttm_compatibility_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    statement_type = str(row.get("statement_type") or "")
+    statement_family = _statement_family(row)
+    source_origin = _source_origin(row.get("source"))
+    return (statement_type, statement_family, source_origin)
+
+
+def _statement_family(row: dict[str, Any]) -> str:
+    filing_type = str(row.get("filing_type") or "").upper()
+    statement_type = str(row.get("statement_type") or "").lower()
+    source = str(row.get("source") or "").lower()
+    if filing_type in {"CALL", "FR Y-9C"}:
+        return "bank_regulatory"
+    if "bank" in statement_type or "fdic" in source or "federalreserve" in source or "ffiec" in source:
+        return "bank_regulatory"
+    return "company_filing"
+
+
+def _source_origin(source: Any) -> str:
+    raw = str(source or "").strip().lower()
+    if not raw:
+        return "unknown"
+
+    parsed = urlparse(raw)
+    host = parsed.netloc or ""
+    if not host and parsed.scheme and parsed.path:
+        host = parsed.path
+    if not host and "://" not in raw:
+        host = raw.split("/", 1)[0]
+    host = host.strip().lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host or "unknown"
 
 
 def _build_cadence_points(
@@ -408,6 +458,7 @@ def _compute_metrics(
     current_liabilities = _to_float(current.get("current_liabilities"))
     current_debt = _to_float(current.get("current_debt"))
     long_term_debt = _to_float(current.get("long_term_debt"))
+    total_debt = _to_float(current.get("total_debt"))
     stockholders_equity = _to_float(current.get("stockholders_equity"))
     operating_cash_flow = _to_float(current.get("operating_cash_flow"))
     stock_based_compensation = _to_float(current.get("stock_based_compensation"))
@@ -432,17 +483,22 @@ def _compute_metrics(
         previous_shares_proxy = shares_for_per_share_metric(previous).value
         previous_tangible_common_equity = _to_float(previous.get("tangible_common_equity"))
 
-    invested_capital = _sum_non_null(stockholders_equity, long_term_debt, current_debt)
-    if invested_capital is not None and cash_proxy is not None:
-        invested_capital = invested_capital - cash_proxy
+    debt_balance = _complete_debt_balance(
+        total_debt=total_debt,
+        current_debt=current_debt,
+        long_term_debt=long_term_debt,
+    )
+    invested_capital = _invested_capital(
+        stockholders_equity=stockholders_equity,
+        debt_balance=debt_balance,
+        cash_balance=cash_proxy,
+    )
 
     market_cap = None
     if price_point is not None and market_cap_shares.value is not None:
         market_cap = price_point["close"] * market_cap_shares.value
 
-    net_debt = _sum_non_null(current_debt, long_term_debt)
-    if net_debt is not None and cash_proxy is not None:
-        net_debt = net_debt - cash_proxy
+    net_debt = _net_debt_balance(debt_balance=debt_balance, cash_balance=cash_proxy)
 
     quarterly_annualization_scale = 4.0 if cadence == "quarterly" else 1.0
     working_capital_days_scale = 365.0 / quarterly_annualization_scale
@@ -609,3 +665,23 @@ def _first_non_null(*values: float | None) -> float | None:
         if value is not None:
             return value
     return None
+
+
+def _complete_debt_balance(*, total_debt: float | None, current_debt: float | None, long_term_debt: float | None) -> float | None:
+    if total_debt is not None:
+        return total_debt
+    if current_debt is None or long_term_debt is None:
+        return None
+    return current_debt + long_term_debt
+
+
+def _net_debt_balance(*, debt_balance: float | None, cash_balance: float | None) -> float | None:
+    if debt_balance is None or cash_balance is None:
+        return None
+    return debt_balance - cash_balance
+
+
+def _invested_capital(*, stockholders_equity: float | None, debt_balance: float | None, cash_balance: float | None) -> float | None:
+    if stockholders_equity is None or debt_balance is None or cash_balance is None:
+        return None
+    return stockholders_equity + debt_balance - cash_balance

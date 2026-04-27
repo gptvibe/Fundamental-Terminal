@@ -27,7 +27,7 @@ def _model_run() -> SimpleNamespace:
     return SimpleNamespace(
         model_name="dcf",
         model_version="v2",
-        calculation_version="dcf_ev_bridge_v1",
+        calculation_version="dcf_ev_bridge_v2",
         created_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
         input_periods={
             "period_end": "2025-12-31",
@@ -52,7 +52,7 @@ def _model_run() -> SimpleNamespace:
         },
         result={
             "model_status": "supported",
-            "calculation_version": "dcf_ev_bridge_v1",
+            "calculation_version": "dcf_ev_bridge_v2",
             "base_period_end": "2025-12-31",
             "enterprise_value": 2_500_000_000_000,
             "equity_value": 2_420_000_000_000,
@@ -112,12 +112,12 @@ def test_models_route_omits_input_periods_by_default_and_reduces_payload(monkeyp
     formula_payload = formula_response.json()
 
     assert default_payload["models"][0]["input_periods"] is None
-    assert default_payload["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"
+    assert default_payload["models"][0]["calculation_version"] == "dcf_ev_bridge_v2"
     assert "formula_ids" in default_payload["models"][0]["result"]
     assert "fair_value_per_share" in default_payload["models"][0]["result"]["formula_ids"]
     assert default_payload["models"][0]["formula_details"] is None
     assert expanded_payload["models"][0]["input_periods"]["period_end"] == "2025-12-31"
-    assert expanded_payload["models"][0]["result"]["calculation_version"] == "dcf_ev_bridge_v1"
+    assert expanded_payload["models"][0]["result"]["calculation_version"] == "dcf_ev_bridge_v2"
     assert "fair_value_per_share" in formula_payload["models"][0]["formula_details"]
     assert formula_payload["models"][0]["formula_details"]["fair_value_per_share"]["formula_id"].startswith("model.dcf")
     assert len(default_response.content) < len(expanded_response.content)
@@ -137,7 +137,7 @@ def test_models_route_serializes_mocked_model_without_calculation_version_attrib
         response = client.get("/api/companies/AAPL/models?model=dcf")
 
     assert response.status_code == 200
-    assert response.json()["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"
+    assert response.json()["models"][0]["calculation_version"] == "dcf_ev_bridge_v2"
 
 
 def test_models_route_rejects_unknown_expansion(monkeypatch):
@@ -225,4 +225,4 @@ def test_models_route_recomputes_missing_current_model_when_legacy_row_is_filter
 
     assert response.status_code == 200
     assert observed_compute == [["dcf"]]
-    assert response.json()["models"][0]["calculation_version"] == "dcf_ev_bridge_v1"
+    assert response.json()["models"][0]["calculation_version"] == "dcf_ev_bridge_v2"

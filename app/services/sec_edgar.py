@@ -1686,6 +1686,9 @@ class EdgarNormalizer:
                 "repaid": _candidate_fact_metadata(debt_repayment_candidate, source=accumulator.source) if debt_repayment_candidate is not None else None,
             }
         if data.get("operating_cash_flow") is not None and capex_candidate is not None:
+            # Canonical free_cash_flow is defined as OCF - capex from filing facts.
+            # This is a practical cash-flow proxy and may still reflect financing-related
+            # interest effects present in reported operating cash flow.
             data["free_cash_flow"] = _json_number(data["operating_cash_flow"] - abs(capex_candidate.value))
             selected_facts["free_cash_flow"] = {
                 "operating_cash_flow": selected_facts.get("operating_cash_flow"),

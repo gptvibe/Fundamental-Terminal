@@ -5,7 +5,7 @@ from typing import Any
 
 
 FORMULA_REGISTRY_VERSION = "formula_registry_v1"
-DERIVED_METRICS_FORMULA_VERSION = "sec_metrics_v3"
+DERIVED_METRICS_FORMULA_VERSION = "sec_metrics_v4"
 DERIVED_METRICS_MART_FORMULA_VERSION = "sec_metrics_mart_v2"
 MODEL_OUTPUT_FORMULA_VERSION = "model_output_v1"
 

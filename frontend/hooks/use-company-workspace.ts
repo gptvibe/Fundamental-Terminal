@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
+import { buildCompanyWorkspaceCacheKey, useCompanyLayoutContext } from "@/components/layout/company-layout-context";
 import { useJobStream } from "@/hooks/use-job-stream";
 import { rememberActiveJob } from "@/lib/active-job";
 import { COMMAND_PALETTE_REFRESH_EVENT, type CommandPaletteTickerDetail } from "@/lib/command-palette-events";
@@ -38,6 +38,7 @@ interface UseCompanyWorkspaceOptions {
   includeEarningsSummary?: boolean;
   includeChartConsole?: boolean;
   financialsView?: "full" | "core_segments" | "core";
+  workspaceAsOf?: string | null;
   auditPageRoute?: string;
   auditScenario?: string;
   initialWorkspaceData?: LoadCompanyWorkspaceDataResult | null;
@@ -57,6 +58,7 @@ export interface LoadCompanyWorkspaceDataResult {
 const COMPATIBILITY_FALLBACK_STATUSES = new Set([404, 405, 501]);
 const WORKSPACE_PRICE_HISTORY_LATEST_N = 3200;
 const WORKSPACE_PRICE_HISTORY_MAX_POINTS = 480;
+const WORKSPACE_LAYOUT_CACHE_TTL_MS = 30_000;
 
 export function useCompanyWorkspace(
   ticker: string,
@@ -67,28 +69,90 @@ export function useCompanyWorkspace(
     includeEarningsSummary = false,
     includeChartConsole = false,
     financialsView,
+    workspaceAsOf,
     auditPageRoute,
     auditScenario,
     initialWorkspaceData = null,
   }: UseCompanyWorkspaceOptions = {}
 ) {
-  const [data, setData] = useState<CompanyFinancialsResponse | null>(initialWorkspaceData?.financialData ?? null);
-  const [briefData, setBriefData] = useState<CompanyResearchBriefResponse | null>(initialWorkspaceData?.briefData ?? null);
-  const [earningsSummaryData, setEarningsSummaryData] = useState<CompanyEarningsSummaryResponse | null>(initialWorkspaceData?.earningsSummaryData ?? null);
-  const [insiderData, setInsiderData] = useState<CompanyInsiderTradesResponse | null>(initialWorkspaceData?.insiderData ?? null);
-  const [institutionalData, setInstitutionalData] = useState<CompanyInstitutionalHoldingsResponse | null>(initialWorkspaceData?.institutionalData ?? null);
-  const [insiderError, setInsiderError] = useState<string | null>(initialWorkspaceData?.insiderError ?? null);
-  const [institutionalError, setInstitutionalError] = useState<string | null>(initialWorkspaceData?.institutionalError ?? null);
-  const [loading, setLoading] = useState(initialWorkspaceData == null);
+  const normalizedTicker = ticker.toUpperCase();
+  const resolvedFinancialsView =
+    financialsView ??
+    (includeOverviewBrief && !includeInsiders && !includeInstitutional ? "core_segments" : "full");
+  const normalizedWorkspaceAsOf = workspaceAsOf?.trim() || null;
+  const companyLayout = useCompanyLayoutContext();
+  const workspaceCacheKey = useMemo(
+    () =>
+      buildCompanyWorkspaceCacheKey({
+        ticker: normalizedTicker,
+        financialsView: resolvedFinancialsView,
+        includeInsiders,
+        includeInstitutional,
+        includeOverviewBrief,
+        includeEarningsSummary,
+        asOf: normalizedWorkspaceAsOf,
+      }),
+    [
+      includeEarningsSummary,
+      includeInsiders,
+      includeInstitutional,
+      includeOverviewBrief,
+      normalizedTicker,
+      normalizedWorkspaceAsOf,
+      resolvedFinancialsView,
+    ]
+  );
+  const initialWorkspaceSeed = useMemo(() => {
+    if (!initialWorkspaceData) {
+      return null;
+    }
+
+    const initialTicker = initialWorkspaceData.financialData.company?.ticker?.toUpperCase();
+    return initialTicker === normalizedTicker ? initialWorkspaceData : null;
+  }, [initialWorkspaceData, normalizedTicker]);
+  const getWorkspaceCacheEntry = companyLayout?.getWorkspaceCacheEntry;
+  const setWorkspaceCacheEntry = companyLayout?.setWorkspaceCacheEntry;
+  const invalidateWorkspaceCacheForTicker = companyLayout?.invalidateWorkspaceCacheForTicker;
+  const initialHydratedResult = initialWorkspaceSeed ?? getWorkspaceCacheEntry?.(workspaceCacheKey)?.payload ?? null;
+
+  const [data, setData] = useState<CompanyFinancialsResponse | null>(initialHydratedResult?.financialData ?? null);
+  const [briefData, setBriefData] = useState<CompanyResearchBriefResponse | null>(initialHydratedResult?.briefData ?? null);
+  const [earningsSummaryData, setEarningsSummaryData] = useState<CompanyEarningsSummaryResponse | null>(initialHydratedResult?.earningsSummaryData ?? null);
+  const [insiderData, setInsiderData] = useState<CompanyInsiderTradesResponse | null>(initialHydratedResult?.insiderData ?? null);
+  const [institutionalData, setInstitutionalData] = useState<CompanyInstitutionalHoldingsResponse | null>(initialHydratedResult?.institutionalData ?? null);
+  const [insiderError, setInsiderError] = useState<string | null>(initialHydratedResult?.insiderError ?? null);
+  const [institutionalError, setInstitutionalError] = useState<string | null>(initialHydratedResult?.institutionalError ?? null);
+  const [loading, setLoading] = useState(initialHydratedResult == null);
+  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<string | null>(initialWorkspaceData?.activeJobId ?? null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(initialHydratedResult?.activeJobId ?? null);
   const [chartConsoleEntries, setChartConsoleEntries] = useState<ConsoleEntry[]>([]);
   const [lastChartKey, setLastChartKey] = useState<string | null>(null);
   const [settledJobIds, setSettledJobIds] = useState<string[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
-  const consumedInitialWorkspaceData = useRef(false);
-  const companyLayout = useCompanyLayoutContext();
+
+  const applyWorkspaceResult = useCallback((result: LoadCompanyWorkspaceDataResult) => {
+    setData(result.financialData);
+    setBriefData(result.briefData);
+    setEarningsSummaryData(result.earningsSummaryData);
+    setInsiderData(result.insiderData);
+    setInstitutionalData(result.institutionalData);
+    setInsiderError(result.insiderError);
+    setInstitutionalError(result.institutionalError);
+    setActiveJobId(result.activeJobId);
+  }, []);
+
+  const clearWorkspaceResult = useCallback(() => {
+    setData(null);
+    setBriefData(null);
+    setEarningsSummaryData(null);
+    setInsiderError(null);
+    setInstitutionalError(null);
+    setInsiderData(null);
+    setInstitutionalData(null);
+    setActiveJobId(null);
+  }, []);
 
   const financials = useMemo(() => data?.financials ?? [], [data?.financials]);
   const priceHistory = useMemo(() => data?.price_history ?? [], [data?.price_history]);
@@ -129,40 +193,61 @@ export function useCompanyWorkspace(
   }, [auditPageRoute, auditScenario]);
 
   useEffect(() => {
-    if (
-      !consumedInitialWorkspaceData.current &&
-      initialWorkspaceData &&
-      initialWorkspaceData.financialData.company?.ticker?.toUpperCase() === ticker
-    ) {
-      consumedInitialWorkspaceData.current = true;
-      return;
-    }
-
     const controller = new AbortController();
+    const cachedEntry = getWorkspaceCacheEntry?.(workspaceCacheKey) ?? null;
+    const seedEntry =
+      cachedEntry ??
+      (initialWorkspaceSeed
+        ? {
+            cacheKey: workspaceCacheKey,
+            ticker: normalizedTicker,
+            asOf: resolveWorkspaceAsOf(initialWorkspaceSeed, normalizedWorkspaceAsOf),
+            updatedAt: Date.now(),
+            payload: initialWorkspaceSeed,
+          }
+        : null);
+
+    if (seedEntry) {
+      applyWorkspaceResult(seedEntry.payload);
+      setError(null);
+
+      if (!cachedEntry) {
+        setWorkspaceCacheEntry?.(seedEntry);
+      }
+
+      if (isWorkspaceCacheFresh(seedEntry)) {
+        setLoading(false);
+        setUpdating(false);
+        return () => {
+          controller.abort();
+        };
+      }
+
+      setLoading(true);
+      setUpdating(true);
+    } else {
+      setLoading(true);
+      setUpdating(false);
+      setError(null);
+      clearWorkspaceResult();
+      setChartConsoleEntries([]);
+      setLastChartKey(null);
+      setSettledJobIds([]);
+      setRefreshTick(0);
+    }
 
     async function load() {
       try {
         setLoading(true);
         setError(null);
-        setBriefData(null);
-        setEarningsSummaryData(null);
-        setInsiderError(null);
-        setInstitutionalError(null);
-        setInsiderData(null);
-        setInstitutionalData(null);
-        setActiveJobId(null);
-        setChartConsoleEntries([]);
-        setLastChartKey(null);
-        setSettledJobIds([]);
-        setRefreshTick(0);
 
         const result = await runWithAudit("company-workspace:initial-load", () =>
-          loadCompanyWorkspaceData(ticker, {
+          loadCompanyWorkspaceData(normalizedTicker, {
             includeInsiders,
             includeInstitutional,
             includeOverviewBrief,
             includeEarningsSummary,
-            financialsView,
+            financialsView: resolvedFinancialsView,
             signal: controller.signal,
           })
         );
@@ -170,14 +255,14 @@ export function useCompanyWorkspace(
           return;
         }
 
-        setData(result.financialData);
-        setBriefData(result.briefData);
-        setEarningsSummaryData(result.earningsSummaryData);
-        setInsiderData(result.insiderData);
-        setInstitutionalData(result.institutionalData);
-        setInsiderError(result.insiderError);
-        setInstitutionalError(result.institutionalError);
-        setActiveJobId(result.activeJobId);
+        applyWorkspaceResult(result);
+        setWorkspaceCacheEntry?.({
+          cacheKey: workspaceCacheKey,
+          ticker: normalizedTicker,
+          asOf: resolveWorkspaceAsOf(result, normalizedWorkspaceAsOf),
+          updatedAt: Date.now(),
+          payload: result,
+        });
       } catch (nextError) {
         if (!isAbortError(nextError)) {
           setError(asErrorMessage(nextError, "Unable to load company workspace"));
@@ -185,6 +270,7 @@ export function useCompanyWorkspace(
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
+          setUpdating(false);
         }
       }
     }
@@ -193,7 +279,22 @@ export function useCompanyWorkspace(
     return () => {
       controller.abort();
     };
-  }, [financialsView, includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, initialWorkspaceData, ticker]);
+  }, [
+    applyWorkspaceResult,
+    clearWorkspaceResult,
+    getWorkspaceCacheEntry,
+    includeEarningsSummary,
+    includeInsiders,
+    includeInstitutional,
+    includeOverviewBrief,
+    initialWorkspaceSeed,
+    normalizedTicker,
+    normalizedWorkspaceAsOf,
+    resolvedFinancialsView,
+    runWithAudit,
+    setWorkspaceCacheEntry,
+    workspaceCacheKey,
+  ]);
 
   useEffect(() => {
     if (!activeJobId || !lastEvent) {
@@ -208,15 +309,16 @@ export function useCompanyWorkspace(
     const controller = new AbortController();
     setSettledJobIds((current) => (current.includes(activeJobId) ? current : [...current, activeJobId]));
     setRefreshTick((current) => current + 1);
-    invalidateApiReadCacheForTicker(ticker);
+    invalidateApiReadCacheForTicker(normalizedTicker);
+    invalidateWorkspaceCacheForTicker?.(normalizedTicker);
 
     void runWithAudit("company-workspace:reload-after-refresh", () =>
-      loadCompanyWorkspaceData(ticker, {
+      loadCompanyWorkspaceData(normalizedTicker, {
         includeInsiders,
         includeInstitutional,
         includeOverviewBrief,
         includeEarningsSummary,
-        financialsView,
+        financialsView: resolvedFinancialsView,
         signal: controller.signal,
       })
     )
@@ -226,14 +328,14 @@ export function useCompanyWorkspace(
         }
 
         setError(null);
-        setData(result.financialData);
-        setBriefData(result.briefData);
-        setEarningsSummaryData(result.earningsSummaryData);
-        setInsiderData(result.insiderData);
-        setInstitutionalData(result.institutionalData);
-        setInsiderError(result.insiderError);
-        setInstitutionalError(result.institutionalError);
-        setActiveJobId(result.activeJobId);
+        applyWorkspaceResult(result);
+        setWorkspaceCacheEntry?.({
+          cacheKey: workspaceCacheKey,
+          ticker: normalizedTicker,
+          asOf: resolveWorkspaceAsOf(result, normalizedWorkspaceAsOf),
+          updatedAt: Date.now(),
+          payload: result,
+        });
       })
       .catch((nextError) => {
         if (!isAbortError(nextError)) {
@@ -244,7 +346,23 @@ export function useCompanyWorkspace(
     return () => {
       controller.abort();
     };
-  }, [activeJobId, financialsView, includeEarningsSummary, includeInsiders, includeInstitutional, includeOverviewBrief, lastEvent, settledJobIds, ticker]);
+  }, [
+    activeJobId,
+    applyWorkspaceResult,
+    includeEarningsSummary,
+    includeInsiders,
+    includeInstitutional,
+    includeOverviewBrief,
+    invalidateWorkspaceCacheForTicker,
+    lastEvent,
+    normalizedTicker,
+    normalizedWorkspaceAsOf,
+    resolvedFinancialsView,
+    runWithAudit,
+    setWorkspaceCacheEntry,
+    settledJobIds,
+    workspaceCacheKey,
+  ]);
 
   useEffect(() => {
     if (!includeChartConsole) {
@@ -285,8 +403,9 @@ export function useCompanyWorkspace(
   const queueRefresh = useCallback(async (force = true) => {
     try {
       setRefreshing(true);
-      invalidateApiReadCacheForTicker(ticker);
-      const response = await runWithAudit("company-workspace:queue-refresh", () => refreshCompany(ticker, force));
+      invalidateApiReadCacheForTicker(normalizedTicker);
+      invalidateWorkspaceCacheForTicker?.(normalizedTicker);
+      const response = await runWithAudit("company-workspace:queue-refresh", () => refreshCompany(normalizedTicker, force));
       setError(null);
       setActiveJobId(response.refresh.job_id);
       setChartConsoleEntries([]);
@@ -296,7 +415,7 @@ export function useCompanyWorkspace(
     } finally {
       setRefreshing(false);
     }
-  }, [runWithAudit, ticker]);
+  }, [invalidateWorkspaceCacheForTicker, normalizedTicker, runWithAudit]);
 
   useEffect(() => {
     function onCommandRefresh(event: Event) {
@@ -340,8 +459,16 @@ export function useCompanyWorkspace(
   }, [companyLayout]);
 
   useEffect(() => {
-    companyLayout?.setCompany(null);
-  }, [companyLayout, ticker]);
+    if (!companyLayout) {
+      return;
+    }
+
+    if (companyLayout.company?.ticker?.toUpperCase() === normalizedTicker) {
+      return;
+    }
+
+    companyLayout.setCompany(null);
+  }, [companyLayout, normalizedTicker]);
 
   useEffect(() => {
     companyLayout?.setCompany(mergedCompany);
@@ -374,6 +501,7 @@ export function useCompanyWorkspace(
     institutionalData,
     institutionalHoldings,
     loading,
+    updating,
     error,
     insiderError,
     institutionalError,
@@ -385,6 +513,43 @@ export function useCompanyWorkspace(
     queueRefresh,
     reloadKey: `${refreshTick}:${data?.company?.last_checked ?? briefData?.generated_at ?? "none"}:${financials.length}:${priceHistory.length}:${briefData?.build_state ?? "none"}`
   };
+}
+
+function isWorkspaceCacheFresh(entry: { updatedAt: number; payload: LoadCompanyWorkspaceDataResult }): boolean {
+  if (Date.now() - entry.updatedAt > WORKSPACE_LAYOUT_CACHE_TTL_MS) {
+    return false;
+  }
+
+  const refreshStates = [
+    entry.payload.financialData.refresh,
+    entry.payload.briefData?.refresh ?? null,
+    entry.payload.earningsSummaryData?.refresh ?? null,
+    entry.payload.insiderData?.refresh ?? null,
+    entry.payload.institutionalData?.refresh ?? null,
+  ];
+
+  return refreshStates.every((refreshState) => {
+    if (!refreshState) {
+      return true;
+    }
+
+    if (refreshState.job_id) {
+      return false;
+    }
+
+    return refreshState.reason === "fresh" || refreshState.reason === "none";
+  });
+}
+
+function resolveWorkspaceAsOf(
+  result: LoadCompanyWorkspaceDataResult,
+  explicitAsOf: string | null
+): string | null {
+  if (explicitAsOf) {
+    return explicitAsOf;
+  }
+
+  return result.financialData.as_of ?? result.briefData?.as_of ?? null;
 }
 
 async function loadCompanyWorkspaceData(

@@ -188,8 +188,8 @@ def test_stale_legacy_rows_are_selected_for_recomputation(monkeypatch: pytest.Mo
 def test_current_version_rows_are_skipped(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     current_row = SimpleNamespace(
         model_name="dcf",
-        calculation_version="dcf_ev_bridge_v1",
-        result={"calculation_version": "dcf_ev_bridge_v1"},
+        calculation_version="dcf_ev_bridge_v2",
+        result={"calculation_version": "dcf_ev_bridge_v2"},
         created_at=None,
         id=1,
     )
@@ -210,8 +210,8 @@ def test_current_version_rows_are_skipped(monkeypatch: pytest.MonkeyPatch, capsy
 def test_newer_version_rows_are_not_overwritten(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     newer_row = SimpleNamespace(
         model_name="dcf",
-        calculation_version="dcf_ev_bridge_v2",
-        result={"calculation_version": "dcf_ev_bridge_v2"},
+        calculation_version="dcf_ev_bridge_v3",
+        result={"calculation_version": "dcf_ev_bridge_v3"},
         created_at=None,
         id=1,
     )
@@ -226,7 +226,7 @@ def test_newer_version_rows_are_not_overwritten(monkeypatch: pytest.MonkeyPatch,
     payload = json.loads(capsys.readouterr().out.strip())
     assert exit_code == 0
     assert payload["status"] == "skipped"
-    assert payload["reason"] == "newer_calculation_version:dcf_ev_bridge_v2"
+    assert payload["reason"] == "newer_calculation_version:dcf_ev_bridge_v3"
 
 
 def test_query_failure_produces_structured_error(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

@@ -22,12 +22,12 @@ describe("InvestmentSummaryPanel", () => {
           {
             model_name: "dcf",
             model_version: "2.1.0",
-            calculation_version: "dcf_ev_bridge_v1",
+            calculation_version: "dcf_ev_bridge_v2",
             created_at: "2026-03-22T00:00:00Z",
             input_periods: {},
             result: {
               model_status: "supported",
-              calculation_version: "dcf_ev_bridge_v1",
+              calculation_version: "dcf_ev_bridge_v2",
               fair_value_per_share: 120,
               net_debt: 50000000,
             },
@@ -154,12 +154,12 @@ describe("InvestmentSummaryPanel", () => {
           {
             model_name: "dcf",
             model_version: "2.4.0",
-            calculation_version: "dcf_ev_bridge_v1",
+            calculation_version: "dcf_ev_bridge_v2",
             created_at: "2026-03-22T00:00:00Z",
             input_periods: {},
             result: {
               model_status: "proxy",
-              calculation_version: "dcf_ev_bridge_v1",
+              calculation_version: "dcf_ev_bridge_v2",
               value_basis: "enterprise_value_proxy",
               enterprise_value_proxy: 12500000000,
               capital_structure_proxied: true,
