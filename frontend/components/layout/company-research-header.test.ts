@@ -38,4 +38,26 @@ describe("CompanyResearchHeader", () => {
     expect(screen.getByText("Revenue")).toBeTruthy();
     expect(screen.getByText("$99B")).toBeTruthy();
   });
+
+  it("renders freshness details including last checked and background revalidating status", () => {
+    render(
+      React.createElement(CompanyResearchHeader, {
+        ticker: "AAPL",
+        title: "Overview",
+        companyName: "Apple Inc.",
+        freshness: {
+          cacheState: "stale",
+          refreshState: { triggered: true, reason: "stale", ticker: "AAPL", job_id: "job-123" },
+          hasData: true,
+          loading: false,
+          lastChecked: "2026-04-27T12:00:00Z",
+        },
+      })
+    );
+
+    const freshness = screen.getByRole("img", { name: "Refresh queued in background" });
+    expect(freshness).toBeTruthy();
+    expect(freshness.getAttribute("title")).toContain("Background revalidating: yes");
+    expect(freshness.getAttribute("title")).toContain("Last checked:");
+  });
 });

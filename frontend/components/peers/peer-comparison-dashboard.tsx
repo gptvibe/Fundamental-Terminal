@@ -15,9 +15,12 @@ import {
   Radar,
   RadarChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
-  YAxis
+  YAxis,
+  ZAxis,
 } from "recharts";
 
 import { getCompanyPeers } from "@/lib/api";
@@ -48,6 +51,47 @@ interface SelectedPeerState {
   selectionKey: string;
   tickers: string[] | null;
 }
+
+type ScatterXAxisMetric = "revenue_growth" | "roic";
+type ScatterYAxisMetric = "ev_to_ebitda" | "pe" | "fcf_yield";
+type ScatterColorMode = "focus" | "sector";
+
+type ScatterPoint = {
+  ticker: string;
+  name: string;
+  is_focus: boolean;
+  sector: string | null;
+  x: number;
+  y: number;
+  size: number;
+  sizeValue: number;
+  sizeMode: "market_cap" | "proxy";
+  fill: string;
+};
+
+type ScatterDotProps = {
+  cx?: number;
+  cy?: number;
+  payload?: ScatterPoint;
+};
+
+type ScatterEnvelope = {
+  points: ScatterPoint[];
+  missingMetricsCount: number;
+  sizeProxyCount: number;
+  notes: string[];
+};
+
+const SCATTER_X_OPTIONS: Array<{ key: ScatterXAxisMetric; label: string }> = [
+  { key: "revenue_growth", label: "Revenue Growth" },
+  { key: "roic", label: "ROIC" },
+];
+
+const SCATTER_Y_OPTIONS: Array<{ key: ScatterYAxisMetric; label: string }> = [
+  { key: "ev_to_ebitda", label: "EV/EBITDA" },
+  { key: "pe", label: "P/E" },
+  { key: "fcf_yield", label: "FCF Yield" },
+];
 
 export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDashboardProps) {
   const selectionKey = `${ticker}:${reloadKey ?? ""}`;
@@ -109,6 +153,15 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
   const tickerColorMap = useMemo(() => buildTickerColorMap(displayedPeers), [displayedPeers]);
   const radarData = useMemo(() => buildRadarData(displayedPeers), [displayedPeers]);
   const barData = useMemo(() => buildBarData(displayedPeers), [displayedPeers]);
+  const [scatterXAxis, setScatterXAxis] = useState<ScatterXAxisMetric>("revenue_growth");
+  const [scatterYAxis, setScatterYAxis] = useState<ScatterYAxisMetric>("pe");
+  const [scatterColorMode, setScatterColorMode] = useState<ScatterColorMode>("focus");
+  const scatterEnvelope = useMemo(
+    () => buildScatterEnvelope(displayedPeers, scatterXAxis, scatterYAxis, scatterColorMode),
+    [displayedPeers, scatterColorMode, scatterXAxis, scatterYAxis]
+  );
+  const scatterPeers = useMemo(() => scatterEnvelope.points.filter((point) => !point.is_focus), [scatterEnvelope.points]);
+  const scatterFocus = useMemo(() => scatterEnvelope.points.filter((point) => point.is_focus), [scatterEnvelope.points]);
   const [compareDrawerOpen, setCompareDrawerOpen] = useState(true);
   const [tableScrollTop, setTableScrollTop] = useState(0);
   const rowHeight = 44;
@@ -286,6 +339,118 @@ export function PeerComparisonDashboard({ ticker, reloadKey }: PeerComparisonDas
             </div>
           </div> : null}
 
+          {!strictModeNote ? <div className="peer-chart-card">
+            <div className="peer-section-title">Valuation Positioning Scatter</div>
+            <div className="peer-section-subtitle">Visual view of whether {ticker} is cheap or expensive versus quality and growth.</div>
+
+            <div className="peer-scatter-controls" role="group" aria-label="Peer scatter metric controls">
+              <div className="peer-scatter-control-group">
+                <span className="peer-scatter-control-label">X-axis</span>
+                {SCATTER_X_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`peer-scatter-option${scatterXAxis === option.key ? " active" : ""}`}
+                    onClick={() => setScatterXAxis(option.key)}
+                    aria-pressed={scatterXAxis === option.key}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="peer-scatter-control-group">
+                <span className="peer-scatter-control-label">Y-axis</span>
+                {SCATTER_Y_OPTIONS.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`peer-scatter-option${scatterYAxis === option.key ? " active" : ""}`}
+                    onClick={() => setScatterYAxis(option.key)}
+                    aria-pressed={scatterYAxis === option.key}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="peer-scatter-control-group">
+                <span className="peer-scatter-control-label">Color</span>
+                <button
+                  type="button"
+                  className={`peer-scatter-option${scatterColorMode === "focus" ? " active" : ""}`}
+                  onClick={() => setScatterColorMode("focus")}
+                  aria-pressed={scatterColorMode === "focus"}
+                >
+                  Focus vs peers
+                </button>
+                <button
+                  type="button"
+                  className={`peer-scatter-option${scatterColorMode === "sector" ? " active" : ""}`}
+                  onClick={() => setScatterColorMode("sector")}
+                  aria-pressed={scatterColorMode === "sector"}
+                >
+                  Sector
+                </button>
+              </div>
+            </div>
+
+            {scatterEnvelope.points.length >= 2 ? (
+              <>
+                <div className="peer-chart-shell peer-chart-medium">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ScatterChart margin={{ top: 8, right: 18, left: 10, bottom: 10 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} />
+                      <XAxis
+                        type="number"
+                        dataKey="x"
+                        stroke={CHART_AXIS_COLOR}
+                        tick={chartTick()}
+                        tickFormatter={(value) => formatScatterValue(scatterXAxis, Number(value ?? 0))}
+                        name={scatterXAxis === "roic" ? "ROIC" : "Revenue Growth"}
+                      />
+                      <YAxis
+                        type="number"
+                        dataKey="y"
+                        stroke={CHART_AXIS_COLOR}
+                        tick={chartTick()}
+                        tickFormatter={(value) => formatScatterValue(scatterYAxis, Number(value ?? 0))}
+                        name={scatterYAxis === "ev_to_ebitda" ? "EV/EBITDA" : scatterYAxis === "pe" ? "P/E" : "FCF Yield"}
+                      />
+                      <ZAxis type="number" dataKey="size" range={[70, 460]} name="Market cap" />
+                      <Tooltip content={<ScatterTooltip xMetric={scatterXAxis} yMetric={scatterYAxis} />} />
+                      <Scatter name="Peers" data={scatterPeers} shape={(props: ScatterDotProps) => renderScatterDot(props, false)} />
+                      <Scatter name={`${ticker} (focus)`} data={scatterFocus} shape={(props: ScatterDotProps) => renderScatterDot(props, true)} />
+                    </ScatterChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="peer-scatter-legend-row">
+                  <span className="peer-scatter-legend-item focus">Focus company</span>
+                  <span className="peer-scatter-legend-item">Peers</span>
+                </div>
+              </>
+            ) : (
+              <div className="grid-empty-state grid-empty-state-tall">
+                <div className="grid-empty-kicker">Scatter metrics</div>
+                <div className="grid-empty-title">Insufficient peer metrics for scatter plot</div>
+                <div className="grid-empty-copy">
+                  Not enough peers have complete x/y valuation metrics to render this view. Try another metric combination.
+                </div>
+              </div>
+            )}
+
+            {scatterEnvelope.notes.map((note) => (
+              <div key={note} className="peer-footnote">{note}</div>
+            ))}
+
+            {data?.source_mix?.official_only ? (
+              <div className="peer-footnote">
+                Official-only source mode may suppress vendor-derived valuation fields when no official price feed is available.
+              </div>
+            ) : null}
+          </div> : null}
+
           {!strictModeNote ? <div className="peer-bottom-grid">
             <div className="peer-chart-card">
               <div className="peer-section-title">Revenue Growth Tracks</div>
@@ -451,6 +616,146 @@ function buildBarData(peers: PeerMetricsPayload[]) {
   }));
 }
 
+function buildScatterEnvelope(
+  peers: PeerMetricsPayload[],
+  xMetric: ScatterXAxisMetric,
+  yMetric: ScatterYAxisMetric,
+  colorMode: ScatterColorMode
+): ScatterEnvelope {
+  const notes: string[] = [];
+  const sectorColorMap = buildSectorColorMap(peers);
+  let missingMetricsCount = 0;
+  let sizeProxyCount = 0;
+
+  const points: ScatterPoint[] = [];
+  for (const peer of peers) {
+    const x = resolveScatterMetric(peer, xMetric);
+    const y = resolveScatterMetric(peer, yMetric);
+
+    if (x == null || y == null) {
+      missingMetricsCount += 1;
+      continue;
+    }
+
+    const bubbleSize = resolvePeerBubbleSize(peer);
+    if (!bubbleSize) {
+      missingMetricsCount += 1;
+      continue;
+    }
+
+    if (bubbleSize.mode === "proxy") {
+      sizeProxyCount += 1;
+    }
+
+    const fill = colorMode === "sector"
+      ? (sectorColorMap[peer.sector ?? "Unknown"] ?? chartSeriesColor(4))
+      : (peer.is_focus ? "var(--chart-series-1)" : "var(--chart-series-3)");
+
+    points.push({
+      ticker: peer.ticker,
+      name: peer.name,
+      is_focus: peer.is_focus,
+      sector: peer.sector,
+      x,
+      y,
+      size: bubbleSize.normalizedSize,
+      sizeValue: bubbleSize.rawSize,
+      sizeMode: bubbleSize.mode,
+      fill,
+    });
+  }
+
+  if (missingMetricsCount > 0) {
+    notes.push(`${missingMetricsCount} peer rows were omitted because selected scatter metrics were unavailable.`);
+  }
+  if (sizeProxyCount > 0) {
+    notes.push(`${sizeProxyCount} bubble sizes use a price proxy because market-cap fields were unavailable.`);
+  }
+
+  return {
+    points,
+    missingMetricsCount,
+    sizeProxyCount,
+    notes,
+  };
+}
+
+function buildSectorColorMap(peers: PeerMetricsPayload[]): Record<string, string> {
+  const sectors = Array.from(new Set(peers.map((peer) => peer.sector ?? "Unknown")));
+  return Object.fromEntries(sectors.map((sector, index) => [sector, chartSeriesColor(index + 2)]));
+}
+
+function resolveScatterMetric(peer: PeerMetricsPayload, metric: ScatterXAxisMetric | ScatterYAxisMetric): number | null {
+  switch (metric) {
+    case "revenue_growth":
+      return asFiniteNumber(peer.revenue_growth);
+    case "roic":
+      return asFiniteNumber(peer.roic);
+    case "pe":
+      return asFiniteNumber(peer.pe);
+    case "ev_to_ebitda":
+      return asFiniteNumber(peer.ev_to_ebit);
+    case "fcf_yield": {
+      const multiple = asFiniteNumber(peer.price_to_free_cash_flow);
+      if (multiple == null || multiple === 0) {
+        return null;
+      }
+      return 1 / multiple;
+    }
+  }
+}
+
+function resolvePeerBubbleSize(peer: PeerMetricsPayload): { rawSize: number; normalizedSize: number; mode: "market_cap" | "proxy" } | null {
+  const peerRecord = peer as unknown as Record<string, unknown>;
+  const marketCap = asFiniteNumber(peerRecord.market_cap) ?? asFiniteNumber(peerRecord.market_cap_proxy);
+  if (marketCap != null && marketCap > 0) {
+    return {
+      rawSize: marketCap,
+      normalizedSize: normalizeBubbleSize(marketCap),
+      mode: "market_cap",
+    };
+  }
+
+  const price = asFiniteNumber(peer.latest_price);
+  if (price == null || price <= 0) {
+    return null;
+  }
+
+  return {
+    rawSize: price,
+    normalizedSize: normalizeBubbleSize(price),
+    mode: "proxy",
+  };
+}
+
+function normalizeBubbleSize(value: number): number {
+  return clamp(Math.sqrt(Math.max(value, 0.0001)) * 6, 10, 90);
+}
+
+function renderScatterDot(
+  props: ScatterDotProps,
+  focus: boolean
+) {
+  const cx = props.cx ?? 0;
+  const cy = props.cy ?? 0;
+  const payload = props.payload;
+  const radius = focus ? 8.8 : 6.4;
+  const fill = payload?.fill ?? (focus ? "var(--chart-series-1)" : "var(--chart-series-3)");
+
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r={radius} fill={fill} fillOpacity={focus ? 0.96 : 0.8} stroke={focus ? "var(--text)" : "var(--panel)"} strokeWidth={focus ? 2.2 : 1.2} />
+    </g>
+  );
+}
+
+function formatScatterValue(metric: ScatterXAxisMetric | ScatterYAxisMetric, value: number): string {
+  if (metric === "pe" || metric === "ev_to_ebitda") {
+    return `${value.toFixed(0)}x`;
+  }
+  return `${(value * 100).toFixed(0)}%`;
+}
+
 function formatValuationMetric(value: number | null, status: string | null | undefined): string {
   if (status === "unsupported") {
     return "Unsupported";
@@ -512,6 +817,39 @@ function RevenueTooltip({ active, payload, label, ticker }: { active?: boolean; 
       <TooltipRow label="Revenue Growth" value={growth === null ? "—" : `${growth.toFixed(2)}%`} color="var(--accent)" />
       <TooltipRow label="Revenue" value={formatCompactNumber(revenue)} color="var(--positive)" />
       <TooltipRow label="Period End" value={typeof point.fullDate === "string" ? formatDate(point.fullDate) : "—"} color="var(--warning)" />
+    </div>
+  );
+}
+
+function ScatterTooltip({
+  active,
+  payload,
+  xMetric,
+  yMetric,
+}: {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  xMetric: ScatterXAxisMetric;
+  yMetric: ScatterYAxisMetric;
+}) {
+  if (!active || !payload?.length) {
+    return null;
+  }
+
+  const point = payload[0]?.payload as ScatterPoint | undefined;
+  if (!point) {
+    return null;
+  }
+
+  const sizeLabel = point.sizeMode === "market_cap" ? "Market cap" : "Size proxy";
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">{point.ticker} · {point.name}</div>
+      <TooltipRow label={xMetric === "roic" ? "ROIC" : "Revenue Growth"} value={formatScatterValue(xMetric, point.x)} color="var(--accent)" />
+      <TooltipRow label={yMetric === "ev_to_ebitda" ? "EV/EBITDA" : yMetric === "pe" ? "P/E" : "FCF Yield"} value={formatScatterValue(yMetric, point.y)} color="var(--positive)" />
+      <TooltipRow label={sizeLabel} value={formatCompactNumber(point.sizeValue)} color="var(--warning)" />
+      <TooltipRow label="Sector" value={point.sector ?? "Unknown"} color="var(--text-muted)" />
     </div>
   );
 }

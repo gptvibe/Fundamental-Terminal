@@ -73,6 +73,7 @@ import {
   recordPerformanceAuditRequest,
   type PerformanceAuditContext,
   type PerformanceAuditCacheDisposition,
+  type PerformanceAuditResponseSource,
 } from "@/lib/performance-audit";
 
 const API_PREFIX = "/backend/api";
@@ -81,6 +82,8 @@ type ReadCachePolicy = {
   ttlMs: number;
   staleMs: number;
 };
+
+export type ApiReadCacheState = "missing" | "fresh" | "stale";
 
 type CacheEntry = {
   data: unknown;
@@ -499,11 +502,18 @@ function emitInvalidation(prefix: string): void {
   }
 }
 
-async function readCachedValue<T>(cacheKey: string, path: string): Promise<{ data: T; stale: boolean } | null> {
+async function readCachedValue<T>(cacheKey: string, path: string): Promise<{
+  data: T;
+  stale: boolean;
+  cacheSource: "memory-cache" | "indexeddb-cache";
+  policy: ReadCachePolicy;
+  payloadBytes: number | null;
+} | null> {
   setupCrossTabCacheSync();
   const now = Date.now();
   const policy = resolveReadPolicy(path);
   const inMemory = readCache.get(cacheKey);
+  const cacheSource: "memory-cache" | "indexeddb-cache" = inMemory ? "memory-cache" : "indexeddb-cache";
   const entry = inMemory ?? (await readPersistentCache(cacheKey));
   if (!entry) {
     return null;
@@ -535,6 +545,9 @@ async function readCachedValue<T>(cacheKey: string, path: string): Promise<{ dat
   return {
     data: entry.data as T,
     stale: now - entry.updatedAt > policy.ttlMs,
+    cacheSource,
+    policy,
+    payloadBytes: entry.approxSizeBytes,
   };
 }
 
@@ -665,6 +678,7 @@ function buildProjectionStudioViewerKey(): string {
 async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   return fetchAndParseWithAudit(path, init, {
     cacheDisposition: "network",
+    responseSource: "network",
     backgroundRevalidate: false,
     context: getCurrentPerformanceAuditContext(),
   });
@@ -673,52 +687,86 @@ async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: Ab
 async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
   const readRequest = isReadRequest(init);
   const auditContext = getCurrentPerformanceAuditContext();
+  const cacheKey = readRequest ? path : null;
+  const cachePolicy = readRequest ? resolveReadPolicy(path) : null;
+  const cachePolicyTtlMs = cachePolicy?.ttlMs ?? null;
+  const cachePolicyStaleMs = cachePolicy?.staleMs ?? null;
   if (!readRequest) {
     return fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, {
       cacheDisposition: "cache-bypass",
+      responseSource: "cache-bypass",
       backgroundRevalidate: false,
       context: auditContext,
+      cacheKey,
+      cachePolicyTtlMs,
+      cachePolicyStaleMs,
     });
   }
 
   if (shouldBypassReadCache(path)) {
     return fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, {
       cacheDisposition: "cache-bypass",
+      responseSource: "cache-bypass",
       backgroundRevalidate: false,
       context: auditContext,
+      cacheKey,
+      cachePolicyTtlMs,
+      cachePolicyStaleMs,
     });
   }
 
-  const cacheKey = path;
+  const cacheKeyValue = path;
   const requestKey = requestKeyForPath(path);
-  const cached = await readCachedValue<T>(cacheKey, path);
+  const cached = await readCachedValue<T>(cacheKeyValue, path);
   if (cached && !cached.stale) {
-    recordCachedAudit(path, "GET", "fresh-cache-hit", auditContext);
+    recordCachedAudit(path, "GET", "fresh-cache-hit", cached.cacheSource, auditContext, {
+      cacheKey: cacheKeyValue,
+      cachePolicyTtlMs: cached.policy.ttlMs,
+      cachePolicyStaleMs: cached.policy.staleMs,
+      payloadBytes: cached.payloadBytes,
+    });
     return cached.data;
   }
 
   const currentInflight = inflightRequests.get(requestKey) as Promise<T> | undefined;
   if (currentInflight) {
-    recordCachedAudit(path, "GET", "inflight-dedupe", auditContext);
+    recordCachedAudit(path, "GET", "inflight-dedupe", "inflight-dedupe", auditContext, {
+      cacheKey: cacheKeyValue,
+      cachePolicyTtlMs,
+      cachePolicyStaleMs,
+    });
     return currentInflight;
   }
 
   if (cached?.stale) {
-    recordCachedAudit(path, "GET", "stale-cache-hit", auditContext);
-    void revalidateRead(path, cacheKey, init, {
+    recordCachedAudit(path, "GET", "stale-cache-hit", "stale-cache", auditContext, {
+      cacheKey: cacheKeyValue,
+      cachePolicyTtlMs: cached.policy.ttlMs,
+      cachePolicyStaleMs: cached.policy.staleMs,
+      payloadBytes: cached.payloadBytes,
+    });
+    void revalidateRead(path, cacheKeyValue, init, {
       cacheDisposition: "network",
+      responseSource: "network",
       backgroundRevalidate: true,
       context: auditContext,
+      cacheKey: cacheKeyValue,
+      cachePolicyTtlMs: cached.policy.ttlMs,
+      cachePolicyStaleMs: cached.policy.staleMs,
     }).catch(() => {
       // Preserve stale serving behavior; background failures should not escape as unhandled rejections.
     });
     return cached.data;
   }
 
-  return revalidateRead(path, cacheKey, init, {
+  return revalidateRead(path, cacheKeyValue, init, {
     cacheDisposition: "network",
+    responseSource: "network",
     backgroundRevalidate: false,
     context: auditContext,
+    cacheKey: cacheKeyValue,
+    cachePolicyTtlMs,
+    cachePolicyStaleMs,
   });
 }
 
@@ -728,8 +776,12 @@ async function revalidateRead<T>(
   init?: RequestInit & { signal?: AbortSignal },
   audit?: {
     cacheDisposition: PerformanceAuditCacheDisposition;
+    responseSource: PerformanceAuditResponseSource;
     backgroundRevalidate: boolean;
     context: PerformanceAuditContext | null;
+    cacheKey?: string | null;
+    cachePolicyTtlMs?: number | null;
+    cachePolicyStaleMs?: number | null;
   }
 ): Promise<T> {
   const request = fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, audit)
@@ -751,8 +803,12 @@ async function fetchAndParseWithAudit<T>(
   audit:
     | {
         cacheDisposition: PerformanceAuditCacheDisposition;
+        responseSource: PerformanceAuditResponseSource;
         backgroundRevalidate: boolean;
         context: PerformanceAuditContext | null;
+        cacheKey?: string | null;
+        cachePolicyTtlMs?: number | null;
+        cachePolicyStaleMs?: number | null;
       }
     | undefined
 ): Promise<T> {
@@ -790,10 +846,15 @@ async function fetchAndParseWithAudit<T>(
           method,
           path,
           cacheDisposition: audit?.cacheDisposition ?? "network",
+          cacheKey: audit?.cacheKey ?? null,
+          cachePolicyTtlMs: audit?.cachePolicyTtlMs ?? null,
+          cachePolicyStaleMs: audit?.cachePolicyStaleMs ?? null,
+          responseSource: audit?.responseSource ?? "network",
           networkRequest: true,
           backgroundRevalidate: audit?.backgroundRevalidate ?? false,
           statusCode: response.status,
           durationMs,
+          payloadBytes: responseBytes,
           responseBytes,
           error: requestError.message,
         });
@@ -809,10 +870,15 @@ async function fetchAndParseWithAudit<T>(
           method,
           path,
           cacheDisposition: audit?.cacheDisposition ?? "network",
+          cacheKey: audit?.cacheKey ?? null,
+          cachePolicyTtlMs: audit?.cachePolicyTtlMs ?? null,
+          cachePolicyStaleMs: audit?.cachePolicyStaleMs ?? null,
+          responseSource: audit?.responseSource ?? "network",
           networkRequest: true,
           backgroundRevalidate: audit?.backgroundRevalidate ?? false,
           statusCode: response.status,
           durationMs,
+          payloadBytes: responseBytes,
           responseBytes,
           error: null,
         });
@@ -830,10 +896,15 @@ async function fetchAndParseWithAudit<T>(
           method,
           path,
           cacheDisposition: audit?.cacheDisposition ?? "network",
+          cacheKey: audit?.cacheKey ?? null,
+          cachePolicyTtlMs: audit?.cachePolicyTtlMs ?? null,
+          cachePolicyStaleMs: audit?.cachePolicyStaleMs ?? null,
+          responseSource: audit?.responseSource ?? "network",
           networkRequest: true,
           backgroundRevalidate: audit?.backgroundRevalidate ?? false,
           statusCode: null,
           durationMs: performance.now() - startedPerf,
+          payloadBytes: null,
           responseBytes: null,
           error: isAborted ? "aborted" : (error instanceof Error ? error.message : String(error)),
         });
@@ -878,7 +949,14 @@ function recordCachedAudit(
   path: string,
   method: string,
   cacheDisposition: PerformanceAuditCacheDisposition,
-  context: PerformanceAuditContext | null
+  responseSource: PerformanceAuditResponseSource,
+  context: PerformanceAuditContext | null,
+  metadata?: {
+    cacheKey?: string | null;
+    cachePolicyTtlMs?: number | null;
+    cachePolicyStaleMs?: number | null;
+    payloadBytes?: number | null;
+  }
 ): void {
   if (!isPerformanceAuditEnabled()) {
     return;
@@ -889,11 +967,16 @@ function recordCachedAudit(
     method,
     path,
     cacheDisposition,
+    cacheKey: metadata?.cacheKey ?? null,
+    cachePolicyTtlMs: metadata?.cachePolicyTtlMs ?? null,
+    cachePolicyStaleMs: metadata?.cachePolicyStaleMs ?? null,
+    responseSource,
     networkRequest: false,
     backgroundRevalidate: false,
     statusCode: null,
+    payloadBytes: metadata?.payloadBytes ?? null,
     durationMs: 0,
-    responseBytes: null,
+    responseBytes: metadata?.payloadBytes ?? null,
     error: null,
   });
 }
@@ -915,6 +998,19 @@ export function invalidateApiReadCache(prefix = "", options?: { emitCrossTab?: b
 export function invalidateApiReadCacheForTicker(ticker: string): void {
   const normalized = encodeURIComponent(ticker.trim().toUpperCase());
   invalidateApiReadCache(`/companies/${normalized}/`);
+}
+
+export async function getApiReadCacheState(path: string): Promise<ApiReadCacheState> {
+  if (shouldBypassReadCache(path)) {
+    return "missing";
+  }
+
+  const cached = await readCachedValue<unknown>(path, path);
+  if (!cached) {
+    return "missing";
+  }
+
+  return cached.stale ? "stale" : "fresh";
 }
 
 export async function __resetApiClientCacheForTests(): Promise<void> {
@@ -1602,8 +1698,24 @@ export function refreshCompany(ticker: string, force = false): Promise<RefreshQu
   const suffix = force ? "?force=true" : "";
   return fetchJson<RefreshQueuedResponse>(`/companies/${encodeURIComponent(ticker)}/refresh${suffix}`, { method: "POST" }).then((response) => {
     invalidateApiReadCacheForTicker(ticker);
+    void revalidateCompanyServerCacheTags(ticker);
     return response;
   });
+}
+
+async function revalidateCompanyServerCacheTags(ticker: string): Promise<void> {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    await fetch(`/api/cache/company/${encodeURIComponent(ticker)}`, {
+      method: "POST",
+      cache: "no-store",
+    });
+  } catch {
+    // Refresh should still succeed even if frontend tag invalidation is temporarily unavailable.
+  }
 }
 
 export function getWatchlistSummary(tickers: string[]): Promise<WatchlistSummaryResponse> {

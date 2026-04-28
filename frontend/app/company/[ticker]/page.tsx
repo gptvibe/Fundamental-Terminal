@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { ResearchBriefPlainEnglishPanel } from "@/components/company/research-brief-plain-english-panel";
+import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -44,6 +45,7 @@ import {
   type SemanticTone,
 } from "@/lib/activity-feed-tone";
 import { MODEL_NAMES } from "@/lib/constants";
+import { prefetchCompanyWorkspaceTabs } from "@/lib/company-workspace-prefetch";
 import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
@@ -227,6 +229,7 @@ const INITIAL_RESEARCH_BRIEF_DATA_STATE: ResearchBriefDataState = {
 export default function CompanyResearchBriefPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
+  const idlePrefetchTickerRef = useRef<string | null>(null);
   const {
     data,
     company,
@@ -253,6 +256,52 @@ export default function CompanyResearchBriefPage() {
     auditPageRoute: "/company/[ticker]",
     auditScenario: "company_overview",
   });
+
+  useEffect(() => {
+    idlePrefetchTickerRef.current = null;
+  }, [ticker]);
+
+  useEffect(() => {
+    if (idlePrefetchTickerRef.current === ticker) {
+      return;
+    }
+
+    if (loading || !data) {
+      return;
+    }
+
+    idlePrefetchTickerRef.current = ticker;
+
+    const schedule = (callback: () => void): number => {
+      if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+        return window.requestIdleCallback(callback, { timeout: 1500 }) as unknown as number;
+      }
+
+      return window.setTimeout(callback, 180);
+    };
+
+    const cancel = (id: number): void => {
+      if (typeof window !== "undefined" && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(id as unknown as number);
+        return;
+      }
+
+      window.clearTimeout(id);
+    };
+
+    const scheduledId = schedule(() => {
+      void prefetchCompanyWorkspaceTabs(ticker, {
+        trigger: "idle",
+        activeRefreshJobId: activeJobId ?? refreshState?.job_id ?? null,
+        pageRoute: "/company/[ticker]",
+        scenario: "company_overview",
+      });
+    });
+
+    return () => {
+      cancel(scheduledId);
+    };
+  }, [activeJobId, data, loading, refreshState?.job_id, ticker]);
 
   const briefData = useResearchBriefData(
     ticker,
@@ -593,6 +642,19 @@ export default function CompanyResearchBriefPage() {
           loadingMessage={initialCompanyLoadMessage}
         />
       </CompanyResearchHeader>
+
+      <SourceFreshnessTimeline
+        ticker={ticker}
+        company={pageCompany}
+        refreshState={refreshState}
+        activeJobId={activeJobId}
+        financialsResponse={data}
+        filingTimeline={briefData.filingTimeline}
+        asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
+        lastRefreshedAt={data?.last_refreshed_at ?? null}
+        provenance={data?.provenance ?? null}
+        sourceMix={data?.source_mix ?? null}
+      />
 
       <ResearchBriefWarmupPanel
         buildState={briefData.buildState}

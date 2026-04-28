@@ -8,6 +8,7 @@ import { BankRegulatoryOverview } from "@/components/company/bank-regulatory-ove
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
 import { FinancialPeriodToolbar } from "@/components/company/financial-period-toolbar";
+import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
 import { CapitalStructureIntelligencePanel } from "@/components/company/capital-structure-intelligence-panel";
 import { FinancialComparisonPanel } from "@/components/company/financial-comparison-panel";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
@@ -24,6 +25,7 @@ import { usePeriodSelection } from "@/hooks/use-period-selection";
 import { resolveFilingChartCadence } from "@/lib/annual-financial-scope";
 import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import type { CompanyWorkspaceBootstrapResponse } from "@/lib/types";
 const GrowthWaterfallChart = dynamic(
   () => import("@/components/charts/growth-waterfall-chart").then((module) => module.GrowthWaterfallChart),
   { ssr: false, loading: () => <div className="text-muted">Loading growth chart...</div> }
@@ -63,6 +65,10 @@ const ShareDilutionTrackerChart = dynamic(
 const FinancialStatementsTable = dynamic(
   () => import("@/components/company/financial-statements-table").then((module) => module.FinancialStatementsTable),
   { ssr: false, loading: () => <div className="text-muted">Loading financial statements...</div> }
+);
+const FinancialStatementChangeHeatmap = dynamic(
+  () => import("@/components/company/financial-statement-change-heatmap").then((module) => module.FinancialStatementChangeHeatmap),
+  { ssr: false, loading: () => <div className="text-muted">Loading statement-change heatmap...</div> }
 );
 
 function FinancialWorkflowSection({
@@ -108,6 +114,26 @@ interface CompanyFinancialsClientPageProps {
 }
 
 export default function CompanyFinancialsClientPage({ ticker, initialWorkspaceData }: CompanyFinancialsClientPageProps) {
+  const workspaceBootstrapTimelineData: CompanyWorkspaceBootstrapResponse | null = useMemo(() => {
+    if (!initialWorkspaceData) {
+      return null;
+    }
+
+    return {
+      company: initialWorkspaceData.financialData.company,
+      financials: initialWorkspaceData.financialData,
+      brief: initialWorkspaceData.briefData,
+      earnings_summary: initialWorkspaceData.earningsSummaryData,
+      insider_trades: initialWorkspaceData.insiderData,
+      institutional_holdings: initialWorkspaceData.institutionalData,
+      errors: {
+        insider: initialWorkspaceData.insiderError,
+        institutional: initialWorkspaceData.institutionalError,
+        earnings_summary: null,
+      },
+    };
+  }, [initialWorkspaceData]);
+
   const {
     data,
     company,
@@ -282,6 +308,18 @@ export default function CompanyFinancialsClientPage({ ticker, initialWorkspaceDa
         />
       </CompanyResearchHeader>
 
+      <SourceFreshnessTimeline
+        ticker={ticker}
+        company={company}
+        refreshState={refreshState}
+        financialsResponse={data}
+        workspaceBootstrap={workspaceBootstrapTimelineData}
+        asOf={data?.as_of ?? null}
+        lastRefreshedAt={data?.last_refreshed_at ?? null}
+        provenance={data?.provenance ?? null}
+        sourceMix={data?.source_mix ?? null}
+      />
+
       <Panel title="Data Quality Diagnostics" subtitle="Coverage, freshness, and missing-field flags for the cached financial workspace">
         <DataQualityDiagnostics diagnostics={data?.diagnostics} reconciliation={diagnosticsReconciliation} />
       </Panel>
@@ -317,6 +355,10 @@ export default function CompanyFinancialsClientPage({ ticker, initialWorkspaceDa
           onSelectedPeriodChange={periodSelection.setSelectedPeriodKey}
           onCustomComparePeriodChange={periodSelection.setCustomComparePeriodKey}
         />
+      </Panel>
+
+      <Panel title="Statement Change Heatmap (Advanced)" subtitle="Rows are statement line items, columns are fiscal periods, and cell intensity reflects filing-to-filing movement. Click cells to open filing/source metadata when available.">
+        <FinancialStatementChangeHeatmap financials={pageFinancials} />
       </Panel>
 
       {bankMode ? (

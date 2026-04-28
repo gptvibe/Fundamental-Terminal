@@ -7,6 +7,7 @@ import { clsx } from "clsx";
 
 import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
 import { getCompanyFinancials, getCompanyOverview } from "@/lib/api";
+import { prefetchCompanyWorkspaceTabs } from "@/lib/company-workspace-prefetch";
 import { companySupportsOilWorkspace } from "@/lib/oil-workspace";
 
 interface CompanySubnavProps {
@@ -239,6 +240,14 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     }
   }
 
+  function triggerWorkspacePrefetch(trigger: "hover" | "focus") {
+    void prefetchCompanyWorkspaceTabs(ticker, {
+      trigger,
+      pageRoute: "/company/[ticker]",
+      scenario: "company_workspace_nav_prefetch",
+    });
+  }
+
   return (
     <div className="company-subnav">
       <div className="company-subnav-meta">
@@ -255,6 +264,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
               href={tab.href}
               className={clsx("company-subnav-link", isActive && "is-active")}
               aria-current={isActive ? "page" : undefined}
+              onMouseEnter={() => triggerWorkspacePrefetch("hover")}
+              onFocus={() => triggerWorkspacePrefetch("focus")}
               onKeyDown={handleTrackKeyDown}
             >
               {tab.label}
@@ -273,6 +284,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
                 href={tab.href}
                 className={clsx("company-subnav-link", isActive && "is-active")}
                 aria-current={isActive ? "page" : undefined}
+                onMouseEnter={() => triggerWorkspacePrefetch("hover")}
+                onFocus={() => triggerWorkspacePrefetch("focus")}
                 onKeyDown={handleTrackKeyDown}
               >
                 {tab.label}
@@ -304,6 +317,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
                     href={tab.href}
                     className={clsx("company-subnav-more-link", isActive && "is-active")}
                     aria-current={isActive ? "page" : undefined}
+                    onMouseEnter={() => triggerWorkspacePrefetch("hover")}
+                    onFocus={() => triggerWorkspacePrefetch("focus")}
                     onClick={() => setMoreOpen(false)}
                     onKeyDown={handleMoreMenuKeyDown}
                   >

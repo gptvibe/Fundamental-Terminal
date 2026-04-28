@@ -11,6 +11,14 @@ export type PerformanceAuditCacheDisposition =
   | "stale-cache-hit"
   | "inflight-dedupe";
 
+export type PerformanceAuditResponseSource =
+  | "memory-cache"
+  | "indexeddb-cache"
+  | "stale-cache"
+  | "network"
+  | "inflight-dedupe"
+  | "cache-bypass";
+
 export type PerformanceAuditRequestRecord = {
   id: string;
   startedAt: string;
@@ -20,9 +28,14 @@ export type PerformanceAuditRequestRecord = {
   pageRoute: string | null;
   source: string | null;
   cacheDisposition: PerformanceAuditCacheDisposition;
+  cacheKey: string | null;
+  cachePolicyTtlMs: number | null;
+  cachePolicyStaleMs: number | null;
+  responseSource: PerformanceAuditResponseSource | null;
   networkRequest: boolean;
   backgroundRevalidate: boolean;
   statusCode: number | null;
+  payloadBytes: number | null;
   durationMs: number;
   responseBytes: number | null;
   error: string | null;
@@ -215,11 +228,16 @@ export function recordPerformanceAuditRequest(
         pageRoute: context?.pageRoute ?? null,
         source: context?.source ?? null,
         cacheDisposition: record.cacheDisposition,
+        cacheKey: record.cacheKey ?? null,
+        cachePolicyTtlMs: typeof record.cachePolicyTtlMs === "number" ? record.cachePolicyTtlMs : null,
+        cachePolicyStaleMs: typeof record.cachePolicyStaleMs === "number" ? record.cachePolicyStaleMs : null,
+        responseSource: record.responseSource ?? null,
         networkRequest: record.networkRequest,
         backgroundRevalidate: record.backgroundRevalidate,
         statusCode: record.statusCode,
+        payloadBytes: typeof record.payloadBytes === "number" ? record.payloadBytes : null,
         durationMs: record.durationMs,
-        responseBytes: record.responseBytes,
+        responseBytes: typeof record.responseBytes === "number" ? record.responseBytes : (typeof record.payloadBytes === "number" ? record.payloadBytes : null),
         error: record.error,
       },
     ],

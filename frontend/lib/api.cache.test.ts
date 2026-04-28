@@ -198,6 +198,58 @@ describe("api read cache", () => {
     }
   });
 
+  it("records cache key, policy, source, and payload bytes in performance audit events", async () => {
+    const previousAuditFlag = process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED;
+    process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED = "true";
+
+    try {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers([["content-length", "256"]]),
+        json: async () => buildFinancialsPayload("AAPL", "first-load"),
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+
+      window.__FT_PERFORMANCE_AUDIT__?.reset({ phase: "cache-metadata" });
+
+      await getCompanyFinancials("AAPL");
+      await getCompanyFinancials("AAPL");
+
+      const snapshot = window.__FT_PERFORMANCE_AUDIT__?.snapshot();
+      expect(snapshot).toBeTruthy();
+
+      const events = (snapshot?.requests ?? []).filter((event) => event.path === "/companies/AAPL/financials");
+      const networkEvent = [...events].reverse().find((event) => event.networkRequest);
+      const memoryHitEvent = [...events].reverse().find((event) => event.cacheDisposition === "fresh-cache-hit");
+
+      expect(networkEvent).toBeTruthy();
+      expect(networkEvent).toEqual(expect.objectContaining({
+        cacheKey: "/companies/AAPL/financials",
+        cachePolicyTtlMs: 600_000,
+        cachePolicyStaleMs: 3_600_000,
+        responseSource: "network",
+        payloadBytes: 256,
+      }));
+
+      expect(memoryHitEvent).toBeTruthy();
+      expect(memoryHitEvent).toEqual(expect.objectContaining({
+        cacheKey: "/companies/AAPL/financials",
+        cachePolicyTtlMs: 600_000,
+        cachePolicyStaleMs: 3_600_000,
+        responseSource: "memory-cache",
+        cacheDisposition: "fresh-cache-hit",
+      }));
+    } finally {
+      if (previousAuditFlag == null) {
+        delete process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED;
+      } else {
+        process.env.NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED = previousAuditFlag;
+      }
+    }
+  });
+
   it("returns the same promise for concurrent reads to the same URL", async () => {
     let resolveFetch: ((value: unknown) => void) | null = null;
     const fetchMock = vi.fn().mockImplementation(
@@ -469,6 +521,10 @@ describe("api read cache", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/backend/api/companies/AAPL/refresh?force=true",
+      expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cache/company/AAPL",
       expect.objectContaining({ method: "POST", cache: "no-store" })
     );
   });

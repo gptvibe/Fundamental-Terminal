@@ -141,6 +141,7 @@ vi.mock("@/components/models/investment-summary-panel", () => ({
 }));
 
 vi.mock("@/lib/api", () => ({
+  getApiReadCacheState: vi.fn(() => "missing"),
   getCompanyActivityOverview: vi.fn(),
   getCompanyBeneficialOwnershipSummary: vi.fn(),
   getCompanyCapitalMarketsSummary: vi.fn(),
@@ -256,8 +257,8 @@ describe("CompanyResearchBriefPage", () => {
     expect(getCompanyCapitalMarketsSummary).not.toHaveBeenCalled();
     expect(getCompanyGovernanceSummary).not.toHaveBeenCalled();
     expect(getCompanyBeneficialOwnershipSummary).not.toHaveBeenCalled();
-    expect(getCompanyModels).not.toHaveBeenCalled();
-    expect(getCompanyPeers).not.toHaveBeenCalled();
+    expect(getCompanyModels).toHaveBeenCalledWith("ACME", undefined, { asOf: null });
+    expect(getCompanyPeers).toHaveBeenCalledWith("ACME", undefined, { asOf: null });
   });
 
   it("reuses the overview workspace brief payload without issuing a second brief request", async () => {

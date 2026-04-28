@@ -1,7 +1,9 @@
 import { headers } from "next/headers";
 
 import CompanyFinancialsClientPage from "./financials-client-page";
+import { FINANCIALS_ROUTE_REVALIDATE_SECONDS } from "./financials-route-data";
 import type { LoadCompanyWorkspaceDataResult } from "@/hooks/use-company-workspace";
+import { buildCompanyFinancialsCacheTags } from "@/lib/company-workspace-cache-tags";
 import type { CompanyWorkspaceBootstrapResponse } from "@/lib/types";
 
 type FinancialsPageProps = {
@@ -23,9 +25,12 @@ async function loadInitialFinancialsWorkspaceData(ticker: string): Promise<LoadC
     const response = await fetch(
       `${baseUrl}/backend/api/companies/${encodeURIComponent(ticker)}/workspace-bootstrap?financials_view=core_segments&include_earnings_summary=true`,
       {
-        cache: "no-store",
         headers: {
           Accept: "application/json",
+        },
+        next: {
+          revalidate: FINANCIALS_ROUTE_REVALIDATE_SECONDS,
+          tags: buildCompanyFinancialsCacheTags(ticker),
         },
       }
     );

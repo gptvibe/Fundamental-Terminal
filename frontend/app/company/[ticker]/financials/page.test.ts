@@ -4,7 +4,7 @@ import * as React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import CompanyFinancialsTabPage from "@/app/company/[ticker]/financials/page";
+import CompanyFinancialsTabPage from "@/app/company/[ticker]/financials/financials-client-page";
 
 const workspaceFixture = vi.hoisted(() => ({ current: null as any }));
 const financialSurfaceFixture = vi.hoisted(() => ({
@@ -354,11 +354,12 @@ describe("CompanyFinancialsTabPage", () => {
   });
 
   it("renders registry-backed source freshness metadata for financials", () => {
-    render(React.createElement(CompanyFinancialsTabPage));
+    render(React.createElement(CompanyFinancialsTabPage, { ticker: "ACME", initialWorkspaceData: null }));
 
     expect(screen.getByText("Source & Freshness")).toBeTruthy();
     expect(screen.getByText("Capital Structure Intelligence")).toBeTruthy();
     expect(screen.getByText("Period & Comparison")).toBeTruthy();
+    expect(screen.getByText("Statement Change Heatmap (Advanced)")).toBeTruthy();
     expect(screen.getByText("Financial Quality")).toBeTruthy();
     expect(screen.getByText("Ratio History")).toBeTruthy();
     expect(screen.getByText("Annual Financial Comparison")).toBeTruthy();
@@ -394,7 +395,7 @@ describe("CompanyFinancialsTabPage", () => {
       error: null,
     };
 
-    render(React.createElement(CompanyFinancialsTabPage));
+    render(React.createElement(CompanyFinancialsTabPage, { ticker: "ACME", initialWorkspaceData: null }));
 
     expect(screen.getByText("Latest Statement")).toBeTruthy();
     expect(screen.getByText("Latest Reported Earnings")).toBeTruthy();
@@ -455,7 +456,7 @@ describe("CompanyFinancialsTabPage", () => {
     workspaceFixture.current.financials = [bankStatement];
     workspaceFixture.current.annualStatements = [bankStatement];
 
-    render(React.createElement(CompanyFinancialsTabPage));
+    render(React.createElement(CompanyFinancialsTabPage, { ticker: "ACME", initialWorkspaceData: null }));
 
     expect(screen.getByText("Regulated Bank Snapshot")).toBeTruthy();
     expect(screen.getByText("Derived Bank Metrics")).toBeTruthy();
@@ -482,7 +483,7 @@ describe("CompanyFinancialsTabPage", () => {
       `fin_range=3Y&fin_compare=custom&fin_period=${encodeURIComponent("2024-12-31|10-K")}&fin_compare_period=${encodeURIComponent("2023-12-31|10-K")}`
     );
 
-    render(React.createElement(CompanyFinancialsTabPage));
+    render(React.createElement(CompanyFinancialsTabPage, { ticker: "ACME", initialWorkspaceData: null }));
 
     await waitFor(() => expect(financialSurfaceFixture.business).toBeTruthy());
 

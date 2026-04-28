@@ -10,6 +10,7 @@ const mockUsePathname = vi.fn();
 const mockUseCompanyLayoutContext = vi.fn();
 const getCompanyFinancials = vi.fn();
 const getCompanyOverview = vi.fn();
+const prefetchCompanyWorkspaceTabs = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
@@ -24,6 +25,10 @@ vi.mock("@/lib/api", () => ({
   getCompanyOverview: (...args: unknown[]) => getCompanyOverview(...args),
 }));
 
+vi.mock("@/lib/company-workspace-prefetch", () => ({
+  prefetchCompanyWorkspaceTabs: (...args: unknown[]) => prefetchCompanyWorkspaceTabs(...args),
+}));
+
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children?: React.ReactNode }) => React.createElement("a", { href, ...props }, children),
 }));
@@ -34,6 +39,7 @@ describe("CompanySubnav", () => {
     mockUseCompanyLayoutContext.mockReset();
     getCompanyFinancials.mockReset();
     getCompanyOverview.mockReset();
+    prefetchCompanyWorkspaceTabs.mockReset();
     mockUseCompanyLayoutContext.mockReturnValue(null);
     getCompanyFinancials.mockResolvedValue({ company: { oil_support_status: "unsupported" } });
     getCompanyOverview.mockResolvedValue({ company: { oil_support_status: "unsupported" }, financials: { company: { oil_support_status: "unsupported" } } });
@@ -162,5 +168,35 @@ describe("CompanySubnav", () => {
     });
     expect(getCompanyOverview).not.toHaveBeenCalled();
     expect(getCompanyFinancials).not.toHaveBeenCalled();
+  });
+
+  it("triggers workspace prefetch on hover and focus of tab links", () => {
+    mockUsePathname.mockReturnValue("/company/AAPL");
+
+    const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
+    const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
+    const financialsLink = within(desktopNav).getByRole("link", { name: "Financials" });
+
+    fireEvent.mouseEnter(financialsLink);
+    fireEvent.focus(financialsLink);
+
+    expect(prefetchCompanyWorkspaceTabs).toHaveBeenNthCalledWith(
+      1,
+      "AAPL",
+      expect.objectContaining({
+        trigger: "hover",
+        pageRoute: "/company/[ticker]",
+        scenario: "company_workspace_nav_prefetch",
+      })
+    );
+    expect(prefetchCompanyWorkspaceTabs).toHaveBeenNthCalledWith(
+      2,
+      "AAPL",
+      expect.objectContaining({
+        trigger: "focus",
+        pageRoute: "/company/[ticker]",
+        scenario: "company_workspace_nav_prefetch",
+      })
+    );
   });
 });

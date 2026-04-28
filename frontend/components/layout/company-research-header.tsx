@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { clsx } from "clsx";
 
+import { CacheDiagnosticsPanel } from "@/components/dev/cache-diagnostics-panel";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { formatDate } from "@/lib/format";
 import type { CacheState, RefreshState } from "@/lib/types";
@@ -49,6 +50,7 @@ interface CompanyResearchHeaderProps {
   summariesLoading?: boolean;
   freshness?: CompanyHeaderFreshness;
   freshnessPlacement?: "title" | "subtitle";
+  showCacheDiagnostics?: boolean;
   className?: string;
   children?: ReactNode;
 }
@@ -73,6 +75,7 @@ export function CompanyResearchHeader({
   summariesLoading = false,
   freshness,
   freshnessPlacement = "subtitle",
+  showCacheDiagnostics = true,
   className,
   children,
 }: CompanyResearchHeaderProps) {
@@ -123,6 +126,8 @@ export function CompanyResearchHeader({
           ))}
         </div>
       ) : null}
+
+      {showCacheDiagnostics ? <CacheDiagnosticsPanel ticker={ticker} /> : null}
 
       {facts.length ? <CompanyMetricGrid items={facts} loading={factsLoading} /> : null}
       {summaries.length ? <CompanySummaryStrip items={summaries} loading={summariesLoading} /> : null}
@@ -201,6 +206,7 @@ function HeaderFreshnessIndicator({
       title={title}
     >
       <span className="company-freshness-dot" aria-hidden="true" />
+      <span className="company-freshness-label-text">{label}</span>
       <span className="company-freshness-tooltip" role="tooltip">
         <span className="company-freshness-tooltip-title">{label}</span>
         {detailLines.map((line) => (
@@ -223,6 +229,7 @@ function buildFreshnessIndicator(freshness: CompanyHeaderFreshness): {
   const cacheState = freshness.cacheState ?? null;
   const refreshState = freshness.refreshState ?? null;
   const refreshQueued = Boolean(refreshState?.job_id);
+  const backgroundRevalidating = refreshQueued || Boolean(freshness.loading && hasData);
 
   let tone: FreshnessTone = "stale";
   let label = "Cached data is warming";
@@ -253,6 +260,7 @@ function buildFreshnessIndicator(freshness: CompanyHeaderFreshness): {
   const detailLines = [
     cacheState ? `Cache: ${formatCacheState(cacheState)}` : null,
     refreshState ? `Refresh: ${formatRefreshState(refreshState)}` : null,
+    `Background revalidating: ${backgroundRevalidating ? "yes" : "no"}`,
     freshness.lastChecked ? `Last checked: ${formatDate(freshness.lastChecked)}` : null,
     ...(freshness.detailLines ?? []),
     ...errors.map((message) => `Error: ${message}`),
