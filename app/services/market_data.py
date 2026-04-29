@@ -49,12 +49,12 @@ class MarketDataClient:
     def __init__(self) -> None:
         self._http = httpx.Client(
             headers={
-                "User-Agent": settings.sec_user_agent,
+                "User-Agent": settings.market_user_agent,
                 "Accept": "application/json",
                 "Accept-Encoding": "gzip, deflate",
             },
             follow_redirects=True,
-            timeout=settings.sec_timeout_seconds,
+            timeout=settings.market_timeout_seconds,
         )
 
     def close(self) -> None:

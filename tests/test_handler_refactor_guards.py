@@ -80,6 +80,5 @@ def test_jobs_routes_keep_streaming_and_async_contracts() -> None:
     assert refresh_route.endpoint.__name__ == "refresh_company"
     assert list(inspect.signature(refresh_route.endpoint, follow_wrapped=True).parameters) == [
         "ticker",
-        "background_tasks",
         "force",
     ]

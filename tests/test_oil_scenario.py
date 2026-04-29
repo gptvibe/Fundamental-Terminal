@@ -196,7 +196,7 @@ def test_oil_scenario_returns_stale_payload_and_queues_revalidation(monkeypatch)
     monkeypatch.setattr(
         main_module,
         "queue_company_refresh",
-        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-stale",
+        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-stale",
     )
     monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])
@@ -221,7 +221,7 @@ def test_oil_scenario_returns_placeholder_shell_when_dataset_missing(monkeypatch
     monkeypatch.setattr(
         main_module,
         "queue_company_refresh",
-        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-missing",
+        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-missing",
     )
     monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])

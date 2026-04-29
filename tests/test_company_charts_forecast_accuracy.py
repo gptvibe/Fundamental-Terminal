@@ -4,8 +4,6 @@ import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
-from fastapi import BackgroundTasks
-
 import app.main as main_module
 from app.models.company_charts_dashboard_snapshot import CompanyChartsDashboardSnapshot
 from app.services import company_charts_dashboard as charts_service
@@ -278,7 +276,7 @@ def test_company_charts_forecast_accuracy_route_returns_response_shape(monkeypat
     monkeypatch.setattr(main_module.shared_hot_response_cache, "get_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main_module.shared_hot_response_cache, "store_sync", lambda *_args, **_kwargs: None)
 
-    response = main_module.company_charts_forecast_accuracy("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_charts_forecast_accuracy("ACME", as_of=None, session=object())
 
     assert response.status == "ok"
     assert response.aggregate.snapshot_count == 2
@@ -331,7 +329,7 @@ def test_company_charts_forecast_accuracy_route_triggers_stale_refresh_but_serve
     monkeypatch.setattr(main_module.shared_hot_response_cache, "get_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main_module.shared_hot_response_cache, "store_sync", lambda *_args, **_kwargs: None)
 
-    response = main_module.company_charts_forecast_accuracy("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_charts_forecast_accuracy("ACME", as_of=None, session=object())
 
     assert response.status == "ok"
     assert response.refresh.triggered is True
@@ -386,7 +384,7 @@ def test_company_charts_forecast_accuracy_route_recomputes_inline_when_snapshot_
     monkeypatch.setattr(main_module.shared_hot_response_cache, "get_sync", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(main_module.shared_hot_response_cache, "store_sync", lambda *_args, **_kwargs: None)
 
-    response = main_module.company_charts_forecast_accuracy("ACME", BackgroundTasks(), as_of=None, session=session)
+    response = main_module.company_charts_forecast_accuracy("ACME", as_of=None, session=session)
 
     assert response.status == "ok"
     assert response.refresh.triggered is False
@@ -426,7 +424,7 @@ def test_company_charts_forecast_accuracy_route_uses_hot_cache_when_fresh(monkey
 
     monkeypatch.setattr(main_module.shared_hot_response_cache, "get_sync", lambda *_args, **_kwargs: hot_lookup)
 
-    response = main_module.company_charts_forecast_accuracy("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_charts_forecast_accuracy("ACME", as_of=None, session=object())
 
     assert response.status == "ok"
     assert response.aggregate.sample_count == 4
@@ -457,11 +455,10 @@ def test_forecast_accuracy_refresh_detects_sources_newer_than_snapshot(monkeypat
     monkeypatch.setattr(
         main_module,
         "_trigger_refresh",
-        lambda _background_tasks, ticker, reason: main_module.RefreshState(triggered=True, reason=reason, ticker=ticker, job_id="job-stale"),
+        lambda ticker, reason: main_module.RefreshState(triggered=True, reason=reason, ticker=ticker, job_id="job-stale"),
     )
 
     refresh = main_module._refresh_for_company_charts_forecast_accuracy(
-        BackgroundTasks(),
         _Session(),
         snapshot,
         stored_snapshot=stored_snapshot,

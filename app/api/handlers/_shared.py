@@ -21,7 +21,7 @@ from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status
+from fastapi import Body, Depends, HTTPException, Query, Request, Response, status
 import httpx
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
@@ -659,7 +659,6 @@ def pool_status() -> DatabasePoolStatusResponse:
 async def search_companies(
     request: Request,
     http_response: Response,
-    background_tasks: BackgroundTasks,
     query: str | None = Query(default=None, min_length=1),
     ticker: str | None = Query(default=None, min_length=1),
     refresh: bool = Query(default=True),
@@ -683,7 +682,7 @@ async def search_companies(
         payload = _decode_hot_cache_payload(cached_hot)
         cached_response = CompanySearchResponse.model_validate(payload)
         if refresh and _looks_like_ticker(normalized_query):
-            stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
+            stale_refresh = _trigger_refresh(_normalize_ticker(normalized_query), reason="stale")
             cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
 
         not_modified = _apply_conditional_headers(
@@ -740,7 +739,7 @@ async def search_companies(
                     refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
             elif exact_match is None:
                 if not snapshots and _looks_like_ticker(normalized_query):
-                    refresh_state = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+                    refresh_state = _trigger_refresh(normalized_ticker, reason="missing")
                 else:
                     refresh_state = RefreshState(
                         triggered=False,
@@ -749,7 +748,7 @@ async def search_companies(
                         job_id=None,
                     )
             elif exact_match.cache_state in {"missing", "stale"}:
-                refresh_state = _trigger_refresh(background_tasks, exact_match.company.ticker, reason=exact_match.cache_state)
+                refresh_state = _trigger_refresh(exact_match.company.ticker, reason=exact_match.cache_state)
             else:
                 refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
 
@@ -863,7 +862,6 @@ def official_screener_search(
 @app.get("/api/companies/compare", response_model=CompanyCompareResponse)
 def company_compare(
     tickers: str = Query(..., description="Comma-separated tickers to compare"),
-    background_tasks: BackgroundTasks = None,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -876,7 +874,6 @@ def company_compare(
     companies = [
         _build_company_compare_item(
             session=session,
-            background_tasks=background_tasks,
             ticker=ticker,
             requested_as_of=requested_as_of,
             parsed_as_of=parsed_as_of,
@@ -892,7 +889,6 @@ async def company_financials(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
     view: str | None = Query(default=None, description="response shape: full|core_segments|core"),
     price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
     price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
@@ -938,7 +934,7 @@ async def company_financials(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyFinancialsResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -961,7 +957,6 @@ async def company_financials(
             return _build_company_financials_response(
                 sync_session,
                 normalized_ticker,
-                background_tasks,
                 requested_as_of=requested_as_of,
                 parsed_as_of=parsed_as_of,
                 view=normalized_view,
@@ -991,7 +986,6 @@ async def company_financials(
 @app.get("/api/companies/{ticker}/overview", response_model=CompanyOverviewResponse)
 def company_overview(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     http_response: Response = None,
     financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
@@ -1035,7 +1029,6 @@ def company_overview(
     financials = _build_company_financials_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
         snapshot=snapshot,
@@ -1048,7 +1041,6 @@ def company_overview(
     brief = _build_company_research_brief_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
         snapshot=snapshot,
@@ -1074,7 +1066,6 @@ def company_overview(
 @app.get("/api/companies/{ticker}/workspace-bootstrap", response_model=CompanyWorkspaceBootstrapResponse)
 def company_workspace_bootstrap(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     http_response: Response = None,
     include_overview_brief: bool = Query(default=False),
@@ -1133,7 +1124,6 @@ def company_workspace_bootstrap(
         try:
             overview = company_overview(
                 ticker=normalized_ticker,
-                background_tasks=background_tasks,
                 request=request,
                 financials_view=normalized_financials_view,
                 price_start_date=resolved_price_start_date.isoformat() if resolved_price_start_date is not None else None,
@@ -1149,7 +1139,6 @@ def company_workspace_bootstrap(
             financials = _build_company_financials_response(
                 session,
                 normalized_ticker,
-                background_tasks,
                 requested_as_of=requested_as_of,
                 parsed_as_of=parsed_as_of,
                 view=normalized_financials_view,
@@ -1162,7 +1151,6 @@ def company_workspace_bootstrap(
         financials = _build_company_financials_response(
             session,
             normalized_ticker,
-            background_tasks,
             requested_as_of=requested_as_of,
             parsed_as_of=parsed_as_of,
             view=normalized_financials_view,
@@ -1180,7 +1168,6 @@ def company_workspace_bootstrap(
         try:
             insider_trades = company_insider_trades(
                 ticker=normalized_ticker,
-                background_tasks=background_tasks,
                 session=session,
             )
         except Exception as exc:
@@ -1190,7 +1177,6 @@ def company_workspace_bootstrap(
         try:
             institutional_holdings = company_institutional_holdings(
                 ticker=normalized_ticker,
-                background_tasks=background_tasks,
                 session=session,
             )
         except Exception as exc:
@@ -1200,7 +1186,6 @@ def company_workspace_bootstrap(
         try:
             earnings_summary = company_earnings_summary(
                 ticker=normalized_ticker,
-                background_tasks=background_tasks,
                 session=session,
             )
         except Exception as exc:
@@ -1240,7 +1225,6 @@ def company_workspace_bootstrap(
 @app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
 def company_segment_history(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     years: int = Query(default=5, ge=1, le=20),
     kind: Literal["business", "geographic"] = Query(default="business"),
@@ -1258,7 +1242,7 @@ def company_segment_history(
             kind=kind,
             years=years,
             periods=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(
                 stale_flags=["company_missing"],
                 missing_field_flags=["segment_history_empty"],
@@ -1272,7 +1256,7 @@ def company_segment_history(
         financials = select_point_in_time_financials(financials, parsed_as_of)
 
     history_result = build_segment_history(financials, kind=kind, years=years)
-    refresh = _refresh_for_segment_history(background_tasks, snapshot, financials)
+    refresh = _refresh_for_segment_history(snapshot, financials)
     periods = [_serialize_segment_history_period(period) for period in history_result.periods]
     diagnostics = _diagnostics_for_segment_history_response(periods, requested_years=years, refresh=refresh)
     last_refreshed_at = _merge_last_checked(*(statement.last_checked for statement in history_result.provenance_statements))
@@ -1304,7 +1288,6 @@ async def company_capital_structure(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     max_periods: int = Query(default=8, ge=1, le=40),
 ) -> CompanyCapitalStructureResponse:
@@ -1328,7 +1311,7 @@ async def company_capital_structure(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyCapitalStructureResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -1355,7 +1338,7 @@ async def company_capital_structure(
                     latest=None,
                     history=[],
                     last_capital_structure_check=None,
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
                     **_empty_provenance_contract("company_missing", "capital_structure_missing"),
                 )
@@ -1367,7 +1350,7 @@ async def company_capital_structure(
                 floor = datetime.min.replace(tzinfo=timezone.utc)
                 history = [item for item in history if (snapshot_effective_at(item) or floor) <= parsed_as_of]
             history = history[:max_periods]
-            refresh = _refresh_for_capital_structure(background_tasks, snapshot, last_capital_structure_check, history)
+            refresh = _refresh_for_capital_structure(snapshot, last_capital_structure_check, history)
             serialized_history = [_serialize_capital_structure_snapshot(item) for item in history]
             latest = serialized_history[0] if serialized_history else None
             diagnostics = _diagnostics_for_capital_structure(serialized_history, refresh)
@@ -1408,7 +1391,6 @@ async def company_capital_structure(
 @app.get("/api/companies/{ticker}/equity-claim-risk", response_model=CompanyEquityClaimRiskResponse)
 def company_equity_claim_risk(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -1420,12 +1402,12 @@ def company_equity_claim_risk(
     if snapshot is None:
         payload = CompanyEquityClaimRiskResponse(
             company=None,
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "equity_claim_risk_missing"], missing_field_flags=["financials_missing", "capital_structure_missing", "capital_markets_missing", "filing_events_missing"]),
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     payload = build_company_equity_claim_risk_response(
         session,
         snapshot.company.id,
@@ -1439,7 +1421,6 @@ def company_equity_claim_risk(
 @app.get("/api/companies/{ticker}/filing-insights", response_model=CompanyFilingInsightsResponse)
 def company_filing_insights(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyFilingInsightsResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -1448,13 +1429,13 @@ def company_filing_insights(
         return CompanyFilingInsightsResponse(
             company=None,
             insights=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     insights = get_company_filing_insights(session, snapshot.company.id)
     insights_last_checked = max((item.last_checked for item in insights if item.last_checked is not None), default=None)
-    refresh = _refresh_for_filing_insights(background_tasks, snapshot)
+    refresh = _refresh_for_filing_insights(snapshot)
     serialized_insights = [_serialize_filing_parser_insight(item) for item in insights]
     return CompanyFilingInsightsResponse(
         company=_serialize_company(snapshot, last_checked=insights_last_checked),
@@ -1467,7 +1448,6 @@ def company_filing_insights(
 @app.get("/api/companies/{ticker}/changes-since-last-filing", response_model=CompanyChangesSinceLastFilingResponse)
 def company_changes_since_last_filing(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -1480,13 +1460,13 @@ def company_changes_since_last_filing(
         payload = CompanyChangesSinceLastFilingResponse(
             company=None,
             summary=ChangesSinceLastFilingSummaryPayload(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     persisted_payload = _load_snapshot_backed_changes_since_last_filing_response(
         session,
         snapshot,
@@ -1617,7 +1597,6 @@ def company_changes_since_last_filing(
 @app.get("/api/companies/{ticker}/metrics-timeseries", response_model=CompanyMetricsTimeseriesResponse)
 def company_metrics_timeseries(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     cadence: Literal["quarterly", "annual", "ttm"] | None = Query(default=None),
     max_points: int = Query(default=24, ge=1, le=200),
@@ -1635,7 +1614,7 @@ def company_metrics_timeseries(
             last_financials_check=None,
             last_price_check=None,
             staleness_reason="company_missing",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -1644,7 +1623,7 @@ def company_metrics_timeseries(
     financials = _visible_financials_for_company(session, snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
     if parsed_as_of is not None:
         financials = select_point_in_time_financials(financials, parsed_as_of)
@@ -1681,7 +1660,6 @@ def company_metrics_timeseries(
 @app.get("/api/companies/{ticker}/metrics", response_model=CompanyDerivedMetricsResponse)
 def company_derived_metrics(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
     max_periods: int = Query(default=24, ge=1, le=200),
@@ -1702,7 +1680,7 @@ def company_derived_metrics(
             last_financials_check=None,
             last_price_check=None,
             staleness_reason="company_missing",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -1711,7 +1689,7 @@ def company_derived_metrics(
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = _visible_financials_for_company(session, snapshot.company)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
 
     if parsed_as_of is None:
         rows = get_company_derived_metric_points(
@@ -1722,7 +1700,7 @@ def company_derived_metrics(
         )
         last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
         if not rows:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
                 staleness_reason = "metrics_missing"
 
@@ -1813,7 +1791,6 @@ def company_derived_metrics(
 @app.get("/api/companies/{ticker}/metrics/summary", response_model=CompanyDerivedMetricsSummaryResponse)
 def company_derived_metrics_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
@@ -1833,7 +1810,7 @@ def company_derived_metrics_summary(
             last_financials_check=None,
             last_price_check=None,
             staleness_reason="company_missing",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -1842,13 +1819,13 @@ def company_derived_metrics_summary(
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = _visible_financials_for_company(session, snapshot.company)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
 
     if parsed_as_of is None:
         rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
         last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
         if not rows:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
                 staleness_reason = "metrics_missing"
 
@@ -1928,7 +1905,6 @@ def company_derived_metrics_summary(
 @app.get("/api/companies/{ticker}/insider-trades", response_model=CompanyInsiderTradesResponse)
 def company_insider_trades(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyInsiderTradesResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -1938,13 +1914,13 @@ def company_insider_trades(
             company=None,
             insider_trades=[],
             summary=_serialize_insider_activity_summary(build_insider_activity_summary([])),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     insider_last_checked, insider_cache_state = get_company_insider_trade_cache_status(session, snapshot.company)
     insider_trades = get_company_insider_trades(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=insider_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=insider_cache_state)
         if insider_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -1963,7 +1939,6 @@ def company_insider_trades(
 @app.get("/api/companies/{ticker}/institutional-holdings", response_model=CompanyInstitutionalHoldingsResponse)
 def company_institutional_holdings(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyInstitutionalHoldingsResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -1972,13 +1947,13 @@ def company_institutional_holdings(
         return CompanyInstitutionalHoldingsResponse(
             company=None,
             institutional_holdings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
     holdings = get_company_institutional_holdings(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=holdings_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=holdings_cache_state)
         if holdings_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -1996,7 +1971,6 @@ def company_institutional_holdings(
 @app.get("/api/companies/{ticker}/institutional-holdings/summary", response_model=CompanyInstitutionalHoldingsSummaryResponse)
 def company_institutional_holdings_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyInstitutionalHoldingsSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -2005,13 +1979,13 @@ def company_institutional_holdings_summary(
         return CompanyInstitutionalHoldingsSummaryResponse(
             company=None,
             summary=InstitutionalHoldingsSummaryPayload(total_rows=0, unique_managers=0, amended_rows=0, latest_reporting_date=None),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
     holdings = get_company_institutional_holdings(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=holdings_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=holdings_cache_state)
         if holdings_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -2030,7 +2004,6 @@ def company_institutional_holdings_summary(
 @app.get("/api/companies/{ticker}/form-144-filings", response_model=CompanyForm144Response)
 def company_form144_filings(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyForm144Response:
     normalized_ticker = _normalize_ticker(ticker)
@@ -2039,13 +2012,13 @@ def company_form144_filings(
         return CompanyForm144Response(
             company=None,
             filings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     form144_last_checked, form144_cache_state = get_company_form144_cache_status(session, snapshot.company)
     filings = get_company_form144_filings(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=form144_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=form144_cache_state)
         if form144_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -2062,13 +2035,12 @@ def company_form144_filings(
 @app.get("/api/companies/{ticker}/comment-letters", response_model=CompanyCommentLettersResponse)
 def company_comment_letters(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyCommentLettersResponse:
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyCommentLettersResponse(
             company=None,
             letters=[],
@@ -2080,7 +2052,7 @@ def company_comment_letters(
     letters_last_checked, letters_cache_state = get_company_comment_letters_cache_status(session, snapshot.company)
     letters = [_serialize_comment_letter(letter) for letter in get_company_comment_letters(session, snapshot.company.id)]
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=letters_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=letters_cache_state)
         if letters_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -2097,7 +2069,6 @@ def company_comment_letters(
 @app.get("/api/companies/{ticker}/earnings", response_model=CompanyEarningsResponse)
 def company_earnings(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyEarningsResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -2106,13 +2077,13 @@ def company_earnings(
         return CompanyEarningsResponse(
             company=None,
             earnings_releases=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
     earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
-    refresh = _refresh_for_earnings(background_tasks, snapshot, earnings_cache_state)
+    refresh = _refresh_for_earnings(snapshot, earnings_cache_state)
     payload = [_serialize_earnings_release(release) for release in earnings_releases]
     return CompanyEarningsResponse(
         company=_serialize_company(
@@ -2129,7 +2100,6 @@ def company_earnings(
 @app.get("/api/companies/{ticker}/earnings/summary", response_model=CompanyEarningsSummaryResponse)
 def company_earnings_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyEarningsSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -2138,13 +2108,13 @@ def company_earnings_summary(
         return CompanyEarningsSummaryResponse(
             company=None,
             summary=_build_earnings_summary([]),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
     earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
-    refresh = _refresh_for_earnings(background_tasks, snapshot, earnings_cache_state)
+    refresh = _refresh_for_earnings(snapshot, earnings_cache_state)
     payload = [_serialize_earnings_release(release) for release in earnings_releases]
     return CompanyEarningsSummaryResponse(
         company=_serialize_company(
@@ -2161,7 +2131,6 @@ def company_earnings_summary(
 @app.get("/api/companies/{ticker}/earnings/workspace", response_model=CompanyEarningsWorkspaceResponse)
 def company_earnings_workspace(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyEarningsWorkspaceResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -2192,7 +2161,7 @@ def company_earnings_workspace(
                 sector_eps_drift_percentile=None,
             ),
             alerts=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
@@ -2200,7 +2169,7 @@ def company_earnings_workspace(
     model_last_checked, model_cache_state = get_company_earnings_model_cache_status(session, snapshot.company.id)
     earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
     model_rows = get_company_earnings_model_points(session, snapshot.company.id)
-    refresh = _refresh_for_earnings_workspace(background_tasks, snapshot, earnings_cache_state, model_cache_state)
+    refresh = _refresh_for_earnings_workspace(snapshot, earnings_cache_state, model_cache_state)
 
     release_payload = [_serialize_earnings_release(release) for release in earnings_releases]
     model_payload = [_serialize_earnings_model_point(point) for point in model_rows]
@@ -2271,14 +2240,13 @@ def ownership_analytics(
 )
 def refresh_company(
     ticker: str,
-    background_tasks: BackgroundTasks,
     force: bool = False,
     session: Session = Depends(get_db_session),
 ) -> RefreshQueuedResponse:
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     queue_ticker = snapshot.company.ticker if snapshot is not None else normalized_ticker
-    job_id = queue_company_refresh(background_tasks, queue_ticker, force=force)
+    job_id = queue_company_refresh(queue_ticker, force=force)
     return RefreshQueuedResponse(
         status="queued",
         ticker=queue_ticker,
@@ -2292,7 +2260,6 @@ async def company_models(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
     model: str | None = Query(default=None),
     expand: str | None = Query(default=None, description="optional expansions: input_periods, formula_details"),
     dupont_mode: str | None = Query(default=None, description="optional DuPont basis: auto|annual|ttm"),
@@ -2338,7 +2305,7 @@ async def company_models(
                 payload_data = _decode_hot_cache_payload(cached_hot)
                 cached_response = CompanyModelsResponse.model_validate(payload_data)
                 if not cached_hot.is_fresh:
-                    stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                    stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                     cached_response = cached_response.model_copy(
                         update={
                             "refresh": stale_refresh,
@@ -2364,13 +2331,13 @@ async def company_models(
                         company=None,
                         requested_models=requested_models,
                         models=[],
-                        refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                        refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                         diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
                         **_empty_provenance_contract("company_missing"),
                     )
                     return _apply_requested_as_of(payload, requested_as_of)
 
-                refresh = _refresh_for_snapshot(background_tasks, snapshot)
+                refresh = _refresh_for_snapshot(snapshot)
                 financials = get_company_financials(sync_session, snapshot.company.id)
                 price_last_checked, _price_cache_state = _visible_price_cache_status(sync_session, snapshot.company.id)
                 price_history: list[PriceHistory] = []
@@ -2509,7 +2476,6 @@ async def company_oil_scenario_overlay(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
 ) -> CompanyOilScenarioOverlayResponse:
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario_overlay:{normalized_ticker}"
@@ -2527,7 +2493,7 @@ async def company_oil_scenario_overlay(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyOilScenarioOverlayResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_cached_company_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -2570,13 +2536,13 @@ async def company_oil_scenario_overlay(
                         stale_flags=["company_missing", "oil_scenario_overlay_missing"],
                         missing_field_flags=["oil_scenario_overlay_missing"],
                     ),
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing", "oil_scenario_overlay_missing"),
                 )
 
             payload, cache_state = get_company_oil_scenario_overlay(sync_session, snapshot.company.id)
             last_checked = get_company_oil_scenario_overlay_last_checked(sync_session, snapshot.company.id)
-            refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+            refresh = _refresh_for_oil_scenario_overlay(snapshot, cache_state)
             return _serialize_oil_scenario_overlay_response(
                 company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
                 payload=payload
@@ -2610,7 +2576,6 @@ async def company_oil_scenario(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
 ) -> CompanyOilScenarioResponse:
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario:{normalized_ticker}"
@@ -2628,7 +2593,7 @@ async def company_oil_scenario(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyOilScenarioResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_cached_company_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -2713,13 +2678,13 @@ async def company_oil_scenario(
                         stale_flags=["company_missing", "oil_scenario_missing"],
                         missing_field_flags=["oil_scenario_missing"],
                     ),
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing", "oil_scenario_missing"),
                 )
 
             payload, cache_state = get_company_oil_scenario_overlay(sync_session, snapshot.company.id)
             last_checked = get_company_oil_scenario_overlay_last_checked(sync_session, snapshot.company.id)
-            refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+            refresh = _refresh_for_oil_scenario_overlay(snapshot, cache_state)
             default_checked_at = last_checked or snapshot.last_checked or datetime.now(timezone.utc)
             base_payload = payload or build_company_oil_scenario_overlay_placeholder(snapshot.company, checked_at=default_checked_at)
             public_payload = build_company_oil_scenario_public_payload(
@@ -2879,7 +2844,6 @@ def latest_model_evaluation(
 @app.get("/api/companies/{ticker}/market-context", response_model=CompanyMarketContextResponse)
 def company_market_context(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyMarketContextResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -2905,7 +2869,7 @@ def company_market_context(
             "sector_exposure": [],
             "hqm_snapshot": None,
         }
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         fetched_at = datetime.now(timezone.utc)
         return CompanyMarketContextResponse(
             company=None,
@@ -2920,7 +2884,7 @@ def company_market_context(
             **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     company = snapshot.company
     payload = get_company_market_context_v2(
         session,
@@ -3311,13 +3275,12 @@ def global_market_context(
 @app.get("/api/companies/{ticker}/sector-context", response_model=CompanySectorContextResponse)
 def company_sector_context(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanySectorContextResponse:
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         fetched_at = datetime.now(timezone.utc)
         return CompanySectorContextResponse(
             company=None,
@@ -3339,7 +3302,7 @@ def company_sector_context(
             confidence_flags=["company_missing", "no_relevant_sector_plugins"],
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     company = snapshot.company
     payload = get_company_sector_context(
         session,
@@ -3366,7 +3329,6 @@ def company_sector_context(
 @app.get("/api/companies/{ticker}/charts", response_model=CompanyChartsDashboardResponse)
 def company_charts(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -3377,7 +3339,6 @@ def company_charts(
     return _build_company_charts_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
     )
@@ -3386,7 +3347,6 @@ def company_charts(
 @app.post("/api/companies/{ticker}/charts/what-if", response_model=CompanyChartsDashboardResponse)
 def company_charts_what_if(
     ticker: str,
-    background_tasks: BackgroundTasks,
     payload: CompanyChartsWhatIfRequest | None = Body(default=None),
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
@@ -3398,7 +3358,6 @@ def company_charts_what_if(
     return _build_company_charts_what_if_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
         payload=payload or CompanyChartsWhatIfRequest(),
@@ -3408,7 +3367,6 @@ def company_charts_what_if(
 @app.get("/api/companies/{ticker}/charts/forecast-accuracy", response_model=CompanyChartsForecastAccuracyResponse)
 def company_charts_forecast_accuracy(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -3424,7 +3382,7 @@ def company_charts_forecast_accuracy(
 
     snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
     if snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyChartsForecastAccuracyResponse(
             company=None,
             status="insufficient_history",
@@ -3444,7 +3402,6 @@ def company_charts_forecast_accuracy(
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_charts_forecast_accuracy(
-        background_tasks,
         session,
         snapshot,
         stored_snapshot=stored_snapshot,
@@ -3477,7 +3434,7 @@ def company_charts_forecast_accuracy(
                 )
                 return response
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
         return CompanyChartsForecastAccuracyResponse(
             company=_serialize_company(snapshot),
             status="insufficient_history",
@@ -3781,7 +3738,6 @@ def company_charts_share_snapshot_detail(
 def _build_company_charts_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -3795,7 +3751,7 @@ def _build_company_charts_response(
 
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return _build_company_charts_bootstrap_for_missing_ticker(
             normalized_ticker,
             refresh=refresh,
@@ -3808,7 +3764,6 @@ def _build_company_charts_response(
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_charts(
-        background_tasks,
         resolved_snapshot,
         stored_snapshot=stored_snapshot,
         as_of=parsed_as_of,
@@ -3841,7 +3796,7 @@ def _build_company_charts_response(
                 )
                 return response
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, resolved_snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(resolved_snapshot.company.ticker, reason="missing")
         return _build_company_charts_bootstrap_for_snapshot(
             resolved_snapshot,
             refresh=refresh,
@@ -3871,7 +3826,6 @@ def _build_company_charts_response(
 def _build_company_charts_what_if_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -3880,7 +3834,7 @@ def _build_company_charts_what_if_response(
 ) -> CompanyChartsDashboardResponse:
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return _build_company_charts_bootstrap_for_missing_ticker(
             normalized_ticker,
             refresh=refresh,
@@ -3943,7 +3897,6 @@ def _attempt_inline_company_snapshot_refresh_for_charts(
 @app.get("/api/companies/{ticker}/brief", response_model=CompanyResearchBriefResponse)
 def company_brief(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -3954,7 +3907,6 @@ def company_brief(
     return _build_company_research_brief_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
     )
@@ -3963,7 +3915,6 @@ def company_brief(
 def _build_company_research_brief_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -3971,7 +3922,7 @@ def _build_company_research_brief_response(
 ) -> CompanyResearchBriefResponse:
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return _build_company_brief_bootstrap_for_missing_ticker(
             normalized_ticker,
             refresh=refresh,
@@ -3984,14 +3935,13 @@ def _build_company_research_brief_response(
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_brief(
-        background_tasks,
         resolved_snapshot,
         stored_snapshot=stored_snapshot,
         as_of=parsed_as_of,
     )
     if payload is None:
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, resolved_snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(resolved_snapshot.company.ticker, reason="missing")
         return _build_company_brief_bootstrap_for_snapshot(
             session,
             resolved_snapshot,
@@ -4169,7 +4119,6 @@ def _load_company_charts_forecast_accuracy_snapshot_record(
 
 
 def _refresh_for_company_charts(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     *,
     stored_snapshot: Any | None,
@@ -4177,17 +4126,16 @@ def _refresh_for_company_charts(
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
-            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+            return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
-    return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    return _trigger_refresh(snapshot.company.ticker, reason="stale")
 
 
 def _refresh_for_company_charts_forecast_accuracy(
-    background_tasks: BackgroundTasks,
     session: Session,
     snapshot: CompanyCacheSnapshot,
     *,
@@ -4196,16 +4144,16 @@ def _refresh_for_company_charts_forecast_accuracy(
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
-            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if not _snapshot_last_checked_is_fresh(stored_snapshot):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if _charts_forecast_accuracy_sources_newer_than_snapshot(session, snapshot.company.id, stored_snapshot):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
@@ -4537,7 +4485,6 @@ def _load_company_research_brief_snapshot_record(
 
 
 def _refresh_for_company_brief(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     *,
     stored_snapshot: Any | None,
@@ -4545,13 +4492,13 @@ def _refresh_for_company_brief(
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
-            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+            return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
-    return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    return _trigger_refresh(snapshot.company.ticker, reason="stale")
 
 
 def _snapshot_last_checked_is_fresh(stored_snapshot: Any) -> bool:
@@ -4957,7 +4904,6 @@ async def company_peers(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
     peers: str | None = Query(default=None),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyPeersResponse:
@@ -4983,7 +4929,7 @@ async def company_peers(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyPeersResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -5011,14 +4957,14 @@ async def company_peers(
                     selected_tickers=[],
                     peers=[],
                     notes={},
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing"),
                 )
                 return _apply_requested_as_of(payload, requested_as_of)
 
             price_last_checked, price_cache_state = _visible_price_cache_status(sync_session, snapshot.company.id)
             financials = get_company_financials(sync_session, snapshot.company.id)
-            refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+            refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
             payload = build_peer_comparison(sync_session, snapshot.company.ticker, selected_tickers=selected_tickers, as_of=parsed_as_of)
             logging.getLogger(__name__).info(
                 "TELEMETRY peer_view ticker=%s selected=%s count=%s",
@@ -5075,7 +5021,6 @@ async def company_peers(
 @app.get("/api/companies/{ticker}/filings", response_model=CompanyFilingsResponse)
 def company_filings(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyFilingsResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5085,12 +5030,12 @@ def company_filings(
             company=None,
             filings=[],
             timeline_source="sec_submissions",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
 
     cached_filings = _load_filings_from_cache(snapshot.company.cik)
     if cached_filings is not None:
@@ -5140,7 +5085,6 @@ def company_filings(
 @app.get("/api/companies/{ticker}/beneficial-ownership", response_model=CompanyBeneficialOwnershipResponse)
 def company_beneficial_ownership(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyBeneficialOwnershipResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5149,11 +5093,11 @@ def company_beneficial_ownership(
         return CompanyBeneficialOwnershipResponse(
             company=None,
             filings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     filings = _enrich_beneficial_ownership_amendment_history(
         [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
@@ -5169,7 +5113,6 @@ def company_beneficial_ownership(
 @app.get("/api/companies/{ticker}/beneficial-ownership/summary", response_model=CompanyBeneficialOwnershipSummaryResponse)
 def company_beneficial_ownership_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyBeneficialOwnershipSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5178,11 +5121,11 @@ def company_beneficial_ownership_summary(
         return CompanyBeneficialOwnershipSummaryResponse(
             company=None,
             summary=_empty_beneficial_ownership_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     filings = _enrich_beneficial_ownership_amendment_history(
         [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
@@ -5198,7 +5141,6 @@ def company_beneficial_ownership_summary(
 @app.get("/api/companies/{ticker}/governance", response_model=CompanyGovernanceResponse)
 def company_governance(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyGovernanceResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5207,12 +5149,12 @@ def company_governance(
         return CompanyGovernanceResponse(
             company=None,
             filings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_governance(background_tasks, session, snapshot)
+    refresh = _refresh_for_governance(session, snapshot)
     cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
     filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
     return CompanyGovernanceResponse(
@@ -5227,7 +5169,6 @@ def company_governance(
 @app.get("/api/companies/{ticker}/governance/summary", response_model=CompanyGovernanceSummaryResponse)
 def company_governance_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyGovernanceSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5236,12 +5177,12 @@ def company_governance_summary(
         return CompanyGovernanceSummaryResponse(
             company=None,
             summary=_empty_governance_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_governance(background_tasks, session, snapshot)
+    refresh = _refresh_for_governance(session, snapshot)
     persisted_payload = _load_snapshot_backed_governance_summary_response(
         session,
         snapshot,
@@ -5264,7 +5205,6 @@ def company_governance_summary(
 @app.get("/api/companies/{ticker}/executive-compensation", response_model=CompanyExecutiveCompensationResponse)
 def company_executive_compensation(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyExecutiveCompensationResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5275,11 +5215,11 @@ def company_executive_compensation(
             rows=[],
             fiscal_years=[],
             source="none",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
         )
 
-    refresh = _refresh_for_governance(background_tasks, session, snapshot)
+    refresh = _refresh_for_governance(session, snapshot)
     cached_rows = get_company_executive_compensation(session, snapshot.company.id)
     source = "cached" if cached_rows else "none"
     if cached_rows:
@@ -5331,7 +5271,6 @@ _REGISTRATION_FORM_SUMMARIES: dict[str, str] = {
 @app.get("/api/companies/{ticker}/capital-raises", response_model=CompanyCapitalRaisesResponse)
 def company_capital_raises(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyCapitalRaisesResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5340,12 +5279,12 @@ def company_capital_raises(
         return CompanyCapitalRaisesResponse(
             company=None,
             filings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     cached_events = get_company_capital_markets_events(session, snapshot.company.id)
     filings = [_serialize_cached_capital_markets_event(event) for event in cached_events]
     return CompanyCapitalRaisesResponse(
@@ -5360,16 +5299,14 @@ def company_capital_raises(
 @app.get("/api/companies/{ticker}/capital-markets", response_model=CompanyCapitalRaisesResponse)
 def company_capital_markets(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyCapitalRaisesResponse:
-    return company_capital_raises(ticker=ticker, background_tasks=background_tasks, session=session)
+    return company_capital_raises(ticker=ticker, session=session)
 
 
 @app.get("/api/companies/{ticker}/capital-markets/summary", response_model=CompanyCapitalMarketsSummaryResponse)
 def company_capital_markets_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyCapitalMarketsSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5378,12 +5315,12 @@ def company_capital_markets_summary(
         return CompanyCapitalMarketsSummaryResponse(
             company=None,
             summary=_empty_capital_markets_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     rows = [_serialize_cached_capital_markets_event(event) for event in get_company_capital_markets_events(session, snapshot.company.id)]
     return CompanyCapitalMarketsSummaryResponse(
         company=_serialize_company(snapshot),
@@ -5397,7 +5334,6 @@ def company_capital_markets_summary(
 @app.get("/api/companies/{ticker}/events", response_model=CompanyEventsResponse)
 def company_events(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyEventsResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5406,12 +5342,12 @@ def company_events(
         return CompanyEventsResponse(
             company=None,
             events=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
     return CompanyEventsResponse(
         company=_serialize_company(snapshot),
@@ -5425,16 +5361,14 @@ def company_events(
 @app.get("/api/companies/{ticker}/filing-events", response_model=CompanyEventsResponse)
 def company_filing_events(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyEventsResponse:
-    return company_events(ticker=ticker, background_tasks=background_tasks, session=session)
+    return company_events(ticker=ticker, session=session)
 
 
 @app.get("/api/companies/{ticker}/filing-events/summary", response_model=CompanyFilingEventsSummaryResponse)
 def company_filing_events_summary(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyFilingEventsSummaryResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -5443,12 +5377,12 @@ def company_filing_events_summary(
         return CompanyFilingEventsSummaryResponse(
             company=None,
             summary=_empty_filing_events_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     rows = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
     return CompanyFilingEventsSummaryResponse(
         company=_serialize_company(snapshot),
@@ -5462,10 +5396,9 @@ def company_filing_events_summary(
 @app.get("/api/companies/{ticker}/activity-feed", response_model=CompanyActivityFeedResponse)
 def company_activity_feed(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyActivityFeedResponse:
-    overview = _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
+    overview = _build_company_activity_overview_response(ticker=ticker, session=session)
     return CompanyActivityFeedResponse(
         company=overview.company,
         entries=overview.entries,
@@ -5477,10 +5410,9 @@ def company_activity_feed(
 @app.get("/api/companies/{ticker}/alerts", response_model=CompanyAlertsResponse)
 def company_alerts(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyAlertsResponse:
-    overview = _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
+    overview = _build_company_activity_overview_response(ticker=ticker, session=session)
     return CompanyAlertsResponse(
         company=overview.company,
         alerts=overview.alerts,
@@ -5493,10 +5425,9 @@ def company_alerts(
 @app.get("/api/companies/{ticker}/activity-overview", response_model=CompanyActivityOverviewResponse)
 def company_activity_overview(
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> CompanyActivityOverviewResponse:
-    return _build_company_activity_overview_response(ticker=ticker, background_tasks=background_tasks, session=session)
+    return _build_company_activity_overview_response(ticker=ticker, session=session)
 
 
 def _build_watchlist_preloaded_activity_data(
@@ -5641,7 +5572,6 @@ def _load_watchlist_summary_preload(
 @app.post("/api/watchlist/summary", response_model=WatchlistSummaryResponse)
 def watchlist_summary(
     payload: WatchlistSummaryRequest,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> WatchlistSummaryResponse:
     normalized_tickers = _normalize_watchlist_tickers(payload.tickers)
@@ -5658,7 +5588,7 @@ def watchlist_summary(
         logging.getLogger(__name__).exception("Unable to load watchlist summary snapshots")
         return WatchlistSummaryResponse(
             tickers=normalized_tickers,
-            companies=[_build_missing_watchlist_summary_item(background_tasks, ticker) for ticker in normalized_tickers],
+            companies=[_build_missing_watchlist_summary_item(ticker) for ticker in normalized_tickers],
         )
 
     preload: dict[str, Any] | None = None
@@ -5673,13 +5603,12 @@ def watchlist_summary(
         for ticker in normalized_tickers:
             snapshot = snapshots_by_ticker.get(ticker)
             if snapshot is None:
-                companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+                companies.append(_build_missing_watchlist_summary_item(ticker))
                 continue
             try:
                 companies.append(
                     _build_watchlist_summary_item(
                         session,
-                        background_tasks,
                         ticker,
                         snapshot=snapshot,
                         coverage_counts=coverage_counts.get(snapshot.company.id),
@@ -5687,7 +5616,7 @@ def watchlist_summary(
                 )
             except Exception:
                 logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
-                companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+                companies.append(_build_missing_watchlist_summary_item(ticker))
     finally:
         _watchlist_summary_preload_ctx.reset(preload_token)
     logging.getLogger(__name__).info(
@@ -5824,7 +5753,6 @@ def search_filings(
 @app.get("/api/companies/{ticker}/financial-restatements", response_model=CompanyFinancialRestatementsResponse)
 def company_financial_restatements(
     ticker: str,
-    background_tasks: BackgroundTasks,
     request: Request = None,
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
@@ -5838,12 +5766,12 @@ def company_financial_restatements(
             company=None,
             summary=_empty_financial_restatements_summary(),
             restatements=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             **_empty_provenance_contract("company_missing"),
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     records = get_company_financial_restatements(session, snapshot.company.id)
     if parsed_as_of is not None:
         records = [record for record in records if _financial_restatement_effective_at(record) <= parsed_as_of]
@@ -5951,79 +5879,74 @@ def company_filing_view(
         client.close()
 
 
-def _refresh_for_snapshot(background_tasks: BackgroundTasks, snapshot: CompanyCacheSnapshot) -> RefreshState:
+def _refresh_for_snapshot(snapshot: CompanyCacheSnapshot) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_capital_structure(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     last_capital_structure_check: datetime | None,
     history: list[Any],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if last_capital_structure_check is None or not history:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_oil_scenario_overlay(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     cache_state: Literal["fresh", "stale", "missing"],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if cache_state in {"missing", "stale"}:
-        return _trigger_cached_company_refresh(background_tasks, snapshot.company.ticker, reason=cache_state)
+        return _trigger_cached_company_refresh(snapshot.company.ticker, reason=cache_state)
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_governance(
-    background_tasks: BackgroundTasks,
     session: Session,
     snapshot: CompanyCacheSnapshot,
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
 
     _last_checked, proxy_cache_state = get_company_proxy_cache_status(session, snapshot.company)
     if proxy_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=proxy_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=proxy_cache_state)
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_earnings(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     earnings_cache_state: Literal["fresh", "stale", "missing"],
 ) -> RefreshState:
     if snapshot.cache_state == "missing":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if snapshot.cache_state == "stale":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if earnings_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=earnings_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=earnings_cache_state)
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_earnings_workspace(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     earnings_cache_state: Literal["fresh", "stale", "missing"],
     model_cache_state: Literal["fresh", "stale", "missing"],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if earnings_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=earnings_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=earnings_cache_state)
     if model_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=model_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=model_cache_state)
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
@@ -6369,7 +6292,6 @@ def _visible_financials_for_company(
 def _build_company_financials_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -6386,7 +6308,7 @@ def _build_company_financials_response(
             company=None,
             financials=[],
             price_history=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -6394,7 +6316,7 @@ def _build_company_financials_response(
 
     financials = _visible_financials_for_company(session, resolved_snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, resolved_snapshot.company.id)
-    refresh = _refresh_for_financial_page(background_tasks, resolved_snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(resolved_snapshot, price_cache_state, financials)
     effective_price_end_date = price_end_date
     if parsed_as_of is not None:
         parsed_as_of_date = parsed_as_of.date()
@@ -6490,30 +6412,28 @@ def _resolve_canonical_ticker(session: Session, identity: Any) -> str | None:
 
 
 def _refresh_for_financial_page(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     price_cache_state: Literal["fresh", "stale", "missing"],
     financials: list[FinancialStatement],
 ) -> RefreshState:
     if snapshot.cache_state == "missing" or price_cache_state == "missing":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if snapshot.cache_state == "stale" or price_cache_state == "stale":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if _needs_segment_backfill(financials):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_segment_history(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     financials: list[FinancialStatement],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if _needs_segment_backfill(financials):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
@@ -6653,35 +6573,32 @@ def _sanitize_model_result_for_strict_official_mode(model_name: str, result: dic
 
 
 def _refresh_for_filing_insights(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
 ) -> RefreshState:
     if snapshot.cache_state == "missing":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if snapshot.cache_state == "stale":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _trigger_refresh(
-    background_tasks: BackgroundTasks,
     ticker: str,
     *,
     reason: Literal["manual", "missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=(reason == "missing"))
+    job_id = queue_company_refresh(normalized_ticker, force=(reason == "missing"))
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
 def _trigger_cached_company_refresh(
-    background_tasks: BackgroundTasks,
     ticker: str,
     *,
     reason: Literal["missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=False)
+    job_id = queue_company_refresh(normalized_ticker, force=False)
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
@@ -10032,7 +9949,6 @@ def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
 def _build_company_activity_overview_response(
     *,
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session,
 ) -> CompanyActivityOverviewResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -10044,12 +9960,12 @@ def _build_company_activity_overview_response(
             alerts=[],
             summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
             market_context_status=get_cached_market_context_status(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
             **_empty_provenance_contract("company_missing"),
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     persisted_payload = _load_snapshot_backed_activity_overview_response(
         session,
         snapshot,
@@ -10859,7 +10775,6 @@ def _build_watchlist_13f_deadline_events(
 
 def _build_watchlist_summary_item(
     session: Session,
-    background_tasks: BackgroundTasks,
     ticker: str,
     *,
     snapshot: CompanyCacheSnapshot | None = None,
@@ -10867,9 +10782,9 @@ def _build_watchlist_summary_item(
 ) -> WatchlistSummaryItemPayload:
     snapshot = snapshot or _resolve_cached_company_snapshot(session, ticker)
     if snapshot is None:
-        return _build_missing_watchlist_summary_item(background_tasks, ticker)
+        return _build_missing_watchlist_summary_item(ticker)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
 
     financial_periods = int((coverage_counts or {}).get("financial_periods", 0))
     price_points = int((coverage_counts or {}).get("price_points", 0))
@@ -11004,14 +10919,14 @@ def _build_watchlist_summary_item(
     )
 
 
-def _build_missing_watchlist_summary_item(background_tasks: BackgroundTasks, ticker: str) -> WatchlistSummaryItemPayload:
+def _build_missing_watchlist_summary_item(ticker: str) -> WatchlistSummaryItemPayload:
     return WatchlistSummaryItemPayload(
         ticker=ticker,
         name=None,
         sector=None,
         cik=None,
         last_checked=None,
-        refresh=_trigger_refresh(background_tasks, ticker, reason="missing"),
+        refresh=_trigger_refresh(ticker, reason="missing"),
         alert_summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
         latest_alert=None,
         latest_activity=None,
@@ -11332,7 +11247,6 @@ def _normalize_compare_tickers(value: str | None) -> list[str]:
 
 def _build_company_compare_item(
     session: Session,
-    background_tasks: BackgroundTasks,
     ticker: str,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -11341,7 +11255,7 @@ def _build_company_compare_item(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = snapshot or _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyCompareItemPayload(
             ticker=normalized_ticker,
             financials=_apply_requested_as_of(
@@ -11386,7 +11300,7 @@ def _build_company_compare_item(
 
     financials = _visible_financials_for_company(session, snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
     compare_financials = financials
     compare_price_history = price_history
@@ -11426,7 +11340,7 @@ def _build_company_compare_item(
         metric_rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
         last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
         if not metric_rows:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
                 staleness_reason = "metrics_missing"
         summary = build_summary_payload(metric_rows, "ttm")

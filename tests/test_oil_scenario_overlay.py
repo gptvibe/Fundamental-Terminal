@@ -170,7 +170,7 @@ def test_oil_scenario_overlay_returns_stale_payload_and_queues_revalidation(monk
     monkeypatch.setattr(
         main_module,
         "queue_company_refresh",
-        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-stale",
+        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-stale",
     )
 
     with _client() as client:
@@ -193,7 +193,7 @@ def test_oil_scenario_overlay_returns_placeholder_shell_when_dataset_missing(mon
     monkeypatch.setattr(
         main_module,
         "queue_company_refresh",
-        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-missing",
+        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-missing",
     )
 
     with _client() as client:
