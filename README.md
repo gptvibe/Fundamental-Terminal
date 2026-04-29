@@ -81,6 +81,7 @@ The default compose file pulls the published images from Docker Hub.
 
 ```bash
 cp .env.example .env
+# Edit .env and set required secrets (at minimum POSTGRES_PASSWORD and DATABASE_URL).
 docker compose pull
 docker compose up -d
 python scripts/verify_deployment_compat.py --backend-url http://127.0.0.1:8000 --frontend-url http://127.0.0.1:3000 --ticker AAPL
@@ -136,7 +137,7 @@ The small-host override keeps the main compose defaults unchanged for larger mac
 Install backend dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 Install frontend dependencies:
@@ -164,6 +165,7 @@ Set local environment variables and start the backend:
 set DATABASE_URL=postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals
 set REDIS_URL=redis://localhost:6379/0
 set SEC_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
+set MARKET_USER_AGENT=FundamentalTerminal/1.0 (contact@example.com)
 uvicorn app.main:app --reload
 ```
 
@@ -186,6 +188,12 @@ The app now includes:
 - `/health` component checks for API, DB, Redis/cache backend, worker heartbeat visibility, and SEC upstream reachability
 - security headers on backend responses and frontend pages
 - a migration safety guard that runs before backend container migrations
+
+The public API limiter uses its own Redis key namespace by default:
+
+- `RATE_LIMIT_NAMESPACE=ft:rate-limit`
+
+That namespace is intentionally separate from `HOT_RESPONSE_CACHE_NAMESPACE` so hot-cache flushes do not wipe rate-limit counters unless you explicitly point them back at the same prefix.
 
 Operator guides:
 
@@ -262,6 +270,7 @@ Useful diagnostics endpoints:
 Backend tests:
 
 ```bash
+pip install -r requirements-dev.txt
 python -m pytest
 ```
 

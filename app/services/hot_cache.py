@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -15,6 +16,9 @@ from app.config import settings
 from app.observability import emit_structured_log, observe_redis_call, record_cache_event, record_singleflight_wait
 
 logger = logging.getLogger(__name__)
+
+_REDIS_RECONNECT_INITIAL_BACKOFF_SECONDS = 1.0
+_REDIS_RECONNECT_MAX_BACKOFF_SECONDS = 30.0
 
 try:
     import orjson
@@ -77,6 +81,9 @@ class SharedHotResponseCache:
         self._last_fallback_error: str | None = None
         self._last_fallback_at: datetime | None = None
         self._logged_runtime_fallback_operations: set[str] = set()
+        self._redis_reconnect_lock = threading.Lock()
+        self._redis_reconnect_backoff_seconds = _REDIS_RECONNECT_INITIAL_BACKOFF_SECONDS
+        self._redis_reconnect_not_before = 0.0
         self._redis = None
         self._redis_async = None
         self._redis, self._redis_async = self._build_redis_clients()
@@ -111,6 +118,7 @@ class SharedHotResponseCache:
         return f"asof:{normalized}"
 
     async def get(self, logical_key: str, *, route: str | None = None) -> HotCacheLookup | None:
+        self._maybe_reconnect_redis(trigger="get")
         resolved_route = route or _route_from_logical_key(logical_key)
         lookup = await self._read_entry(logical_key)
         if lookup is None:
@@ -137,6 +145,7 @@ class SharedHotResponseCache:
         payload: dict[str, Any],
         tags: tuple[str, ...] = (),
     ) -> None:
+        self._maybe_reconnect_redis(trigger="store")
         resolved_route = route or _route_from_logical_key(logical_key)
         normalized_tags = tuple(sorted({tag for tag in tags if tag}))
         stored_at = time.time()
@@ -186,6 +195,7 @@ class SharedHotResponseCache:
         tags: tuple[str, ...] = (),
         fill: Callable[[], Any],
     ) -> dict[str, Any]:
+        self._maybe_reconnect_redis(trigger="fill_or_get")
         resolved_route = route or _route_from_logical_key(logical_key)
         cached = await self._read_entry(logical_key)
         if cached is not None:
@@ -236,6 +246,7 @@ class SharedHotResponseCache:
         schema_version: str | None = None,
         as_of: str | None = None,
     ) -> dict[str, Any]:
+        self._maybe_reconnect_redis(trigger="invalidate")
         tags = self._build_invalidation_tags(
             ticker=ticker,
             dataset=dataset,
@@ -282,6 +293,7 @@ class SharedHotResponseCache:
         }
 
     async def snapshot_metrics(self) -> dict[str, Any]:
+        self._maybe_reconnect_redis(trigger="snapshot_metrics")
         metrics = await self._snapshot_metrics()
         overall = _compute_metric_summary(metrics.get("overall", {}))
         routes = {
@@ -308,6 +320,7 @@ class SharedHotResponseCache:
         }
 
     async def clear(self) -> None:
+        self._maybe_reconnect_redis(trigger="clear")
         async with self._inflight_lock:
             for inflight in self._inflight.values():
                 inflight.event.set()
@@ -408,6 +421,7 @@ class SharedHotResponseCache:
         *,
         route: str | None = None,
     ) -> HotCacheLookup | None:
+        self._maybe_reconnect_redis(trigger="get_sync")
         resolved_route = route or _route_from_logical_key(logical_key)
         lookup = self._read_entry_sync(logical_key)
         if lookup is None:
@@ -431,6 +445,7 @@ class SharedHotResponseCache:
         payload: dict[str, Any],
         tags: tuple[str, ...] = (),
     ) -> None:
+        self._maybe_reconnect_redis(trigger="store_sync")
         resolved_route = route or _route_from_logical_key(logical_key)
         normalized_tags = tuple(sorted({tag for tag in tags if tag}))
         stored_at = time.time()
@@ -476,6 +491,7 @@ class SharedHotResponseCache:
         schema_version: str | None = None,
         as_of: str | None = None,
     ) -> dict[str, Any]:
+        self._maybe_reconnect_redis(trigger="invalidate_sync")
         tags = self._build_invalidation_tags(
             ticker=ticker,
             dataset=dataset,
@@ -509,6 +525,22 @@ class SharedHotResponseCache:
             "invalidated_keys": deleted,
         }
 
+    def _create_redis_clients(self):
+        sync_client = redis.Redis.from_url(
+            settings.redis_url,
+            decode_responses=False,
+            socket_timeout=0.5,
+            socket_connect_timeout=0.5,
+        )
+        sync_client.ping()
+        async_client = redis_async.Redis.from_url(
+            settings.redis_url,
+            decode_responses=False,
+            socket_timeout=0.5,
+            socket_connect_timeout=0.5,
+        )
+        return sync_client, async_client
+
     def _build_redis_clients(self):
         if redis is None or redis_async is None:
             self._startup_backend_reason = "redis_dependency_missing"
@@ -519,19 +551,7 @@ class SharedHotResponseCache:
             )
             return None, None
         try:
-            sync_client = redis.Redis.from_url(
-                settings.redis_url,
-                decode_responses=False,
-                socket_timeout=0.5,
-                socket_connect_timeout=0.5,
-            )
-            sync_client.ping()
-            async_client = redis_async.Redis.from_url(
-                settings.redis_url,
-                decode_responses=False,
-                socket_timeout=0.5,
-                socket_connect_timeout=0.5,
-            )
+            sync_client, async_client = self._create_redis_clients()
             self._startup_backend_reason = "redis_connected"
             self._emit_backend_log(
                 level=logging.INFO,
@@ -551,6 +571,40 @@ class SharedHotResponseCache:
                 error=self._last_fallback_error,
             )
             return None, None
+
+    def _maybe_reconnect_redis(self, *, trigger: str) -> None:
+        if not self._redis_configured:
+            return
+        if self._redis is not None and self._redis_async is not None:
+            return
+        if redis is None or redis_async is None:
+            return
+
+        now = time.monotonic()
+        with self._redis_reconnect_lock:
+            if self._redis is not None and self._redis_async is not None:
+                return
+            if now < self._redis_reconnect_not_before:
+                return
+
+            try:
+                sync_client, async_client = self._create_redis_clients()
+            except Exception as exc:
+                self._redis = None
+                self._redis_async = None
+                self._redis_reconnect_not_before = time.monotonic() + self._redis_reconnect_backoff_seconds
+                self._redis_reconnect_backoff_seconds = min(
+                    self._redis_reconnect_backoff_seconds * 2,
+                    _REDIS_RECONNECT_MAX_BACKOFF_SECONDS,
+                )
+                self._note_runtime_fallback(operation="reconnect", exc=exc, log_once=False)
+                return
+
+            self._redis = sync_client
+            self._redis_async = async_client
+            self._redis_reconnect_backoff_seconds = _REDIS_RECONNECT_INITIAL_BACKOFF_SECONDS
+            self._redis_reconnect_not_before = 0.0
+            self._note_backend_recovered(trigger=trigger)
 
     async def _fill_or_wait_remote(
         self,
@@ -1182,6 +1236,26 @@ class SharedHotResponseCache:
             recommended_checks=backend_status["recommended_checks"],
             fallback_reason=self._last_fallback_reason,
             error=self._last_fallback_error,
+            redis_configured=self._redis_configured,
+            shared=self.is_shared,
+        )
+
+    def _note_backend_recovered(self, *, trigger: str) -> None:
+        backend_status = self._backend_status()
+        emit_structured_log(
+            logger,
+            "shared_hot_cache.backend_recovered",
+            level=logging.INFO,
+            backend=self.backend,
+            backend_mode=self.backend_mode,
+            cache_scope="cross-instance" if self.is_shared else "process-local",
+            trigger=trigger,
+            status=backend_status["status"],
+            summary=backend_status["summary"],
+            operational_impact=backend_status["operational_impact"],
+            recommended_checks=backend_status["recommended_checks"],
+            fallback_reason=self._last_fallback_reason,
+            fallback_events_total=self._fallback_events_total,
             redis_configured=self._redis_configured,
             shared=self.is_shared,
         )
