@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 from app.services.status_stream import JobEvent
 
 
@@ -50,7 +51,9 @@ def test_job_event_stream_route_delivers_terminal_backlog_and_cleans_up(monkeypa
             payload = json.dumps(event.to_payload(job_id))
             return f"event: status\ndata: {payload}\n\n"
 
-    monkeypatch.setattr(main_module, "status_broker", _FakeBroker())
+    _fake_broker = _FakeBroker()
+    monkeypatch.setattr(main_module, "status_broker", _fake_broker)
+    monkeypatch.setattr(_shared_handlers, "status_broker", _fake_broker)
 
     client = TestClient(app)
     with client.stream("GET", "/api/jobs/job-1/events") as response:

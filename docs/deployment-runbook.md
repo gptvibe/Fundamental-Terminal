@@ -15,6 +15,11 @@ Required core settings:
 - `REDIS_URL`
 - `SEC_USER_AGENT`
 
+Optional market-data overrides:
+
+- `MARKET_USER_AGENT` (falls back to `SEC_USER_AGENT` if unset)
+- `MARKET_TIMEOUT_SECONDS` (falls back to `SEC_TIMEOUT_SECONDS` if unset)
+
 Optional external integrations:
 
 - `FRED_API_KEY`
@@ -32,6 +37,7 @@ Optional security settings:
 - `API_RATE_LIMIT_ENABLED`
 - `API_RATE_LIMIT_REQUESTS`
 - `API_RATE_LIMIT_WINDOW_SECONDS`
+- `RATE_LIMIT_NAMESPACE`
 
 ## Auth Integration Points
 
@@ -64,22 +70,24 @@ For proxy-auth deployments, prefer terminating auth at the edge and forwarding o
 ## First Deployment
 
 1. Copy `.env.example` to `.env`.
-2. Set `SEC_USER_AGENT` to a real operator contact.
+2. Set `SEC_USER_AGENT` to a real operator contact, and set `MARKET_USER_AGENT` too if you want a separate identifier for Yahoo or other market-data providers.
 3. Decide whether auth should stay off, use a bearer token, or trust a reverse proxy header.
 4. Decide whether the default public API rate limit is acceptable.
-5. Start the stack:
+5. Leave `RATE_LIMIT_NAMESPACE=ft:rate-limit` unless you intentionally need a custom Redis key prefix for rate-limit counters.
+6. Keep `API_RATE_LIMIT_TRUST_PROXY=false` unless a trusted reverse proxy sits in front of the API and rewrites `X-Forwarded-For`; only set it to `true` in that deployment model.
+7. Start the stack:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
 
-6. Verify the deployment:
+8. Verify the deployment:
 
 ```bash
 python scripts/verify_deployment_compat.py --backend-url http://127.0.0.1:8000 --frontend-url http://127.0.0.1:3000 --ticker AAPL
 ```
 
-7. Check health manually:
+9. Check health manually:
 
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/readyz`

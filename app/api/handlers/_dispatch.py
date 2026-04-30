@@ -1,44 +1,168 @@
 from __future__ import annotations
 
-import importlib
-import inspect
-from functools import wraps
-from typing import Any
+from typing import Any, Callable
 
-from app.api.handlers import _shared
+from app.api.handlers.company_overview import company_brief, company_overview, company_peers, company_workspace_bootstrap
+from app.api.handlers._shared import (
+    cache_metrics,
+    company_activity_feed,
+    company_activity_overview,
+    company_alerts,
+    company_beneficial_ownership,
+    company_beneficial_ownership_summary,
+    company_capital_markets,
+    company_capital_markets_summary,
+    company_capital_raises,
+    company_capital_structure,
+    company_changes_since_last_filing,
+    company_charts,
+    company_charts_forecast_accuracy,
+    company_charts_scenario_clone,
+    company_charts_scenario_create,
+    company_charts_scenario_detail,
+    company_charts_scenario_update,
+    company_charts_scenarios,
+    company_charts_share_snapshot_create,
+    company_charts_share_snapshot_detail,
+    company_charts_what_if,
+    company_comment_letters,
+    company_compare,
+    company_derived_metrics,
+    company_derived_metrics_summary,
+    company_earnings,
+    company_earnings_summary,
+    company_earnings_workspace,
+    company_equity_claim_risk,
+    company_events,
+    company_filing_events,
+    company_filing_events_summary,
+    company_filing_insights,
+    company_filing_view,
+    company_filings,
+    company_financial_history,
+    company_financial_restatements,
+    company_financials,
+    company_form144_filings,
+    company_insider_trades,
+    company_institutional_holdings,
+    company_institutional_holdings_summary,
+    company_market_context,
+    company_metrics_timeseries,
+    company_models,
+    company_oil_scenario,
+    company_oil_scenario_overlay,
+    company_sector_context,
+    company_segment_history,
+    filings_timeline,
+    get_formula,
+    global_market_context,
+    healthcheck,
+    insider_analytics,
+    invalidate_cache_metrics,
+    latest_model_evaluation,
+    list_formulas,
+    observability_snapshot,
+    official_screener_filters,
+    official_screener_search,
+    ownership_analytics,
+    performance_audit_snapshot,
+    pool_status,
+    readiness_check,
+    refresh_company,
+    reset_performance_audit,
+    resolve_company_identifier,
+    search_companies,
+    search_filings,
+    source_registry,
+    stream_job_events,
+    watchlist_calendar,
+    watchlist_summary,
+)
 
 
-def _should_call_wrapped_target(target: Any, exported: Any) -> bool:
-    wrapped = getattr(target, "__wrapped__", None)
-    if wrapped is None:
-        return False
-    if not inspect.iscoroutinefunction(target) or inspect.iscoroutinefunction(exported):
-        return False
-    if not inspect.isfunction(wrapped) or not inspect.isfunction(exported):
-        return False
-    return exported.__code__ is wrapped.__code__
+ROUTE_HANDLERS: dict[str, Callable[..., Any]] = {
+    "cache_metrics": cache_metrics,
+    "company_activity_feed": company_activity_feed,
+    "company_activity_overview": company_activity_overview,
+    "company_alerts": company_alerts,
+    "company_beneficial_ownership": company_beneficial_ownership,
+    "company_beneficial_ownership_summary": company_beneficial_ownership_summary,
+    "company_brief": company_brief,
+    "company_capital_markets": company_capital_markets,
+    "company_capital_markets_summary": company_capital_markets_summary,
+    "company_capital_raises": company_capital_raises,
+    "company_capital_structure": company_capital_structure,
+    "company_changes_since_last_filing": company_changes_since_last_filing,
+    "company_charts": company_charts,
+    "company_charts_forecast_accuracy": company_charts_forecast_accuracy,
+    "company_charts_scenario_clone": company_charts_scenario_clone,
+    "company_charts_scenario_create": company_charts_scenario_create,
+    "company_charts_scenario_detail": company_charts_scenario_detail,
+    "company_charts_scenario_update": company_charts_scenario_update,
+    "company_charts_scenarios": company_charts_scenarios,
+    "company_charts_share_snapshot_create": company_charts_share_snapshot_create,
+    "company_charts_share_snapshot_detail": company_charts_share_snapshot_detail,
+    "company_charts_what_if": company_charts_what_if,
+    "company_comment_letters": company_comment_letters,
+    "company_compare": company_compare,
+    "company_derived_metrics": company_derived_metrics,
+    "company_derived_metrics_summary": company_derived_metrics_summary,
+    "company_earnings": company_earnings,
+    "company_earnings_summary": company_earnings_summary,
+    "company_earnings_workspace": company_earnings_workspace,
+    "company_equity_claim_risk": company_equity_claim_risk,
+    "company_events": company_events,
+    "company_filing_events": company_filing_events,
+    "company_filing_events_summary": company_filing_events_summary,
+    "company_filing_insights": company_filing_insights,
+    "company_filing_view": company_filing_view,
+    "company_filings": company_filings,
+    "company_financial_history": company_financial_history,
+    "company_financial_restatements": company_financial_restatements,
+    "company_financials": company_financials,
+    "company_form144_filings": company_form144_filings,
+    "company_insider_trades": company_insider_trades,
+    "company_institutional_holdings": company_institutional_holdings,
+    "company_institutional_holdings_summary": company_institutional_holdings_summary,
+    "company_market_context": company_market_context,
+    "company_metrics_timeseries": company_metrics_timeseries,
+    "company_models": company_models,
+    "company_oil_scenario": company_oil_scenario,
+    "company_oil_scenario_overlay": company_oil_scenario_overlay,
+    "company_overview": company_overview,
+    "company_peers": company_peers,
+    "company_sector_context": company_sector_context,
+    "company_segment_history": company_segment_history,
+    "company_workspace_bootstrap": company_workspace_bootstrap,
+    "filings_timeline": filings_timeline,
+    "get_formula": get_formula,
+    "global_market_context": global_market_context,
+    "healthcheck": healthcheck,
+    "insider_analytics": insider_analytics,
+    "invalidate_cache_metrics": invalidate_cache_metrics,
+    "latest_model_evaluation": latest_model_evaluation,
+    "list_formulas": list_formulas,
+    "observability_snapshot": observability_snapshot,
+    "official_screener_filters": official_screener_filters,
+    "official_screener_search": official_screener_search,
+    "ownership_analytics": ownership_analytics,
+    "performance_audit_snapshot": performance_audit_snapshot,
+    "pool_status": pool_status,
+    "readiness_check": readiness_check,
+    "refresh_company": refresh_company,
+    "reset_performance_audit": reset_performance_audit,
+    "resolve_company_identifier": resolve_company_identifier,
+    "search_companies": search_companies,
+    "search_filings": search_filings,
+    "source_registry": source_registry,
+    "stream_job_events": stream_job_events,
+    "watchlist_calendar": watchlist_calendar,
+    "watchlist_summary": watchlist_summary,
+}
 
 
-def route_handler(name: str):
-    target = getattr(_shared, name)
-    target_signature = inspect.signature(target)
-    if inspect.iscoroutinefunction(target):
-        @wraps(target)
-        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            main_module = importlib.import_module("app.main")
-            exported = getattr(main_module, name)
-            result = target(*args, **kwargs) if _should_call_wrapped_target(target, exported) else exported(*args, **kwargs)
-            if inspect.isawaitable(result):
-                return await result
-            return result
-
-        async_wrapper.__signature__ = target_signature  # type: ignore[attr-defined]
-        return async_wrapper
-
-    @wraps(target)
-    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-        main_module = importlib.import_module("app.main")
-        return getattr(main_module, name)(*args, **kwargs)
-
-    sync_wrapper.__signature__ = target_signature  # type: ignore[attr-defined]
-    return sync_wrapper
+def route_handler(name: str) -> Callable[..., Any]:
+    try:
+        return ROUTE_HANDLERS[name]
+    except KeyError as exc:
+        raise AttributeError(f"Unknown route handler: {name}") from exc

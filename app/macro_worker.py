@@ -6,6 +6,9 @@ from app.observability import observe_worker_job
 from app.services.market_context import run_market_context_refresh_job
 
 
+logger = logging.getLogger(__name__)
+
+
 def macro_worker_main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
@@ -17,6 +20,7 @@ def macro_worker_main() -> int:
             run_market_context_refresh_job()
         return 0
     except Exception:
+        logger.exception("Macro worker failed")
         return 1
 
 

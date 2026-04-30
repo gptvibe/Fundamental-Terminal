@@ -49,12 +49,12 @@ class SecHttpCache:
                 return None
             expires_at = entry.payload.get("expires_at")
             if expires_at is not None and time.time() >= float(expires_at):
-                logger.info("CACHE MISS %s", entry.normalized_url)
+                logger.debug("CACHE MISS %s", entry.normalized_url)
                 return None
-            logger.info("CACHE HIT %s", entry.normalized_url)
+            logger.debug("CACHE HIT %s", entry.normalized_url)
             return _response_from_payload(method, entry.normalized_url, entry.payload)
         except Exception:
-            logger.info("CACHE MISS %s", _normalized_url(url, params=params))
+            logger.debug("CACHE MISS %s", _normalized_url(url, params=params))
             return None
 
     def get_stale(self, method: str, url: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> CachedResponseEntry | None:
@@ -65,7 +65,7 @@ class SecHttpCache:
         normalized_url = _normalized_url(url, params=params)
         cache_path = self._cache_path(policy, normalized_url)
         if not cache_path.exists():
-            logger.info("CACHE MISS %s", normalized_url)
+            logger.debug("CACHE MISS %s", normalized_url)
             return None
 
         try:
@@ -77,7 +77,7 @@ class SecHttpCache:
                 payload=payload,
             )
         except Exception:
-            logger.info("CACHE MISS %s", normalized_url)
+            logger.debug("CACHE MISS %s", normalized_url)
             return None
 
     def cache_key(self, method: str, url: str, *, params: dict[str, Any] | None = None) -> str | None:

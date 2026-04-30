@@ -30,7 +30,7 @@ class PublicRouteRateLimiter:
         self._enabled = settings.api_rate_limit_enabled
         self._limit = settings.api_rate_limit_requests
         self._window_seconds = settings.api_rate_limit_window_seconds
-        self._namespace = f"{settings.hot_response_cache_namespace}:rate-limit"
+        self._namespace = settings.rate_limit_namespace
         self._local_lock = threading.Lock()
         self._local_counts: dict[str, tuple[int, int]] = {}
         self._redis = self._build_redis_client()

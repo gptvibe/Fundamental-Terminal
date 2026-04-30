@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
+
+import pytest
 
 from app.observability import reset_worker_observations, snapshot_worker_observations
 import app.worker as worker_module
@@ -134,3 +137,42 @@ def test_queue_worker_emits_failed_refresh_metric(monkeypatch) -> None:
     assert snapshot["totals"]["failed_refresh_count"] == 1
     assert snapshot["records"][0]["status"] == "failed"
     assert snapshot["records"][0]["ticker"] == "AAPL"
+
+
+def test_queue_worker_uses_sleep_for_non_blocking_idle_poll(monkeypatch) -> None:
+    class _StopLoop(RuntimeError):
+        pass
+
+    real_event_type = threading.Event
+
+    class _CountingEvent:
+        allocations = 0
+
+        def __init__(self) -> None:
+            type(self).allocations += 1
+            self._event = real_event_type()
+
+        def wait(self, timeout: float | None = None) -> bool:
+            return self._event.wait(timeout)
+
+        def set(self) -> None:
+            self._event.set()
+
+    broker = _FakeBroker([None])
+    broker.has_blocking_queue = False
+    sleep_calls: list[float] = []
+
+    def _sleep(interval: float) -> None:
+        sleep_calls.append(interval)
+        raise _StopLoop()
+
+    monkeypatch.setattr(worker_module, "status_broker", broker)
+    monkeypatch.setattr(worker_module.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(worker_module.threading, "Event", _CountingEvent)
+    monkeypatch.setattr(worker_module.time, "sleep", _sleep)
+
+    with pytest.raises(_StopLoop):
+        worker_module.run_refresh_queue_worker(poll_interval_seconds=0.25, once=False)
+
+    assert sleep_calls == [0.25]
+    assert _CountingEvent.allocations == 1

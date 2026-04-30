@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from fastapi import BackgroundTasks
-
 import app.main as main_module
 
 
@@ -13,7 +11,7 @@ def test_company_charts_returns_bootstrap_payload_for_uncached_ticker_when_inlin
     monkeypatch.setattr(
         main_module,
         "_trigger_refresh",
-        lambda background_tasks, ticker, reason: main_module.RefreshState(
+        lambda ticker, reason: main_module.RefreshState(
             triggered=True,
             reason=reason,
             ticker=ticker,
@@ -21,7 +19,7 @@ def test_company_charts_returns_bootstrap_payload_for_uncached_ticker_when_inlin
         ),
     )
 
-    response = main_module.company_charts("acme", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_charts("acme", as_of=None, session=object())
 
     assert response.build_state == "building"
     assert response.build_status == "No persisted company snapshot is available yet. A refresh has been queued to build the first charts dashboard."
@@ -38,13 +36,13 @@ def test_company_charts_queues_refresh_for_uncached_ticker_instead_of_refreshing
     monkeypatch.setattr(
         main_module,
         "_trigger_refresh",
-        lambda background_tasks, ticker, reason: (
+        lambda ticker, reason: (
             trigger_calls.append((ticker, reason))
             or main_module.RefreshState(triggered=True, reason=reason, ticker=ticker, job_id="job-charts-missing")
         ),
     )
 
-    response = main_module.company_charts("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_charts("ACME", as_of=None, session=object())
 
     assert response.build_state == "building"
     assert response.build_status == "No persisted company snapshot is available yet. A refresh has been queued to build the first charts dashboard."
@@ -139,7 +137,7 @@ def test_company_charts_returns_persisted_payload_when_snapshot_exists(monkeypat
         ),
     )
 
-    response = main_module.company_charts("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_charts("ACME", as_of=None, session=object())
 
     assert response.build_state == "ready"
     assert response.build_status == "Charts dashboard ready."
@@ -211,7 +209,7 @@ def test_company_charts_builds_inline_when_snapshot_missing(monkeypatch):
     monkeypatch.setattr(main_module, "get_company_charts_dashboard_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr(main_module, "recompute_and_persist_company_charts_dashboard", lambda *args, **kwargs: generated_payload)
 
-    response = main_module.company_charts("ACME", BackgroundTasks(), as_of=None, session=session)
+    response = main_module.company_charts("ACME", as_of=None, session=session)
 
     assert response.build_state == "ready"
     assert response.summary.primary_score.score == 84
@@ -314,7 +312,7 @@ def test_company_charts_rebuilds_when_persisted_snapshot_uses_legacy_hash_payloa
     monkeypatch.setattr(main_module, "_trigger_refresh", lambda *_args, **_kwargs: refresh)
     monkeypatch.setattr(main_module, "recompute_and_persist_company_charts_dashboard", lambda *args, **kwargs: rebuilt_payload)
 
-    response = main_module.company_charts("ACME", BackgroundTasks(), as_of=None, session=session)
+    response = main_module.company_charts("ACME", as_of=None, session=session)
 
     assert response.payload_version == "company_charts_dashboard_v9"
     assert response.summary.primary_score.score == 84
@@ -406,7 +404,6 @@ def test_company_charts_what_if_builds_stateless_response_without_db_writes(monk
 
     response = main_module.company_charts_what_if(
         "ACME",
-        BackgroundTasks(),
         payload=main_module.CompanyChartsWhatIfRequest(overrides={"dso": 60.0}),
         as_of=None,
         session=session,
@@ -488,7 +485,6 @@ def test_company_charts_what_if_defaults_to_empty_overrides_when_payload_missing
 
     response = main_module.company_charts_what_if(
         "ACME",
-        BackgroundTasks(),
         payload=None,
         as_of=None,
         session=session,

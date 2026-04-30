@@ -55,8 +55,8 @@ def _run_scenario(*, rounds: int, ttl_seconds: int) -> dict[str, Any]:
     try:
         market_data_module.settings = SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="benchmark-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="benchmark-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=ttl_seconds,

@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 import pytest
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
+from app.api.handlers import market_context as _market_context_handlers
 from app.main import RefreshState, app
 import app.services.market_context as market_context_module
 
@@ -163,16 +165,13 @@ def test_market_context_client_uses_fred_curve_when_treasury_csv_fails(monkeypat
 def test_company_market_context_route_returns_payload(monkeypatch):
     from app.db import get_db_session
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(
-        main_module,
-        "_refresh_for_snapshot",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
-    )
-    monkeypatch.setattr(
-        main_module,
-        "_serialize_company",
-        lambda *_args, **_kwargs: {
+    _snapshot_fn = lambda *_args, **_kwargs: _snapshot()
+    _refresh_fn = lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None)
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", _snapshot_fn)
+    monkeypatch.setattr(_shared_handlers, "_resolve_cached_company_snapshot", _snapshot_fn)
+    monkeypatch.setattr(main_module, "_refresh_for_snapshot", _refresh_fn)
+    monkeypatch.setattr(_shared_handlers, "_refresh_for_snapshot", _refresh_fn)
+    _serialize_company_fn = lambda *_args, **_kwargs: {
             "ticker": "AAPL",
             "cik": "0000320193",
             "name": "Apple Inc.",
@@ -186,10 +185,11 @@ def test_company_market_context_route_returns_payload(monkeypatch):
             "last_checked_institutional": None,
             "last_checked_filings": None,
             "cache_state": "fresh",
-        },
-    )
+        }
+    monkeypatch.setattr(main_module, "_serialize_company", _serialize_company_fn)
+    monkeypatch.setattr(_shared_handlers, "_serialize_company", _serialize_company_fn)
     monkeypatch.setattr(
-        main_module,
+        _market_context_handlers,
         "get_company_market_context_v2",
         lambda *_args, **_kwargs: {
             "status": "partial",
@@ -301,16 +301,9 @@ def test_company_market_context_route_returns_payload(monkeypatch):
 def test_company_market_context_route_skips_malformed_cached_sections(monkeypatch):
     from app.db import get_db_session
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(
-        main_module,
-        "_refresh_for_snapshot",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
-    )
-    monkeypatch.setattr(
-        main_module,
-        "_serialize_company",
-        lambda *_args, **_kwargs: {
+    _snapshot_fn = lambda *_args, **_kwargs: _snapshot()
+    _refresh_fn = lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None)
+    _serialize_company_fn = lambda *_args, **_kwargs: {
             "ticker": "AAPL",
             "cik": "0000320193",
             "name": "Apple Inc.",
@@ -324,10 +317,16 @@ def test_company_market_context_route_skips_malformed_cached_sections(monkeypatc
             "last_checked_institutional": None,
             "last_checked_filings": None,
             "cache_state": "fresh",
-        },
-    )
+        }
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", _snapshot_fn)
+    monkeypatch.setattr(_shared_handlers, "_resolve_cached_company_snapshot", _snapshot_fn)
+    monkeypatch.setattr(main_module, "_refresh_for_snapshot", _refresh_fn)
+    monkeypatch.setattr(_shared_handlers, "_refresh_for_snapshot", _refresh_fn)
+    monkeypatch.setattr(main_module, "_serialize_company", _serialize_company_fn)
+    monkeypatch.setattr(_shared_handlers, "_serialize_company", _serialize_company_fn)
     monkeypatch.setattr(
-        main_module,
+        _market_context_handlers,
         "get_company_market_context_v2",
         lambda *_args, **_kwargs: {
             "status": "partial",
