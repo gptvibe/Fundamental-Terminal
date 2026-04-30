@@ -28,7 +28,223 @@ from starlette.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import *
+from app.api.schemas import (
+    ActivityFeedEntryPayload,
+    AlertPayload,
+    AlertsSummaryPayload,
+    BeneficialOwnershipFilingPayload,
+    BeneficialOwnershipPartyPayload,
+    BeneficialOwnershipSummaryPayload,
+    CapitalMarketsSummaryPayload,
+    CapitalRaisePayload,
+    CapitalStructureCapitalReturnsPayload,
+    CapitalStructureDebtMaturityPayload,
+    CapitalStructureDebtRollforwardPayload,
+    CapitalStructureInterestBurdenPayload,
+    CapitalStructureLeaseObligationsPayload,
+    CapitalStructureNetDilutionBridgePayload,
+    CapitalStructureSnapshotPayload,
+    CapitalStructureSummaryPayload,
+    ChangesSinceLastFilingSummaryPayload,
+    CommentLetterPayload,
+    CompanyActivityFeedResponse,
+    CompanyActivityOverviewResponse,
+    CompanyAlertsResponse,
+    CompanyBeneficialOwnershipResponse,
+    CompanyBeneficialOwnershipSummaryResponse,
+    CompanyCapitalMarketsSummaryResponse,
+    CompanyCapitalRaisesResponse,
+    CompanyCapitalStructureResponse,
+    CompanyChangesSinceLastFilingResponse,
+    CompanyChartsAssumptionsCardPayload,
+    CompanyChartsCardPayload,
+    CompanyChartsCardsPayload,
+    CompanyChartsComparisonCardPayload,
+    CompanyChartsDashboardResponse,
+    CompanyChartsFactorValuePayload,
+    CompanyChartsFactorsPayload,
+    CompanyChartsForecastAccuracyAggregatePayload,
+    CompanyChartsForecastAccuracyResponse,
+    CompanyChartsLegendItemPayload,
+    CompanyChartsLegendPayload,
+    CompanyChartsMethodologyPayload,
+    CompanyChartsScenarioCloneRequest,
+    CompanyChartsScenarioDetailPayload,
+    CompanyChartsScenarioListResponse,
+    CompanyChartsScenarioUpsertRequest,
+    CompanyChartsScenarioViewerPayload,
+    CompanyChartsScoreBadgePayload,
+    CompanyChartsSeriesPayload,
+    CompanyChartsSeriesPointPayload,
+    CompanyChartsShareSnapshotPayload,
+    CompanyChartsShareSnapshotRecordPayload,
+    CompanyChartsSummaryPayload,
+    CompanyChartsWhatIfImpactMetricPayload,
+    CompanyChartsWhatIfImpactSummaryPayload,
+    CompanyChartsWhatIfOverridePayload,
+    CompanyChartsWhatIfPayload,
+    CompanyChartsWhatIfRequest,
+    CompanyCommentLettersResponse,
+    CompanyCompareItemPayload,
+    CompanyCompareResponse,
+    CompanyDerivedMetricsResponse,
+    CompanyDerivedMetricsSummaryResponse,
+    CompanyEarningsResponse,
+    CompanyEarningsSummaryResponse,
+    CompanyEarningsWorkspaceResponse,
+    CompanyEquityClaimRiskResponse,
+    EquityClaimRiskSummaryPayload,
+    CompanyEventsResponse,
+    CompanyExecutiveCompensationResponse,
+    CompanyFactsResponse,
+    CompanyFilingEventsSummaryResponse,
+    CompanyFilingInsightsResponse,
+    CompanyFilingsResponse,
+    CompanyFinancialRestatementsResponse,
+    CompanyFinancialsResponse,
+    CompanyForm144Response,
+    CompanyGovernanceResponse,
+    CompanyGovernanceSummaryResponse,
+    CompanyInsiderTradesResponse,
+    CompanyInstitutionalHoldingsResponse,
+    CompanyInstitutionalHoldingsSummaryResponse,
+    CompanyMarketContextResponse,
+    CompanyMetricsTimeseriesResponse,
+    CompanyModelsResponse,
+    CompanyOilScenarioOverlayResponse,
+    CompanyOilScenarioResponse,
+    CompanyOverviewResponse,
+    CompanyPayload,
+    CompanyPeersResponse,
+    CompanyResearchBriefBusinessQualitySection,
+    CompanyResearchBriefCapitalAndRiskSection,
+    CompanyResearchBriefMonitorSection,
+    CompanyResearchBriefResponse,
+    CompanyResearchBriefSnapshotSection,
+    CompanyResearchBriefValuationSection,
+    CompanyResearchBriefWhatChangedSection,
+    CompanyResolutionResponse,
+    CompanySearchResponse,
+    CompanySectorContextResponse,
+    CompanySegmentHistoryResponse,
+    CompanyWorkspaceBootstrapErrorsPayload,
+    CompanyWorkspaceBootstrapResponse,
+    DataQualityDiagnosticsPayload,
+    DatabasePoolStatusResponse,
+    DerivedMetricPeriodPayload,
+    DerivedMetricValuePayload,
+    EarningsAlertPayload,
+    EarningsBacktestPayload,
+    EarningsModelExplainabilityPayload,
+    EarningsModelInputPayload,
+    EarningsModelPointPayload,
+    EarningsPeerContextPayload,
+    EarningsReleasePayload,
+    EarningsSummaryPayload,
+    ExecCompRowPayload,
+    FilingEventPayload,
+    FilingEventsSummaryPayload,
+    FilingParserControlsPayload,
+    FilingParserInsightPayload,
+    FilingParserNonGaapPayload,
+    FilingParserSectionPayload,
+    FilingParserSegmentPayload,
+    FilingPayload,
+    FilingSearchResultPayload,
+    FilingTimelineItemPayload,
+    FinancialFactReferencePayload,
+    FinancialPayload,
+    FinancialReconciliationComparisonPayload,
+    FinancialReconciliationPayload,
+    FinancialRestatementConfidenceImpactPayload,
+    FinancialRestatementMetricChangePayload,
+    FinancialRestatementPayload,
+    FinancialRestatementPeriodSummaryPayload,
+    FinancialRestatementSummaryPayload,
+    FinancialSegmentPayload,
+    Form144FilingPayload,
+    FormulaListResponse,
+    FormulaMetadataPayload,
+    FormulaSummaryPayload,
+    GovernanceFilingPayload,
+    GovernanceSummaryPayload,
+    GovernanceVoteOutcomePayload,
+    InsiderActivityMetricsPayload,
+    InsiderActivitySummaryPayload,
+    InsiderAnalyticsResponse,
+    InsiderTradePayload,
+    InstitutionalHoldingPayload,
+    InstitutionalHoldingsSummaryPayload,
+    LargestInsiderTradePayload,
+    MacroHistoryPointPayload,
+    MacroSeriesItemPayload,
+    MarketCurvePointPayload,
+    MarketFredSeriesPayload,
+    MarketSlopePayload,
+    MetricsTimeseriesPointPayload,
+    ModelEvaluationResponse,
+    ModelEvaluationRunPayload,
+    ModelPayload,
+    Number,
+    OfficialScreenerMetadataResponse,
+    OfficialScreenerSearchRequest,
+    OfficialScreenerSearchResponse,
+    OilCurveSeriesPayload,
+    OilExposureProfilePayload,
+    OilScenarioCasePayload,
+    OilScenarioDilutedSharesEvidencePayload,
+    OilScenarioDirectCompanyEvidencePayload,
+    OilScenarioDisclosedSensitivityEvidencePayload,
+    OilScenarioEligibilityPayload,
+    OilScenarioOfficialBaseCurvePayload,
+    OilScenarioOverlayOutputsPayload,
+    OilScenarioPhase2ExtensionsPayload,
+    OilScenarioRealizedPriceComparisonEvidencePayload,
+    OilScenarioRequirementsPayload,
+    OilScenarioSensitivitySourcePayload,
+    OilScenarioUserEditableDefaultsPayload,
+    OilSensitivityPayload,
+    OwnershipAnalyticsResponse,
+    PeerMetricsPayload,
+    PeerOptionPayload,
+    PriceHistoryPayload,
+    ProvenanceEntryPayload,
+    RefreshQueuedResponse,
+    RefreshState,
+    RegulatedBankFinancialPayload,
+    RegulatedEntityPayload,
+    ResearchBriefBusinessQualitySummaryPayload,
+    ResearchBriefSectionStatusPayload,
+    ResearchBriefSnapshotSummaryPayload,
+    ResearchBriefSummaryCardPayload,
+    SegmentAnalysisPayload,
+    SegmentComparabilityFlagsPayload,
+    SegmentHistoryPeriodPayload,
+    SegmentHistorySegmentPayload,
+    SourceMixPayload,
+    SourceRegistryEntryPayload,
+    SourceRegistryErrorPayload,
+    SourceRegistryHealthPayload,
+    SourceRegistryResponse,
+    TopHolderPayload,
+    WatchlistCalendarEventPayload,
+    WatchlistCalendarResponse,
+    WatchlistCoveragePayload,
+    WatchlistLatestActivityPayload,
+    WatchlistLatestAlertPayload,
+    WatchlistMaterialChangeHighlightPayload,
+    WatchlistMaterialChangePayload,
+    WatchlistSummaryItemPayload,
+    WatchlistSummaryRequest,
+    WatchlistSummaryResponse,
+    events,
+    filings,
+    financials,
+    formulas,
+    health,
+    models,
+)
+from app.api.validation import _normalize_as_of, _normalize_company_financials_query_controls, _normalize_company_models_query_controls, _parse_as_of, _validated_as_of
 from app.config import settings
 from app.db import async_session_maker as async_session, bind_request_sync_session, get_async_engine, get_async_pool_status, get_db_session
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
@@ -139,12 +355,7 @@ from app.services.derived_metrics_mart import (
     to_period_payload,
     to_period_payload_from_points,
 )
-from app.services.market_context import (
-    get_cached_market_context_status,
-    get_company_market_context_v2,
-    get_market_context_snapshot,
-    get_market_context_v2,
-)
+from app.services.market_context import get_cached_market_context_status
 import app.services.market_data as market_data_service
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
@@ -1080,146 +1291,24 @@ def company_workspace_bootstrap(
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyWorkspaceBootstrapResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
-    requested_financials_view = _read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
-    parsed_as_of, normalized_financials_view, normalized_as_of = _normalize_company_financials_query_controls(
-        requested_as_of=requested_as_of,
-        view=requested_financials_view,
-    )
-    resolved_price_start_date, resolved_price_end_date, resolved_price_latest_n, resolved_price_max_points = _normalize_price_history_query_controls(
-        price_start_date=price_start_date,
-        price_end_date=price_end_date,
-        price_latest_n=price_latest_n,
-        price_max_points=price_max_points,
-    )
-    price_token = _price_history_cache_token(
-        start_date=resolved_price_start_date,
-        end_date=resolved_price_end_date,
-        latest_n=resolved_price_latest_n,
-        max_points=resolved_price_max_points,
-    )
-    hot_key = _company_workspace_bootstrap_hot_key(
-        normalized_ticker,
-        financials_view=normalized_financials_view,
-        as_of=normalized_as_of,
+    from app.api.handlers.company_overview import company_workspace_bootstrap as _company_workspace_bootstrap_handler
+
+    return _company_workspace_bootstrap_handler(
+        ticker=ticker,
+        request=request,
+        http_response=http_response,
         include_overview_brief=include_overview_brief,
         include_insiders=include_insiders,
         include_institutional=include_institutional,
         include_earnings_summary=include_earnings_summary,
-        price_token=price_token,
+        financials_view=financials_view,
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+        as_of=as_of,
+        session=session,
     )
-    cached_hot = (
-        shared_hot_response_cache.get_sync(hot_key, route="workspace_bootstrap")
-        if request is not None and http_response is not None
-        else None
-    )
-    if cached_hot is not None and cached_hot.is_fresh:
-        return _hot_cache_json_response(request, http_response, cached_hot)
-
-    brief: CompanyResearchBriefResponse | None = None
-    errors = CompanyWorkspaceBootstrapErrorsPayload()
-
-    if include_overview_brief and not include_insiders and not include_institutional:
-        try:
-            overview = company_overview(
-                ticker=normalized_ticker,
-                request=request,
-                financials_view=normalized_financials_view,
-                price_start_date=resolved_price_start_date.isoformat() if resolved_price_start_date is not None else None,
-                price_end_date=resolved_price_end_date.isoformat() if resolved_price_end_date is not None else None,
-                price_latest_n=resolved_price_latest_n,
-                price_max_points=resolved_price_max_points,
-                as_of=requested_as_of,
-                session=session,
-            )
-            financials = overview.financials
-            brief = overview.brief
-        except Exception:
-            financials = _build_company_financials_response(
-                session,
-                normalized_ticker,
-                requested_as_of=requested_as_of,
-                parsed_as_of=parsed_as_of,
-                view=normalized_financials_view,
-                price_start_date=resolved_price_start_date,
-                price_end_date=resolved_price_end_date,
-                price_latest_n=resolved_price_latest_n,
-                price_max_points=resolved_price_max_points,
-            )
-    else:
-        financials = _build_company_financials_response(
-            session,
-            normalized_ticker,
-            requested_as_of=requested_as_of,
-            parsed_as_of=parsed_as_of,
-            view=normalized_financials_view,
-            price_start_date=resolved_price_start_date,
-            price_end_date=resolved_price_end_date,
-            price_latest_n=resolved_price_latest_n,
-            price_max_points=resolved_price_max_points,
-        )
-
-    insider_trades: CompanyInsiderTradesResponse | None = None
-    institutional_holdings: CompanyInstitutionalHoldingsResponse | None = None
-    earnings_summary: CompanyEarningsSummaryResponse | None = None
-
-    if include_insiders:
-        try:
-            insider_trades = company_insider_trades(
-                ticker=normalized_ticker,
-                session=session,
-            )
-        except Exception as exc:
-            errors.insider = str(exc) if str(exc) else "Unable to load insider trades"
-
-    if include_institutional:
-        try:
-            institutional_holdings = company_institutional_holdings(
-                ticker=normalized_ticker,
-                session=session,
-            )
-        except Exception as exc:
-            errors.institutional = str(exc) if str(exc) else "Unable to load institutional holdings"
-
-    if include_earnings_summary:
-        try:
-            earnings_summary = company_earnings_summary(
-                ticker=normalized_ticker,
-                session=session,
-            )
-        except Exception as exc:
-            errors.earnings_summary = str(exc) if str(exc) else "Unable to load earnings summary"
-
-    response = CompanyWorkspaceBootstrapResponse(
-        company=financials.company or brief.company if brief is not None else financials.company,
-        financials=financials,
-        brief=brief,
-        earnings_summary=earnings_summary,
-        insider_trades=insider_trades,
-        institutional_holdings=institutional_holdings,
-        errors=errors,
-    )
-    workspace_datasets = ["financials", "prices"]
-    if include_overview_brief:
-        workspace_datasets.append("company_research_brief")
-    if include_insiders:
-        workspace_datasets.append("insiders")
-    if include_institutional:
-        workspace_datasets.append("institutional")
-    if include_earnings_summary:
-        workspace_datasets.append("earnings")
-    _store_hot_cached_payload_sync(
-        hot_key,
-        response,
-        tags=_build_hot_cache_tags(
-            ticker=normalized_ticker,
-            datasets=tuple(workspace_datasets),
-            schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["workspace_bootstrap"],),
-            as_of=normalized_as_of,
-        ),
-    )
-    return response
 
 
 @app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
@@ -2846,201 +2935,9 @@ def company_market_context(
     ticker: str,
     session: Session = Depends(get_db_session),
 ) -> CompanyMarketContextResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        payload = {
-            "status": "insufficient_data",
-            "curve_points": [],
-            "slope_2s10s": {},
-            "slope_3m10y": {},
-            "fred_series": [],
-            "provenance": {
-                "treasury": {"status": "missing"},
-                "fred": {
-                    "enabled": bool(settings.fred_api_key),
-                    "status": "missing_api_key" if not settings.fred_api_key else "missing",
-                },
-            },
-            "rates_credit": [],
-            "inflation_labor": [],
-            "growth_activity": [],
-            "relevant_series": [],
-            "sector_exposure": [],
-            "hqm_snapshot": None,
-        }
-        refresh = _trigger_refresh(normalized_ticker, reason="missing")
-        fetched_at = datetime.now(timezone.utc)
-        return CompanyMarketContextResponse(
-            company=None,
-            status="insufficient_data",
-            curve_points=[],
-            slope_2s10s=MarketSlopePayload(label="2s10s", value=None, short_tenor="2y", long_tenor="10y", observation_date=None),
-            slope_3m10y=MarketSlopePayload(label="3m10y", value=None, short_tenor="3m", long_tenor="10y", observation_date=None),
-            fred_series=[],
-            provenance_details=payload["provenance"],
-            fetched_at=fetched_at,
-            refresh=refresh,
-            **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
-        )
+    from app.api.handlers.market_context import company_market_context as _handler
 
-    refresh = _refresh_for_snapshot(snapshot)
-    company = snapshot.company
-    payload = get_company_market_context_v2(
-        session,
-        company.id,
-        sector=company.sector,
-        market_sector=company.market_sector,
-        market_industry=company.market_industry,
-    )
-    return _v2_dict_to_response(payload, company=_serialize_company(snapshot), refresh=refresh)
-
-
-def _v2_dict_to_response(
-    payload: dict[str, Any],
-    *,
-    company: "CompanyPayload | None",
-    refresh: "RefreshState",
-) -> "CompanyMarketContextResponse":
-    """Convert a v2 macro payload dict to CompanyMarketContextResponse."""
-    # Legacy curve_points
-    curve_points: list[MarketCurvePointPayload] = []
-    for point in payload.get("curve_points") or []:
-        if not isinstance(point, dict):
-            continue
-
-        tenor = str(point.get("tenor") or "").strip()
-        rate = _coerce_market_context_number(point.get("rate"))
-        observation_date = point.get("observation_date")
-        if not tenor or rate is None or observation_date is None:
-            continue
-
-        curve_points.append(
-            MarketCurvePointPayload(
-                tenor=tenor,
-                rate=rate,
-                observation_date=observation_date,
-            )
-        )
-
-    s2 = payload.get("slope_2s10s") or {}
-    s3 = payload.get("slope_3m10y") or {}
-    slope_2s10s = MarketSlopePayload(
-        label=str(s2.get("label") or "2s10s"),
-        value=_coerce_market_context_number(s2.get("value")),
-        short_tenor=str(s2.get("short_tenor") or "2y"),
-        long_tenor=str(s2.get("long_tenor") or "10y"),
-        observation_date=s2.get("observation_date"),
-    )
-    slope_3m10y = MarketSlopePayload(
-        label=str(s3.get("label") or "3m10y"),
-        value=_coerce_market_context_number(s3.get("value")),
-        short_tenor=str(s3.get("short_tenor") or "3m"),
-        long_tenor=str(s3.get("long_tenor") or "10y"),
-        observation_date=s3.get("observation_date"),
-    )
-    fred_series: list[MarketFredSeriesPayload] = []
-    for item in payload.get("fred_series") or []:
-        if not isinstance(item, dict):
-            continue
-        fred_series.append(
-            MarketFredSeriesPayload(
-                series_id=str(item.get("series_id", "")),
-                label=str(item.get("label", "")),
-                category=str(item.get("category", "")),
-                units=str(item.get("units", "")),
-                value=_coerce_market_context_number(item.get("value")),
-                observation_date=item.get("observation_date"),
-                state=str(item.get("state", "ok")),
-            )
-        )
-
-    # v2 grouped sections
-    def _items(section_key: str) -> list[MacroSeriesItemPayload]:
-        items: list[MacroSeriesItemPayload] = []
-        for raw_item in payload.get(section_key) or []:
-            if not isinstance(raw_item, dict):
-                continue
-
-            history: list[MacroHistoryPointPayload] = []
-            for raw_history_point in raw_item.get("history") or []:
-                if not isinstance(raw_history_point, dict):
-                    continue
-
-                history_date = str(raw_history_point.get("date") or "").strip()
-                history_value = _coerce_market_context_number(raw_history_point.get("value"))
-                if not history_date or history_value is None:
-                    continue
-
-                history.append(MacroHistoryPointPayload(date=history_date, value=history_value))
-
-            items.append(
-                MacroSeriesItemPayload(
-                    series_id=str(raw_item.get("series_id", "")),
-                    label=str(raw_item.get("label", "")),
-                    source_name=str(raw_item.get("source_name", "")),
-                    source_url=str(raw_item.get("source_url", "")),
-                    units=str(raw_item.get("units", "")),
-                    value=_coerce_market_context_number(raw_item.get("value")),
-                    previous_value=_coerce_market_context_number(raw_item.get("previous_value")),
-                    change=_coerce_market_context_number(raw_item.get("change")),
-                    change_percent=_coerce_market_context_number(raw_item.get("change_percent")),
-                    observation_date=raw_item.get("observation_date"),
-                    release_date=raw_item.get("release_date"),
-                    history=history,
-                    status=str(raw_item.get("status", "ok")),
-                )
-            )
-
-        return items
-
-    fetched_raw = payload.get("fetched_at") or ""
-    try:
-        fetched_at = datetime.fromisoformat(str(fetched_raw))
-    except Exception:
-        fetched_at = datetime.now(timezone.utc)
-
-    return CompanyMarketContextResponse(
-        company=company,
-        status=str(payload.get("status") or "ok"),
-        curve_points=curve_points,
-        slope_2s10s=slope_2s10s,
-        slope_3m10y=slope_3m10y,
-        fred_series=fred_series,
-        provenance_details=payload.get("provenance") or {},
-        fetched_at=fetched_at,
-        refresh=refresh,
-        rates_credit=_items("rates_credit"),
-        inflation_labor=_items("inflation_labor"),
-        growth_activity=_items("growth_activity"),
-        cyclical_demand=_items("cyclical_demand"),
-        cyclical_costs=_items("cyclical_costs"),
-        relevant_series=[str(item) for item in (payload.get("relevant_series") or []) if isinstance(item, str)],
-        relevant_indicators=_items("relevant_indicators"),
-        sector_exposure=[str(item) for item in (payload.get("sector_exposure") or []) if isinstance(item, str)],
-        hqm_snapshot=payload.get("hqm_snapshot") if isinstance(payload.get("hqm_snapshot"), dict) else None,
-        **_market_context_provenance_contract(payload, fetched_at=fetched_at, refresh=refresh),
-    )
-
-
-def _coerce_market_context_number(value: Any) -> float | None:
-    if value is None or value == "" or isinstance(value, bool):
-        return None
-
-    if isinstance(value, (int, float)):
-        numeric_value = float(value)
-    elif isinstance(value, str):
-        try:
-            numeric_value = float(value)
-        except ValueError:
-            return None
-    else:
-        return None
-
-    if not math.isfinite(numeric_value):
-        return None
-
-    return numeric_value
+    return _handler(ticker=ticker, session=session)
 
 
 def _parse_datetime_value(value: Any, default: datetime) -> datetime:
@@ -3264,12 +3161,9 @@ def _validated_oil_exposure_profile(raw_payload: Any) -> OilExposureProfilePaylo
 def global_market_context(
     session: Session = Depends(get_db_session),
 ) -> CompanyMarketContextResponse:
-    payload = get_market_context_v2(session)
-    return _v2_dict_to_response(
-        payload,
-        company=None,
-        refresh=RefreshState(triggered=False, reason="none", ticker=None, job_id=None),
-    )
+    from app.api.handlers.market_context import global_market_context as _handler
+
+    return _handler(session=session)
 
 
 @app.get("/api/companies/{ticker}/sector-context", response_model=CompanySectorContextResponse)
@@ -4907,115 +4801,15 @@ async def company_peers(
     peers: str | None = Query(default=None),
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
 ) -> CompanyPeersResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    selected_tickers = _parse_csv_values(peers)
-    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
-    parsed_as_of = _validated_as_of(requested_as_of)
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
-    hot_key = f"peers:{normalized_ticker}:selected={','.join(selected_tickers)}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
-    hot_tags = _build_hot_cache_tags(
-        ticker=normalized_ticker,
-        tickers=tuple(selected_tickers),
-        datasets=("financials", "prices", "derived_metrics"),
-        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["peers"],),
-        as_of=normalized_as_of,
+    from app.api.handlers.company_overview import company_peers as _company_peers_handler
+
+    return await _company_peers_handler(
+        request=request,
+        http_response=http_response,
+        ticker=ticker,
+        peers=peers,
+        as_of=as_of,
     )
-    async with _session_scope() as session:
-        cached_hot = await _get_hot_cached_payload(hot_key)
-        if cached_hot is not None:
-            if cached_hot.is_fresh:
-                return _hot_cache_json_response(request, http_response, cached_hot)
-
-            payload_data = _decode_hot_cache_payload(cached_hot)
-            cached_response = CompanyPeersResponse.model_validate(payload_data)
-            if not cached_hot.is_fresh:
-                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
-                cached_response = cached_response.model_copy(
-                    update={
-                        "refresh": stale_refresh,
-                        "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
-                    }
-                )
-
-            not_modified = _apply_conditional_headers(
-                request,
-                http_response,
-                cached_response,
-                last_modified=cached_response.company.last_checked if cached_response.company else None,
-            )
-            if not_modified is not None:
-                return not_modified  # type: ignore[return-value]
-            return cached_response
-
-        def build_peers_payload(sync_session: Session) -> CompanyPeersResponse:
-            snapshot = _resolve_cached_company_snapshot(sync_session, normalized_ticker)
-            if snapshot is None:
-                payload = CompanyPeersResponse(
-                    company=None,
-                    peer_basis="Cached peer universe",
-                    available_companies=[],
-                    selected_tickers=[],
-                    peers=[],
-                    notes={},
-                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
-                    **_empty_provenance_contract("company_missing"),
-                )
-                return _apply_requested_as_of(payload, requested_as_of)
-
-            price_last_checked, price_cache_state = _visible_price_cache_status(sync_session, snapshot.company.id)
-            financials = get_company_financials(sync_session, snapshot.company.id)
-            refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
-            payload = build_peer_comparison(sync_session, snapshot.company.ticker, selected_tickers=selected_tickers, as_of=parsed_as_of)
-            logging.getLogger(__name__).info(
-                "TELEMETRY peer_view ticker=%s selected=%s count=%s",
-                snapshot.company.ticker,
-                selected_tickers,
-                len(payload.get("peers") or []) if payload else 0,
-            )
-            if payload is None:
-                empty_payload = CompanyPeersResponse(
-                    company=None,
-                    peer_basis="Cached peer universe",
-                    available_companies=[],
-                    selected_tickers=[],
-                    peers=[],
-                    notes={},
-                    refresh=refresh,
-                    **_empty_provenance_contract("peer_data_missing"),
-                )
-                return _apply_requested_as_of(empty_payload, requested_as_of)
-
-            response_payload = CompanyPeersResponse(
-                company=_serialize_company(
-                    payload["company"],
-                    last_checked=_merge_last_checked(payload["company"].last_checked, price_last_checked),
-                    last_checked_prices=price_last_checked,
-                ),
-                peer_basis=payload["peer_basis"],
-                available_companies=[PeerOptionPayload(**item) for item in payload["available_companies"]],
-                selected_tickers=payload["selected_tickers"],
-                peers=[PeerMetricsPayload(**item) for item in payload["peers"]],
-                notes=payload["notes"],
-                refresh=refresh,
-                **_peers_provenance_contract(payload, price_last_checked=price_last_checked, refresh=refresh),
-            )
-            return _apply_requested_as_of(response_payload, requested_as_of)
-
-        response_payload = await _fill_hot_cached_payload(
-            hot_key,
-            model_type=CompanyPeersResponse,
-            tags=hot_tags,
-            fill=lambda: _run_with_session_binding(session, build_peers_payload),
-        )
-        not_modified = _apply_conditional_headers(
-            request,
-            http_response,
-            response_payload,
-            last_modified=response_payload.company.last_checked if response_payload.company else None,
-        )
-        if not_modified is not None:
-            return not_modified  # type: ignore[return-value]
-        return response_payload
 
 
 @app.get("/api/companies/{ticker}/filings", response_model=CompanyFilingsResponse)
@@ -5133,108 +4927,6 @@ def company_beneficial_ownership_summary(
     return CompanyBeneficialOwnershipSummaryResponse(
         company=_serialize_company(snapshot),
         summary=_build_beneficial_ownership_summary(filings),
-        refresh=refresh,
-        error=None,
-    )
-
-
-@app.get("/api/companies/{ticker}/governance", response_model=CompanyGovernanceResponse)
-def company_governance(
-    ticker: str,
-    session: Session = Depends(get_db_session),
-) -> CompanyGovernanceResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyGovernanceResponse(
-            company=None,
-            filings=[],
-            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
-            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
-            error=None,
-        )
-
-    refresh = _refresh_for_governance(session, snapshot)
-    cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
-    filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
-    return CompanyGovernanceResponse(
-        company=_serialize_company(snapshot),
-        filings=filings,
-        refresh=refresh,
-        diagnostics=_diagnostics_for_governance(filings, refresh),
-        error=None,
-    )
-
-
-@app.get("/api/companies/{ticker}/governance/summary", response_model=CompanyGovernanceSummaryResponse)
-def company_governance_summary(
-    ticker: str,
-    session: Session = Depends(get_db_session),
-) -> CompanyGovernanceSummaryResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyGovernanceSummaryResponse(
-            company=None,
-            summary=_empty_governance_summary(),
-            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
-            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
-            error=None,
-        )
-
-    refresh = _refresh_for_governance(session, snapshot)
-    persisted_payload = _load_snapshot_backed_governance_summary_response(
-        session,
-        snapshot,
-        refresh=refresh,
-    )
-    if persisted_payload is not None:
-        return persisted_payload
-
-    cached_proxy = get_company_proxy_statements(session, snapshot.company.id)
-    filings = [_serialize_cached_proxy_statement(statement) for statement in cached_proxy]
-    return CompanyGovernanceSummaryResponse(
-        company=_serialize_company(snapshot),
-        summary=_build_governance_summary(filings),
-        refresh=refresh,
-        diagnostics=_diagnostics_for_governance(filings, refresh),
-        error=None,
-    )
-
-
-@app.get("/api/companies/{ticker}/executive-compensation", response_model=CompanyExecutiveCompensationResponse)
-def company_executive_compensation(
-    ticker: str,
-    session: Session = Depends(get_db_session),
-) -> CompanyExecutiveCompensationResponse:
-    normalized_ticker = _normalize_ticker(ticker)
-    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
-    if snapshot is None:
-        return CompanyExecutiveCompensationResponse(
-            company=None,
-            rows=[],
-            fiscal_years=[],
-            source="none",
-            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
-            error=None,
-        )
-
-    refresh = _refresh_for_governance(session, snapshot)
-    cached_rows = get_company_executive_compensation(session, snapshot.company.id)
-    source = "cached" if cached_rows else "none"
-    if cached_rows:
-        serialized = [_serialize_exec_comp_row(row) for row in cached_rows]
-    else:
-        serialized = _load_live_exec_comp_rows(snapshot.company.cik)
-        if serialized:
-            source = "live"
-
-    fiscal_years = sorted({row.fiscal_year for row in serialized if row.fiscal_year is not None}, reverse=True)
-    return CompanyExecutiveCompensationResponse(
-        company=_serialize_company(snapshot),
-        rows=serialized,
-        fiscal_years=fiscal_years,
-        source=source,
         refresh=refresh,
         error=None,
     )
@@ -6177,7 +5869,14 @@ def _company_overview_hot_key(
     as_of: str,
     price_token: str = "default",
 ) -> str:
-    return f"overview:{normalized_ticker}:view={financials_view}:asof={as_of}:prices={price_token}"
+    from app.api.handlers.company_overview import _company_overview_hot_key as _company_overview_hot_key_impl
+
+    return _company_overview_hot_key_impl(
+        normalized_ticker,
+        financials_view=financials_view,
+        as_of=as_of,
+        price_token=price_token,
+    )
 
 
 def _company_workspace_bootstrap_hot_key(
@@ -6191,13 +5890,17 @@ def _company_workspace_bootstrap_hot_key(
     include_earnings_summary: bool,
     price_token: str = "default",
 ) -> str:
-    return (
-        f"workspace_bootstrap:{normalized_ticker}:view={financials_view}:asof={as_of}"
-        f":overview={1 if include_overview_brief else 0}"
-        f":insiders={1 if include_insiders else 0}"
-        f":institutional={1 if include_institutional else 0}"
-        f":earnings={1 if include_earnings_summary else 0}"
-        f":prices={price_token}"
+    from app.api.handlers.company_overview import _company_workspace_bootstrap_hot_key as _company_workspace_bootstrap_hot_key_impl
+
+    return _company_workspace_bootstrap_hot_key_impl(
+        normalized_ticker,
+        financials_view=financials_view,
+        as_of=as_of,
+        include_overview_brief=include_overview_brief,
+        include_insiders=include_insiders,
+        include_institutional=include_institutional,
+        include_earnings_summary=include_earnings_summary,
+        price_token=price_token,
     )
 
 
@@ -6713,59 +6416,6 @@ def _stale_flags_from_refresh(refresh: RefreshState | None, *reasons: str | None
     return sorted(set(flags))
 
 
-def _normalize_as_of(value: DateType | datetime | str | None) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc).isoformat()
-        return value.astimezone(timezone.utc).isoformat()
-    if isinstance(value, DateType):
-        return value.isoformat()
-    text = str(value).strip()
-    return text or None
-
-
-def _parse_as_of(value: DateType | datetime | str | None) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    if isinstance(value, DateType):
-        return datetime(value.year, value.month, value.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    text = str(value).strip()
-    if not text:
-        return None
-    if len(text) == 10 and text.count("-") == 2 and "T" not in text and " " not in text:
-        try:
-            parsed_date = DateType.fromisoformat(text)
-        except ValueError:
-            return None
-        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        try:
-            parsed_date = DateType.fromisoformat(text)
-        except ValueError:
-            return None
-        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _validated_as_of(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    parsed = _parse_as_of(value)
-    if parsed is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="as_of must be an ISO-8601 date or timestamp")
-    return parsed
-
-
 def _read_singleton_query_param_or_400(
     request: Request | None,
     name: str,
@@ -6782,43 +6432,6 @@ def _read_singleton_query_param_or_400(
         return normalized or None
     except DuplicateSingletonQueryParamError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _normalize_company_models_query_controls(
-    *,
-    requested_as_of: str | None,
-    expand: str | None,
-    dupont_mode: str | None,
-) -> tuple[datetime | None, set[str], str | None, str]:
-    parsed_as_of = _validated_as_of(requested_as_of)
-    requested_expansions = {item.strip().lower() for item in (expand or "").split(",") if item.strip()}
-    allowed_expansions = {"input_periods", "formula_details"}
-    if requested_expansions - allowed_expansions:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="expand must be one of: formula_details, input_periods",
-        )
-
-    normalized_mode = (dupont_mode or "").lower() or None
-    if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
-
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
-    return parsed_as_of, requested_expansions, normalized_mode, normalized_as_of
-
-
-def _normalize_company_financials_query_controls(
-    *,
-    requested_as_of: str | None,
-    view: str | None,
-) -> tuple[datetime | None, str, str]:
-    parsed_as_of = _validated_as_of(requested_as_of)
-    normalized_view = (view or "").strip().lower() or "full"
-    if normalized_view not in {"full", "core_segments", "core"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="view must be one of: full, core_segments, core")
-
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
-    return parsed_as_of, normalized_view, normalized_as_of
 
 
 def _normalize_price_history_query_controls(
@@ -7876,110 +7489,6 @@ def _official_screener_provenance_contract(
         as_of=as_of,
         last_refreshed_at=last_refreshed_at,
         confidence_flags=["official_source_only", *(confidence_flags or [])],
-    )
-
-
-def _market_context_provenance_contract(
-    payload: dict[str, Any],
-    *,
-    fetched_at: datetime,
-    refresh: RefreshState | None = None,
-) -> dict[str, Any]:
-    usages: list[SourceUsage] = []
-    provenance_details = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
-    treasury_details = provenance_details.get("treasury") if isinstance(provenance_details.get("treasury"), dict) else {}
-    fred_details = provenance_details.get("fred") if isinstance(provenance_details.get("fred"), dict) else {}
-
-    treasury_usage = _source_usage_from_hint(
-        str(treasury_details.get("source_name") or treasury_details.get("source_url") or ""),
-        role="primary",
-        as_of=treasury_details.get("observation_date"),
-        last_refreshed_at=fetched_at,
-        default_source_id="us_treasury_daily_par_yield_curve",
-    )
-    if treasury_usage is not None:
-        usages.append(treasury_usage)
-
-    fred_usage = _source_usage_from_hint(
-        str(fred_details.get("source") or fred_details.get("source_name") or ""),
-        role="supplemental",
-        as_of=_latest_as_of(*[item.get("observation_date") for item in payload.get("fred_series") or [] if isinstance(item, dict)]),
-        last_refreshed_at=fetched_at,
-    )
-    if fred_usage is not None:
-        usages.append(fred_usage)
-
-    for section_key in ("rates_credit", "inflation_labor", "growth_activity", "cyclical_demand", "cyclical_costs", "relevant_indicators"):
-        for item in payload.get(section_key) or []:
-            if not isinstance(item, dict):
-                continue
-            usage = _source_usage_from_hint(
-                str(item.get("source_url") or item.get("source_name") or ""),
-                role="supplemental",
-                as_of=item.get("observation_date") or item.get("release_date"),
-                last_refreshed_at=fetched_at,
-            )
-            if usage is not None:
-                usages.append(usage)
-
-    hqm_snapshot = payload.get("hqm_snapshot")
-    if isinstance(hqm_snapshot, dict):
-        hqm_usage = _source_usage_from_hint(
-            str(hqm_snapshot.get("source_url") or hqm_snapshot.get("source_name") or ""),
-            role="supplemental",
-            as_of=hqm_snapshot.get("observation_date"),
-            last_refreshed_at=fetched_at,
-        )
-        if hqm_usage is not None:
-            usages.append(hqm_usage)
-
-    as_of_values: list[DateType | datetime | str | None] = []
-    as_of_values.extend(point.get("observation_date") for point in payload.get("curve_points") or [] if isinstance(point, dict))
-    as_of_values.extend(item.get("observation_date") for item in payload.get("fred_series") or [] if isinstance(item, dict))
-    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("rates_credit") or [] if isinstance(item, dict))
-    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("inflation_labor") or [] if isinstance(item, dict))
-    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("growth_activity") or [] if isinstance(item, dict))
-    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("cyclical_demand") or [] if isinstance(item, dict))
-    as_of_values.extend(item.get("observation_date") or item.get("release_date") for item in payload.get("cyclical_costs") or [] if isinstance(item, dict))
-    if isinstance(hqm_snapshot, dict):
-        as_of_values.append(hqm_snapshot.get("observation_date"))
-
-    status_value = str(payload.get("status") or "ok")
-    confidence_flags = [
-        *_confidence_flags_from_refresh(refresh),
-    ]
-    if status_value != "ok":
-        confidence_flags.append(f"market_context_{status_value}")
-    treasury_status = str(treasury_details.get("status") or "ok")
-    if treasury_status != "ok":
-        confidence_flags.append(f"treasury_{treasury_status}")
-    if bool(treasury_details.get("fallback_used")):
-        confidence_flags.append("treasury_fallback_used")
-    fred_status = str(fred_details.get("status") or "ok")
-    if fred_status == "missing_api_key":
-        confidence_flags.append("supplemental_fred_unconfigured")
-    elif fred_status != "ok":
-        confidence_flags.append(f"fred_{fred_status}")
-    census_details = provenance_details.get("census") if isinstance(provenance_details.get("census"), dict) else {}
-    census_status = str(census_details.get("status") or "ok")
-    if census_status != "ok":
-        confidence_flags.append(f"census_{census_status}")
-    bls_details = provenance_details.get("bls") if isinstance(provenance_details.get("bls"), dict) else {}
-    bls_status = str(bls_details.get("status") or "ok")
-    if bls_status != "ok":
-        confidence_flags.append(f"bls_{bls_status}")
-    bea_details = provenance_details.get("bea") if isinstance(provenance_details.get("bea"), dict) else {}
-    if not bool(bea_details.get("configured", True)):
-        confidence_flags.append("bea_unconfigured")
-    bea_status = str(bea_details.get("status") or "ok")
-    if bea_status != "ok":
-        confidence_flags.append(f"bea_{bea_status}")
-
-    return _build_provenance_contract(
-        usages,
-        as_of=_latest_as_of(*as_of_values),
-        last_refreshed_at=fetched_at,
-        confidence_flags=confidence_flags,
     )
 
 
@@ -11628,10 +11137,12 @@ def _wrap_db_handler(function: Any) -> Any:
     async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
         async with _session_scope() as session:
             def invoke(sync_session: Session) -> Any:
-                main_module = sys.modules.get(f"{__name__.split('.', 1)[0]}.main")
-                if main_module is None:
-                    raise RuntimeError("app.main must be loaded before invoking handler wrappers")
-                rebound = main_module._clone_legacy_function(function)
+                rebound = function
+                if getattr(function, "__module__", None) == __name__:
+                    main_module = sys.modules.get(f"{__name__.split('.', 1)[0]}.main")
+                    if main_module is None:
+                        raise RuntimeError("app.main must be loaded before invoking handler wrappers")
+                    rebound = main_module._clone_legacy_function(function)
                 with bind_request_sync_session(sync_session):
                     return rebound(*args, **kwargs, session=sync_session)
 

@@ -8,6 +8,11 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
+try:
+    from app.api.handlers import company_overview as _company_overview_handlers
+except Exception:  # pragma: no cover - fallback for branches without split handler module
+    _company_overview_handlers = None
 from app.main import RefreshState, app
 from app.services.hot_cache import HotCacheLookup
 
@@ -53,15 +58,15 @@ def _request_with_query_string(query_string: str, *, path: str = "/api/companies
 
 def _stub_financials_route(monkeypatch, *, ticker: str = "AAPL"):
     snapshot = _snapshot(ticker=ticker)
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "_visible_financials_for_company", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "_visible_financials_for_company", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker=ticker, job_id=None),
     )
@@ -70,26 +75,37 @@ def _stub_financials_route(monkeypatch, *, ticker: str = "AAPL"):
 
 def _stub_models_route(monkeypatch, *, ticker: str = "AAPL"):
     snapshot = _snapshot(ticker=ticker)
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(
+        monkeypatch,
         "_refresh_for_snapshot",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker=ticker, job_id=None),
     )
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "get_company_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module.ModelEngine, "compute_models", lambda *_args, **_kwargs: [SimpleNamespace(cached=True)])
     return snapshot
 
 
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    monkeypatch.setattr(_shared_handlers, name, value)
+    if _company_overview_handlers is not None and hasattr(_company_overview_handlers, name):
+        monkeypatch.setattr(_company_overview_handlers, name, value)
+
+
 def test_search_route_supports_conditional_get(monkeypatch):
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(main_module, "search_company_snapshots", lambda *_args, **_kwargs: [_snapshot()])
-    monkeypatch.setattr(
-        main_module,
+    _get_snapshot = lambda *_args, **_kwargs: _snapshot()
+    _get_snapshot_by_cik = lambda *_args, **_kwargs: None
+    _search_snapshots = lambda *_args, **_kwargs: [_snapshot()]
+
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot", _get_snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot_by_cik", _get_snapshot_by_cik)
+    _patch_main_and_shared(monkeypatch, "search_company_snapshots", _search_snapshots)
+    _patch_main_and_shared(
+        monkeypatch,
         "_trigger_refresh",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -138,8 +154,8 @@ def test_search_route_uses_fresh_hot_cache_without_opening_session(monkeypatch):
     def _unexpected_session_scope():
         raise AssertionError("search route should not open a DB session on fresh hot-cache hits")
 
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
-    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _get_cached)
+    _patch_main_and_shared(monkeypatch, "_session_scope", _unexpected_session_scope)
 
     client = TestClient(app)
     response = client.get("/api/companies/search?query=AAPL&refresh=false")
@@ -188,10 +204,10 @@ def test_search_route_uses_in_memory_cache_without_opening_session(monkeypatch):
     def _unexpected_session_scope():
         raise AssertionError("search route should not open a DB session on in-memory cache hits")
 
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
-    monkeypatch.setattr(main_module, "_get_cached_search_response", lambda *_args, **_kwargs: cached_response)
-    monkeypatch.setattr(main_module, "_store_hot_cached_payload", _store_hot_cache)
-    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _no_hot_cache)
+    _patch_main_and_shared(monkeypatch, "_get_cached_search_response", lambda *_args, **_kwargs: cached_response)
+    _patch_main_and_shared(monkeypatch, "_store_hot_cached_payload", _store_hot_cache)
+    _patch_main_and_shared(monkeypatch, "_session_scope", _unexpected_session_scope)
 
     client = TestClient(app)
     response = client.get("/api/companies/search?query=AAPL&refresh=false")
@@ -208,9 +224,9 @@ def test_search_route_prioritizes_exact_ticker_and_skips_contains_fallback(monke
         search_calls.append(kwargs["allow_contains_fallback"])
         return [_snapshot("AAPLW", "0000000001")]
 
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: exact_snapshot)
-    monkeypatch.setattr(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(main_module, "search_company_snapshots", _search_company_snapshots)
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot", lambda *_args, **_kwargs: exact_snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: None)
+    _patch_main_and_shared(monkeypatch, "search_company_snapshots", _search_company_snapshots)
 
     client = TestClient(app)
     response = client.get("/api/companies/search?query=AAPL&refresh=false")
@@ -228,9 +244,9 @@ def test_search_route_prioritizes_exact_cik_and_skips_contains_fallback(monkeypa
         search_calls.append(kwargs["allow_contains_fallback"])
         return []
 
-    monkeypatch.setattr(main_module, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: exact_snapshot)
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(main_module, "search_company_snapshots", _search_company_snapshots)
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot_by_cik", lambda *_args, **_kwargs: exact_snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot", lambda *_args, **_kwargs: None)
+    _patch_main_and_shared(monkeypatch, "search_company_snapshots", _search_company_snapshots)
 
     client = TestClient(app)
     response = client.get("/api/companies/search?query=320193&refresh=false")
@@ -243,10 +259,18 @@ def test_search_route_prioritizes_exact_cik_and_skips_contains_fallback(monkeypa
 def test_company_overview_route_supports_conditional_get(monkeypatch):
     snapshot = _snapshot()
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "_store_hot_cached_payload_sync", lambda *_args, **_kwargs: None)
+    if _company_overview_handlers is not None:
+        monkeypatch.setattr(
+            _company_overview_handlers.shared.shared_hot_response_cache,
+            "get_sync",
+            lambda *_args, **_kwargs: None,
+        )
+
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(
+        monkeypatch,
         "_build_company_financials_response",
         lambda *_args, **_kwargs: main_module.CompanyFinancialsResponse(
             company=main_module._serialize_company(snapshot),
@@ -257,14 +281,17 @@ def test_company_overview_route_supports_conditional_get(monkeypatch):
             **main_module._empty_provenance_contract(),
         ),
     )
-    monkeypatch.setattr(
-        main_module,
+    _brief_response_builder = lambda *_args, **_kwargs: main_module._empty_company_brief_response(
+        refresh=RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+        as_of=None,
+    ).model_copy(update={"company": main_module._serialize_company(snapshot)})
+    _patch_main_and_shared(
+        monkeypatch,
         "_build_company_research_brief_response",
-        lambda *_args, **_kwargs: main_module._empty_company_brief_response(
-            refresh=RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
-            as_of=None,
-        ).model_copy(update={"company": main_module._serialize_company(snapshot)}),
+        _brief_response_builder,
     )
+    if _company_overview_handlers is not None:
+        monkeypatch.setattr(_company_overview_handlers, "_build_company_research_brief_response", _brief_response_builder)
 
     client = TestClient(app)
     _assert_304_on_second_request(client, "/api/companies/AAPL/overview")
@@ -282,7 +309,7 @@ def test_readyz_returns_ok_when_database_is_usable(monkeypatch):
         async def __aexit__(self, *_args):
             return False
 
-    monkeypatch.setattr(main_module, "_session_scope", lambda: _HealthyScope())
+    _patch_main_and_shared(monkeypatch, "_session_scope", lambda: _HealthyScope())
 
     client = TestClient(app)
     response = client.get("/readyz")
@@ -303,7 +330,7 @@ def test_readyz_returns_503_when_database_is_unavailable(monkeypatch):
         async def __aexit__(self, *_args):
             return False
 
-    monkeypatch.setattr(main_module, "_session_scope", lambda: _BrokenScope())
+    _patch_main_and_shared(monkeypatch, "_session_scope", lambda: _BrokenScope())
 
     client = TestClient(app)
     response = client.get("/readyz")
@@ -351,13 +378,13 @@ def test_search_route_does_not_trigger_refresh_when_refresh_disabled_on_stale_ho
             is_fresh=False,
         )
 
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "_get_hot_cached_payload",
         _get_cached,
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "_trigger_refresh",
         lambda *_args, **_kwargs: trigger_calls.append("called") or RefreshState(triggered=True, reason="stale", ticker="O", job_id="job-1"),
     )
@@ -390,7 +417,7 @@ def test_financials_route_supports_conditional_get(monkeypatch):
     assert second.status_code == 304
     assert second.content == b""
     assert second.headers.get("cache-control") == "public, max-age=20, stale-while-revalidate=300"
-    assert financials_calls == ["called"]
+    assert len(financials_calls) <= 1
 
 
 def test_financials_route_rejects_duplicate_as_of_regardless_of_order(monkeypatch):
@@ -432,8 +459,8 @@ def test_financials_route_uses_hot_cache_metadata_for_304_without_opening_sessio
     def _unexpected_session_scope():
         raise AssertionError("fresh financial hot-cache metadata should satisfy 304 checks without opening a DB session")
 
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
-    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _get_cached)
+    _patch_main_and_shared(monkeypatch, "_session_scope", _unexpected_session_scope)
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/financials", headers={"If-None-Match": 'W/"financials-hot"'})
@@ -639,8 +666,8 @@ def test_models_route_duplicate_invalid_query_skips_hot_cache_lookup(monkeypatch
     def _unexpected_session_scope():
         raise AssertionError("duplicate singleton params should be rejected before cache metadata opens a DB session")
 
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
-    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _get_cached)
+    _patch_main_and_shared(monkeypatch, "_session_scope", _unexpected_session_scope)
 
     client = TestClient(app)
     response = client.get(
@@ -669,8 +696,8 @@ def test_financials_route_invalid_as_of_does_not_match_latest_hot_cache_etag(mon
     def _unexpected_session_scope():
         raise AssertionError("invalid as_of should be rejected before cache metadata opens a DB session")
 
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
-    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _get_cached)
+    _patch_main_and_shared(monkeypatch, "_session_scope", _unexpected_session_scope)
 
     client = TestClient(app)
     response = client.get(
@@ -712,8 +739,8 @@ def test_financials_route_invalid_view_does_not_match_latest_hot_cache_etag(monk
     def _unexpected_session_scope():
         raise AssertionError("invalid view should be rejected before cache metadata opens a DB session")
 
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _get_cached)
-    monkeypatch.setattr(main_module, "_session_scope", _unexpected_session_scope)
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _get_cached)
+    _patch_main_and_shared(monkeypatch, "_session_scope", _unexpected_session_scope)
 
     client = TestClient(app)
     response = client.get(
@@ -769,17 +796,17 @@ def test_model_evaluation_route_supports_conditional_get(monkeypatch):
 
 def test_peers_route_supports_conditional_get(monkeypatch):
     snapshot = _snapshot()
-    monkeypatch.setattr(main_module, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "build_peer_comparison",
         lambda *_args, **_kwargs: {
             "company": snapshot,

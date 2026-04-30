@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import asdict, is_dataclass
 from datetime import date
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ DatasetName = Literal[
 ]
 
 _SESSION_INVALIDATION_KEY = "shared_hot_cache_invalidations"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,11 +54,19 @@ class _PendingHotCacheInvalidation:
 def _flush_hot_cache_invalidations(session: Session) -> None:
     pending = session.info.pop(_SESSION_INVALIDATION_KEY, [])
     for invalidation in pending:
-        shared_hot_response_cache.invalidate_sync(
-            ticker=invalidation.ticker,
-            dataset=invalidation.dataset,
-            schema_version=invalidation.schema_version,
-        )
+        try:
+            shared_hot_response_cache.invalidate_sync(
+                ticker=invalidation.ticker,
+                dataset=invalidation.dataset,
+                schema_version=invalidation.schema_version,
+            )
+        except Exception:
+            logger.exception(
+                "Failed hot-cache invalidation after commit ticker=%s dataset=%s schema_version=%s",
+                invalidation.ticker,
+                invalidation.dataset,
+                invalidation.schema_version,
+            )
 
 
 @event.listens_for(Session, "after_rollback")

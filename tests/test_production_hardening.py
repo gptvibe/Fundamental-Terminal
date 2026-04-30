@@ -7,9 +7,16 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 import app.services.rate_limit as rate_limit_module
 from app.main import app
 from app.services.rate_limit import PublicRouteRateLimiter, RateLimitDecision
+
+
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    if hasattr(_shared_handlers, name):
+        monkeypatch.setattr(_shared_handlers, name, value)
 
 
 def _override_settings(**updates):
@@ -37,10 +44,10 @@ def test_healthcheck_surfaces_hardening_summary(monkeypatch) -> None:
     async def _sec_upstream_health_payload():
         return {"status": "ok", "latency_ms": 12.5, "healthy": True}, True
 
-    monkeypatch.setattr(main_module, "_database_health_payload", _database_health_payload)
-    monkeypatch.setattr(main_module, "_redis_health_payload", _redis_health_payload)
-    monkeypatch.setattr(main_module, "_worker_health_payload", _worker_health_payload)
-    monkeypatch.setattr(main_module, "_sec_upstream_health_payload", _sec_upstream_health_payload)
+    _patch_main_and_shared(monkeypatch, "_database_health_payload", _database_health_payload)
+    _patch_main_and_shared(monkeypatch, "_redis_health_payload", _redis_health_payload)
+    _patch_main_and_shared(monkeypatch, "_worker_health_payload", _worker_health_payload)
+    _patch_main_and_shared(monkeypatch, "_sec_upstream_health_payload", _sec_upstream_health_payload)
     original_settings = _override_settings(
         auth_mode="forwarded-user",
         auth_required_path_prefixes=("/api/internal", "/api/admin"),

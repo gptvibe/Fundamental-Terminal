@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 from app.main import RefreshState, app
 
 
@@ -75,16 +76,21 @@ class _AsyncScope:
         return False
 
 
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    monkeypatch.setattr(_shared_handlers, name, value)
+
+
 @contextmanager
 def _client(monkeypatch):
-    monkeypatch.setattr(main_module, "_session_scope", lambda: _AsyncScope())
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [_model_run()])
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
-    monkeypatch.setattr(main_module, "_fill_hot_cached_payload", _fill_without_cache)
+    _patch_main_and_shared(monkeypatch, "_session_scope", lambda: _AsyncScope())
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_main_and_shared(monkeypatch, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "get_company_models", lambda *_args, **_kwargs: [_model_run()])
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _no_hot_cache)
+    _patch_main_and_shared(monkeypatch, "_fill_hot_cached_payload", _fill_without_cache)
     with TestClient(app) as client:
         yield client
 
@@ -124,14 +130,14 @@ def test_models_route_omits_input_periods_by_default_and_reduces_payload(monkeyp
 
 
 def test_models_route_serializes_mocked_model_without_calculation_version_attribute(monkeypatch):
-    monkeypatch.setattr(main_module, "_session_scope", lambda: _AsyncScope())
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "get_company_models", lambda *_args, **_kwargs: [_model_run_without_calculation_version_attr()])
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
-    monkeypatch.setattr(main_module, "_fill_hot_cached_payload", _fill_without_cache)
+    _patch_main_and_shared(monkeypatch, "_session_scope", lambda: _AsyncScope())
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_main_and_shared(monkeypatch, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "get_company_models", lambda *_args, **_kwargs: [_model_run_without_calculation_version_attr()])
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _no_hot_cache)
+    _patch_main_and_shared(monkeypatch, "_fill_hot_cached_payload", _fill_without_cache)
 
     with TestClient(app) as client:
         response = client.get("/api/companies/AAPL/models?model=dcf")
@@ -189,13 +195,13 @@ def test_formula_endpoint_supports_lazy_batch_lookup(monkeypatch):
 
 
 def test_models_route_recomputes_missing_current_model_when_legacy_row_is_filtered(monkeypatch):
-    monkeypatch.setattr(main_module, "_session_scope", lambda: _AsyncScope())
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="stale", ticker="AAPL", job_id=None))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "_get_hot_cached_payload", _no_hot_cache)
-    monkeypatch.setattr(main_module, "_fill_hot_cached_payload", _fill_without_cache)
+    _patch_main_and_shared(monkeypatch, "_session_scope", lambda: _AsyncScope())
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_main_and_shared(monkeypatch, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="stale", ticker="AAPL", job_id=None))
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "_visible_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 4, 13, tzinfo=timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _no_hot_cache)
+    _patch_main_and_shared(monkeypatch, "_fill_hot_cached_payload", _fill_without_cache)
 
     call_count = {"get_company_models": 0}
     observed_compute: list[list[str] | None] = []
@@ -217,8 +223,8 @@ def test_models_route_recomputes_missing_current_model_when_legacy_row_is_filter
             observed_compute.append(model_names)
             return [SimpleNamespace(cached=False)]
 
-    monkeypatch.setattr(main_module, "get_company_models", _get_company_models)
-    monkeypatch.setattr(main_module, "ModelEngine", _FakeModelEngine)
+    _patch_main_and_shared(monkeypatch, "get_company_models", _get_company_models)
+    _patch_main_and_shared(monkeypatch, "ModelEngine", _FakeModelEngine)
 
     with TestClient(app) as client:
         response = client.get("/api/companies/AAPL/models?model=dcf")

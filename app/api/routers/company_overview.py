@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.handlers import market_context as handlers
+from app.api.handlers import company_overview as handlers
 from app.api.source_contracts import add_user_visible_route
 from app.api.schemas.company_overview import (
     CompanyOverviewResponse,

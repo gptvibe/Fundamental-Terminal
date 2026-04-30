@@ -8,6 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
+try:
+    from app.api.handlers import company_overview as _company_overview_handlers
+except Exception:  # pragma: no cover - fallback for branches without split overview handler
+    _company_overview_handlers = None
 from app.db import get_db_session
 from app.main import RefreshState, app
 
@@ -44,9 +49,17 @@ def _client():
         app.dependency_overrides.pop(get_db_session, None)
 
 
+def _patch_handler_namespaces(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    if hasattr(_shared_handlers, name):
+        monkeypatch.setattr(_shared_handlers, name, value)
+    if _company_overview_handlers is not None and hasattr(_company_overview_handlers, name):
+        monkeypatch.setattr(_company_overview_handlers, name, value)
+
+
 @pytest.fixture(autouse=True)
 def _stub_regulated_bank_query(monkeypatch):
-    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
+    _patch_handler_namespaces(monkeypatch, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
 
 
 def _financial_statement(source: str = "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"):
@@ -117,12 +130,12 @@ def _assert_provenance_envelope(payload: dict, expected_sources: set[str], *, re
 
 
 def test_financials_route_includes_registry_backed_provenance(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -244,12 +257,12 @@ def test_financials_route_exposes_reconciliation_metadata(monkeypatch):
         ],
     }
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [statement])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [statement])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -324,12 +337,12 @@ def test_financials_route_core_view_omits_reconciliation_and_segment_payloads_bu
         ],
     }
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [statement])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [statement])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -377,12 +390,12 @@ def test_financials_route_exposes_segment_analysis_metadata(monkeypatch):
         ],
     }
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [latest, previous])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [latest, previous])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -440,12 +453,12 @@ def test_financials_route_core_segments_view_keeps_segment_payloads_without_reco
         ],
     }
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [latest, previous])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [latest, previous])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -462,13 +475,13 @@ def test_financials_route_core_segments_view_keeps_segment_payloads_without_reco
 
 
 def test_financials_route_exposes_regulated_bank_payload_and_provenance(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _bank_snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
-    monkeypatch.setattr(main_module, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [_regulated_financial_statement()])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _bank_snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
+    _patch_handler_namespaces(monkeypatch, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [_regulated_financial_statement()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [_price_point()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="WFC", job_id=None),
     )
@@ -486,9 +499,9 @@ def test_financials_route_exposes_regulated_bank_payload_and_provenance(monkeypa
 
 
 def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_capital_structure_snapshots",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
@@ -559,13 +572,13 @@ def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch
             )
         ],
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_capital_structure_last_checked",
         lambda *_args, **_kwargs: datetime(2026, 3, 22, tzinfo=timezone.utc),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_capital_structure",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -582,9 +595,9 @@ def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch
 
 
 def test_oil_scenario_overlay_route_includes_registry_backed_provenance(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_oil_scenario_overlay",
         lambda *_args, **_kwargs: (
             {
@@ -679,8 +692,8 @@ def test_oil_scenario_overlay_route_includes_registry_backed_provenance(monkeypa
             "fresh",
         ),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_oil_scenario_overlay_last_checked",
         lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc),
     )
@@ -699,9 +712,9 @@ def test_oil_scenario_overlay_route_includes_registry_backed_provenance(monkeypa
 def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
     import app.services.oil_scenario as oil_scenario_service
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_oil_scenario_overlay",
         lambda *_args, **_kwargs: (
             {
@@ -815,8 +828,8 @@ def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
             "fresh",
         ),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_oil_scenario_overlay_last_checked",
         lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc),
     )
@@ -849,16 +862,16 @@ def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
 
 
 def test_models_route_includes_registry_backed_provenance(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_snapshot",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_models",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
@@ -905,22 +918,22 @@ def test_models_route_includes_registry_backed_provenance(monkeypatch):
 
 
 def test_models_route_accepts_sec_filing_statement_provenance(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_financials",
         lambda *_args, **_kwargs: [
             _financial_statement(source="https://www.sec.gov/Archives/edgar/data/320193/000032019325000001/a10-k2025.htm")
         ],
     )
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_snapshot",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_models",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
@@ -948,16 +961,16 @@ def test_models_route_accepts_sec_filing_statement_provenance(monkeypatch):
 
 def test_peers_route_includes_registry_backed_provenance(monkeypatch):
     snapshot = _snapshot()
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [_financial_statement()])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "build_peer_comparison",
         lambda *_args, **_kwargs: {
             "company": SimpleNamespace(company=snapshot.company, cache_state="fresh", last_checked=datetime(2026, 3, 22, tzinfo=timezone.utc)),
@@ -1014,7 +1027,7 @@ def test_peers_route_includes_registry_backed_provenance(monkeypatch):
 
 def test_activity_overview_route_includes_registry_backed_provenance(monkeypatch):
     snapshot = _snapshot()
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
     monkeypatch.setattr(
         main_module,
         "_refresh_for_snapshot",
@@ -1034,7 +1047,7 @@ def test_activity_overview_route_includes_registry_backed_provenance(monkeypatch
             "capital_filings": [],
         },
     )
-    monkeypatch.setattr(main_module, "_load_snapshot_backed_activity_overview_response", lambda *_args, **_kwargs: None)
+    _patch_handler_namespaces(monkeypatch, "_load_snapshot_backed_activity_overview_response", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         main_module,
         "get_cached_market_context_status",
@@ -1067,20 +1080,22 @@ def test_models_route_hides_yahoo_provenance_and_price_snapshot_in_strict_mode(m
     snapshot = _snapshot(ticker="STRICT")
     snapshot.company.sector = "prepackaged software"
     snapshot.cache_state = "stale"
-    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True, valuation_workbench_enabled=True))
+    _patch_handler_namespaces(monkeypatch, "settings", SimpleNamespace(strict_official_mode=True, valuation_workbench_enabled=True))
+
     async def _store_hot_cache(*_args, **_kwargs):
         return None
 
     monkeypatch.setattr(main_module, "_store_hot_cached_payload", _store_hot_cache)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_handler_namespaces(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_handler_namespaces(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_handler_namespaces(
+        monkeypatch,
         "_refresh_for_snapshot",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="STRICT", job_id=None),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_handler_namespaces(
+        monkeypatch,
         "get_company_models",
         lambda *_args, **_kwargs: [
             SimpleNamespace(

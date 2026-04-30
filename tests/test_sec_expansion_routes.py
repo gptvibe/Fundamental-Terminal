@@ -13,12 +13,25 @@ from fastapi.testclient import TestClient
 import pytest
 
 import app.main as main_module
+import app.api.handlers._shared as _shared_handlers
+try:
+    from app.api.handlers import company_overview as _company_overview_handlers
+except Exception:  # pragma: no cover
+    _company_overview_handlers = None
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload
 from app.api.schemas.financials import CompanyFinancialsResponse
 from app.main import RefreshState, app
 from app.services.beneficial_ownership import BeneficialOwnershipNormalizedParty, BeneficialOwnershipNormalizedReport
 from app.services.hot_cache import shared_hot_response_cache
 from app.services.sec_edgar import FilingMetadata
+
+
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    if hasattr(_shared_handlers, name):
+        monkeypatch.setattr(_shared_handlers, name, value)
+    if _company_overview_handlers is not None and hasattr(_company_overview_handlers, name):
+        monkeypatch.setattr(_company_overview_handlers, name, value)
 
 
 def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
@@ -85,19 +98,9 @@ class _FakeEdgarClient:
 
 
 def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(
-        main_module,
-        "_refresh_for_snapshot",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
-    )
-    monkeypatch.setattr(main_module, "_trigger_refresh", lambda *_args, **_kwargs: RefreshState(triggered=True, reason="missing", ticker="AAPL", job_id="job-1"))
-    monkeypatch.setattr(
-        main_module,
-        "get_company_proxy_cache_status",
-        lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh"),
-    )
-    monkeypatch.setattr(main_module, "_serialize_company", lambda *_args, **_kwargs: {
+    _snapshot_fn = lambda *_args, **_kwargs: _snapshot()
+    _trigger_refresh_fn = lambda *_args, **_kwargs: RefreshState(triggered=True, reason="missing", ticker="AAPL", job_id="job-1")
+    _serialize_company_fn = lambda *_args, **_kwargs: {
         "ticker": "AAPL",
         "cik": "0000320193",
         "name": "Apple Inc.",
@@ -111,9 +114,26 @@ def _install_common_overrides(monkeypatch, filings: dict[str, FilingMetadata]):
         "last_checked_institutional": None,
         "last_checked_filings": None,
         "cache_state": "fresh",
-    })
+    }
+    _proxy_cache_status_fn = lambda *_args, **_kwargs: (datetime.now(timezone.utc), "fresh")
+
+    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", _snapshot_fn)
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(main_module, "_trigger_refresh", _trigger_refresh_fn)
+    monkeypatch.setattr(main_module, "get_company_proxy_cache_status", _proxy_cache_status_fn)
+    monkeypatch.setattr(main_module, "_serialize_company", _serialize_company_fn)
     monkeypatch.setattr(main_module, "EdgarClient", lambda: _FakeEdgarClient(filings))
     monkeypatch.setattr(main_module, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: [])
+
+    # Also patch _shared_handlers so governance.py (which uses shared.xxx lookups) sees mocked values.
+    monkeypatch.setattr(_shared_handlers, "_resolve_cached_company_snapshot", _snapshot_fn)
+    monkeypatch.setattr(_shared_handlers, "_trigger_refresh", _trigger_refresh_fn)
+    monkeypatch.setattr(_shared_handlers, "_serialize_company", _serialize_company_fn)
+    monkeypatch.setattr(_shared_handlers, "get_company_proxy_cache_status", _proxy_cache_status_fn)
 
     cached_filing_events = []
     cached_capital_events = []
@@ -338,13 +358,20 @@ def test_equity_claim_risk_endpoint_returns_pack(monkeypatch):
 def test_peers_route_returns_default_selected_tickers(monkeypatch):
     _install_common_overrides(monkeypatch, {})
     main_module._hot_response_cache.clear()
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
+    _price_cache_status = lambda *_args, **_kwargs: (None, "fresh")
+    _financials = lambda *_args, **_kwargs: []
+    _refresh_for_financial_page = lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None)
+
+    monkeypatch.setattr(main_module, "get_company_price_cache_status", _price_cache_status)
+    monkeypatch.setattr(main_module, "get_company_financials", _financials)
     monkeypatch.setattr(
         main_module,
         "_refresh_for_financial_page",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+        _refresh_for_financial_page,
     )
+    monkeypatch.setattr(_shared_handlers, "get_company_price_cache_status", _price_cache_status)
+    monkeypatch.setattr(_shared_handlers, "get_company_financials", _financials)
+    monkeypatch.setattr(_shared_handlers, "_refresh_for_financial_page", _refresh_for_financial_page)
 
     observed: dict[str, list[str] | None] = {"selected": None}
 
@@ -410,6 +437,7 @@ def test_peers_route_returns_default_selected_tickers(monkeypatch):
         }
 
     monkeypatch.setattr(main_module, "build_peer_comparison", _fake_build_peer_comparison)
+    monkeypatch.setattr(_shared_handlers, "build_peer_comparison", _fake_build_peer_comparison)
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/peers")
@@ -424,6 +452,8 @@ def test_peers_route_returns_default_selected_tickers(monkeypatch):
 def test_financials_route_serves_raw_cached_json_on_fresh_hit(monkeypatch):
     _install_common_overrides(monkeypatch, {})
     monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
     shared_hot_response_cache.clear_sync()
 
     payload = CompanyFinancialsResponse(
@@ -482,11 +512,13 @@ def test_financials_route_serves_raw_cached_json_on_fresh_hit(monkeypatch):
 
 def test_company_overview_route_populates_hot_cache_on_cold_miss_and_reuses_it_when_warm(monkeypatch):
     monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
     shared_hot_response_cache.clear_sync()
     snapshot = _snapshot()
     build_calls = {"financials": 0, "brief": 0}
 
-    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
 
     def _build_financials(*_args, **_kwargs):
         build_calls["financials"] += 1
@@ -496,8 +528,8 @@ def test_company_overview_route_populates_hot_cache_on_cold_miss_and_reuses_it_w
         build_calls["brief"] += 1
         return _brief_payload(snapshot)
 
-    monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
-    monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
+    _patch_main_and_shared(monkeypatch, "_build_company_financials_response", _build_financials)
+    _patch_main_and_shared(monkeypatch, "_build_company_research_brief_response", _build_brief)
 
     client = TestClient(app)
     first = client.get("/api/companies/AAPL/overview?financials_view=core_segments")
@@ -516,18 +548,20 @@ def test_company_overview_route_populates_hot_cache_on_cold_miss_and_reuses_it_w
 
 def test_company_overview_route_ignores_stale_hot_cache_and_rebuilds_payload(monkeypatch):
     monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
     shared_hot_response_cache.clear_sync()
     snapshot = _snapshot()
     build_calls = {"financials": 0, "brief": 0}
 
-    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(
+        monkeypatch,
         "_build_company_financials_response",
         lambda *_args, **_kwargs: build_calls.__setitem__("financials", build_calls["financials"] + 1) or _financials_payload(snapshot),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "_build_company_research_brief_response",
         lambda *_args, **_kwargs: build_calls.__setitem__("brief", build_calls["brief"] + 1) or _brief_payload(snapshot),
     )
@@ -571,11 +605,13 @@ def test_company_overview_route_ignores_stale_hot_cache_and_rebuilds_payload(mon
 
 def test_company_workspace_bootstrap_route_populates_hot_cache_on_cold_miss_and_reuses_it_when_warm(monkeypatch):
     monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
     shared_hot_response_cache.clear_sync()
     snapshot = _snapshot()
     build_calls = {"financials": 0, "brief": 0}
 
-    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
 
     def _build_financials(*_args, **_kwargs):
         build_calls["financials"] += 1
@@ -585,8 +621,8 @@ def test_company_workspace_bootstrap_route_populates_hot_cache_on_cold_miss_and_
         build_calls["brief"] += 1
         return _brief_payload(snapshot)
 
-    monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
-    monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
+    _patch_main_and_shared(monkeypatch, "_build_company_financials_response", _build_financials)
+    _patch_main_and_shared(monkeypatch, "_build_company_research_brief_response", _build_brief)
 
     client = TestClient(app)
     first = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
@@ -605,11 +641,13 @@ def test_company_workspace_bootstrap_route_populates_hot_cache_on_cold_miss_and_
 
 def test_company_workspace_bootstrap_route_keeps_schema_compatible_when_served_from_hot_cache(monkeypatch):
     monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
     shared_hot_response_cache.clear_sync()
     snapshot = _snapshot()
-    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_build_company_financials_response", lambda *_args, **_kwargs: _financials_payload(snapshot))
-    monkeypatch.setattr(main_module, "_build_company_research_brief_response", lambda *_args, **_kwargs: _brief_payload(snapshot))
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_build_company_financials_response", lambda *_args, **_kwargs: _financials_payload(snapshot))
+    _patch_main_and_shared(monkeypatch, "_build_company_research_brief_response", lambda *_args, **_kwargs: _brief_payload(snapshot))
 
     client = TestClient(app)
     first = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
@@ -631,10 +669,10 @@ def test_company_workspace_bootstrap_route_keeps_schema_compatible_when_served_f
 def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
     _install_common_overrides(monkeypatch, {})
     main_module._hot_response_cache.clear()
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(
+        monkeypatch,
         "_refresh_for_financial_page",
         lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
     )
@@ -712,7 +750,7 @@ def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
             "notes": {"ev_to_ebit": "proxy", "price_to_free_cash_flow": "proxy", "piotroski": "score"},
         }
 
-    monkeypatch.setattr(main_module, "build_peer_comparison", _fake_build_peer_comparison)
+    _patch_main_and_shared(monkeypatch, "build_peer_comparison", _fake_build_peer_comparison)
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/peers?peers=msft,goog")
@@ -745,24 +783,30 @@ def test_governance_route_filters_proxy_forms(monkeypatch):
         ),
     }
     _install_common_overrides(monkeypatch, filings)
+    _proxy_stmts = [
+        SimpleNamespace(
+            accession_number="0002",
+            form="DEF 14A",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2026, 2, 10),
+            meeting_date=None,
+            board_nominee_count=None,
+            vote_item_count=0,
+            executive_comp_table_detected=False,
+            primary_document="proxy.htm",
+            source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+            vote_results=[],
+        )
+    ]
     monkeypatch.setattr(
         main_module,
         "get_company_proxy_statements",
-        lambda *_args, **_kwargs: [
-            SimpleNamespace(
-                accession_number="0002",
-                form="DEF 14A",
-                filing_date=date(2026, 2, 15),
-                report_date=date(2026, 2, 10),
-                meeting_date=None,
-                board_nominee_count=None,
-                vote_item_count=0,
-                executive_comp_table_detected=False,
-                primary_document="proxy.htm",
-                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
-                vote_results=[],
-            )
-        ],
+        lambda *_args, **_kwargs: _proxy_stmts,
+    )
+    monkeypatch.setattr(
+        _shared_handlers,
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: _proxy_stmts,
     )
 
     client = TestClient(app)
@@ -787,33 +831,39 @@ def test_governance_route_includes_deterministic_parser_signals(monkeypatch):
         )
     }
     _install_common_overrides(monkeypatch, filings)
+    _proxy_stmts = [
+        SimpleNamespace(
+            accession_number="0002",
+            form="DEF 14A",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2026, 2, 10),
+            meeting_date=date(2026, 5, 20),
+            board_nominee_count=9,
+            vote_item_count=3,
+            executive_comp_table_detected=True,
+            primary_document="proxy.htm",
+            source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+            vote_results=[
+                SimpleNamespace(
+                    proposal_number=1,
+                    title="Election of Directors",
+                    for_votes=100000,
+                    against_votes=5000,
+                    abstain_votes=1200,
+                    broker_non_votes=9500,
+                )
+            ],
+        )
+    ]
     monkeypatch.setattr(
         main_module,
         "get_company_proxy_statements",
-        lambda *_args, **_kwargs: [
-            SimpleNamespace(
-                accession_number="0002",
-                form="DEF 14A",
-                filing_date=date(2026, 2, 15),
-                report_date=date(2026, 2, 10),
-                meeting_date=date(2026, 5, 20),
-                board_nominee_count=9,
-                vote_item_count=3,
-                executive_comp_table_detected=True,
-                primary_document="proxy.htm",
-                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
-                vote_results=[
-                    SimpleNamespace(
-                        proposal_number=1,
-                        title="Election of Directors",
-                        for_votes=100000,
-                        against_votes=5000,
-                        abstain_votes=1200,
-                        broker_non_votes=9500,
-                    )
-                ],
-            )
-        ],
+        lambda *_args, **_kwargs: _proxy_stmts,
+    )
+    monkeypatch.setattr(
+        _shared_handlers,
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: _proxy_stmts,
     )
 
     client = TestClient(app)
@@ -844,33 +894,40 @@ def test_governance_summary_endpoint_returns_aggregates(monkeypatch):
     }
     _install_common_overrides(monkeypatch, filings)
     monkeypatch.setattr(main_module, "_load_snapshot_backed_governance_summary_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_shared_handlers, "_load_snapshot_backed_governance_summary_response", lambda *_args, **_kwargs: None)
+    _proxy_stmts_summary = [
+        SimpleNamespace(
+            accession_number="0002",
+            form="DEF 14A",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2026, 2, 10),
+            meeting_date=date(2026, 5, 20),
+            board_nominee_count=9,
+            vote_item_count=3,
+            executive_comp_table_detected=True,
+            primary_document="proxy.htm",
+            source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
+            vote_results=[
+                SimpleNamespace(
+                    proposal_number=1,
+                    title="Election of Directors",
+                    for_votes=100000,
+                    against_votes=5000,
+                    abstain_votes=1200,
+                    broker_non_votes=9500,
+                )
+            ],
+        )
+    ]
     monkeypatch.setattr(
         main_module,
         "get_company_proxy_statements",
-        lambda *_args, **_kwargs: [
-            SimpleNamespace(
-                accession_number="0002",
-                form="DEF 14A",
-                filing_date=date(2026, 2, 15),
-                report_date=date(2026, 2, 10),
-                meeting_date=date(2026, 5, 20),
-                board_nominee_count=9,
-                vote_item_count=3,
-                executive_comp_table_detected=True,
-                primary_document="proxy.htm",
-                source_url="https://www.sec.gov/Archives/edgar/data/1/2/proxy.htm",
-                vote_results=[
-                    SimpleNamespace(
-                        proposal_number=1,
-                        title="Election of Directors",
-                        for_votes=100000,
-                        against_votes=5000,
-                        abstain_votes=1200,
-                        broker_non_votes=9500,
-                    )
-                ],
-            )
-        ],
+        lambda *_args, **_kwargs: _proxy_stmts_summary,
+    )
+    monkeypatch.setattr(
+        _shared_handlers,
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: _proxy_stmts_summary,
     )
 
     client = TestClient(app)
@@ -914,6 +971,16 @@ def test_governance_summary_endpoint_prefers_persisted_brief_snapshot(monkeypatc
         "get_company_proxy_statements",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not query proxy statements when persisted summary exists")),
     )
+    monkeypatch.setattr(
+        _shared_handlers,
+        "get_company_research_brief_snapshot",
+        lambda *_args, **_kwargs: SimpleNamespace(payload=brief_payload),
+    )
+    monkeypatch.setattr(
+        _shared_handlers,
+        "get_company_proxy_statements",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("should not query proxy statements when persisted summary exists")),
+    )
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/governance/summary")
@@ -923,7 +990,6 @@ def test_governance_summary_endpoint_prefers_persisted_brief_snapshot(monkeypatc
     assert payload["summary"]["total_filings"] == 2
     assert payload["summary"]["supplemental_proxies"] == 1
     assert payload["summary"]["max_vote_item_count"] == 4
-
 
 def test_activity_overview_endpoint_prefers_persisted_brief_snapshot(monkeypatch):
     _install_common_overrides(monkeypatch, {})
@@ -983,6 +1049,8 @@ def test_governance_endpoint_triggers_refresh_when_proxy_cache_missing(monkeypat
     _install_common_overrides(monkeypatch, {})
     monkeypatch.setattr(main_module, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_proxy_cache_status", lambda *_args, **_kwargs: (None, "missing"))
+    monkeypatch.setattr(_shared_handlers, "get_company_proxy_statements", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(_shared_handlers, "get_company_proxy_cache_status", lambda *_args, **_kwargs: (None, "missing"))
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/governance")
@@ -1908,7 +1976,7 @@ def test_watchlist_summary_endpoint_normalizes_dedupes_and_ignores_blank_tickers
     )
     monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
 
-    def _fake_item(_session, _background_tasks, ticker: str, **_kwargs):
+    def _fake_item(_session, ticker: str, **_kwargs):
         observed.append(ticker)
         return main_module.WatchlistSummaryItemPayload(
             ticker=ticker,
@@ -1989,7 +2057,7 @@ def test_watchlist_summary_endpoint_tolerates_activity_data_failures(monkeypatch
 def test_watchlist_summary_endpoint_tolerates_snapshot_lookup_failures(monkeypatch):
     observed: list[str] = []
 
-    def _fake_missing(_background_tasks, ticker: str):
+    def _fake_missing(ticker: str):
         observed.append(ticker)
         return main_module.WatchlistSummaryItemPayload(
             ticker=ticker,
@@ -2161,7 +2229,7 @@ def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monk
     )
     monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
 
-    def _fake_item(_session, _background_tasks, ticker: str, **_kwargs):
+    def _fake_item(_session, ticker: str, **_kwargs):
         if ticker == "MSFT":
             raise RuntimeError("broken ticker payload")
         return main_module.WatchlistSummaryItemPayload(

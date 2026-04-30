@@ -6,8 +6,22 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 from app.main import RefreshState, app
 from app.services.oil_exposure import classify_oil_exposure
+
+
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    monkeypatch.setattr(_shared_handlers, name, value)
+
+
+async def _no_hot_cache(*_args, **_kwargs):
+    return None
+
+
+async def _fill_without_cache(_key, *, fill, **_kwargs):
+    return await fill()
 
 
 def test_classify_oil_exposure_support_matrix() -> None:
@@ -45,12 +59,15 @@ def test_models_route_exposes_oil_classification_metadata(monkeypatch) -> None:
         last_checked=datetime(2026, 4, 4, tzinfo=timezone.utc),
     )
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="XOM", job_id=None))
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [])
+    _patch_main_and_shared(monkeypatch, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="XOM", job_id=None))
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    _patch_main_and_shared(monkeypatch, "_visible_price_cache_status", lambda *_args, **_kwargs: (None, "fresh"))
+    _patch_main_and_shared(monkeypatch, "_get_hot_cached_payload", _no_hot_cache)
+    _patch_main_and_shared(monkeypatch, "_fill_hot_cached_payload", _fill_without_cache)
+    _patch_main_and_shared(
+        monkeypatch,
         "get_company_models",
         lambda *_args, **_kwargs: [
             SimpleNamespace(
