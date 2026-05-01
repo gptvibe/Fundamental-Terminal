@@ -21,7 +21,7 @@ from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import Body, Depends, HTTPException, Query, Request, Response, status
+from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status
 import httpx
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, StreamingResponse

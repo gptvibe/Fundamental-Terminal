@@ -105,7 +105,6 @@ async def company_financials(
             return _build_company_financials_response(
                 sync_session,
                 normalized_ticker,
-                background_tasks,
                 requested_as_of=requested_as_of,
                 parsed_as_of=parsed_as_of,
                 view=normalized_view,

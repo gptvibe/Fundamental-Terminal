@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+import typing
 from functools import wraps
 from typing import Any, Callable, TypeVar, cast
 
@@ -53,9 +54,12 @@ def main_bound(function: FunctionT) -> FunctionT:
                 return await shared_module._run_with_session_binding(session, invoke)
 
         session_wrapper.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
-        annotations = dict(getattr(function, "__annotations__", {}))
-        annotations.pop("session", None)
-        session_wrapper.__annotations__ = annotations
+        try:
+            resolved_annotations = typing.get_type_hints(function, include_extras=True)
+        except Exception:
+            resolved_annotations = dict(getattr(function, "__annotations__", {}))
+        resolved_annotations.pop("session", None)
+        session_wrapper.__annotations__ = resolved_annotations
         return cast(FunctionT, session_wrapper)
 
     @wraps(function)
