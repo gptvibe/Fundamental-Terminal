@@ -123,6 +123,19 @@ For local source builds:
 docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.small-host.yml up --build -d
 ```
 
+To smoke-check the frontend container standalone production server directly:
+
+```bash
+docker build -f frontend/Dockerfile -t fundamental-terminal-frontend:standalone ./frontend
+docker run --rm -p 3000:3000 -e BACKEND_API_BASE_URL=http://host.docker.internal:8000 fundamental-terminal-frontend:standalone
+```
+
+Then verify it responds:
+
+```bash
+curl -f http://127.0.0.1:3000/
+```
+
 The small-host override keeps the main compose defaults unchanged for larger machines, but applies these safer worker settings on constrained hosts:
 
 - backend and worker DB pools pinned to `5` with `5` overflow

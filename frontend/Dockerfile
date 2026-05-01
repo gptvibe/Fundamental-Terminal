@@ -24,8 +24,17 @@ ENV NODE_ENV=production \
     BACKEND_API_BASE_URL=${BACKEND_API_BASE_URL} \
     PORT=3000
 
-COPY --from=builder /app .
+RUN addgroup -S nextjs -g 1001 \
+    && adduser -S nextjs -u 1001 -G nextjs \
+    && mkdir -p /app/.next/cache \
+    && chown -R nextjs:nextjs /app/.next
+
+COPY --from=builder --chown=nextjs:nextjs /app/public ./public
+COPY --from=builder --chown=nextjs:nextjs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nextjs /app/.next/static ./.next/static
+
+USER nextjs
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+CMD ["node", "server.js"]

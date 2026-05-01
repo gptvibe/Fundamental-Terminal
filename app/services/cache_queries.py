@@ -653,10 +653,8 @@ def get_company_insider_trade_cache_status(session: Session, company: Company) -
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.insider_trades_last_checked)
-    if last_checked is None:
-        statement = select(func.max(InsiderTrade.last_checked)).where(InsiderTrade.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(InsiderTrade.last_checked)).where(InsiderTrade.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "insiders", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -705,10 +703,8 @@ def get_company_form144_cache_status(session: Session, company: Company) -> tupl
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.form144_filings_last_checked)
-    if last_checked is None:
-        statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "form144", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -750,10 +746,8 @@ def get_company_earnings_cache_status(session: Session, company: Company) -> tup
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.earnings_last_checked)
-    if last_checked is None:
-        statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "earnings", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -875,10 +869,8 @@ def get_company_institutional_holdings_cache_status(session: Session, company: C
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.institutional_holdings_last_checked)
-    if last_checked is None:
-        statement = select(func.max(InstitutionalHolding.last_checked)).where(InstitutionalHolding.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(InstitutionalHolding.last_checked)).where(InstitutionalHolding.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "institutional", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -924,10 +916,8 @@ def get_company_beneficial_ownership_cache_status(session: Session, company: Com
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.beneficial_ownership_last_checked)
-    if last_checked is None:
-        statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(BeneficialOwnershipReport.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(BeneficialOwnershipReport.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "beneficial_ownership", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -978,10 +968,8 @@ def get_company_filing_events_cache_status(session: Session, company: Company) -
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.filing_events_last_checked)
-    if last_checked is None:
-        statement = select(func.max(FilingEvent.last_checked)).where(FilingEvent.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(FilingEvent.last_checked)).where(FilingEvent.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "filings", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -1089,10 +1077,8 @@ def get_company_capital_markets_cache_status(session: Session, company: Company)
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.capital_markets_last_checked)
-    if last_checked is None:
-        statement = select(func.max(CapitalMarketsEvent.last_checked)).where(CapitalMarketsEvent.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(CapitalMarketsEvent.last_checked)).where(CapitalMarketsEvent.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "capital_markets", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -1103,10 +1089,8 @@ def get_company_comment_letters_cache_status(session: Session, company: Company)
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.comment_letters_last_checked)
-    if last_checked is None:
-        statement = select(func.max(CommentLetter.last_checked)).where(CommentLetter.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(CommentLetter.last_checked)).where(CommentLetter.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "comment_letters", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)
@@ -1182,10 +1166,8 @@ def get_company_proxy_cache_status(session: Session, company: Company) -> tuple[
     if state_cache != "missing":
         return state_last_checked, state_cache
 
-    last_checked = _normalize_datetime(company.proxy_statements_last_checked)
-    if last_checked is None:
-        statement = select(func.max(ProxyStatement.last_checked)).where(ProxyStatement.company_id == company.id)
-        last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    statement = select(func.max(ProxyStatement.last_checked)).where(ProxyStatement.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
     if last_checked is not None:
         mark_dataset_checked(session, company.id, "proxy", checked_at=last_checked, success=True)
     return last_checked, _cache_state_from_last_checked(last_checked)

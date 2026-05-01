@@ -65,22 +65,28 @@ from app.source_registry import SourceUsage, build_provenance_entries, build_sou
 from app.services.cache_queries import (
     CompanyCacheSnapshot,
     filter_price_history_as_of,
+    get_company_beneficial_ownership_cache_status,
     get_company_beneficial_ownership_reports,
     get_company_capital_markets_events,
     get_company_capital_structure_last_checked,
     get_company_capital_structure_snapshots,
+    get_company_comment_letters_cache_status,
     get_company_comment_letters,
     get_company_earnings_cache_status,
     get_company_earnings_releases,
+    get_company_filing_events_cache_status,
     get_company_filing_events,
     get_company_filing_insights,
     get_company_financial_restatements,
     get_company_financials,
     get_company_form144_filings,
+    get_company_insider_trade_cache_status,
     get_company_insider_trades,
+    get_company_institutional_holdings_cache_status,
     get_company_institutional_holdings,
     get_company_models,
     get_company_price_cache_status,
+    get_company_proxy_cache_status,
     get_company_price_history,
     get_company_proxy_statements,
     get_company_snapshot,
@@ -379,19 +385,30 @@ def _build_activity_overview_response(session: Session, snapshot: CompanyCacheSn
         institutional_holdings=institutional_holdings,
         comment_letters=comment_letters,
     )
+    filings_last_checked, _filings_cache_state = get_company_filing_events_cache_status(session, snapshot.company)
+    beneficial_last_checked, _beneficial_cache_state = get_company_beneficial_ownership_cache_status(session, snapshot.company)
+    proxy_last_checked, _proxy_cache_state = get_company_proxy_cache_status(session, snapshot.company)
+    insider_last_checked, _insider_cache_state = get_company_insider_trade_cache_status(session, snapshot.company)
+    institutional_last_checked, _institutional_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
+    comment_letters_last_checked, _comment_letters_cache_state = get_company_comment_letters_cache_status(session, snapshot.company)
     last_refreshed_at = _merge_last_checked(
         snapshot.last_checked,
         *(getattr(item, "last_checked", None) for item in filings),
-        snapshot.company.filing_events_last_checked,
-        snapshot.company.beneficial_ownership_last_checked,
-        snapshot.company.proxy_statements_last_checked,
-        snapshot.company.insider_trades_last_checked,
-        snapshot.company.institutional_holdings_last_checked,
-        snapshot.company.comment_letters_last_checked,
+        filings_last_checked,
+        beneficial_last_checked,
+        proxy_last_checked,
+        insider_last_checked,
+        institutional_last_checked,
+        comment_letters_last_checked,
     )
     market_context_status = _get_persisted_market_context_status(session)
     return CompanyActivityOverviewResponse(
-        company=_serialize_company(snapshot),
+        company=_serialize_company(
+            snapshot,
+            last_checked_insiders=insider_last_checked,
+            last_checked_institutional=institutional_last_checked,
+            last_checked_filings=filings_last_checked,
+        ),
         entries=entries,
         alerts=alerts,
         summary=AlertsSummaryPayload(
@@ -703,6 +720,9 @@ def _serialize_company(
     snapshot: CompanyCacheSnapshot,
     last_checked: datetime | None = None,
     *,
+    last_checked_insiders: datetime | None = None,
+    last_checked_institutional: datetime | None = None,
+    last_checked_filings: datetime | None = None,
     last_checked_earnings: datetime | None = None,
 ) -> CompanyPayload:
     market_sector, market_industry = _company_market_classification(snapshot.company)
@@ -711,6 +731,15 @@ def _serialize_company(
         market_sector=market_sector,
         market_industry=market_industry,
     )
+    if last_checked_insiders is None:
+        last_checked_insiders = _dataset_last_checked_from_company(snapshot.company, "insiders")
+    if last_checked_institutional is None:
+        last_checked_institutional = _dataset_last_checked_from_company(snapshot.company, "institutional")
+    if last_checked_filings is None:
+        last_checked_filings = _dataset_last_checked_from_company(snapshot.company, "filings")
+    if last_checked_earnings is None:
+        last_checked_earnings = _dataset_last_checked_from_company(snapshot.company, "earnings")
+
     return CompanyPayload(
         ticker=snapshot.company.ticker,
         cik=snapshot.company.cik,
@@ -726,12 +755,19 @@ def _serialize_company(
         last_checked=last_checked if last_checked is not None else snapshot.last_checked,
         last_checked_financials=snapshot.last_checked,
         last_checked_prices=None,
-        last_checked_insiders=snapshot.company.insider_trades_last_checked,
-        last_checked_institutional=snapshot.company.institutional_holdings_last_checked,
-        last_checked_filings=snapshot.company.filing_events_last_checked,
+        last_checked_insiders=last_checked_insiders,
+        last_checked_institutional=last_checked_institutional,
+        last_checked_filings=last_checked_filings,
         earnings_last_checked=last_checked_earnings,
         cache_state=snapshot.cache_state,
     )
+
+
+def _dataset_last_checked_from_company(company: Company, dataset: str) -> datetime | None:
+    for state in getattr(company, "dataset_refresh_states", []) or []:
+        if getattr(state, "dataset", None) == dataset:
+            return getattr(state, "last_checked", None)
+    return None
 
 
 def _refresh_state_for_snapshot(snapshot: CompanyCacheSnapshot) -> RefreshState:

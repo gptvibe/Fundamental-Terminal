@@ -7,6 +7,8 @@ import "./globals.css";
 
 import { AppChrome } from "@/components/layout/app-chrome";
 
+const DEFAULT_METADATA_BASE = "http://localhost:3000";
+
 const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
@@ -21,9 +23,20 @@ const plexMono = IBM_Plex_Mono({
   display: "swap"
 });
 
+export function resolveMetadataBase(): URL {
+  const configuredOrigin = process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.SITE_URL?.trim() || DEFAULT_METADATA_BASE;
+
+  try {
+    return new URL(configuredOrigin);
+  } catch {
+    return new URL(DEFAULT_METADATA_BASE);
+  }
+}
+
 export const metadata: Metadata = {
   title: "Fundamental Terminal",
   description: "SEC-first fundamental terminal built with Next.js",
+  metadataBase: resolveMetadataBase(),
   icons: {
     icon: "/logo.svg",
     shortcut: "/logo.svg",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
@@ -480,7 +480,7 @@ export default function CompanyResearchBriefPage() {
     [activeRefreshEntry, briefData.buildState, briefData.buildStatus, initialCompanyLoad]
   );
 
-  async function handleExportResearchPackage() {
+  const handleExportResearchPackage = useCallback(async () => {
     try {
       setExportingResearchPackage(true);
 
@@ -534,7 +534,7 @@ export default function CompanyResearchBriefPage() {
     } finally {
       setExportingResearchPackage(false);
     }
-  }
+  }, [pageCompany, ticker]);
 
   useEffect(() => {
     function onCommandExportMemo(event: Event) {
@@ -548,7 +548,7 @@ export default function CompanyResearchBriefPage() {
 
     window.addEventListener(COMMAND_PALETTE_EXPORT_MEMO_EVENT, onCommandExportMemo as EventListener);
     return () => window.removeEventListener(COMMAND_PALETTE_EXPORT_MEMO_EVENT, onCommandExportMemo as EventListener);
-  }, [ticker]);
+  }, [handleExportResearchPackage, ticker]);
 
   return (
     <CompanyWorkspaceShell

@@ -3853,11 +3853,11 @@ def _latest_insider_trade_last_checked(session: Session, company: Company) -> da
     if state_cache != "missing":
         return state_last_checked
 
-    if company.insider_trades_last_checked is not None:
-        return _normalize_datetime_value(company.insider_trades_last_checked)
-
     statement = select(func.max(InsiderTrade.last_checked)).where(InsiderTrade.company_id == company.id)
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "insiders", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _latest_form144_last_checked(session: Session, company: Company) -> datetime | None:
@@ -3865,11 +3865,11 @@ def _latest_form144_last_checked(session: Session, company: Company) -> datetime
     if state_cache != "missing":
         return state_last_checked
 
-    if company.form144_filings_last_checked is not None:
-        return _normalize_datetime_value(company.form144_filings_last_checked)
-
     statement = select(func.max(Form144Filing.last_checked)).where(Form144Filing.company_id == company.id)
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "form144", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _latest_earnings_last_checked(session: Session, company: Company) -> datetime | None:
@@ -3877,11 +3877,11 @@ def _latest_earnings_last_checked(session: Session, company: Company) -> datetim
     if state_cache != "missing":
         return state_last_checked
 
-    if company.earnings_last_checked is not None:
-        return _normalize_datetime_value(company.earnings_last_checked)
-
     statement = select(func.max(EarningsRelease.last_checked)).where(EarningsRelease.company_id == company.id)
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "earnings", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _latest_beneficial_ownership_last_checked(session: Session, company: Company) -> datetime | None:
@@ -3889,13 +3889,13 @@ def _latest_beneficial_ownership_last_checked(session: Session, company: Company
     if state_cache != "missing":
         return state_last_checked
 
-    if company.beneficial_ownership_last_checked is not None:
-        return _normalize_datetime_value(company.beneficial_ownership_last_checked)
-
     statement = select(func.max(BeneficialOwnershipReport.last_checked)).where(
         BeneficialOwnershipReport.company_id == company.id
     )
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "beneficial_ownership", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _latest_comment_letter_last_checked(session: Session, company: Company) -> datetime | None:
@@ -3903,12 +3903,11 @@ def _latest_comment_letter_last_checked(session: Session, company: Company) -> d
     if state_cache != "missing":
         return state_last_checked
 
-    company_last_checked = getattr(company, "comment_letters_last_checked", None)
-    if company_last_checked is not None:
-        return _normalize_datetime_value(company_last_checked)
-
     statement = select(func.max(CommentLetter.last_checked)).where(CommentLetter.company_id == company.id)
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "comment_letters", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _latest_filing_event_last_checked(session: Session, company: Company) -> datetime | None:
@@ -3916,12 +3915,11 @@ def _latest_filing_event_last_checked(session: Session, company: Company) -> dat
     if state_cache != "missing":
         return state_last_checked
 
-    company_last_checked = getattr(company, "filing_events_last_checked", None)
-    if company_last_checked is not None:
-        return _normalize_datetime_value(company_last_checked)
-
     statement = select(func.max(FilingEvent.last_checked)).where(FilingEvent.company_id == company.id)
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "filings", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _latest_capital_markets_last_checked(session: Session, company: Company) -> datetime | None:
@@ -3929,12 +3927,11 @@ def _latest_capital_markets_last_checked(session: Session, company: Company) -> 
     if state_cache != "missing":
         return state_last_checked
 
-    company_last_checked = getattr(company, "capital_markets_last_checked", None)
-    if company_last_checked is not None:
-        return _normalize_datetime_value(company_last_checked)
-
     statement = select(func.max(CapitalMarketsEvent.last_checked)).where(CapitalMarketsEvent.company_id == company.id)
-    return _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    last_checked = _normalize_datetime_value(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "capital_markets", checked_at=last_checked, success=True)
+    return last_checked
 
 
 def _attach_statement_reconciliations(
@@ -4323,11 +4320,6 @@ def _touch_company_insider_trades(
         .where(InsiderTrade.company_id == company_id)
         .values(last_checked=checked_at)
     )
-    session.execute(
-        update(Company)
-        .where(Company.id == company_id)
-        .values(insider_trades_last_checked=checked_at)
-    )
     mark_dataset_checked(
         session,
         company_id,
@@ -4350,11 +4342,6 @@ def _touch_company_form144_filings(
         update(Form144Filing)
         .where(Form144Filing.company_id == company_id)
         .values(last_checked=checked_at)
-    )
-    session.execute(
-        update(Company)
-        .where(Company.id == company_id)
-        .values(form144_filings_last_checked=checked_at)
     )
     mark_dataset_checked(
         session,
@@ -4379,11 +4366,6 @@ def _touch_company_earnings_releases(
         .where(EarningsRelease.company_id == company_id)
         .values(last_checked=checked_at)
     )
-    session.execute(
-        update(Company)
-        .where(Company.id == company_id)
-        .values(earnings_last_checked=checked_at)
-    )
     mark_dataset_checked(
         session,
         company_id,
@@ -4406,11 +4388,6 @@ def _touch_company_comment_letters(
         update(CommentLetter)
         .where(CommentLetter.company_id == company_id)
         .values(last_checked=checked_at)
-    )
-    session.execute(
-        update(Company)
-        .where(Company.id == company_id)
-        .values(comment_letters_last_checked=checked_at)
     )
     mark_dataset_checked(
         session,

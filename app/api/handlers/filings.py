@@ -22,7 +22,7 @@ def company_filings(
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
 
     cached_filings = _load_filings_from_cache(snapshot.company.cik)
     if cached_filings is not None:

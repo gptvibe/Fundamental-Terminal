@@ -22,6 +22,7 @@ This update hardens backend latency and refresh coordination without changing pr
 - Added DB pool tuning knobs with safe defaults in environment-backed settings.
 - Added `dataset_refresh_state` table keyed by `(company_id, dataset)` to persist freshness and active refresh lock metadata.
 - Replaced repeated `MAX(last_checked)` scan patterns with refresh-state lookups where practical, with scan fallback for migration safety.
+- Removed legacy `companies.*_last_checked` freshness columns after backfilling into `dataset_refresh_state`; dataset refresh state is now the single freshness source of truth.
 - Refactored `EdgarIngestionService.refresh_company` into a policy-driven orchestrator with dataset-specific refresh jobs so partial refresh branches and failure isolation stay explicit.
 - Optimized model retrieval and peer assembly query paths to reduce N+1 database access.
 - Added stale-while-revalidate process cache for hot read endpoints:

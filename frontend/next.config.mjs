@@ -5,10 +5,10 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
 ];
 
 const nextConfig = {
+  output: "standalone",
   poweredByHeader: false,
   async rewrites() {
     const backend = process.env.BACKEND_API_BASE_URL ?? "http://127.0.0.1:8000";

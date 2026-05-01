@@ -319,7 +319,7 @@ def company_equity_claim_risk(
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     payload = build_company_equity_claim_risk_response(
         session,
         snapshot.company.id,
@@ -380,7 +380,7 @@ def company_changes_since_last_filing(
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     persisted_payload = _load_snapshot_backed_changes_since_last_filing_response(
         session,
         snapshot,
@@ -833,7 +833,6 @@ def company_charts(
     return _build_company_charts_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
     )
@@ -854,7 +853,6 @@ def company_charts_what_if(
     return _build_company_charts_what_if_response(
         session,
         normalized_ticker,
-        background_tasks,
         requested_as_of=requested_as_of,
         parsed_as_of=parsed_as_of,
         payload=payload or CompanyChartsWhatIfRequest(),
@@ -1212,7 +1210,7 @@ def company_financial_restatements(
         )
         return _apply_requested_as_of(payload, requested_as_of)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     records = get_company_financial_restatements(session, snapshot.company.id)
     if parsed_as_of is not None:
         records = [record for record in records if _financial_restatement_effective_at(record) <= parsed_as_of]

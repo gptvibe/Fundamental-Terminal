@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Any, Sequence
 
 import httpx
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -277,9 +277,6 @@ def get_company_institutional_holdings_last_checked(session: Session, company: C
     state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "institutional")
     if state_cache != "missing":
         return state_last_checked
-
-    if company.institutional_holdings_last_checked is not None:
-        return company.institutional_holdings_last_checked
 
     statement = select(func.max(InstitutionalHolding.last_checked)).where(InstitutionalHolding.company_id == company.id)
     scanned = session.execute(statement).scalar_one_or_none()
@@ -633,11 +630,6 @@ def _touch_company_institutional_holdings(
     *,
     payload_version_hash: str | None = None,
 ) -> None:
-    session.execute(
-        update(Company)
-        .where(Company.id == company_id)
-        .values(institutional_holdings_last_checked=checked_at)
-    )
     mark_dataset_checked(
         session,
         company_id,

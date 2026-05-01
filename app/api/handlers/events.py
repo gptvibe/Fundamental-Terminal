@@ -98,21 +98,27 @@ def company_comment_letters(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyCommentLettersResponse(
             company=None,
             letters=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
-            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            refresh=refresh,
+            **_empty_provenance_contract("company_missing"),
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
-    comment_letters = get_company_comment_letters(session, snapshot.company.id)
-    letters = [_serialize_comment_letter(letter) for letter in comment_letters]
+    letters_last_checked, letters_cache_state = get_company_comment_letters_cache_status(session, snapshot.company)
+    letters = [_serialize_comment_letter(letter) for letter in get_company_comment_letters(session, snapshot.company.id)]
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=letters_cache_state)
+        if letters_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    merged_last_checked = _merge_last_checked(snapshot.last_checked, letters_last_checked)
     return CompanyCommentLettersResponse(
-        company=_serialize_company(snapshot),
+        company=_serialize_company(snapshot, last_checked=merged_last_checked),
         letters=letters,
         refresh=refresh,
-        diagnostics=_diagnostics_for_comment_letters(letters, refresh),
+        **_comment_letters_provenance_contract(letters, last_refreshed_at=merged_last_checked, refresh=refresh),
     )
 
 
@@ -146,12 +152,12 @@ def company_capital_markets_summary(
         return CompanyCapitalMarketsSummaryResponse(
             company=None,
             summary=_empty_capital_markets_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     rows = [_serialize_cached_capital_markets_event(event) for event in get_company_capital_markets_events(session, snapshot.company.id)]
     return CompanyCapitalMarketsSummaryResponse(
         company=_serialize_company(snapshot),
@@ -192,12 +198,12 @@ def company_filing_events_summary(
         return CompanyFilingEventsSummaryResponse(
             company=None,
             summary=_empty_filing_events_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     rows = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
     return CompanyFilingEventsSummaryResponse(
         company=_serialize_company(snapshot),

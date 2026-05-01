@@ -231,7 +231,6 @@ def upsert_beneficial_ownership_reports(
         _replace_report_parties(session, report_id, report.parties)
         count += 1
 
-    company.beneficial_ownership_last_checked = checked_at
     mark_dataset_checked(
         session,
         company.id,

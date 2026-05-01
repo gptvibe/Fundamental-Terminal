@@ -143,7 +143,6 @@ def upsert_filing_events(
         session.execute(statement)
         count += 1
 
-    company.filing_events_last_checked = checked_at
     mark_dataset_checked(
         session,
         company.id,

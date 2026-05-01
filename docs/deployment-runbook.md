@@ -65,6 +65,11 @@ setApiAuthHeadersProvider(() => ({
 }));
 ```
 
+Transport security note:
+
+- Do not rely on app-level unconditional `Strict-Transport-Security` headers from Next.js.
+- Set HSTS at the TLS-terminating reverse proxy/load balancer for HTTPS-only deployments.
+
 For proxy-auth deployments, prefer terminating auth at the edge and forwarding only trusted identity headers to the app.
 
 ## First Deployment

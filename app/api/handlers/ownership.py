@@ -183,7 +183,7 @@ def company_beneficial_ownership(
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     filings = _enrich_beneficial_ownership_amendment_history(
         [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
@@ -212,7 +212,7 @@ def company_beneficial_ownership_summary(
             error=None,
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
     filings = _enrich_beneficial_ownership_amendment_history(
         [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]

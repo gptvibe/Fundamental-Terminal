@@ -87,7 +87,7 @@ async def company_models(
                     )
                     return _apply_requested_as_of(payload, requested_as_of)
 
-                refresh = _refresh_for_snapshot(background_tasks, snapshot)
+                refresh = _refresh_for_snapshot(snapshot)
                 financials = get_company_financials(sync_session, snapshot.company.id)
                 price_last_checked, _price_cache_state = _visible_price_cache_status(sync_session, snapshot.company.id)
                 price_history: list[PriceHistory] = []

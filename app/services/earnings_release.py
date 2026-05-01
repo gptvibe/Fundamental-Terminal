@@ -229,7 +229,6 @@ def upsert_earnings_releases(
         session.execute(statement)
         count += 1
 
-    company.earnings_last_checked = checked_at
     return count
 
 

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Index, String
+from sqlalchemy import Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -53,15 +52,6 @@ class Company(Base):
     sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
     market_sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
     market_industry: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    insider_trades_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    institutional_holdings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    beneficial_ownership_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    filing_events_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    capital_markets_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    comment_letters_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    form144_filings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    earnings_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    proxy_statements_last_checked: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     financial_statements: Mapped[list["FinancialStatement"]] = relationship(
         back_populates="company",
