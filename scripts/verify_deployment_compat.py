@@ -242,7 +242,10 @@ def main() -> int:
         _assert_security_headers(
             "frontend company page",
             frontend_headers,
-            ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Strict-Transport-Security"),
+            # Strict-Transport-Security is intentionally omitted here: it is set
+            # by the TLS-terminating reverse proxy / load balancer, not by Next.js
+            # directly (see docs/deployment-runbook.md).
+            ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"),
         )
 
     print(
