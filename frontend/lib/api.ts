@@ -134,7 +134,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/watchlist\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
 ];
 
-const CACHE_STORAGE_PREFIX = "ft:api-cache:v4:";
+const CACHE_STORAGE_PREFIX = "ft:api-cache:v5:";
 const CACHE_BROADCAST_CHANNEL = "ft:api-cache-events";
 const CACHE_INVALIDATION_STORAGE_KEY = `${CACHE_STORAGE_PREFIX}invalidation`;
 const AUDIT_RECORDED_ERROR = Symbol("auditRecordedError");
@@ -160,7 +160,8 @@ type PersistedCacheEntry = {
 };
 
 const readCache = new Map<string, CacheEntry>();
-const inflightRequests = new Map<string, Promise<unknown>>();
+const INFLIGHT_REQUEST_TIMEOUT_MS = 15_000;
+const inflightRequests = new Map<string, { promise: Promise<unknown>; startedAt: number }>();
 let cacheSyncInitialized = false;
 let memoryCacheApproxBytes = 0;
 let broadcastChannel: BroadcastChannel | null = null;
@@ -571,19 +572,19 @@ function shareReadCacheValue(cacheKey: string, sourceData: unknown): void {
 
 function isCompatibleCachedPayload(path: string, data: unknown): boolean {
   if (/^\/companies\/[^/]+\/financials(?:\?|$)/.test(path)) {
-    return isFinancialsResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
+    return isFinancialsResponseLike(data) && !isMissingFinancialsPlaceholderPayload(data);
   }
 
   if (/^\/companies\/[^/]+\/brief(?:\?|$)/.test(path)) {
-    return isResearchBriefResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
+    return isResearchBriefResponseLike(data) && !isMissingResearchBriefPlaceholderPayload(data);
   }
 
   if (/^\/companies\/[^/]+\/overview(?:\?|$)/.test(path)) {
-    return isOverviewResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
+    return isOverviewResponseLike(data) && !isMissingOverviewPlaceholderPayload(data);
   }
 
   if (/^\/companies\/[^/]+\/workspace-bootstrap(?:\?|$)/.test(path)) {
-    return isWorkspaceBootstrapResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
+    return isWorkspaceBootstrapResponseLike(data) && !isMissingWorkspaceBootstrapPlaceholderPayload(data);
   }
 
   return true;
@@ -645,16 +646,81 @@ function isResearchBriefResponseLike(value: unknown): boolean {
   );
 }
 
-function isCompanyMissingPlaceholderPayload(value: unknown): boolean {
+function isMissingFinancialsPlaceholderPayload(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
   }
 
-  if (value.company !== null && value.company !== undefined) {
+  const noCoverage = hasNoFinancialCoverage(value);
+  if (!noCoverage) {
     return false;
   }
 
-  return payloadTreeHasCompanyMissingMarker(value);
+  if (payloadTreeHasCompanyMissingMarker(value)) {
+    return true;
+  }
+
+  return hasMissingOrPlaceholderCompany(value.company);
+}
+
+function isMissingResearchBriefPlaceholderPayload(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const noAvailableSections = Array.isArray(value.available_sections) && value.available_sections.length === 0;
+  const noTimeline = Array.isArray(value.filing_timeline) && value.filing_timeline.length === 0;
+  const noSummaryCards = Array.isArray(value.stale_summary_cards) && value.stale_summary_cards.length === 0;
+  const buildState = typeof value.build_state === "string" ? value.build_state : null;
+  if (!noAvailableSections || !noTimeline || !noSummaryCards || buildState === "ready") {
+    return false;
+  }
+
+  if (payloadTreeHasCompanyMissingMarker(value)) {
+    return true;
+  }
+
+  return hasMissingOrPlaceholderCompany(value.company);
+}
+
+function isMissingOverviewPlaceholderPayload(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    isMissingFinancialsPlaceholderPayload(value.financials) ||
+    (value.brief != null && isMissingResearchBriefPlaceholderPayload(value.brief))
+  );
+}
+
+function isMissingWorkspaceBootstrapPlaceholderPayload(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (
+    isMissingFinancialsPlaceholderPayload(value.financials) ||
+    (value.brief != null && isMissingResearchBriefPlaceholderPayload(value.brief))
+  ) {
+    return true;
+  }
+
+  if (value.brief != null) {
+    return false;
+  }
+
+  return isRecord(value.financials) && hasNoFinancialCoverage(value.financials) && hasMissingOrPlaceholderCompany(value.company);
+}
+
+function hasNoFinancialCoverage(value: Record<string, unknown>): boolean {
+  const noFinancialHistory = Array.isArray(value.financials) && value.financials.length === 0;
+  const noPriceHistory = Array.isArray(value.price_history) && value.price_history.length === 0;
+  return noFinancialHistory && noPriceHistory;
+}
+
+function hasMissingOrPlaceholderCompany(value: unknown): boolean {
+  return value == null || (isRecord(value) && value.cache_state === "missing");
 }
 
 function payloadTreeHasCompanyMissingMarker(value: unknown, seen = new WeakSet<object>()): boolean {
@@ -799,14 +865,18 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
     return cached.data;
   }
 
-  const currentInflight = inflightRequests.get(requestKey) as Promise<T> | undefined;
+  const currentInflight = inflightRequests.get(requestKey) as { promise: Promise<T>; startedAt: number } | undefined;
   if (currentInflight) {
-    recordCachedAudit(path, "GET", "inflight-dedupe", "inflight-dedupe", auditContext, {
-      cacheKey: cacheKeyValue,
-      cachePolicyTtlMs,
-      cachePolicyStaleMs,
-    });
-    return currentInflight;
+    if (Date.now() - currentInflight.startedAt < INFLIGHT_REQUEST_TIMEOUT_MS) {
+      recordCachedAudit(path, "GET", "inflight-dedupe", "inflight-dedupe", auditContext, {
+        cacheKey: cacheKeyValue,
+        cachePolicyTtlMs,
+        cachePolicyStaleMs,
+      });
+      return currentInflight.promise;
+    }
+
+    inflightRequests.delete(requestKey);
   }
 
   if (cached?.stale) {
@@ -864,7 +934,7 @@ async function revalidateRead<T>(
       inflightRequests.delete(requestKeyForPath(path));
     });
 
-  inflightRequests.set(requestKeyForPath(path), request);
+  inflightRequests.set(requestKeyForPath(path), { promise: request, startedAt: Date.now() });
   return request;
 }
 
@@ -894,7 +964,7 @@ async function fetchAndParseWithAudit<T>(
 
   try {
     try {
-      const response = await fetch(withApiPrefix(path), {
+      const response = await fetchWithTimeout(withApiPrefix(path), {
         ...init,
         headers: {
           ...buildApiAuthHeaders(),
@@ -1000,6 +1070,93 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit & { signal?: AbortSignal }): Promise<Response> {
+  const timeoutController = new AbortController();
+  const { signal, cleanup } = composeAbortSignals(init.signal, timeoutController.signal);
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+  let timedOut = false;
+  const fetchPromise = fetch(input, {
+    ...init,
+    signal,
+  });
+
+  try {
+    return await Promise.race([
+      fetchPromise,
+      new Promise<Response>((_resolve, reject) => {
+        timeoutId = globalThis.setTimeout(() => {
+          timedOut = true;
+          timeoutController.abort();
+          reject(new Error(`API request timed out after ${INFLIGHT_REQUEST_TIMEOUT_MS} ms`));
+        }, INFLIGHT_REQUEST_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(`API request timed out after ${INFLIGHT_REQUEST_TIMEOUT_MS} ms`);
+    }
+
+    throw error;
+  } finally {
+    cleanup();
+    if (timeoutId != null) {
+      globalThis.clearTimeout(timeoutId);
+    }
+  }
+}
+
+function composeAbortSignals(...signals: Array<AbortSignal | undefined>): {
+  signal: AbortSignal | undefined;
+  cleanup: () => void;
+} {
+  const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (activeSignals.length <= 1) {
+    return {
+      signal: activeSignals[0],
+      cleanup: () => {},
+    };
+  }
+
+  const controller = new AbortController();
+  const listeners = new Map<AbortSignal, () => void>();
+
+  const abortFrom = (source: AbortSignal) => {
+    if (controller.signal.aborted) {
+      return;
+    }
+
+    if ("reason" in source) {
+      controller.abort(source.reason);
+      return;
+    }
+
+    controller.abort();
+  };
+
+  for (const signal of activeSignals) {
+    if (signal.aborted) {
+      abortFrom(signal);
+      return {
+        signal: controller.signal,
+        cleanup: () => {},
+      };
+    }
+
+    const listener = () => abortFrom(signal);
+    listeners.set(signal, listener);
+    signal.addEventListener("abort", listener, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const [signal, listener] of listeners.entries()) {
+        signal.removeEventListener("abort", listener);
+      }
+    },
+  };
 }
 
 function resolveResponseBytes(response: Response): number | null {

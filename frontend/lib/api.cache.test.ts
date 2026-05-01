@@ -340,15 +340,89 @@ describe("api read cache", () => {
     expect(firstResult).toEqual(secondResult);
   });
 
+  it("retries after an inflight read has gone stale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00Z"));
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          company: null,
+          current_filing: null,
+          previous_filing: null,
+          summary: {},
+          metric_deltas: [],
+          new_risk_indicators: [],
+          segment_shifts: [],
+          share_count_changes: [],
+          capital_structure_changes: [],
+          amended_prior_values: [],
+          high_signal_changes: [],
+          comment_letter_history: { total_letters: 0, recent_letters: [] },
+          refresh: { triggered: false, reason: "fresh-retry", ticker: "AAPL", job_id: null },
+          diagnostics: null,
+          provenance: [],
+          source_mix: null,
+          confidence_flags: [],
+          as_of: null,
+          last_refreshed_at: null,
+        }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    void getCompanyChangesSinceLastFiling("AAPL").catch(() => undefined);
+
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:16Z"));
+
+    const retried = await getCompanyChangesSinceLastFiling("AAPL");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(retried.refresh.reason).toBe("fresh-retry");
+    vi.useRealTimers();
+  });
+
+  it("times out hung requests instead of waiting forever", async () => {
+    vi.useFakeTimers();
+
+    const fetchMock = vi.fn().mockImplementation((_input, init?: RequestInit) => {
+      const signal = init?.signal;
+      return new Promise((_resolve, reject) => {
+        const abort = () => reject(signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = expect(getCompanyChangesSinceLastFiling("AAPL")).rejects.toThrow("API request timed out after 15000 ms");
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await pending;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
   it("dedupes repeated aggregate overview reads", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        company: null,
+        company: { ticker: "AAPL", name: "Apple Inc.", cache_state: "fresh" },
         financials: {
-          company: null,
+          company: { ticker: "AAPL", name: "Apple Inc.", cache_state: "fresh" },
           financials: [],
-          price_history: [],
+          price_history: [{ date: "2026-04-11", close: 189.95 }],
           refresh: { triggered: false, reason: "none", ticker: "AAPL", job_id: null },
           diagnostics: null,
         },
@@ -459,6 +533,58 @@ describe("api read cache", () => {
     );
   });
 
+  it("drops cached workspace bootstrap placeholders that only contain company metadata", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse(
+          buildWorkspaceBootstrapPayload("BROS", {
+            company: { ticker: "BROS", name: "Dutch Bros Inc.", cache_state: "missing" },
+            financialsReason: "missing",
+            financialsCompany: { ticker: "BROS", name: "Dutch Bros Inc.", cache_state: "missing" },
+            brief: null,
+          })
+        )
+      )
+      .mockResolvedValueOnce(buildOkJsonResponse(buildWorkspaceBootstrapPayload("BROS")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+    const second = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+
+    expect(first.financials.refresh.reason).toBe("missing");
+    expect(second.company?.ticker).toBe("BROS");
+    expect(second.financials.refresh.reason).toBe("fresh");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops cached workspace bootstrap placeholders that are still empty even when marked fresh", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse(
+          buildWorkspaceBootstrapPayload("BROS", {
+            company: null,
+            financialsReason: "fresh",
+            financialsCompany: null,
+            brief: null,
+          })
+        )
+      )
+      .mockResolvedValueOnce(buildOkJsonResponse(buildWorkspaceBootstrapPayload("BROS")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+    const second = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+
+    expect(first.company).toBeNull();
+    expect(first.financials.refresh.reason).toBe("fresh");
+    expect(second.company?.ticker).toBe("BROS");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("drops financials cache entries primed from missing bootstrap placeholders", async () => {
     const fetchMock = vi
       .fn()
@@ -486,6 +612,60 @@ describe("api read cache", () => {
       "/backend/api/companies/BROS/financials",
       expect.objectContaining({ cache: "no-store" })
     );
+  });
+
+  it("drops financials cache entries primed from metadata-only bootstrap placeholders", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse(
+          buildWorkspaceBootstrapPayload("BROS", {
+            company: { ticker: "BROS", name: "Dutch Bros Inc.", cache_state: "missing" },
+            financialsReason: "missing",
+            financialsCompany: { ticker: "BROS", name: "Dutch Bros Inc.", cache_state: "missing" },
+            brief: null,
+          })
+        )
+      )
+      .mockResolvedValueOnce(buildOkJsonResponse(buildFinancialsPayload("BROS", "fresh")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+    const financials = await getCompanyFinancials("BROS");
+
+    expect(financials.refresh.reason).toBe("fresh");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/BROS/financials",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("drops empty financials cache entries that were marked fresh without company coverage", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse({
+          company: null,
+          financials: [],
+          price_history: [],
+          refresh: { triggered: false, reason: "fresh", ticker: "BROS", job_id: null },
+          diagnostics: null,
+        })
+      )
+      .mockResolvedValueOnce(buildOkJsonResponse(buildFinancialsPayload("BROS", "fresh")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getCompanyFinancials("BROS");
+    const second = await getCompanyFinancials("BROS");
+
+    expect(first.company).toBeNull();
+    expect(first.refresh.reason).toBe("fresh");
+    expect(second.company?.ticker).toBe("BROS");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("clears overview-primed financials when ticker cache is invalidated", async () => {

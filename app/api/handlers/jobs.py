@@ -189,7 +189,7 @@ def refresh_company(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     queue_ticker = snapshot.company.ticker if snapshot is not None else normalized_ticker
-    job_id = queue_company_refresh(background_tasks, queue_ticker, force=force)
+    job_id = queue_company_refresh(queue_ticker, force=force)
     return RefreshQueuedResponse(
         status="queued",
         ticker=queue_ticker,
