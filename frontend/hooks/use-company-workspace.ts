@@ -55,7 +55,12 @@ export interface LoadCompanyWorkspaceDataResult {
   activeJobId: string | null;
 }
 
-const COMPATIBILITY_FALLBACK_STATUSES = new Set([404, 405, 501]);
+// 404 is intentionally excluded: it can indicate a real route mismatch or
+// missing resource and should surface as an error rather than silently falling
+// back to the legacy API path.  Only 405 (Method Not Allowed) and 501 (Not
+// Implemented) are used as signals that the bootstrap endpoint does not exist
+// on this deployment and a compatibility fallback is appropriate.
+const COMPATIBILITY_FALLBACK_STATUSES = new Set([405, 501]);
 const WORKSPACE_PRICE_HISTORY_LATEST_N = 3200;
 const WORKSPACE_PRICE_HISTORY_MAX_POINTS = 480;
 const WORKSPACE_LAYOUT_CACHE_TTL_MS = 30_000;

@@ -152,7 +152,10 @@ describe("useCompanyWorkspace", () => {
       connectionState: "open",
       lastEvent: null,
     });
-    vi.mocked(getCompanyWorkspaceBootstrap).mockRejectedValue(buildApiError(404, "Not Found"));
+    // Default: simulate a deployment that does not yet have the bootstrap
+    // endpoint (501 Not Implemented) so that legacy-path tests work without
+    // explicitly mocking bootstrap.
+    vi.mocked(getCompanyWorkspaceBootstrap).mockRejectedValue(buildApiError(501, "Not Implemented"));
   });
 
   afterEach(() => {
@@ -215,7 +218,7 @@ describe("useCompanyWorkspace", () => {
     const fetchOverview = vi.mocked(getCompanyOverview);
     const fetchFinancials = vi.mocked(getCompanyFinancials);
 
-    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
     fetchOverview.mockResolvedValue({
       financials: buildFinancialsResponse({
         company: {
@@ -244,6 +247,51 @@ describe("useCompanyWorkspace", () => {
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.error).toBeNull();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
+  });
+
+  it("surfaces an error for 404 on bootstrap instead of silently falling back", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchOverview).not.toHaveBeenCalled();
+    expect(fetchFinancials).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("API request failed: 404 Not Found");
+  });
+
+  it("surfaces an error for 404 on legacy overview instead of falling back to financials-only", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+    const fetchOverview = vi.mocked(getCompanyOverview);
+    const fetchFinancials = vi.mocked(getCompanyFinancials);
+
+    fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
+    fetchOverview.mockRejectedValue(buildApiError(404, "Not Found"));
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(fetchOverview).toHaveBeenCalled();
+    expect(fetchFinancials).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("API request failed: 404 Not Found");
   });
 
   it("does not fall back on transient bootstrap backend errors", async () => {
@@ -295,8 +343,8 @@ describe("useCompanyWorkspace", () => {
     const fetchOverview = vi.mocked(getCompanyOverview);
     const fetchFinancials = vi.mocked(getCompanyFinancials);
 
-    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
-    fetchOverview.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
+    fetchOverview.mockRejectedValue(buildApiError(405, "Method Not Allowed"));
     fetchFinancials.mockResolvedValue(
       buildFinancialsResponse({
         company: {
@@ -332,7 +380,7 @@ describe("useCompanyWorkspace", () => {
     const fetchOverview = vi.mocked(getCompanyOverview);
     const fetchFinancials = vi.mocked(getCompanyFinancials);
 
-    fetchBootstrap.mockRejectedValue(buildApiError(404, "Not Found"));
+    fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
     fetchOverview.mockRejectedValue(buildApiError(500, "Internal Server Error"));
 
     const { result } = renderHook(() =>
