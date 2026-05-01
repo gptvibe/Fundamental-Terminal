@@ -8,6 +8,7 @@ import {
   getCompanyFinancials,
   getCompanyOverview,
   getCompanyResearchBrief,
+  getCompanyWorkspaceBootstrap,
   getWatchlistSummary,
   invalidateApiReadCacheForTicker,
   refreshCompany,
@@ -29,6 +30,41 @@ describe("api read cache", () => {
     return {
       ok: true,
       json: async () => payload,
+    };
+  }
+
+  function buildWorkspaceBootstrapPayload(
+    ticker = "AAPL",
+    options: {
+      company?: Record<string, unknown> | null;
+      financialsReason?: string;
+      financialsCompany?: Record<string, unknown> | null;
+      brief?: unknown;
+    } = {}
+  ) {
+    const financials = buildFinancialsPayload(ticker, options.financialsReason ?? "fresh");
+
+    return {
+      company:
+        options.company === undefined
+          ? { ticker, name: `${ticker} Inc.`, cache_state: "fresh" }
+          : options.company,
+      financials: {
+        ...financials,
+        company:
+          options.financialsCompany === undefined
+            ? financials.company
+            : options.financialsCompany,
+      },
+      brief: options.brief ?? null,
+      earnings_summary: null,
+      insider_trades: null,
+      institutional_holdings: null,
+      errors: {
+        insider: null,
+        institutional: null,
+        earnings_summary: null,
+      },
     };
   }
 
@@ -389,6 +425,65 @@ describe("api read cache", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(financials.company?.ticker).toBe("AAPL");
+  });
+
+  it("drops cached workspace bootstrap placeholders before reusing them", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse(
+          buildWorkspaceBootstrapPayload("BROS", {
+            company: null,
+            financialsReason: "missing",
+            financialsCompany: null,
+            brief: { company_missing: true },
+          })
+        )
+      )
+      .mockResolvedValueOnce(buildOkJsonResponse(buildWorkspaceBootstrapPayload("BROS")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+    const second = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+
+    expect(first.company).toBeNull();
+    expect(second.company?.ticker).toBe("BROS");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/BROS/workspace-bootstrap?include_overview_brief=true",
+      expect.objectContaining({ cache: "no-store" })
+    );
+  });
+
+  it("drops financials cache entries primed from missing bootstrap placeholders", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse(
+          buildWorkspaceBootstrapPayload("BROS", {
+            company: null,
+            financialsReason: "missing",
+            financialsCompany: null,
+            brief: { company_missing: true },
+          })
+        )
+      )
+      .mockResolvedValueOnce(buildOkJsonResponse(buildFinancialsPayload("BROS", "fresh")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+    const financials = await getCompanyFinancials("BROS");
+
+    expect(financials.company?.ticker).toBe("BROS");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/backend/api/companies/BROS/financials",
+      expect.objectContaining({ cache: "no-store" })
+    );
   });
 
   it("clears overview-primed financials when ticker cache is invalidated", async () => {

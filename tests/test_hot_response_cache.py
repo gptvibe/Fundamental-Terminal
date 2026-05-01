@@ -10,6 +10,7 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
+import app.main as main_module
 import app.services.hot_cache as hot_cache_module
 from app.api.handlers import _shared as shared_handlers
 from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState
@@ -356,6 +357,32 @@ def test_hot_cache_skips_company_missing_payloads(monkeypatch) -> None:
     asyncio.run(shared_handlers._store_hot_cached_payload("financials:ON", payload))
 
     assert asyncio.run(shared_handlers._get_hot_cached_payload("financials:ON")) is None
+
+
+def test_hot_cache_skips_workspace_bootstrap_missing_placeholders(monkeypatch) -> None:
+    _disable_remote(monkeypatch, shared_hot_response_cache)
+    shared_handlers._hot_response_cache.clear()
+
+    missing_refresh = RefreshState(triggered=True, reason="missing", ticker="ON", job_id="job-on")
+    payload = main_module.CompanyWorkspaceBootstrapResponse(
+        company=None,
+        financials=CompanyFinancialsResponse(
+            company=None,
+            financials=[],
+            price_history=[],
+            refresh=missing_refresh,
+            diagnostics=DataQualityDiagnosticsPayload(stale_flags=["company_missing"]),
+            confidence_flags=["company_missing"],
+        ),
+        brief=main_module._empty_company_brief_response(
+            refresh=missing_refresh,
+            as_of=None,
+        ),
+    )
+
+    asyncio.run(shared_handlers._store_hot_cached_payload("workspace_bootstrap:ON:view=core:asof=latest", payload))
+
+    assert asyncio.run(shared_handlers._get_hot_cached_payload("workspace_bootstrap:ON:view=core:asof=latest")) is None
 
 
 def test_hot_cache_keeps_real_company_payloads(monkeypatch) -> None:

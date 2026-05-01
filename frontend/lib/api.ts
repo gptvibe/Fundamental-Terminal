@@ -570,15 +570,31 @@ function shareReadCacheValue(cacheKey: string, sourceData: unknown): void {
 }
 
 function isCompatibleCachedPayload(path: string, data: unknown): boolean {
+  if (/^\/companies\/[^/]+\/financials(?:\?|$)/.test(path)) {
+    return isFinancialsResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
+  }
+
   if (/^\/companies\/[^/]+\/brief(?:\?|$)/.test(path)) {
-    return isResearchBriefResponseLike(data);
+    return isResearchBriefResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
   }
 
   if (/^\/companies\/[^/]+\/overview(?:\?|$)/.test(path)) {
-    return isOverviewResponseLike(data);
+    return isOverviewResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
+  }
+
+  if (/^\/companies\/[^/]+\/workspace-bootstrap(?:\?|$)/.test(path)) {
+    return isWorkspaceBootstrapResponseLike(data) && !isCompanyMissingPlaceholderPayload(data);
   }
 
   return true;
+}
+
+function isFinancialsResponseLike(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return Array.isArray(value.financials) && Array.isArray(value.price_history) && isRecord(value.refresh);
 }
 
 function isOverviewResponseLike(value: unknown): boolean {
@@ -587,6 +603,22 @@ function isOverviewResponseLike(value: unknown): boolean {
   }
 
   return isRecord(value.financials) && isResearchBriefResponseLike(value.brief);
+}
+
+function isWorkspaceBootstrapResponseLike(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (value.company == null || isRecord(value.company)) &&
+    isFinancialsResponseLike(value.financials) &&
+    ("brief" in value) &&
+    ("earnings_summary" in value) &&
+    ("insider_trades" in value) &&
+    ("institutional_holdings" in value) &&
+    isRecord(value.errors)
+  );
 }
 
 function isResearchBriefResponseLike(value: unknown): boolean {
@@ -611,6 +643,44 @@ function isResearchBriefResponseLike(value: unknown): boolean {
     isRecord(value.valuation) &&
     isRecord(value.monitor)
   );
+}
+
+function isCompanyMissingPlaceholderPayload(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  if (value.company !== null && value.company !== undefined) {
+    return false;
+  }
+
+  return payloadTreeHasCompanyMissingMarker(value);
+}
+
+function payloadTreeHasCompanyMissingMarker(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (value == null || typeof value !== "object") {
+    return false;
+  }
+
+  if (seen.has(value)) {
+    return false;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) => payloadTreeHasCompanyMissingMarker(item, seen));
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.company_missing === true) {
+    return true;
+  }
+
+  if (isRecord(record.refresh) && record.refresh.reason === "missing") {
+    return true;
+  }
+
+  return Object.values(record).some((entry) => payloadTreeHasCompanyMissingMarker(entry, seen));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

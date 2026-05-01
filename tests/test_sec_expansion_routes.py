@@ -628,6 +628,67 @@ def test_company_workspace_bootstrap_route_keeps_schema_compatible_when_served_f
     ]
 
 
+def test_company_workspace_bootstrap_route_rebuilds_when_fresh_cache_only_has_missing_placeholder(monkeypatch):
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    shared_hot_response_cache.clear_sync()
+    snapshot = _snapshot()
+    build_calls = {"financials": 0, "brief": 0}
+
+    missing_refresh = RefreshState(triggered=True, reason="missing", ticker="AAPL", job_id="job-1")
+    placeholder = main_module.CompanyWorkspaceBootstrapResponse(
+        company=None,
+        financials=CompanyFinancialsResponse(
+            company=None,
+            financials=[],
+            price_history=[],
+            refresh=missing_refresh,
+            diagnostics=DataQualityDiagnosticsPayload(stale_flags=["company_missing"]),
+            confidence_flags=["company_missing"],
+        ),
+        brief=main_module._empty_company_brief_response(refresh=missing_refresh, as_of=None),
+    )
+    shared_hot_response_cache.store_sync(
+        main_module._company_workspace_bootstrap_hot_key(
+            "AAPL",
+            financials_view="core_segments",
+            as_of="latest",
+            include_overview_brief=True,
+            include_insiders=False,
+            include_institutional=False,
+            include_earnings_summary=False,
+            price_token="default",
+        ),
+        route="workspace_bootstrap",
+        payload=placeholder.model_dump(mode="json"),
+        tags=main_module._build_hot_cache_tags(
+            ticker="AAPL",
+            datasets=("financials", "prices", "company_research_brief"),
+            schema_versions=(main_module.HOT_CACHE_SCHEMA_VERSIONS["workspace_bootstrap"],),
+            as_of="latest",
+        ),
+    )
+
+    monkeypatch.setattr(main_module, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+
+    def _build_financials(*_args, **_kwargs):
+        build_calls["financials"] += 1
+        return _financials_payload(snapshot)
+
+    def _build_brief(*_args, **_kwargs):
+        build_calls["brief"] += 1
+        return _brief_payload(snapshot)
+
+    monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
+    monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&financials_view=core_segments")
+
+    assert response.status_code == 200
+    assert response.json()["company"]["ticker"] == "AAPL"
+    assert build_calls == {"financials": 1, "brief": 1}
+
+
 def test_peers_route_passes_explicit_peer_overrides(monkeypatch):
     _install_common_overrides(monkeypatch, {})
     main_module._hot_response_cache.clear()

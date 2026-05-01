@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CompanySubnav } from "@/components/layout/company-subnav";
 
 const mockUsePathname = vi.fn();
+const mockRouterPrefetch = vi.fn();
 const mockUseCompanyLayoutContext = vi.fn();
 const getCompanyFinancials = vi.fn();
 const getCompanyOverview = vi.fn();
@@ -14,6 +15,9 @@ const prefetchCompanyWorkspaceTabs = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mockUsePathname(),
+  useRouter: () => ({
+    prefetch: mockRouterPrefetch,
+  }),
 }));
 
 vi.mock("@/components/layout/company-layout-context", () => ({
@@ -36,6 +40,7 @@ vi.mock("next/link", () => ({
 describe("CompanySubnav", () => {
   beforeEach(() => {
     mockUsePathname.mockReset();
+    mockRouterPrefetch.mockReset();
     mockUseCompanyLayoutContext.mockReset();
     getCompanyFinancials.mockReset();
     getCompanyOverview.mockReset();
@@ -198,5 +203,6 @@ describe("CompanySubnav", () => {
         scenario: "company_workspace_nav_prefetch",
       })
     );
+    expect(mockRouterPrefetch).toHaveBeenCalledWith("/company/AAPL/financials");
   });
 });

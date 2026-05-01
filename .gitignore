@@ -13,12 +13,16 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyc.*
 *.pyo
 .venv/
 venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
+.tox/
+.nox/
 .coverage
 htmlcov/
 dist/
@@ -34,13 +38,17 @@ build/
 .svelte-kit/
 .vite/
 .parcel-cache/
+.turbo/
 coverage/
 
 # Logs / temp
 *.log
 *.tmp
+*.pid
 tmp/
 temp/
+.cache/
+review-shots/
 data/sec_cache/
 
 # IDE / OS

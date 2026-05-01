@@ -477,6 +477,7 @@ def _muted_benchmark_loggers() -> Iterator[None]:
         "httpx",
         "httpcore",
         "app.main",
+        "app.performance_audit",
         "app.services.hot_cache",
     )
     saved_levels = {name: logging.getLogger(name).level for name in logger_names}

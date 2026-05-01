@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { clsx } from "clsx";
 
 import { useCompanyLayoutContext } from "@/components/layout/company-layout-context";
@@ -60,12 +60,16 @@ const baseTabs: CompanySubnavTab[] = [
 
 const oilTab: CompanySubnavTab = { key: "oil", label: "Oil", suffix: "/oil", section: "primary" };
 
+const ROUTE_PREFETCH_TAB_KEYS = new Set<string>(["financials", "charts", "models", "peers", "earnings", "filings"]);
+
 export function CompanySubnav({ ticker }: CompanySubnavProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const companyLayout = useCompanyLayoutContext();
   const moreRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const prefetchedRoutesRef = useRef<Set<string>>(new Set());
   const [moreOpen, setMoreOpen] = useState(false);
   const [showOilTab, setShowOilTab] = useState(false);
   const baseHref = `/company/${encodeURIComponent(ticker)}`;
@@ -83,6 +87,10 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
   useEffect(() => {
     setMoreOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    prefetchedRoutesRef.current.clear();
+  }, [ticker]);
 
   useEffect(() => {
     if (sharedCompany) {
@@ -129,6 +137,29 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     document.addEventListener("mousedown", handlePointerDown);
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, []);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      tabLinks.forEach((tab) => {
+        if (!ROUTE_PREFETCH_TAB_KEYS.has(tab.key)) {
+          return;
+        }
+
+        if (tab.href === pathname) {
+          return;
+        }
+
+        if (prefetchedRoutesRef.current.has(tab.href)) {
+          return;
+        }
+
+        prefetchedRoutesRef.current.add(tab.href);
+        void router.prefetch(tab.href);
+      });
+    }, 150);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [pathname, router, tabLinks]);
 
   function focusTrackItem(currentTarget: HTMLElement, targetIndex: number) {
     const links = Array.from(currentTarget.closest("nav")?.querySelectorAll<HTMLElement>("a.company-subnav-link, button.company-subnav-link") ?? []);
@@ -240,7 +271,12 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     }
   }
 
-  function triggerWorkspacePrefetch(trigger: "hover" | "focus") {
+  function triggerWorkspacePrefetch(trigger: "hover" | "focus", href: string) {
+    if (href !== pathname && !prefetchedRoutesRef.current.has(href)) {
+      prefetchedRoutesRef.current.add(href);
+      void router.prefetch(href);
+    }
+
     void prefetchCompanyWorkspaceTabs(ticker, {
       trigger,
       pageRoute: "/company/[ticker]",
@@ -264,8 +300,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
               href={tab.href}
               className={clsx("company-subnav-link", isActive && "is-active")}
               aria-current={isActive ? "page" : undefined}
-              onMouseEnter={() => triggerWorkspacePrefetch("hover")}
-              onFocus={() => triggerWorkspacePrefetch("focus")}
+              onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
+              onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
               onKeyDown={handleTrackKeyDown}
             >
               {tab.label}
@@ -284,8 +320,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
                 href={tab.href}
                 className={clsx("company-subnav-link", isActive && "is-active")}
                 aria-current={isActive ? "page" : undefined}
-                onMouseEnter={() => triggerWorkspacePrefetch("hover")}
-                onFocus={() => triggerWorkspacePrefetch("focus")}
+                onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
+                onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
                 onKeyDown={handleTrackKeyDown}
               >
                 {tab.label}
@@ -317,8 +353,8 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
                     href={tab.href}
                     className={clsx("company-subnav-more-link", isActive && "is-active")}
                     aria-current={isActive ? "page" : undefined}
-                    onMouseEnter={() => triggerWorkspacePrefetch("hover")}
-                    onFocus={() => triggerWorkspacePrefetch("focus")}
+                    onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
+                    onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
                     onClick={() => setMoreOpen(false)}
                     onKeyDown={handleMoreMenuKeyDown}
                   >
