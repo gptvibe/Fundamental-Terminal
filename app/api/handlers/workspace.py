@@ -24,7 +24,7 @@ def watchlist_summary(
         logging.getLogger(__name__).exception("Unable to load watchlist summary snapshots")
         return WatchlistSummaryResponse(
             tickers=normalized_tickers,
-            companies=[_build_missing_watchlist_summary_item(background_tasks, ticker) for ticker in normalized_tickers],
+            companies=[_build_missing_watchlist_summary_item(ticker) for ticker in normalized_tickers],
         )
 
     preload: dict[str, Any] | None = None
@@ -39,13 +39,12 @@ def watchlist_summary(
         for ticker in normalized_tickers:
             snapshot = snapshots_by_ticker.get(ticker)
             if snapshot is None:
-                companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+                companies.append(_build_missing_watchlist_summary_item(ticker))
                 continue
             try:
                 companies.append(
                     _build_watchlist_summary_item(
                         session,
-                        background_tasks,
                         ticker,
                         snapshot=snapshot,
                         coverage_counts=coverage_counts.get(snapshot.company.id),
@@ -53,7 +52,7 @@ def watchlist_summary(
                 )
             except Exception:
                 logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
-                companies.append(_build_missing_watchlist_summary_item(background_tasks, ticker))
+                companies.append(_build_missing_watchlist_summary_item(ticker))
     finally:
         _watchlist_summary_preload_ctx.reset(preload_token)
     logging.getLogger(__name__).info(

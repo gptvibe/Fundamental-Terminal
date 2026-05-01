@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as shared_handlers
+import app.legacy_api as legacy_module
 from app.db import get_db_session
 from app.main import app
 
@@ -72,7 +74,18 @@ def test_runtime_rejects_unauthorized_sources_in_route_payload(monkeypatch) -> N
             completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
         ),
     )
+    monkeypatch.setattr(
+        legacy_module,
+        "get_latest_model_evaluation_run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            created_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(shared_handlers, "get_latest_model_evaluation_run", legacy_module.get_latest_model_evaluation_run)
     monkeypatch.setattr(main_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: _serialized_model_evaluation_run())
+    monkeypatch.setattr(legacy_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: _serialized_model_evaluation_run())
+    monkeypatch.setattr(shared_handlers, "serialize_model_evaluation_run", legacy_module.serialize_model_evaluation_run)
     monkeypatch.setattr(
         main_module,
         "_build_provenance_contract",
@@ -102,6 +115,36 @@ def test_runtime_rejects_unauthorized_sources_in_route_payload(monkeypatch) -> N
             "confidence_flags": ["manual_override_present"],
         },
     )
+    monkeypatch.setattr(
+        legacy_module,
+        "_build_provenance_contract",
+        lambda *_args, **_kwargs: {
+            "provenance": [
+                {
+                    "source_id": "manual_override",
+                    "source_tier": "manual_override",
+                    "display_label": "Manual Override",
+                    "url": "https://github.com/gptvibe/Fundamental-Terminal",
+                    "default_freshness_ttl_seconds": 0,
+                    "disclosure_note": "Manually overridden data should be treated as exceptional and disclosed explicitly to users.",
+                    "role": "fallback",
+                    "as_of": "2025-02-15",
+                    "last_refreshed_at": datetime(2026, 3, 29, tzinfo=timezone.utc),
+                }
+            ],
+            "as_of": "2025-02-15",
+            "last_refreshed_at": datetime(2026, 3, 29, tzinfo=timezone.utc),
+            "source_mix": {
+                "source_ids": ["manual_override"],
+                "source_tiers": ["manual_override"],
+                "primary_source_ids": [],
+                "fallback_source_ids": ["manual_override"],
+                "official_only": False,
+            },
+            "confidence_flags": ["manual_override_present"],
+        },
+    )
+    monkeypatch.setattr(shared_handlers, "_build_provenance_contract", legacy_module._build_provenance_contract)
 
     with _client() as client, pytest.raises(RuntimeError, match="unauthorized source ids in payload: manual_override"):
         client.get("/api/model-evaluations/latest")
@@ -109,6 +152,8 @@ def test_runtime_rejects_unauthorized_sources_in_route_payload(monkeypatch) -> N
 
 def test_runtime_rejects_commercial_fallback_payload_in_strict_official_mode(monkeypatch) -> None:
     monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(legacy_module, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(shared_handlers, "settings", legacy_module.settings)
     monkeypatch.setattr(
         main_module,
         "get_latest_model_evaluation_run",
@@ -117,7 +162,18 @@ def test_runtime_rejects_commercial_fallback_payload_in_strict_official_mode(mon
             completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
         ),
     )
+    monkeypatch.setattr(
+        legacy_module,
+        "get_latest_model_evaluation_run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            created_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(shared_handlers, "get_latest_model_evaluation_run", legacy_module.get_latest_model_evaluation_run)
     monkeypatch.setattr(main_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: _serialized_model_evaluation_run())
+    monkeypatch.setattr(legacy_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: _serialized_model_evaluation_run())
+    monkeypatch.setattr(shared_handlers, "serialize_model_evaluation_run", legacy_module.serialize_model_evaluation_run)
     monkeypatch.setattr(
         main_module,
         "_build_provenance_contract",
@@ -158,6 +214,47 @@ def test_runtime_rejects_commercial_fallback_payload_in_strict_official_mode(mon
             "confidence_flags": ["strict_official_mode", "commercial_fallback_present"],
         },
     )
+    monkeypatch.setattr(
+        legacy_module,
+        "_build_provenance_contract",
+        lambda *_args, **_kwargs: {
+            "provenance": [
+                {
+                    "source_id": "ft_model_evaluation_harness",
+                    "source_tier": "derived_from_official",
+                    "display_label": "Fundamental Terminal Model Evaluation Harness",
+                    "url": "https://github.com/gptvibe/Fundamental-Terminal",
+                    "default_freshness_ttl_seconds": 21600,
+                    "disclosure_note": "Historical-snapshot backtests computed from cached fundamentals, labeled price history, and persisted model metrics.",
+                    "role": "derived",
+                    "as_of": "2025-02-15",
+                    "last_refreshed_at": datetime(2026, 3, 29, tzinfo=timezone.utc),
+                },
+                {
+                    "source_id": "yahoo_finance",
+                    "source_tier": "commercial_fallback",
+                    "display_label": "Yahoo Finance",
+                    "url": "https://finance.yahoo.com/",
+                    "default_freshness_ttl_seconds": 3600,
+                    "disclosure_note": "Commercial fallback used only for price, volume, and market-profile context; never for core fundamentals.",
+                    "role": "fallback",
+                    "as_of": "2026-01-31",
+                    "last_refreshed_at": datetime(2026, 3, 29, tzinfo=timezone.utc),
+                },
+            ],
+            "as_of": "2025-02-15",
+            "last_refreshed_at": datetime(2026, 3, 29, tzinfo=timezone.utc),
+            "source_mix": {
+                "source_ids": ["ft_model_evaluation_harness", "yahoo_finance"],
+                "source_tiers": ["derived_from_official", "commercial_fallback"],
+                "primary_source_ids": [],
+                "fallback_source_ids": ["yahoo_finance"],
+                "official_only": False,
+            },
+            "confidence_flags": ["strict_official_mode", "commercial_fallback_present"],
+        },
+    )
+    monkeypatch.setattr(shared_handlers, "_build_provenance_contract", legacy_module._build_provenance_contract)
 
     with _client() as client, pytest.raises(RuntimeError, match="strict official mode payload still exposes fallback sources: yahoo_finance"):
         client.get("/api/model-evaluations/latest")

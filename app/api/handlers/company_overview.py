@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import Any, Callable
 
 from app.api.handlers import _shared as shared
@@ -141,40 +142,52 @@ def company_workspace_bootstrap(
         else None
     )
     if cached_hot is not None and cached_hot.is_fresh:
-        return shared._hot_cache_json_response(request, http_response, cached_hot)
+        cached_payload = shared._decode_hot_cache_payload(cached_hot)
+        if not shared._is_company_missing_payload(cached_payload):
+            return shared._hot_cache_json_response(request, http_response, cached_hot)
 
     brief: shared.CompanyResearchBriefResponse | None = None
     errors = shared.CompanyWorkspaceBootstrapErrorsPayload()
+    main_module = sys.modules.get("app.main")
+    resolve_company_brief_snapshot = getattr(
+        main_module,
+        "_resolve_company_brief_snapshot",
+        shared._resolve_company_brief_snapshot,
+    )
+    build_company_financials_response = getattr(
+        main_module,
+        "_build_company_financials_response",
+        shared._build_company_financials_response,
+    )
+    build_company_research_brief_response = getattr(
+        main_module,
+        "_build_company_research_brief_response",
+        _build_company_research_brief_response,
+    )
 
     if include_overview_brief and not include_insiders and not include_institutional:
-        try:
-            overview = _company_overview_sync(
-                ticker=normalized_ticker,
-                request=request,
-                financials_view=normalized_financials_view,
-                price_start_date=resolved_price_start_date.isoformat() if resolved_price_start_date is not None else None,
-                price_end_date=resolved_price_end_date.isoformat() if resolved_price_end_date is not None else None,
-                price_latest_n=resolved_price_latest_n,
-                price_max_points=resolved_price_max_points,
-                as_of=requested_as_of,
-                session=session,
-            )
-            financials = overview.financials
-            brief = overview.brief
-        except Exception:
-            financials = shared._build_company_financials_response(
-                session,
-                normalized_ticker,
-                requested_as_of=requested_as_of,
-                parsed_as_of=parsed_as_of,
-                view=normalized_financials_view,
-                price_start_date=resolved_price_start_date,
-                price_end_date=resolved_price_end_date,
-                price_latest_n=resolved_price_latest_n,
-                price_max_points=resolved_price_max_points,
-            )
+        snapshot = resolve_company_brief_snapshot(session, normalized_ticker)
+        financials = build_company_financials_response(
+            session,
+            normalized_ticker,
+            requested_as_of=requested_as_of,
+            parsed_as_of=parsed_as_of,
+            snapshot=snapshot,
+            view=normalized_financials_view,
+            price_start_date=resolved_price_start_date,
+            price_end_date=resolved_price_end_date,
+            price_latest_n=resolved_price_latest_n,
+            price_max_points=resolved_price_max_points,
+        )
+        brief = build_company_research_brief_response(
+            session,
+            normalized_ticker,
+            requested_as_of=requested_as_of,
+            parsed_as_of=parsed_as_of,
+            snapshot=snapshot,
+        )
     else:
-        financials = shared._build_company_financials_response(
+        financials = build_company_financials_response(
             session,
             normalized_ticker,
             requested_as_of=requested_as_of,

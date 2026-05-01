@@ -580,7 +580,12 @@ def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch
     _patch_handler_namespaces(
         monkeypatch,
         "_refresh_for_capital_structure",
-        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+        lambda snapshot, last_capital_structure_check, history: RefreshState(
+            triggered=False,
+            reason="fresh",
+            ticker=snapshot.company.ticker,
+            job_id=None,
+        ),
     )
 
     client = TestClient(app)

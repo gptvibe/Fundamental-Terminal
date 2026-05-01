@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.api.handlers import _shared as _shared_handlers
+import app.middleware.rate_limit as rate_limit_middleware
 import app.services.rate_limit as rate_limit_module
 from app.main import app
 from app.services.rate_limit import PublicRouteRateLimiter, RateLimitDecision
@@ -114,8 +115,8 @@ def test_rate_limit_middleware_returns_retry_metadata(monkeypatch) -> None:
         auth_mode="off",
         security_headers_enabled=True,
     )
-    monkeypatch.setattr(main_module, "_is_rate_limited_public_route", lambda _path: True)
-    monkeypatch.setattr(main_module.public_route_rate_limiter, "evaluate", _deny)
+    monkeypatch.setattr(rate_limit_middleware, "is_rate_limited_public_route", lambda _path: True)
+    monkeypatch.setattr(rate_limit_middleware.public_route_rate_limiter, "evaluate", _deny)
 
     try:
         client = TestClient(app)
@@ -152,8 +153,8 @@ def test_rate_limit_ignores_spoofed_x_forwarded_for_by_default(monkeypatch) -> N
         security_headers_enabled=True,
         api_rate_limit_trust_proxy=False,
     )
-    monkeypatch.setattr(main_module, "_is_rate_limited_public_route", lambda _path: True)
-    monkeypatch.setattr(main_module.public_route_rate_limiter, "evaluate", _evaluate)
+    monkeypatch.setattr(rate_limit_middleware, "is_rate_limited_public_route", lambda _path: True)
+    monkeypatch.setattr(rate_limit_middleware.public_route_rate_limiter, "evaluate", _evaluate)
 
     try:
         client = TestClient(app)
@@ -187,8 +188,8 @@ def test_rate_limit_can_trust_x_forwarded_for_when_opted_in(monkeypatch) -> None
         security_headers_enabled=True,
         api_rate_limit_trust_proxy=True,
     )
-    monkeypatch.setattr(main_module, "_is_rate_limited_public_route", lambda _path: True)
-    monkeypatch.setattr(main_module.public_route_rate_limiter, "evaluate", _evaluate)
+    monkeypatch.setattr(rate_limit_middleware, "is_rate_limited_public_route", lambda _path: True)
+    monkeypatch.setattr(rate_limit_middleware.public_route_rate_limiter, "evaluate", _evaluate)
 
     try:
         client = TestClient(app)

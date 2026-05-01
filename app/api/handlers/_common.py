@@ -10,11 +10,12 @@ from typing import Any, Callable, TypeVar, cast
 FunctionT = TypeVar("FunctionT", bound=Callable[..., Any])
 
 
-def _main_module() -> Any:
-    main_module = sys.modules.get("app.main")
-    if main_module is None:
-        raise RuntimeError("app.main must be loaded before invoking split handlers")
-    return main_module
+def _legacy_module() -> Any:
+    legacy_module = sys.modules.get("app.legacy_api")
+    if legacy_module is None:
+        import app.legacy_api as legacy_module
+
+    return legacy_module
 
 
 def main_bound(function: FunctionT) -> FunctionT:
@@ -26,8 +27,8 @@ def main_bound(function: FunctionT) -> FunctionT:
     if inspect.iscoroutinefunction(function):
         @wraps(function)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            main_module = _main_module()
-            rebound = main_module._clone_legacy_function(function)
+            legacy_module = _legacy_module()
+            rebound = legacy_module.clone_legacy_function(function)
             result = rebound(*args, **kwargs)
             if inspect.isawaitable(result):
                 return await result
@@ -41,14 +42,14 @@ def main_bound(function: FunctionT) -> FunctionT:
 
         @wraps(function)
         async def session_wrapper(*args: Any, **kwargs: Any) -> Any:
-            main_module = _main_module()
+            legacy_module = _legacy_module()
             shared_module = sys.modules.get("app.api.handlers._shared")
             if shared_module is None:
                 raise RuntimeError("app.api.handlers._shared must be loaded before invoking split handlers")
             async with shared_module._session_scope() as session:
                 def invoke(sync_session: Any) -> Any:
-                    rebound = main_module._clone_legacy_function(function)
-                    with main_module.bind_request_sync_session(sync_session):
+                    rebound = legacy_module.clone_legacy_function(function)
+                    with legacy_module.bind_request_sync_session(sync_session):
                         return rebound(*args, **kwargs, session=sync_session)
 
                 return await shared_module._run_with_session_binding(session, invoke)
@@ -64,8 +65,8 @@ def main_bound(function: FunctionT) -> FunctionT:
 
     @wraps(function)
     def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-        main_module = _main_module()
-        rebound = main_module._clone_legacy_function(function)
+        legacy_module = _legacy_module()
+        rebound = legacy_module.clone_legacy_function(function)
         return rebound(*args, **kwargs)
 
     sync_wrapper.__signature__ = signature  # type: ignore[attr-defined]

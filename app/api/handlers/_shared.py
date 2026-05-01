@@ -5714,6 +5714,29 @@ def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
         if isinstance(stale_flags, list) and "company_missing" in stale_flags:
             return True
 
+    if payload.get("company") is None and _payload_has_company_missing_marker(payload):
+        return True
+
+    return False
+
+
+def _payload_has_company_missing_marker(payload: Any) -> bool:
+    if isinstance(payload, dict):
+        confidence_flags = payload.get("confidence_flags")
+        if isinstance(confidence_flags, list) and "company_missing" in confidence_flags:
+            return True
+
+        diagnostics = payload.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            stale_flags = diagnostics.get("stale_flags")
+            if isinstance(stale_flags, list) and "company_missing" in stale_flags:
+                return True
+
+        return any(_payload_has_company_missing_marker(value) for value in payload.values())
+
+    if isinstance(payload, list):
+        return any(_payload_has_company_missing_marker(item) for item in payload)
+
     return False
 
 
@@ -11139,10 +11162,9 @@ def _wrap_db_handler(function: Any) -> Any:
             def invoke(sync_session: Session) -> Any:
                 rebound = function
                 if getattr(function, "__module__", None) == __name__:
-                    main_module = sys.modules.get(f"{__name__.split('.', 1)[0]}.main")
-                    if main_module is None:
-                        raise RuntimeError("app.main must be loaded before invoking handler wrappers")
-                    rebound = main_module._clone_legacy_function(function)
+                    import app.legacy_api as legacy_api
+
+                    rebound = legacy_api.clone_legacy_function(function)
                 with bind_request_sync_session(sync_session):
                     return rebound(*args, **kwargs, session=sync_session)
 

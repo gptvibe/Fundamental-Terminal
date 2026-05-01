@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import app.main as main_module
+import app.legacy_api as legacy_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,8 +17,8 @@ if root_str not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _clear_response_caches() -> None:
-    main_module._search_response_cache.clear()
-    main_module._hot_response_cache.clear()
+    legacy_module._search_response_cache.clear()
+    legacy_module._hot_response_cache.clear()
     yield
-    main_module._search_response_cache.clear()
-    main_module._hot_response_cache.clear()
+    legacy_module._search_response_cache.clear()
+    legacy_module._hot_response_cache.clear()

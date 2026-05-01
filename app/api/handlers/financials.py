@@ -20,7 +20,6 @@ def company_compare(
     companies = [
         _build_company_compare_item(
             session=session,
-            background_tasks=background_tasks,
             ticker=ticker,
             requested_as_of=requested_as_of,
             parsed_as_of=parsed_as_of,
@@ -166,7 +165,7 @@ def company_segment_history(
         financials = select_point_in_time_financials(financials, parsed_as_of)
 
     history_result = build_segment_history(financials, kind=kind, years=years)
-    refresh = _refresh_for_segment_history(background_tasks, snapshot, financials)
+    refresh = _refresh_for_segment_history(snapshot, financials)
     periods = [_serialize_segment_history_period(period) for period in history_result.periods]
     diagnostics = _diagnostics_for_segment_history_response(periods, requested_years=years, refresh=refresh)
     last_refreshed_at = _merge_last_checked(*(statement.last_checked for statement in history_result.provenance_statements))
@@ -262,7 +261,7 @@ async def company_capital_structure(
                 floor = datetime.min.replace(tzinfo=timezone.utc)
                 history = [item for item in history if (snapshot_effective_at(item) or floor) <= parsed_as_of]
             history = history[:max_periods]
-            refresh = _refresh_for_capital_structure(background_tasks, snapshot, last_capital_structure_check, history)
+            refresh = _refresh_for_capital_structure(snapshot, last_capital_structure_check, history)
             serialized_history = [_serialize_capital_structure_snapshot(item) for item in history]
             latest = serialized_history[0] if serialized_history else None
             diagnostics = _diagnostics_for_capital_structure(serialized_history, refresh)

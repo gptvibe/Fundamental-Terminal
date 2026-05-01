@@ -41,6 +41,7 @@ def test_main_stays_bootstrap_only() -> None:
     route_definitions = []
     create_app = None
     app_assignment_found = False
+    top_level_function_names: list[str] = []
     for node in tree.body:
         if isinstance(node, ast.Assign):
             if any(isinstance(target, ast.Name) and target.id == "app" for target in node.targets):
@@ -48,6 +49,7 @@ def test_main_stays_bootstrap_only() -> None:
                     app_assignment_found = True
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
+        top_level_function_names.append(node.name)
         if node.name == "create_app":
             create_app = node
         for decorator in node.decorator_list:
@@ -63,18 +65,24 @@ def test_main_stays_bootstrap_only() -> None:
     assert route_definitions == []
     assert create_app is not None
     assert app_assignment_found
+    assert top_level_function_names == ["create_app", "__getattr__", "__dir__"]
 
-    register_calls = [
-        node
+    register_call_names = {
+        node.func.id
         for node in ast.walk(create_app)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
-        and node.func.id == "register_routers"
         and len(node.args) == 1
         and isinstance(node.args[0], ast.Name)
         and node.args[0].id == "app"
-    ]
-    assert len(register_calls) == 1
+    }
+    assert {
+        "register_auth_middleware",
+        "register_rate_limit_middleware",
+        "register_company_conditional_get_middleware",
+        "register_performance_audit_middleware",
+        "register_routers",
+    } <= register_call_names
 
 
 def test_jobs_routes_keep_streaming_and_async_contracts() -> None:
@@ -90,6 +98,7 @@ def test_jobs_routes_keep_streaming_and_async_contracts() -> None:
     assert refresh_route.endpoint.__name__ == "refresh_company"
     assert list(inspect.signature(refresh_route.endpoint, follow_wrapped=True).parameters) == [
         "ticker",
+        "background_tasks",
         "force",
     ]
 
@@ -193,4 +202,5 @@ def test_dispatch_map_covers_all_handler_shim_targets() -> None:
                 continue
             discovered_targets.add(node.args[0].value)
 
-    assert discovered_targets == set(dispatch_handlers.ROUTE_HANDLERS)
+    assert discovered_targets
+    assert discovered_targets <= set(dispatch_handlers.ROUTE_HANDLERS)

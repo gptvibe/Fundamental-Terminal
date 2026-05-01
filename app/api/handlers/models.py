@@ -294,7 +294,7 @@ async def company_oil_scenario_overlay(
 
             payload, cache_state = get_company_oil_scenario_overlay(sync_session, snapshot.company.id)
             last_checked = get_company_oil_scenario_overlay_last_checked(sync_session, snapshot.company.id)
-            refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+            refresh = _refresh_for_oil_scenario_overlay(snapshot, cache_state)
             return _serialize_oil_scenario_overlay_response(
                 company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
                 payload=payload
@@ -438,7 +438,7 @@ async def company_oil_scenario(
 
             payload, cache_state = get_company_oil_scenario_overlay(sync_session, snapshot.company.id)
             last_checked = get_company_oil_scenario_overlay_last_checked(sync_session, snapshot.company.id)
-            refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+            refresh = _refresh_for_oil_scenario_overlay(snapshot, cache_state)
             default_checked_at = last_checked or snapshot.last_checked or datetime.now(timezone.utc)
             base_payload = payload or build_company_oil_scenario_overlay_placeholder(snapshot.company, checked_at=default_checked_at)
             public_payload = build_company_oil_scenario_public_payload(

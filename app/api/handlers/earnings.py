@@ -22,7 +22,7 @@ def company_earnings(
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
     earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
-    refresh = _refresh_for_earnings(background_tasks, snapshot, earnings_cache_state)
+    refresh = _refresh_for_earnings(snapshot, earnings_cache_state)
     payload = [_serialize_earnings_release(release) for release in earnings_releases]
     return CompanyEarningsResponse(
         company=_serialize_company(
@@ -54,7 +54,7 @@ def company_earnings_summary(
 
     earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
     earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
-    refresh = _refresh_for_earnings(background_tasks, snapshot, earnings_cache_state)
+    refresh = _refresh_for_earnings(snapshot, earnings_cache_state)
     payload = [_serialize_earnings_release(release) for release in earnings_releases]
     return CompanyEarningsSummaryResponse(
         company=_serialize_company(
@@ -110,7 +110,7 @@ def company_earnings_workspace(
     model_last_checked, model_cache_state = get_company_earnings_model_cache_status(session, snapshot.company.id)
     earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
     model_rows = get_company_earnings_model_points(session, snapshot.company.id)
-    refresh = _refresh_for_earnings_workspace(background_tasks, snapshot, earnings_cache_state, model_cache_state)
+    refresh = _refresh_for_earnings_workspace(snapshot, earnings_cache_state, model_cache_state)
 
     release_payload = [_serialize_earnings_release(release) for release in earnings_releases]
     model_payload = [_serialize_earnings_model_point(point) for point in model_rows]
