@@ -19,6 +19,7 @@ RUN_MACRO_WORKER="${DATA_FETCHER_RUN_MACRO_WORKER:-true}"
 INTERVAL="${WORKER_INTERVAL_SECONDS:-3600}"
 IDENTIFIERS="${WORKER_IDENTIFIERS:-AAPL MSFT NVDA}"
 QUEUE_POLL_INTERVAL="${REFRESH_QUEUE_POLL_SECONDS:-1}"
+QUEUE_PID_FILE="${DATA_FETCHER_HEALTH_QUEUE_PID_FILE:-/tmp/data-fetcher-queue.pid}"
 
 ensure_queue_worker_running() {
   if [ -z "${QUEUE_PID:-}" ]; then
@@ -66,8 +67,10 @@ fi
 echo "[worker] starting durable refresh queue consumer"
 python -m app.worker --queue-worker --poll-interval "${QUEUE_POLL_INTERVAL}" &
 QUEUE_PID="$!"
+printf '%s\n' "${QUEUE_PID}" > "${QUEUE_PID_FILE}"
 
 cleanup() {
+  rm -f "${QUEUE_PID_FILE}" 2>/dev/null || true
   kill "${QUEUE_PID}" 2>/dev/null || true
 }
 

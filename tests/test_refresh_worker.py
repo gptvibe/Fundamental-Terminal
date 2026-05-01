@@ -176,3 +176,36 @@ def test_queue_worker_uses_sleep_for_non_blocking_idle_poll(monkeypatch) -> None
 
     assert sleep_calls == [0.25]
     assert _CountingEvent.allocations == 1
+
+
+def test_worker_lifecycle_heartbeat_writes_health_file(monkeypatch, tmp_path) -> None:
+    health_file = tmp_path / "worker-heartbeat.txt"
+    seen_heartbeats: list[tuple[str, str]] = []
+
+    class _Broker:
+        def heartbeat_worker(
+            self,
+            worker_id: str,
+            *,
+            state: str,
+            current_job_id: str | None = None,
+            ticker: str | None = None,
+        ) -> None:
+            seen_heartbeats.append((worker_id, state))
+
+    stop_event = threading.Event()
+    stop_event.set()
+
+    monkeypatch.setattr(worker_module, "status_broker", _Broker())
+    monkeypatch.setenv("DATA_FETCHER_HEALTH_HEARTBEAT_FILE", str(health_file))
+
+    worker_module._worker_lifecycle_heartbeat_loop(
+        "worker-test-1",
+        {"state": "idle", "current_job_id": None, "ticker": None},
+        threading.Lock(),
+        stop_event,
+    )
+
+    assert seen_heartbeats == [("worker-test-1", "idle")]
+    assert health_file.exists()
+    assert int(health_file.read_text(encoding="utf-8").strip()) > 0

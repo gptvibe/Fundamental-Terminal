@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import threading
 import time
 import uuid
@@ -14,6 +15,19 @@ from app.services.status_stream import ClaimedJob, status_broker
 
 
 logger = logging.getLogger(__name__)
+
+
+def _worker_health_heartbeat_file() -> str:
+    return os.getenv("DATA_FETCHER_HEALTH_HEARTBEAT_FILE", "/tmp/data-fetcher-worker-heartbeat").strip() or "/tmp/data-fetcher-worker-heartbeat"
+
+
+def _touch_worker_health_heartbeat() -> None:
+    heartbeat_file = _worker_health_heartbeat_file()
+    try:
+        with open(heartbeat_file, "w", encoding="utf-8") as handle:
+            handle.write(f"{int(time.time())}\n")
+    except OSError:
+        return
 
 
 def _heartbeat_loop(job: ClaimedJob, stop_event: threading.Event) -> None:
@@ -40,6 +54,7 @@ def _worker_lifecycle_heartbeat_loop(
             current_job_id=current_job_id,
             ticker=ticker,
         )
+        _touch_worker_health_heartbeat()
         if stop_event.wait(interval):
             return
 

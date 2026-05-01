@@ -166,7 +166,7 @@ class Settings:
     worker_heartbeat_interval_seconds: float = field(default_factory=lambda: _float_env("WORKER_HEARTBEAT_INTERVAL_SECONDS", 15.0, minimum=2.0))
     worker_heartbeat_ttl_seconds: int = field(default_factory=lambda: _int_env("WORKER_HEARTBEAT_TTL_SECONDS", 45, minimum=5))
     refresh_aux_io_max_workers: int = field(default_factory=lambda: _int_env("REFRESH_AUX_IO_MAX_WORKERS", 2, minimum=1))
-    hot_response_cache_ttl_seconds: int = field(default_factory=lambda: _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 20, minimum=1))
+    hot_response_cache_ttl_seconds: int = field(default_factory=lambda: _int_env("HOT_RESPONSE_CACHE_TTL_SECONDS", 120, minimum=1))
     hot_response_cache_stale_ttl_seconds: int = field(default_factory=lambda: _int_env("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", 120, minimum=1))
     hot_response_cache_namespace: str = field(default_factory=lambda: os.getenv("HOT_RESPONSE_CACHE_NAMESPACE", "ft:hot-cache").strip() or "ft:hot-cache")
     rate_limit_namespace: str = field(default_factory=lambda: os.getenv("RATE_LIMIT_NAMESPACE", "ft:rate-limit").strip() or "ft:rate-limit")

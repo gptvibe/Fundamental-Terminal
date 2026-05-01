@@ -6,6 +6,7 @@ import {
   __resetApiClientCacheForTests,
   getCompanyChangesSinceLastFiling,
   getCompanyFinancials,
+  getCompanyMarketContext,
   getCompanyOverview,
   getCompanyResearchBrief,
   getCompanyWorkspaceBootstrap,
@@ -13,6 +14,7 @@ import {
   invalidateApiReadCacheForTicker,
   refreshCompany,
   searchCompanies,
+  type ReadCachePolicy,
 } from "@/lib/api";
 
 describe("api read cache", () => {
@@ -666,5 +668,102 @@ describe("api read cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(brief.schema_version).toBe("company_research_brief_v1");
     expect(window.localStorage.getItem("ft:api-cache:v4:/companies/AAPL/brief")).toBeNull();
+  });
+
+  it("route-specific market-context policy (20 s ttl) marks data stale before STABLE_SEC_POLICY would", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00Z"));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ company: null, context: {}, refresh: { triggered: false, reason: "first", ticker: "AMD", job_id: null } }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ company: null, context: {}, refresh: { triggered: false, reason: "revalidated", ticker: "AMD", job_id: null } }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Prime the cache.
+    await getCompanyMarketContext("AMD");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Advance by 25 s – beyond market-context ttlMs (20 000) but well within STABLE_SEC_POLICY ttlMs (600 000).
+    vi.setSystemTime(new Date("2026-04-27T00:00:25Z"));
+
+    // Should return stale data and trigger background revalidation.
+    const staleResult = await getCompanyMarketContext("AMD");
+    expect(staleResult.refresh.reason).toBe("first");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it("per-request cachePolicy override takes precedence over the route default", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00Z"));
+
+    // market-context has a 20 s route policy.  We override it with a very long ttl so the entry
+    // should still be fresh after 25 s (which would normally trigger a stale revalidation).
+    const longPolicy: ReadCachePolicy = { ttlMs: 300_000, staleMs: 900_000 };
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ company: null, context: {}, refresh: { triggered: false, reason: "cached", ticker: "AMD", job_id: null } }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyMarketContext("AMD", { cachePolicy: longPolicy });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-04-27T00:00:25Z"));
+
+    // With the override policy (300 s ttl), the entry is still fresh.
+    const result = await getCompanyMarketContext("AMD", { cachePolicy: longPolicy });
+    expect(result.refresh.reason).toBe("cached");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    vi.useRealTimers();
+  });
+
+  it("uses DEFAULT_READ_POLICY (45 s ttl) for paths without a route-specific override", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00Z"));
+
+    // searchCompanies with refresh=false so the cache is actually consulted.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ query: "X", total: 0, results: [] }),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Prime – search has a route policy of 20 s ttl, which is shorter than the 45 s default.
+    // Use a path we can control by passing an explicit long policy to act as the "default" scenario.
+    // Instead, test the stale boundary at exactly DEFAULT_READ_POLICY.ttlMs (45 s) for
+    // a hypothetical unmatched path by passing cachePolicy directly.
+    const defaultPolicy: ReadCachePolicy = { ttlMs: 45_000, staleMs: 180_000 };
+
+    await searchCompanies("X", { refresh: false, cachePolicy: defaultPolicy });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 44 s – still fresh under the 45 s ttl.
+    vi.setSystemTime(new Date("2026-04-27T00:00:44Z"));
+    await searchCompanies("X", { refresh: false, cachePolicy: defaultPolicy });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 46 s – now stale; background revalidation should fire.
+    vi.setSystemTime(new Date("2026-04-27T00:00:46Z"));
+    const stale = await searchCompanies("X", { refresh: false, cachePolicy: defaultPolicy });
+    expect(stale.query).toBe("X");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
   });
 });

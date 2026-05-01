@@ -78,7 +78,7 @@ import {
 
 const API_PREFIX = "/backend/api";
 
-type ReadCachePolicy = {
+export type ReadCachePolicy = {
   ttlMs: number;
   staleMs: number;
 };
@@ -502,7 +502,7 @@ function emitInvalidation(prefix: string): void {
   }
 }
 
-async function readCachedValue<T>(cacheKey: string, path: string): Promise<{
+async function readCachedValue<T>(cacheKey: string, path: string, policyOverride?: ReadCachePolicy): Promise<{
   data: T;
   stale: boolean;
   cacheSource: "memory-cache" | "indexeddb-cache";
@@ -511,7 +511,7 @@ async function readCachedValue<T>(cacheKey: string, path: string): Promise<{
 } | null> {
   setupCrossTabCacheSync();
   const now = Date.now();
-  const policy = resolveReadPolicy(path);
+  const policy = policyOverride ?? resolveReadPolicy(path);
   const inMemory = readCache.get(cacheKey);
   const cacheSource: "memory-cache" | "indexeddb-cache" = inMemory ? "memory-cache" : "indexeddb-cache";
   const entry = inMemory ?? (await readPersistentCache(cacheKey));
@@ -754,15 +754,16 @@ async function fetchAndParse<T>(path: string, init?: RequestInit & { signal?: Ab
   });
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<T> {
-  const readRequest = isReadRequest(init);
+async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal; cachePolicy?: ReadCachePolicy }): Promise<T> {
+  const { cachePolicy: policyOverride, ...fetchInit } = init ?? {};
+  const readRequest = isReadRequest(fetchInit);
   const auditContext = getCurrentPerformanceAuditContext();
   const cacheKey = readRequest ? path : null;
-  const cachePolicy = readRequest ? resolveReadPolicy(path) : null;
+  const cachePolicy = readRequest ? (policyOverride ?? resolveReadPolicy(path)) : null;
   const cachePolicyTtlMs = cachePolicy?.ttlMs ?? null;
   const cachePolicyStaleMs = cachePolicy?.staleMs ?? null;
   if (!readRequest) {
-    return fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, {
+    return fetchAndParseWithAudit<T>(path, { ...fetchInit, cache: "no-store" }, {
       cacheDisposition: "cache-bypass",
       responseSource: "cache-bypass",
       backgroundRevalidate: false,
@@ -774,7 +775,7 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
   }
 
   if (shouldBypassReadCache(path)) {
-    return fetchAndParseWithAudit<T>(path, { ...init, cache: "no-store" }, {
+    return fetchAndParseWithAudit<T>(path, { ...fetchInit, cache: "no-store" }, {
       cacheDisposition: "cache-bypass",
       responseSource: "cache-bypass",
       backgroundRevalidate: false,
@@ -787,7 +788,7 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
 
   const cacheKeyValue = path;
   const requestKey = requestKeyForPath(path);
-  const cached = await readCachedValue<T>(cacheKeyValue, path);
+  const cached = await readCachedValue<T>(cacheKeyValue, path, policyOverride);
   if (cached && !cached.stale) {
     recordCachedAudit(path, "GET", "fresh-cache-hit", cached.cacheSource, auditContext, {
       cacheKey: cacheKeyValue,
@@ -815,7 +816,7 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
       cachePolicyStaleMs: cached.policy.staleMs,
       payloadBytes: cached.payloadBytes,
     });
-    void revalidateRead(path, cacheKeyValue, init, {
+    void revalidateRead(path, cacheKeyValue, fetchInit, {
       cacheDisposition: "network",
       responseSource: "network",
       backgroundRevalidate: true,
@@ -829,7 +830,7 @@ async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortS
     return cached.data;
   }
 
-  return revalidateRead(path, cacheKeyValue, init, {
+  return revalidateRead(path, cacheKeyValue, fetchInit, {
     cacheDisposition: "network",
     responseSource: "network",
     backgroundRevalidate: false,
@@ -1092,11 +1093,11 @@ export async function __resetApiClientCacheForTests(): Promise<void> {
 
 export function searchCompanies(
   query: string,
-  options?: { refresh?: boolean; signal?: AbortSignal }
+  options?: { refresh?: boolean; signal?: AbortSignal; cachePolicy?: ReadCachePolicy }
 ): Promise<CompanySearchResponse> {
   const params = new URLSearchParams({ query });
   params.set("refresh", String(options?.refresh ?? true));
-  return fetchJson(`/companies/search?${params.toString()}`, { signal: options?.signal });
+  return fetchJson(`/companies/search?${params.toString()}`, { signal: options?.signal, cachePolicy: options?.cachePolicy });
 }
 
 export function resolveCompanyIdentifier(query: string): Promise<CompanyResolutionResponse> {
@@ -1724,9 +1725,9 @@ export function getLatestModelEvaluation(
 
 export function getCompanyMarketContext(
   ticker: string,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; cachePolicy?: ReadCachePolicy }
 ): Promise<CompanyMarketContextResponse> {
-  return fetchJson(`/companies/${encodeURIComponent(ticker)}/market-context`, { signal: options?.signal });
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/market-context`, { signal: options?.signal, cachePolicy: options?.cachePolicy });
 }
 
 export function getCompanySectorContext(

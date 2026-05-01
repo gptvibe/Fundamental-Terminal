@@ -92,7 +92,8 @@ Both were captured from local Docker runs against `AAPL` after a warm-up pass.
 - Structured logs now emit refresh, model-compute, and SSE job events with a shared traceable `job_id`/`trace_id` path.
 - Frontend console rows and SSE payloads expose `ticker` and `kind` metadata so operators can correlate UI events with backend logs.
 - Response cache TTLs are controlled with:
-  - `HOT_RESPONSE_CACHE_TTL_SECONDS`
-  - `HOT_RESPONSE_CACHE_STALE_TTL_SECONDS`
+  - `HOT_RESPONSE_CACHE_TTL_SECONDS` (default: 120 seconds; marked "fresh" during this window)
+  - `HOT_RESPONSE_CACHE_STALE_TTL_SECONDS` (default: 120 seconds; after fresh TTL, stale data serves while refresh runs)
+  - **Behavior:** Responses are fresh for 120 seconds. After that, stale cache serves for another 120 seconds (0–240 seconds total) while background refresh runs. After 240 seconds, the cache expires and a new request forces a refresh. This default is unified across Docker and non-Docker deployments to ensure consistent cache freshness behavior.
 - Cache effectiveness counters include hot cache hit/miss/stale/expired/store and conditional 304 counts.
 - Model export/debug flows that need full model input snapshots should call `/api/companies/{ticker}/models?expand=input_periods`; the default models workspace now keeps those inputs off the initial route payload.

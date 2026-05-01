@@ -5656,7 +5656,7 @@ def _get_cached_search_response(_query: str) -> CompanySearchResponse | None:
 
 
 def _store_cached_search_response(query: str, payload: CompanySearchResponse) -> None:
-    ttl_seconds = max(0, int(getattr(settings, "hot_response_cache_ttl_seconds", 20)))
+    ttl_seconds = max(0, int(getattr(settings, "hot_response_cache_ttl_seconds", 120)))
     if ttl_seconds <= 0:
         _search_response_cache.pop(query, None)
         return

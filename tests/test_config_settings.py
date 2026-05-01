@@ -73,3 +73,32 @@ def test_settings_defaults_match_intended_values(monkeypatch) -> None:
     assert default_settings.valuation_workbench_enabled is True
     assert default_settings.rate_limit_namespace == "ft:rate-limit"
     assert default_settings.auth_required_path_prefixes == ("/api/internal",)
+
+
+def test_hot_response_cache_ttl_unified_across_environments(monkeypatch) -> None:
+    """Verify Docker and non-Docker deployments use the same cache freshness default."""
+    for name in (
+        "HOT_RESPONSE_CACHE_TTL_SECONDS",
+        "HOT_RESPONSE_CACHE_STALE_TTL_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    parsed = config_module.Settings()
+
+    # Both Docker compose files default to 120; config.py should match (not 20).
+    assert parsed.hot_response_cache_ttl_seconds == 120, (
+        "hot_response_cache_ttl_seconds default must match Docker compose defaults (120) "
+        "to prevent silent behavior changes between Docker and non-Docker deployments"
+    )
+    assert parsed.hot_response_cache_stale_ttl_seconds == 120
+
+
+def test_hot_response_cache_ttl_can_be_overridden(monkeypatch) -> None:
+    """Verify cache TTL can be customized via environment variables."""
+    monkeypatch.setenv("HOT_RESPONSE_CACHE_TTL_SECONDS", "60")
+    monkeypatch.setenv("HOT_RESPONSE_CACHE_STALE_TTL_SECONDS", "180")
+
+    parsed = config_module.Settings()
+
+    assert parsed.hot_response_cache_ttl_seconds == 60
+    assert parsed.hot_response_cache_stale_ttl_seconds == 180
