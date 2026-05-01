@@ -22,6 +22,7 @@ from app.services.hot_cache import HotCacheLookup, SharedHotResponseCache, share
 def _disable_remote(monkeypatch, cache: SharedHotResponseCache) -> None:
     monkeypatch.setattr(cache, "_redis", None)
     monkeypatch.setattr(cache, "_redis_async", None)
+    monkeypatch.setattr(cache, "_redis_configured", False)
 
 
 def test_hot_cache_emits_request_cache_and_redis_metrics(monkeypatch) -> None:
@@ -341,6 +342,21 @@ def _build_remote_cache(monkeypatch) -> tuple[SharedHotResponseCache, _FakeRedis
     return SharedHotResponseCache(), backend
 
 
+class _FakeRedisClientFactory:
+    def __init__(self, *outcomes: str | BaseException) -> None:
+        self._outcomes = list(outcomes)
+        self.backend = _FakeRedisBackend()
+        self.calls = 0
+
+    def build(self) -> tuple[_FakeSyncRedis, _FakeAsyncRedis]:
+        self.calls += 1
+        index = min(self.calls - 1, len(self._outcomes) - 1)
+        outcome = self._outcomes[index]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return self.backend.make_clients()
+
+
 def test_hot_cache_skips_company_missing_payloads(monkeypatch) -> None:
     _disable_remote(monkeypatch, shared_hot_response_cache)
     shared_handlers._hot_response_cache.clear()
@@ -621,6 +637,88 @@ def test_shared_hot_cache_logs_connect_fallback_on_startup(monkeypatch, caplog) 
     assert any('"event":"shared_hot_cache.local_fallback"' in message and '"operation":"startup_connect"' in message for message in messages)
     assert any('"event":"shared_hot_cache.backend"' in message and '"startup_reason":"redis_connect_failed"' in message for message in messages)
     assert any('"summary":"Redis was configured, but the app is currently using process-local hot-cache fallback."' in message for message in messages)
+
+
+def test_shared_hot_cache_startup_redis_failure_uses_local_fallback(monkeypatch) -> None:
+    factory = _FakeRedisClientFactory(RuntimeError("startup unavailable"), RuntimeError("still unavailable"))
+    monkeypatch.setattr(hot_cache_module, "redis", SimpleNamespace(Redis=object()))
+    monkeypatch.setattr(hot_cache_module, "redis_async", SimpleNamespace(Redis=object()))
+    monkeypatch.setattr(SharedHotResponseCache, "_create_redis_clients", lambda self: factory.build())
+    cache = SharedHotResponseCache()
+
+    asyncio.run(
+        cache._store_local(
+            "financials:ON:asof=latest",
+            route="financials",
+            content=b'{"value":1}',
+            tags=(cache.build_ticker_tag("ON"),),
+            stored_at=time.time(),
+            fresh_until=time.time() + 60,
+            stale_until=time.time() + 120,
+            etag='W/"abc"',
+            last_modified=None,
+        )
+    )
+
+    lookup = asyncio.run(cache.get("financials:ON:asof=latest", route="financials"))
+
+    assert lookup is not None
+    assert json.loads(lookup.content) == {"value": 1}
+    assert cache.backend == "local"
+    assert factory.calls == 2
+
+
+def test_shared_hot_cache_lazy_reconnect_switches_to_redis_after_startup_failure(monkeypatch, caplog) -> None:
+    factory = _FakeRedisClientFactory(RuntimeError("startup unavailable"), "success")
+    monkeypatch.setattr(hot_cache_module, "redis", SimpleNamespace(Redis=object()))
+    monkeypatch.setattr(hot_cache_module, "redis_async", SimpleNamespace(Redis=object()))
+    monkeypatch.setattr(SharedHotResponseCache, "_create_redis_clients", lambda self: factory.build())
+    caplog.set_level(logging.INFO, logger="app.services.hot_cache")
+
+    cache = SharedHotResponseCache()
+
+    asyncio.run(
+        cache.store(
+            "financials:ON:asof=latest",
+            route="financials",
+            payload={"company": {"ticker": "ON"}, "results": []},
+            tags=(cache.build_ticker_tag("ON"), cache.build_dataset_tag("financials")),
+        )
+    )
+
+    assert cache.backend == "redis"
+    assert factory.calls == 2
+    assert factory.backend.calls["async_hset"] >= 1
+    assert any(
+        '"event":"shared_hot_cache.backend_recovered"' in record.message and '"trigger":"store"' in record.message
+        for record in caplog.records
+    )
+
+
+def test_shared_hot_cache_lazy_reconnect_throttles_repeated_failures(monkeypatch) -> None:
+    factory = _FakeRedisClientFactory(
+        RuntimeError("startup unavailable"),
+        RuntimeError("retry unavailable"),
+        RuntimeError("retry unavailable again"),
+    )
+    monotonic_now = {"value": 100.0}
+    monkeypatch.setattr(hot_cache_module, "redis", SimpleNamespace(Redis=object()))
+    monkeypatch.setattr(hot_cache_module, "redis_async", SimpleNamespace(Redis=object()))
+    monkeypatch.setattr(SharedHotResponseCache, "_create_redis_clients", lambda self: factory.build())
+    monkeypatch.setattr(hot_cache_module.time, "monotonic", lambda: monotonic_now["value"])
+
+    cache = SharedHotResponseCache()
+
+    for _ in range(3):
+        assert asyncio.run(cache.get("financials:MISS:asof=latest", route="financials")) is None
+
+    assert factory.calls == 2
+
+    monotonic_now["value"] += 1.0
+    assert asyncio.run(cache.get("financials:MISS:asof=latest", route="financials")) is None
+
+    assert factory.calls == 3
+    assert cache.backend == "local"
 
 
 def test_shared_hot_cache_runtime_read_fallback_updates_metrics(monkeypatch, caplog) -> None:

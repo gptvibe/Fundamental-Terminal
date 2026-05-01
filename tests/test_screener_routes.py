@@ -6,8 +6,15 @@ from datetime import date, datetime, timezone
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 from app.db import get_db_session
 from app.main import app
+
+
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    if hasattr(_shared_handlers, name):
+        monkeypatch.setattr(_shared_handlers, name, value)
 
 
 def _ranking_component(
@@ -175,8 +182,8 @@ def _client():
 
 
 def test_screener_filter_catalog_endpoint_returns_official_only_contract(monkeypatch) -> None:
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "build_official_screener_filter_catalog",
         lambda: {
             "strict_official_only": True,
@@ -252,8 +259,8 @@ def test_screener_filter_catalog_endpoint_returns_official_only_contract(monkeyp
 
 
 def test_screener_search_endpoint_returns_screened_rows(monkeypatch) -> None:
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "run_official_screener",
         lambda *_args, **_kwargs: {
             "query": {

@@ -6,8 +6,15 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 from app.main import RefreshState, app
 from app.services import peer_comparison as peer_module
+
+
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    if hasattr(_shared_handlers, name):
+        monkeypatch.setattr(_shared_handlers, name, value)
 
 
 def _snapshot(company_id: int, ticker: str) -> SimpleNamespace:
@@ -98,12 +105,12 @@ def test_models_endpoint_filters_future_inputs_for_as_of(monkeypatch):
                 }
             ]
 
-    monkeypatch.setattr(main_module, "ModelEngine", _FakeModelEngine)
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [future_statement, past_statement])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [past_price, future_price])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "ModelEngine", _FakeModelEngine)
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "_refresh_for_snapshot", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [future_statement, past_statement])
+    _patch_main_and_shared(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [past_price, future_price])
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/models?as_of=2025-02-01")
@@ -144,13 +151,13 @@ def test_metrics_endpoint_filters_future_inputs_for_as_of(monkeypatch):
             }
         ]
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
-    monkeypatch.setattr(main_module, "get_company_financials", lambda *_args, **_kwargs: [future_statement, past_statement])
-    monkeypatch.setattr(main_module, "get_company_price_history", lambda *_args, **_kwargs: [past_price, future_price])
-    monkeypatch.setattr(main_module, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
-    monkeypatch.setattr(main_module, "_refresh_for_financial_page", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
-    monkeypatch.setattr(main_module, "build_derived_metric_points", _build_points)
-    monkeypatch.setattr(main_module, "get_company_derived_metric_points", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("mart path should not run for as_of requests")))
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: snapshot)
+    _patch_main_and_shared(monkeypatch, "get_company_financials", lambda *_args, **_kwargs: [future_statement, past_statement])
+    _patch_main_and_shared(monkeypatch, "get_company_price_history", lambda *_args, **_kwargs: [past_price, future_price])
+    _patch_main_and_shared(monkeypatch, "get_company_price_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 21, tzinfo=timezone.utc), "fresh"))
+    _patch_main_and_shared(monkeypatch, "_refresh_for_financial_page", lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None))
+    _patch_main_and_shared(monkeypatch, "build_derived_metric_points", _build_points)
+    _patch_main_and_shared(monkeypatch, "get_company_derived_metric_points", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("mart path should not run for as_of requests")))
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/metrics?period_type=ttm&as_of=2025-02-01")

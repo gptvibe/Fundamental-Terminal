@@ -21,14 +21,230 @@ from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status
+from fastapi import Body, Depends, HTTPException, Query, Request, Response, status
 import httpx
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import *
+from app.api.schemas import (
+    ActivityFeedEntryPayload,
+    AlertPayload,
+    AlertsSummaryPayload,
+    BeneficialOwnershipFilingPayload,
+    BeneficialOwnershipPartyPayload,
+    BeneficialOwnershipSummaryPayload,
+    CapitalMarketsSummaryPayload,
+    CapitalRaisePayload,
+    CapitalStructureCapitalReturnsPayload,
+    CapitalStructureDebtMaturityPayload,
+    CapitalStructureDebtRollforwardPayload,
+    CapitalStructureInterestBurdenPayload,
+    CapitalStructureLeaseObligationsPayload,
+    CapitalStructureNetDilutionBridgePayload,
+    CapitalStructureSnapshotPayload,
+    CapitalStructureSummaryPayload,
+    ChangesSinceLastFilingSummaryPayload,
+    CommentLetterPayload,
+    CompanyActivityFeedResponse,
+    CompanyActivityOverviewResponse,
+    CompanyAlertsResponse,
+    CompanyBeneficialOwnershipResponse,
+    CompanyBeneficialOwnershipSummaryResponse,
+    CompanyCapitalMarketsSummaryResponse,
+    CompanyCapitalRaisesResponse,
+    CompanyCapitalStructureResponse,
+    CompanyChangesSinceLastFilingResponse,
+    CompanyChartsAssumptionsCardPayload,
+    CompanyChartsCardPayload,
+    CompanyChartsCardsPayload,
+    CompanyChartsComparisonCardPayload,
+    CompanyChartsDashboardResponse,
+    CompanyChartsFactorValuePayload,
+    CompanyChartsFactorsPayload,
+    CompanyChartsForecastAccuracyAggregatePayload,
+    CompanyChartsForecastAccuracyResponse,
+    CompanyChartsLegendItemPayload,
+    CompanyChartsLegendPayload,
+    CompanyChartsMethodologyPayload,
+    CompanyChartsScenarioCloneRequest,
+    CompanyChartsScenarioDetailPayload,
+    CompanyChartsScenarioListResponse,
+    CompanyChartsScenarioUpsertRequest,
+    CompanyChartsScenarioViewerPayload,
+    CompanyChartsScoreBadgePayload,
+    CompanyChartsSeriesPayload,
+    CompanyChartsSeriesPointPayload,
+    CompanyChartsShareSnapshotPayload,
+    CompanyChartsShareSnapshotRecordPayload,
+    CompanyChartsSummaryPayload,
+    CompanyChartsWhatIfImpactMetricPayload,
+    CompanyChartsWhatIfImpactSummaryPayload,
+    CompanyChartsWhatIfOverridePayload,
+    CompanyChartsWhatIfPayload,
+    CompanyChartsWhatIfRequest,
+    CompanyCommentLettersResponse,
+    CompanyCompareItemPayload,
+    CompanyCompareResponse,
+    CompanyDerivedMetricsResponse,
+    CompanyDerivedMetricsSummaryResponse,
+    CompanyEarningsResponse,
+    CompanyEarningsSummaryResponse,
+    CompanyEarningsWorkspaceResponse,
+    CompanyEquityClaimRiskResponse,
+    EquityClaimRiskSummaryPayload,
+    CompanyEventsResponse,
+    CompanyExecutiveCompensationResponse,
+    CompanyFactsResponse,
+    CompanyFilingEventsSummaryResponse,
+    CompanyFilingInsightsResponse,
+    CompanyFilingsResponse,
+    CompanyFinancialRestatementsResponse,
+    CompanyFinancialsResponse,
+    CompanyForm144Response,
+    CompanyGovernanceResponse,
+    CompanyGovernanceSummaryResponse,
+    CompanyInsiderTradesResponse,
+    CompanyInstitutionalHoldingsResponse,
+    CompanyInstitutionalHoldingsSummaryResponse,
+    CompanyMarketContextResponse,
+    CompanyMetricsTimeseriesResponse,
+    CompanyModelsResponse,
+    CompanyOilScenarioOverlayResponse,
+    CompanyOilScenarioResponse,
+    CompanyOverviewResponse,
+    CompanyPayload,
+    CompanyPeersResponse,
+    CompanyResearchBriefBusinessQualitySection,
+    CompanyResearchBriefCapitalAndRiskSection,
+    CompanyResearchBriefMonitorSection,
+    CompanyResearchBriefResponse,
+    CompanyResearchBriefSnapshotSection,
+    CompanyResearchBriefValuationSection,
+    CompanyResearchBriefWhatChangedSection,
+    CompanyResolutionResponse,
+    CompanySearchResponse,
+    CompanySectorContextResponse,
+    CompanySegmentHistoryResponse,
+    CompanyWorkspaceBootstrapErrorsPayload,
+    CompanyWorkspaceBootstrapResponse,
+    DataQualityDiagnosticsPayload,
+    DatabasePoolStatusResponse,
+    DerivedMetricPeriodPayload,
+    DerivedMetricValuePayload,
+    EarningsAlertPayload,
+    EarningsBacktestPayload,
+    EarningsModelExplainabilityPayload,
+    EarningsModelInputPayload,
+    EarningsModelPointPayload,
+    EarningsPeerContextPayload,
+    EarningsReleasePayload,
+    EarningsSummaryPayload,
+    ExecCompRowPayload,
+    FilingEventPayload,
+    FilingEventsSummaryPayload,
+    FilingParserControlsPayload,
+    FilingParserInsightPayload,
+    FilingParserNonGaapPayload,
+    FilingParserSectionPayload,
+    FilingParserSegmentPayload,
+    FilingPayload,
+    FilingSearchResultPayload,
+    FilingTimelineItemPayload,
+    FinancialFactReferencePayload,
+    FinancialPayload,
+    FinancialReconciliationComparisonPayload,
+    FinancialReconciliationPayload,
+    FinancialRestatementConfidenceImpactPayload,
+    FinancialRestatementMetricChangePayload,
+    FinancialRestatementPayload,
+    FinancialRestatementPeriodSummaryPayload,
+    FinancialRestatementSummaryPayload,
+    FinancialSegmentPayload,
+    Form144FilingPayload,
+    FormulaListResponse,
+    FormulaMetadataPayload,
+    FormulaSummaryPayload,
+    GovernanceFilingPayload,
+    GovernanceSummaryPayload,
+    GovernanceVoteOutcomePayload,
+    InsiderActivityMetricsPayload,
+    InsiderActivitySummaryPayload,
+    InsiderAnalyticsResponse,
+    InsiderTradePayload,
+    InstitutionalHoldingPayload,
+    InstitutionalHoldingsSummaryPayload,
+    LargestInsiderTradePayload,
+    MacroHistoryPointPayload,
+    MacroSeriesItemPayload,
+    MarketCurvePointPayload,
+    MarketFredSeriesPayload,
+    MarketSlopePayload,
+    MetricsTimeseriesPointPayload,
+    ModelEvaluationResponse,
+    ModelEvaluationRunPayload,
+    ModelPayload,
+    Number,
+    OfficialScreenerMetadataResponse,
+    OfficialScreenerSearchRequest,
+    OfficialScreenerSearchResponse,
+    OilCurveSeriesPayload,
+    OilExposureProfilePayload,
+    OilScenarioCasePayload,
+    OilScenarioDilutedSharesEvidencePayload,
+    OilScenarioDirectCompanyEvidencePayload,
+    OilScenarioDisclosedSensitivityEvidencePayload,
+    OilScenarioEligibilityPayload,
+    OilScenarioOfficialBaseCurvePayload,
+    OilScenarioOverlayOutputsPayload,
+    OilScenarioPhase2ExtensionsPayload,
+    OilScenarioRealizedPriceComparisonEvidencePayload,
+    OilScenarioRequirementsPayload,
+    OilScenarioSensitivitySourcePayload,
+    OilScenarioUserEditableDefaultsPayload,
+    OilSensitivityPayload,
+    OwnershipAnalyticsResponse,
+    PeerMetricsPayload,
+    PeerOptionPayload,
+    PriceHistoryPayload,
+    ProvenanceEntryPayload,
+    RefreshQueuedResponse,
+    RefreshState,
+    RegulatedBankFinancialPayload,
+    RegulatedEntityPayload,
+    ResearchBriefBusinessQualitySummaryPayload,
+    ResearchBriefSectionStatusPayload,
+    ResearchBriefSnapshotSummaryPayload,
+    ResearchBriefSummaryCardPayload,
+    SegmentAnalysisPayload,
+    SegmentComparabilityFlagsPayload,
+    SegmentHistoryPeriodPayload,
+    SegmentHistorySegmentPayload,
+    SourceMixPayload,
+    SourceRegistryEntryPayload,
+    SourceRegistryErrorPayload,
+    SourceRegistryHealthPayload,
+    SourceRegistryResponse,
+    TopHolderPayload,
+    WatchlistCalendarEventPayload,
+    WatchlistCalendarResponse,
+    WatchlistCoveragePayload,
+    WatchlistLatestActivityPayload,
+    WatchlistLatestAlertPayload,
+    WatchlistMaterialChangeHighlightPayload,
+    WatchlistMaterialChangePayload,
+    WatchlistSummaryItemPayload,
+    WatchlistSummaryRequest,
+    WatchlistSummaryResponse,
+    events,
+    filings,
+    financials,
+    formulas,
+    health,
+    models,
+)
+from app.api.validation import _normalize_as_of, _normalize_company_financials_query_controls, _normalize_company_models_query_controls, _parse_as_of, _validated_as_of
 from app.config import settings
 from app.db import async_session_maker as async_session, bind_request_sync_session, get_async_engine, get_async_pool_status, get_db_session
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
@@ -139,12 +355,7 @@ from app.services.derived_metrics_mart import (
     to_period_payload,
     to_period_payload_from_points,
 )
-from app.services.market_context import (
-    get_cached_market_context_status,
-    get_company_market_context_v2,
-    get_market_context_snapshot,
-    get_market_context_v2,
-)
+from app.services.market_context import get_cached_market_context_status
 import app.services.market_data as market_data_service
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
 from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
@@ -481,11 +692,1879 @@ async def _sec_upstream_health_payload() -> tuple[dict[str, Any], bool]:
     return dict(payload), bool(payload.get("healthy", False))
 
 
+@app.get("/health")
+async def healthcheck() -> dict[str, Any]:
+    database, database_ok = await _database_health_payload()
+    redis, redis_ok = await _redis_health_payload()
+    worker, worker_ok = await _worker_health_payload()
+    sec_upstream, sec_ok = await _sec_upstream_health_payload()
+    sec_upstream.pop("healthy", None)
+
+    uptime_seconds = max(0, int((datetime.now(timezone.utc) - _api_started_at).total_seconds()))
+    component_health = {
+        "db": database_ok,
+        "redis": redis_ok,
+        "worker": worker_ok,
+        "sec_upstream": sec_ok,
+    }
+    degraded_components = [name for name, is_ok in component_health.items() if not is_ok]
+    overall_status = "ok" if all((database_ok, redis_ok, worker_ok, sec_ok)) else "degraded"
+    return {
+        "status": "ok",
+        "overall_status": overall_status,
+        "degraded_components": degraded_components,
+        "service": "api",
+        "version": "1.1.0",
+        "uptime_seconds": uptime_seconds,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "components": {
+            "api": {
+                "status": "ok",
+                "observability_enabled": settings.observability_enabled,
+                "performance_audit_enabled": settings.performance_audit_enabled,
+                "security_headers_enabled": settings.security_headers_enabled,
+                "auth_mode": settings.auth_mode,
+                "auth_required_path_prefixes": list(settings.auth_required_path_prefixes),
+                "rate_limit": {
+                    "enabled": settings.api_rate_limit_enabled,
+                    "requests": settings.api_rate_limit_requests,
+                    "window_seconds": settings.api_rate_limit_window_seconds,
+                    "trust_proxy": settings.api_rate_limit_trust_proxy,
+                },
+            },
+            "db": database,
+            "redis": redis,
+            "worker": worker,
+            "sec_upstream": sec_upstream,
+        },
+    }
+
+
+@app.get("/readyz")
+async def readiness_check() -> dict[str, str]:
+    try:
+        async with _session_scope() as session:
+            result = session.execute(select(1))
+            if inspect.isawaitable(result):
+                await result
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database not ready") from exc
+    return {"status": "ok"}
+
+
+@app.get("/api/internal/cache-metrics")
+async def cache_metrics() -> dict[str, Any]:
+    hot_cache_metrics = await shared_hot_response_cache.snapshot_metrics()
+    backend_details = hot_cache_metrics.get("backend_details", {})
+    return {
+        "search_cache": {
+            "entries": len(_search_response_cache),
+            "ttl_seconds": 0,
+        },
+        "hot_cache_backend": hot_cache_metrics["backend"],
+        "hot_cache_backend_mode": hot_cache_metrics["backend_mode"],
+        "hot_cache_status": backend_details.get("status"),
+        "hot_cache_scope": backend_details.get("cache_scope"),
+        "hot_cache_cross_instance_reuse": backend_details.get("cross_instance_reuse"),
+        "hot_cache_operator_summary": backend_details.get("summary"),
+        "hot_cache": hot_cache_metrics,
+    }
+
+
+@app.post("/api/internal/cache-metrics/invalidate")
+async def invalidate_cache_metrics(
+    ticker: str | None = Query(default=None),
+    dataset: str | None = Query(default=None),
+    schema_version: str | None = Query(default=None),
+    as_of: str | None = Query(default=None),
+) -> dict[str, Any]:
+    normalized_ticker = _normalize_ticker(ticker) if ticker and ticker.strip() else None
+    normalized_dataset = dataset.strip().lower() if dataset and dataset.strip() else None
+    normalized_schema = schema_version.strip() if schema_version and schema_version.strip() else None
+    requested_as_of = (as_of or "").strip()
+    normalized_as_of = None
+    if as_of is not None:
+        normalized_as_of = _normalize_as_of(_validated_as_of(requested_as_of or None)) or "latest"
+    try:
+        return await shared_hot_response_cache.invalidate(
+            ticker=normalized_ticker,
+            dataset=normalized_dataset,
+            schema_version=normalized_schema,
+            as_of=normalized_as_of,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+@app.get("/api/internal/performance-audit")
+def performance_audit_snapshot() -> dict[str, Any]:
+    return snapshot_performance_audit_store()
+
+
+@app.post("/api/internal/performance-audit/reset")
+def reset_performance_audit() -> dict[str, Any]:
+    return reset_performance_audit_store()
+
+
+@app.get("/api/internal/observability")
+async def observability_snapshot() -> dict[str, Any]:
+    hot_cache_metrics = await shared_hot_response_cache.snapshot_metrics()
+    return {
+        "enabled": settings.observability_enabled,
+        "requests": snapshot_request_observations(),
+        "workers": snapshot_worker_observations(),
+        "caches": {
+            "hot_response": hot_cache_metrics,
+            "shared_upstream": shared_upstream_cache.snapshot_metrics(),
+        },
+    }
+
+
+@app.get("/api/jobs/{job_id}/events")
+async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
+    try:
+        backlog, queue, unsubscribe = await status_broker.async_subscribe(job_id)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown job ID")
+
+    async def event_generator():
+        try:
+            for event in backlog:
+                yield status_broker.format_sse(job_id, event)
+                if event.status in {"completed", "failed"}:
+                    return
+
+            while True:
+                if await request.is_disconnected():
+                    break
+
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+
+                yield status_broker.format_sse(job_id, event)
+                if event.status in {"completed", "failed"}:
+                    break
+        finally:
+            unsubscribe()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def pool_status() -> DatabasePoolStatusResponse:
+    snapshot = get_async_pool_status()
+    return DatabasePoolStatusResponse.model_validate(snapshot, from_attributes=True)
+
+
+@app.get("/api/companies/search", response_model=CompanySearchResponse)
+async def search_companies(
+    request: Request,
+    http_response: Response,
+    query: str | None = Query(default=None, min_length=1),
+    ticker: str | None = Query(default=None, min_length=1),
+    refresh: bool = Query(default=True),
+) -> CompanySearchResponse:
+    raw_query = query if query is not None else ticker
+    if raw_query is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="query is required")
+
+    normalized_query = _normalize_search_query(raw_query)
+    hot_key = f"search:{normalized_query}:refresh={int(refresh)}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=_normalize_ticker(normalized_query) if _looks_like_ticker(normalized_query) else None,
+        datasets=("financials",),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["search"],),
+    )
+    cached_hot = await _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        if cached_hot.is_fresh:
+            return _hot_cache_json_response(request, http_response, cached_hot)
+
+        payload = _decode_hot_cache_payload(cached_hot)
+        cached_response = CompanySearchResponse.model_validate(payload)
+        if refresh and _looks_like_ticker(normalized_query):
+            stale_refresh = _trigger_refresh(_normalize_ticker(normalized_query), reason="stale")
+            cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
+
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            cached_response,
+            last_modified=max(
+                (item.last_checked for item in cached_response.results if item.last_checked is not None),
+                default=None,
+            ),
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return cached_response
+
+    if not refresh:
+        cached_response = _get_cached_search_response(normalized_query)
+        if cached_response is not None:
+            not_modified = _apply_conditional_headers(
+                request,
+                http_response,
+                cached_response,
+                last_modified=max(
+                    (item.last_checked for item in cached_response.results if item.last_checked is not None),
+                    default=None,
+                ),
+            )
+            if not_modified is not None:
+                return not_modified  # type: ignore[return-value]
+            return cached_response
+
+    async with _session_scope() as session:
+        def build_search_payload(sync_session: Session) -> CompanySearchResponse:
+            snapshots, exact_match = _resolve_search_snapshots(sync_session, normalized_query)
+            normalized_ticker = _normalize_ticker(normalized_query)
+
+            refresh_state = RefreshState()
+            if not refresh:
+                if exact_match is None:
+                    refresh_state = RefreshState(
+                        triggered=False,
+                        reason="none",
+                        ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None,
+                        job_id=None,
+                    )
+                elif exact_match.cache_state in {"missing", "stale"}:
+                    refresh_state = RefreshState(
+                        triggered=False,
+                        reason=exact_match.cache_state,
+                        ticker=exact_match.company.ticker,
+                        job_id=None,
+                    )
+                else:
+                    refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
+            elif exact_match is None:
+                if not snapshots and _looks_like_ticker(normalized_query):
+                    refresh_state = _trigger_refresh(normalized_ticker, reason="missing")
+                else:
+                    refresh_state = RefreshState(
+                        triggered=False,
+                        reason="none",
+                        ticker=normalized_ticker if _looks_like_ticker(normalized_query) else None,
+                        job_id=None,
+                    )
+            elif exact_match.cache_state in {"missing", "stale"}:
+                refresh_state = _trigger_refresh(exact_match.company.ticker, reason=exact_match.cache_state)
+            else:
+                refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
+
+            payload = CompanySearchResponse(
+                query=normalized_query,
+                results=[_serialize_company(snapshot) for snapshot in snapshots],
+                refresh=refresh_state,
+            )
+            return payload
+
+        payload = await _run_with_session_binding(session, build_search_payload)
+        _store_cached_search_response(normalized_query, payload)
+        await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            payload,
+            last_modified=max((item.last_checked for item in payload.results if item.last_checked is not None), default=None),
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return payload
+
+
+@app.get("/api/companies/resolve", response_model=CompanyResolutionResponse)
+async def resolve_company_identifier(query: str = Query(..., min_length=1)) -> CompanyResolutionResponse:
+    normalized_query = _normalize_search_query(query)
+    hot_key = f"resolve:{normalized_query}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=_normalize_ticker(normalized_query) if _looks_like_ticker(normalized_query) else None,
+        datasets=("financials",),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["resolve"],),
+    )
+    cached_hot = await _get_hot_cached_payload(hot_key)
+    if cached_hot is not None:
+        return CompanyResolutionResponse.model_validate(_decode_hot_cache_payload(cached_hot))
+
+    client = EdgarClient()
+    try:
+        identity = client.resolve_company(normalized_query)
+    except ValueError:
+        payload = CompanyResolutionResponse(query=normalized_query, resolved=False, error="not_found")
+        await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
+        return payload
+    except Exception:
+        logging.getLogger(__name__).exception("SEC company resolution failed for '%s'", normalized_query)
+        return CompanyResolutionResponse(query=normalized_query, resolved=False, error="lookup_failed")
+    finally:
+        client.close()
+
+    async with _session_scope() as session:
+        canonical_ticker = await _run_with_session_binding(
+            session,
+            lambda sync_session: _resolve_canonical_ticker(sync_session, identity),
+        )
+
+    payload = CompanyResolutionResponse(
+        query=normalized_query,
+        resolved=True,
+        ticker=canonical_ticker or identity.ticker,
+        name=identity.name,
+        error=None,
+    )
+    if payload.ticker:
+        hot_tags = _build_hot_cache_tags(
+            ticker=payload.ticker,
+            datasets=("financials",),
+            schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["resolve"],),
+        )
+    await _store_hot_cached_payload(hot_key, payload, tags=hot_tags)
+    return payload
+
+
+@app.get("/api/screener/filters", response_model=OfficialScreenerMetadataResponse)
+def official_screener_filters() -> OfficialScreenerMetadataResponse:
+    payload = build_official_screener_filter_catalog()
+    source_hints = dict(payload.pop("source_hints", None) or {})
+    confidence_flags = list(payload.pop("confidence_flags", None) or [])
+    return OfficialScreenerMetadataResponse(
+        **payload,
+        **_official_screener_provenance_contract(
+            source_hints=source_hints,
+            as_of=None,
+            last_refreshed_at=None,
+            confidence_flags=confidence_flags,
+        ),
+    )
+
+
+@app.post("/api/screener/search", response_model=OfficialScreenerSearchResponse)
+def official_screener_search(
+    payload: OfficialScreenerSearchRequest,
+    session: Session = Depends(get_db_session),
+) -> OfficialScreenerSearchResponse:
+    result = run_official_screener(session, payload.model_dump(mode="python"))
+    source_hints = dict(result.pop("source_hints", None) or {})
+    confidence_flags = list(result.pop("confidence_flags", None) or [])
+    provenance_as_of = result.pop("as_of", None)
+    provenance_last_refreshed_at = result.pop("last_refreshed_at", None)
+    return OfficialScreenerSearchResponse(
+        **result,
+        **_official_screener_provenance_contract(
+            source_hints=source_hints,
+            as_of=provenance_as_of,
+            last_refreshed_at=provenance_last_refreshed_at,
+            confidence_flags=confidence_flags,
+        ),
+    )
+
+
+@app.get("/api/companies/compare", response_model=CompanyCompareResponse)
+def company_compare(
+    tickers: str = Query(..., description="Comma-separated tickers to compare"),
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyCompareResponse:
+    tickers = _read_singleton_query_param_or_400(request, "tickers", fallback=tickers) or ""
+    normalized_tickers = _normalize_compare_tickers(tickers)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+    companies = [
+        _build_company_compare_item(
+            session=session,
+            ticker=ticker,
+            requested_as_of=requested_as_of,
+            parsed_as_of=parsed_as_of,
+            snapshot=snapshots_by_ticker.get(ticker),
+        )
+        for ticker in normalized_tickers
+    ]
+    return CompanyCompareResponse(tickers=normalized_tickers, companies=companies)
+
+
+@app.get("/api/companies/{ticker}/financials", response_model=CompanyFinancialsResponse)
+async def company_financials(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    view: str | None = Query(default=None, description="response shape: full|core_segments|core"),
+    price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
+    price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
+    price_latest_n: int | None = Query(default=None, ge=1, le=20000, description="Optional latest-N price points"),
+    price_max_points: int | None = Query(default=None, ge=2, le=5000, description="Optional decimation target points"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+) -> CompanyFinancialsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    requested_view = _read_singleton_query_param_or_400(request, "view", fallback=view)
+    parsed_as_of, normalized_view, normalized_as_of = _normalize_company_financials_query_controls(
+        requested_as_of=requested_as_of,
+        view=requested_view,
+    )
+    resolved_price_start_date, resolved_price_end_date, resolved_price_latest_n, resolved_price_max_points = _normalize_price_history_query_controls(
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+    )
+    price_token = _price_history_cache_token(
+        start_date=resolved_price_start_date,
+        end_date=resolved_price_end_date,
+        latest_n=resolved_price_latest_n,
+        max_points=resolved_price_max_points,
+    )
+    hot_key = f"financials:{normalized_ticker}:view={normalized_view}:asof={normalized_as_of}:prices={price_token}"
+    legacy_hot_key = f"financials:{normalized_ticker}:asof={normalized_as_of}" if normalized_view == "full" else None
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("financials", "prices"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["financials"],),
+        as_of=normalized_as_of,
+    )
+    async with _session_scope() as session:
+        cached_hot = await _get_hot_cached_payload(hot_key)
+        if cached_hot is None and legacy_hot_key is not None:
+            cached_hot = await _get_hot_cached_payload(legacy_hot_key)
+        if cached_hot is not None:
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
+            cached_response = CompanyFinancialsResponse.model_validate(payload_data)
+            if not cached_hot.is_fresh:
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
+                cached_response = cached_response.model_copy(
+                    update={
+                        "refresh": stale_refresh,
+                        "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                        "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
+                    }
+                )
+
+            not_modified = _apply_conditional_headers(
+                request,
+                http_response,
+                cached_response,
+                last_modified=cached_response.company.last_checked if cached_response.company else None,
+            )
+            if not_modified is not None:
+                return not_modified  # type: ignore[return-value]
+            return cached_response
+
+        def build_financials_payload(sync_session: Session) -> CompanyFinancialsResponse:
+            return _build_company_financials_response(
+                sync_session,
+                normalized_ticker,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
+                view=normalized_view,
+                price_start_date=resolved_price_start_date,
+                price_end_date=resolved_price_end_date,
+                price_latest_n=resolved_price_latest_n,
+                price_max_points=resolved_price_max_points,
+            )
+
+        payload = await _fill_hot_cached_payload(
+            hot_key,
+            model_type=CompanyFinancialsResponse,
+            tags=hot_tags,
+            fill=lambda: _run_with_session_binding(session, build_financials_payload),
+        )
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            payload,
+            last_modified=payload.company.last_checked if payload.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return payload
+
+
+@app.get("/api/companies/{ticker}/overview", response_model=CompanyOverviewResponse)
+def company_overview(
+    ticker: str,
+    request: Request = None,
+    http_response: Response = None,
+    financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
+    price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
+    price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
+    price_latest_n: int | None = Query(default=None, ge=1, le=20000, description="Optional latest-N price points"),
+    price_max_points: int | None = Query(default=None, ge=2, le=5000, description="Optional decimation target points"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyOverviewResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    requested_financials_view = _read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
+    parsed_as_of, normalized_financials_view, normalized_as_of = _normalize_company_financials_query_controls(
+        requested_as_of=requested_as_of,
+        view=requested_financials_view,
+    )
+    resolved_price_start_date, resolved_price_end_date, resolved_price_latest_n, resolved_price_max_points = _normalize_price_history_query_controls(
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+    )
+    price_token = _price_history_cache_token(
+        start_date=resolved_price_start_date,
+        end_date=resolved_price_end_date,
+        latest_n=resolved_price_latest_n,
+        max_points=resolved_price_max_points,
+    )
+    hot_key = _company_overview_hot_key(
+        normalized_ticker,
+        financials_view=normalized_financials_view,
+        as_of=normalized_as_of,
+        price_token=price_token,
+    )
+    cached_hot = shared_hot_response_cache.get_sync(hot_key, route="overview") if request is not None and http_response is not None else None
+    if cached_hot is not None and cached_hot.is_fresh:
+        return _hot_cache_json_response(request, http_response, cached_hot)
+
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    financials = _build_company_financials_response(
+        session,
+        normalized_ticker,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+        snapshot=snapshot,
+        view=normalized_financials_view,
+        price_start_date=resolved_price_start_date,
+        price_end_date=resolved_price_end_date,
+        price_latest_n=resolved_price_latest_n,
+        price_max_points=resolved_price_max_points,
+    )
+    brief = _build_company_research_brief_response(
+        session,
+        normalized_ticker,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+        snapshot=snapshot,
+    )
+    response = CompanyOverviewResponse(
+        company=financials.company or brief.company,
+        financials=financials,
+        brief=brief,
+    )
+    _store_hot_cached_payload_sync(
+        hot_key,
+        response,
+        tags=_build_hot_cache_tags(
+            ticker=normalized_ticker,
+            datasets=("financials", "prices", "company_research_brief"),
+            schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["overview"],),
+            as_of=normalized_as_of,
+        ),
+    )
+    return response
+
+
+@app.get("/api/companies/{ticker}/workspace-bootstrap", response_model=CompanyWorkspaceBootstrapResponse)
+def company_workspace_bootstrap(
+    ticker: str,
+    request: Request = None,
+    http_response: Response = None,
+    include_overview_brief: bool = Query(default=False),
+    include_insiders: bool = Query(default=False),
+    include_institutional: bool = Query(default=False),
+    include_earnings_summary: bool = Query(default=False),
+    financials_view: str | None = Query(default=None, description="embedded financials shape: full|core_segments|core"),
+    price_start_date: str | None = Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
+    price_end_date: str | None = Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
+    price_latest_n: int | None = Query(default=None, ge=1, le=20000, description="Optional latest-N price points"),
+    price_max_points: int | None = Query(default=None, ge=2, le=5000, description="Optional decimation target points"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyWorkspaceBootstrapResponse:
+    from app.api.handlers.company_overview import company_workspace_bootstrap as _company_workspace_bootstrap_handler
+
+    return _company_workspace_bootstrap_handler(
+        ticker=ticker,
+        request=request,
+        http_response=http_response,
+        include_overview_brief=include_overview_brief,
+        include_insiders=include_insiders,
+        include_institutional=include_institutional,
+        include_earnings_summary=include_earnings_summary,
+        financials_view=financials_view,
+        price_start_date=price_start_date,
+        price_end_date=price_end_date,
+        price_latest_n=price_latest_n,
+        price_max_points=price_max_points,
+        as_of=as_of,
+        session=session,
+    )
+
+
+@app.get("/api/companies/{ticker}/segment-history", response_model=CompanySegmentHistoryResponse)
+def company_segment_history(
+    ticker: str,
+    request: Request = None,
+    years: int = Query(default=5, ge=1, le=20),
+    kind: Literal["business", "geographic"] = Query(default="business"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanySegmentHistoryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanySegmentHistoryResponse(
+            company=None,
+            kind=kind,
+            years=years,
+            periods=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(
+                stale_flags=["company_missing"],
+                missing_field_flags=["segment_history_empty"],
+            ),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    financials = _visible_financials_for_company(session, snapshot.company)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+
+    history_result = build_segment_history(financials, kind=kind, years=years)
+    refresh = _refresh_for_segment_history(snapshot, financials)
+    periods = [_serialize_segment_history_period(period) for period in history_result.periods]
+    diagnostics = _diagnostics_for_segment_history_response(periods, requested_years=years, refresh=refresh)
+    last_refreshed_at = _merge_last_checked(*(statement.last_checked for statement in history_result.provenance_statements))
+    latest_period_end = periods[0].period_end if periods else None
+    payload = CompanySegmentHistoryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, last_refreshed_at),
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+        ),
+        kind=kind,
+        years=years,
+        periods=periods,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_segment_history_provenance_contract(
+            history_result.provenance_statements,
+            latest_period_end=latest_period_end,
+            last_refreshed_at=last_refreshed_at,
+            periods=periods,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+async def company_capital_structure(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    max_periods: int = Query(default=8, ge=1, le=40),
+) -> CompanyCapitalStructureResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    hot_key = f"capital_structure:{normalized_ticker}:periods={max_periods}:asof={_normalize_as_of(parsed_as_of) or 'latest'}"
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("capital_structure", "financials"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["capital_structure"],),
+        as_of=normalized_as_of,
+    )
+    async with _session_scope() as session:
+        cached_hot = await _get_hot_cached_payload(hot_key)
+        if cached_hot is not None:
+            if cached_hot.is_fresh:
+                return _hot_cache_json_response(request, http_response, cached_hot)
+
+            payload_data = _decode_hot_cache_payload(cached_hot)
+            cached_response = CompanyCapitalStructureResponse.model_validate(payload_data)
+            if not cached_hot.is_fresh:
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
+                cached_response = cached_response.model_copy(
+                    update={
+                        "refresh": stale_refresh,
+                        "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                        "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
+                    }
+                )
+
+            not_modified = _apply_conditional_headers(
+                request,
+                http_response,
+                cached_response,
+                last_modified=cached_response.company.last_checked if cached_response.company else None,
+            )
+            if not_modified is not None:
+                return not_modified  # type: ignore[return-value]
+            return cached_response
+
+        def build_capital_structure_payload(sync_session: Session) -> CompanyCapitalStructureResponse:
+            snapshot = _resolve_cached_company_snapshot(sync_session, normalized_ticker)
+            if snapshot is None:
+                payload = CompanyCapitalStructureResponse(
+                    company=None,
+                    latest=None,
+                    history=[],
+                    last_capital_structure_check=None,
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+                    diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
+                    **_empty_provenance_contract("company_missing", "capital_structure_missing"),
+                )
+                return _apply_requested_as_of(payload, requested_as_of)
+
+            history = get_company_capital_structure_snapshots(sync_session, snapshot.company.id, limit=max(48, max_periods * 6))
+            last_capital_structure_check = get_company_capital_structure_last_checked(sync_session, snapshot.company.id)
+            if parsed_as_of is not None:
+                floor = datetime.min.replace(tzinfo=timezone.utc)
+                history = [item for item in history if (snapshot_effective_at(item) or floor) <= parsed_as_of]
+            history = history[:max_periods]
+            refresh = _refresh_for_capital_structure(snapshot, last_capital_structure_check, history)
+            serialized_history = [_serialize_capital_structure_snapshot(item) for item in history]
+            latest = serialized_history[0] if serialized_history else None
+            diagnostics = _diagnostics_for_capital_structure(serialized_history, refresh)
+            payload = CompanyCapitalStructureResponse(
+                company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_capital_structure_check)),
+                latest=latest,
+                history=serialized_history,
+                last_capital_structure_check=last_capital_structure_check,
+                refresh=refresh,
+                diagnostics=diagnostics,
+                **_capital_structure_provenance_contract(
+                    history,
+                    latest=latest,
+                    last_capital_structure_check=last_capital_structure_check,
+                    diagnostics=diagnostics,
+                    refresh=refresh,
+                ),
+            )
+            return _apply_requested_as_of(payload, requested_as_of)
+
+        payload = await _fill_hot_cached_payload(
+            hot_key,
+            model_type=CompanyCapitalStructureResponse,
+            tags=hot_tags,
+            fill=lambda: _run_with_session_binding(session, build_capital_structure_payload),
+        )
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            payload,
+            last_modified=payload.company.last_checked if payload.company else None,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return payload
+
+
+@app.get("/api/companies/{ticker}/equity-claim-risk", response_model=CompanyEquityClaimRiskResponse)
+def company_equity_claim_risk(
+    ticker: str,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyEquityClaimRiskResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyEquityClaimRiskResponse(
+            company=None,
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "equity_claim_risk_missing"], missing_field_flags=["financials_missing", "capital_structure_missing", "capital_markets_missing", "filing_events_missing"]),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    refresh = _refresh_for_snapshot(snapshot)
+    payload = build_company_equity_claim_risk_response(
+        session,
+        snapshot.company.id,
+        company=_serialize_company(snapshot),
+        refresh=refresh,
+        as_of=parsed_as_of,
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+@app.get("/api/companies/{ticker}/filing-insights", response_model=CompanyFilingInsightsResponse)
+def company_filing_insights(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyFilingInsightsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyFilingInsightsResponse(
+            company=None,
+            insights=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        )
+
+    insights = get_company_filing_insights(session, snapshot.company.id)
+    insights_last_checked = max((item.last_checked for item in insights if item.last_checked is not None), default=None)
+    refresh = _refresh_for_filing_insights(snapshot)
+    serialized_insights = [_serialize_filing_parser_insight(item) for item in insights]
+    return CompanyFilingInsightsResponse(
+        company=_serialize_company(snapshot, last_checked=insights_last_checked),
+        insights=serialized_insights,
+        refresh=refresh,
+        diagnostics=_diagnostics_for_filing_insights(serialized_insights, refresh),
+    )
+
+
+@app.get("/api/companies/{ticker}/changes-since-last-filing", response_model=CompanyChangesSinceLastFilingResponse)
+def company_changes_since_last_filing(
+    ticker: str,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChangesSinceLastFilingResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyChangesSinceLastFilingResponse(
+            company=None,
+            summary=ChangesSinceLastFilingSummaryPayload(),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    refresh = _refresh_for_snapshot(snapshot)
+    persisted_payload = _load_snapshot_backed_changes_since_last_filing_response(
+        session,
+        snapshot,
+        refresh=refresh,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+    )
+    if persisted_payload is not None:
+        return persisted_payload
+
+    financials = _visible_financials_for_company(session, snapshot.company)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+    restatements = get_company_financial_restatements(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        restatements = [record for record in restatements if _financial_restatement_effective_at(record) <= parsed_as_of]
+    parsed_filings = get_company_filing_insights(session, snapshot.company.id, limit=12)
+    if parsed_as_of is not None:
+        parsed_filings = select_point_in_time_financials(parsed_filings, parsed_as_of)
+    comment_letters = get_company_comment_letters(session, snapshot.company.id, limit=24)
+    if parsed_as_of is not None:
+        comment_letters = [letter for letter in comment_letters if _effective_at(letter.filing_date) <= parsed_as_of]
+
+    comparison = build_changes_since_last_filing(
+        financials,
+        restatements,
+        parsed_filings=parsed_filings,
+        comment_letters=comment_letters,
+    )
+    diagnostics = _diagnostics_for_changes_since_last_filing(comparison, refresh)
+    comparison_as_of = requested_as_of or _latest_as_of(
+        (comparison.get("current_filing") or {}).get("filing_acceptance_at"),
+        (comparison.get("current_filing") or {}).get("period_end"),
+    )
+
+    usages: list[SourceUsage] = [
+        SourceUsage(
+            source_id="ft_changes_since_last_filing",
+            role="derived",
+            as_of=comparison_as_of,
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                (comparison.get("current_filing") or {}).get("last_checked"),
+                (comparison.get("previous_filing") or {}).get("last_checked"),
+            ),
+        )
+    ]
+    companyfacts_usage = _source_usage_from_hint(
+        "https://data.sec.gov/api/xbrl/companyfacts/",
+        role="primary",
+        as_of=comparison_as_of,
+        last_refreshed_at=snapshot.last_checked,
+        default_source_id="sec_companyfacts",
+    )
+    if companyfacts_usage is not None:
+        usages.append(companyfacts_usage)
+    if any(
+        str(source or "").startswith("https://www.sec.gov/Archives/")
+        for source in [
+            (comparison.get("current_filing") or {}).get("source"),
+            (comparison.get("previous_filing") or {}).get("source"),
+            *(item.get("source") for item in comparison.get("amended_prior_values", [])),
+            *(
+                evidence.get("source")
+                for item in comparison.get("high_signal_changes", [])
+                if isinstance(item, dict)
+                for evidence in item.get("evidence", [])
+                if isinstance(evidence, dict)
+            ),
+        ]
+    ):
+        filing_usage = _source_usage_from_hint(
+            "https://www.sec.gov/Archives/",
+            role="supplemental",
+            as_of=comparison_as_of,
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                *(item.last_checked for item in restatements),
+                *(getattr(item, "last_checked", None) for item in parsed_filings),
+                *(getattr(item, "last_checked", None) for item in comment_letters),
+            ),
+            default_source_id="sec_edgar",
+        )
+        if filing_usage is not None:
+            usages.append(filing_usage)
+
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    confidence_flags.update(str(flag) for flag in comparison.get("confidence_flags", []))
+    confidence_flags.update(
+        str(item.get("indicator_key") or "")
+        for item in comparison.get("new_risk_indicators", [])
+        if str(item.get("severity") or "") == "high"
+    )
+    confidence_flags.discard("")
+
+    payload = CompanyChangesSinceLastFilingResponse(
+        company=_serialize_company(snapshot),
+        current_filing=comparison.get("current_filing"),
+        previous_filing=comparison.get("previous_filing"),
+        summary=comparison.get("summary") or ChangesSinceLastFilingSummaryPayload(),
+        metric_deltas=comparison.get("metric_deltas") or [],
+        new_risk_indicators=comparison.get("new_risk_indicators") or [],
+        segment_shifts=comparison.get("segment_shifts") or [],
+        share_count_changes=comparison.get("share_count_changes") or [],
+        capital_structure_changes=comparison.get("capital_structure_changes") or [],
+        amended_prior_values=comparison.get("amended_prior_values") or [],
+        high_signal_changes=comparison.get("high_signal_changes") or [],
+        comment_letter_history=comparison.get("comment_letter_history") or {},
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_build_provenance_contract(
+            usages,
+            as_of=comparison_as_of,
+            last_refreshed_at=_merge_last_checked(
+                snapshot.last_checked,
+                (comparison.get("current_filing") or {}).get("last_checked"),
+                (comparison.get("previous_filing") or {}).get("last_checked"),
+                *(item.last_checked for item in restatements),
+                *(getattr(item, "last_checked", None) for item in parsed_filings),
+                *(getattr(item, "last_checked", None) for item in comment_letters),
+            ),
+            confidence_flags=sorted(confidence_flags),
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+@app.get("/api/companies/{ticker}/metrics-timeseries", response_model=CompanyMetricsTimeseriesResponse)
+def company_metrics_timeseries(
+    ticker: str,
+    request: Request = None,
+    cadence: Literal["quarterly", "annual", "ttm"] | None = Query(default=None),
+    max_points: int = Query(default=24, ge=1, le=200),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyMetricsTimeseriesResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyMetricsTimeseriesResponse(
+            company=None,
+            series=[],
+            last_financials_check=None,
+            last_price_check=None,
+            staleness_reason="company_missing",
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    financials = _visible_financials_for_company(session, snapshot.company)
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
+    price_history = _visible_price_history(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        financials = select_point_in_time_financials(financials, parsed_as_of)
+        price_history = filter_price_history_as_of(price_history, parsed_as_of)
+    series = build_metrics_timeseries(financials, price_history, cadence=cadence, max_points=max_points)
+    point_payload = _sanitize_metrics_timeseries_points_for_strict_official_mode(
+        [MetricsTimeseriesPointPayload.model_validate(point) for point in series]
+    )
+    diagnostics = _diagnostics_for_metrics_timeseries(point_payload, refresh, staleness_reason)
+    payload = CompanyMetricsTimeseriesResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+        ),
+        series=point_payload,
+        last_financials_check=snapshot.last_checked,
+        last_price_check=price_last_checked,
+        staleness_reason=staleness_reason,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_metrics_timeseries_provenance_contract(
+            point_payload,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+@app.get("/api/companies/{ticker}/metrics", response_model=CompanyDerivedMetricsResponse)
+def company_derived_metrics(
+    ticker: str,
+    request: Request = None,
+    period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
+    max_periods: int = Query(default=24, ge=1, le=200),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyDerivedMetricsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyDerivedMetricsResponse(
+            company=None,
+            period_type=period_type,
+            periods=[],
+            available_metric_keys=[],
+            last_metrics_check=None,
+            last_financials_check=None,
+            last_price_check=None,
+            staleness_reason="company_missing",
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
+
+    if parsed_as_of is None:
+        rows = get_company_derived_metric_points(
+            session,
+            snapshot.company.id,
+            period_type=period_type,
+            max_periods=max_periods,
+        )
+        last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+        if not rows:
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
+            if staleness_reason == "fresh":
+                staleness_reason = "metrics_missing"
+
+        period_payload = _sanitize_derived_metric_periods_for_strict_official_mode(
+            [DerivedMetricPeriodPayload.model_validate(item) for item in to_period_payload(rows)]
+        )
+        available_metric_keys = sorted({item.metric_key for item in rows})
+        metric_values = [metric for period in period_payload for metric in period.metrics]
+        latest_period_end = max((period.period_end for period in period_payload), default=None)
+        diagnostics = _diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason)
+        payload = CompanyDerivedMetricsResponse(
+            company=_serialize_company(
+                snapshot,
+                last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+                regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+            ),
+            period_type=period_type,
+            periods=period_payload,
+            available_metric_keys=available_metric_keys,
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            staleness_reason=staleness_reason,
+            refresh=refresh,
+            diagnostics=diagnostics,
+            **_derived_metrics_provenance_contract(
+                metric_values,
+                as_of=latest_period_end,
+                derived_source_id="ft_derived_metrics_mart",
+                last_metrics_check=last_metrics_check,
+                last_financials_check=snapshot.last_checked,
+                last_price_check=price_last_checked,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    filtered_financials = select_point_in_time_financials(financials, parsed_as_of)
+    filtered_price_history = filter_price_history_as_of(_visible_price_history(session, snapshot.company.id), parsed_as_of)
+    point_rows = [
+        row
+        for row in build_derived_metric_points(filtered_financials, filtered_price_history)
+        if row.get("period_type") == period_type
+    ]
+    period_rows = to_period_payload_from_points(point_rows)
+    if len(period_rows) > max_periods:
+        period_rows = period_rows[-max_periods:]
+    period_payload = _sanitize_derived_metric_periods_for_strict_official_mode(
+        [DerivedMetricPeriodPayload.model_validate(item) for item in period_rows]
+    )
+    available_metric_keys = sorted({str(item.get("metric_key") or "") for item in point_rows if item.get("metric_key")})
+    last_metrics_check = None
+    diagnostics = _diagnostics_for_derived_metrics_periods(period_payload, refresh, staleness_reason)
+    metric_values = [metric for period in period_payload for metric in period.metrics]
+    latest_period_end = max((period.period_end for period in period_payload), default=None)
+    payload = CompanyDerivedMetricsResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+        ),
+        period_type=period_type,
+        periods=period_payload,
+        available_metric_keys=available_metric_keys,
+        last_metrics_check=last_metrics_check,
+        last_financials_check=snapshot.last_checked,
+        last_price_check=price_last_checked,
+        staleness_reason=staleness_reason,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_derived_metrics_provenance_contract(
+            metric_values,
+            as_of=requested_as_of or latest_period_end,
+            derived_source_id="ft_derived_metrics_engine",
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+@app.get("/api/companies/{ticker}/metrics/summary", response_model=CompanyDerivedMetricsSummaryResponse)
+def company_derived_metrics_summary(
+    ticker: str,
+    request: Request = None,
+    period_type: Literal["quarterly", "annual", "ttm"] = Query(default="ttm"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyDerivedMetricsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyDerivedMetricsSummaryResponse(
+            company=None,
+            period_type=period_type,
+            latest_period_end=None,
+            metrics=[],
+            last_metrics_check=None,
+            last_financials_check=None,
+            last_price_check=None,
+            staleness_reason="company_missing",
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+    financials = _visible_financials_for_company(session, snapshot.company)
+    staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
+
+    if parsed_as_of is None:
+        rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
+        last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+        if not rows:
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
+            if staleness_reason == "fresh":
+                staleness_reason = "metrics_missing"
+
+        summary = build_summary_payload(rows, period_type)
+        metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
+            [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+        )
+        diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
+        payload = CompanyDerivedMetricsSummaryResponse(
+            company=_serialize_company(
+                snapshot,
+                last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+                last_checked_prices=price_last_checked,
+                regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+            ),
+            period_type=summary["period_type"],
+            latest_period_end=summary["latest_period_end"],
+            metrics=metric_payload,
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            staleness_reason=staleness_reason,
+            refresh=refresh,
+            diagnostics=diagnostics,
+            **_derived_metrics_provenance_contract(
+                metric_payload,
+                as_of=summary["latest_period_end"],
+                derived_source_id="ft_derived_metrics_mart",
+                last_metrics_check=last_metrics_check,
+                last_financials_check=snapshot.last_checked,
+                last_price_check=price_last_checked,
+                diagnostics=diagnostics,
+                refresh=refresh,
+            ),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    filtered_financials = select_point_in_time_financials(financials, parsed_as_of)
+    filtered_price_history = filter_price_history_as_of(_visible_price_history(session, snapshot.company.id), parsed_as_of)
+    point_rows = build_derived_metric_points(filtered_financials, filtered_price_history)
+    summary = build_summary_payload_from_points(point_rows, period_type)
+    last_metrics_check = None
+    metric_payload = _sanitize_derived_metric_values_for_strict_official_mode(
+        [DerivedMetricValuePayload.model_validate(item) for item in summary["metrics"]]
+    )
+    diagnostics = _diagnostics_for_derived_metrics_values(metric_payload, refresh, staleness_reason)
+    payload = CompanyDerivedMetricsSummaryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, price_last_checked),
+            last_checked_prices=price_last_checked,
+            regulated_entity=_regulated_entity_payload(snapshot.company, financials),
+        ),
+        period_type=summary["period_type"],
+        latest_period_end=summary["latest_period_end"],
+        metrics=metric_payload,
+        last_metrics_check=last_metrics_check,
+        last_financials_check=snapshot.last_checked,
+        last_price_check=price_last_checked,
+        staleness_reason=staleness_reason,
+        refresh=refresh,
+        diagnostics=diagnostics,
+        **_derived_metrics_provenance_contract(
+            metric_payload,
+            as_of=requested_as_of or summary["latest_period_end"],
+            derived_source_id="ft_derived_metrics_engine",
+            last_metrics_check=last_metrics_check,
+            last_financials_check=snapshot.last_checked,
+            last_price_check=price_last_checked,
+            diagnostics=diagnostics,
+            refresh=refresh,
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+@app.get("/api/companies/{ticker}/insider-trades", response_model=CompanyInsiderTradesResponse)
+def company_insider_trades(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyInsiderTradesResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyInsiderTradesResponse(
+            company=None,
+            insider_trades=[],
+            summary=_serialize_insider_activity_summary(build_insider_activity_summary([])),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+        )
+
+    insider_last_checked, insider_cache_state = get_company_insider_trade_cache_status(session, snapshot.company)
+    insider_trades = get_company_insider_trades(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=insider_cache_state)
+        if insider_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    return CompanyInsiderTradesResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, insider_last_checked),
+            last_checked_insiders=insider_last_checked,
+        ),
+        insider_trades=[_serialize_insider_trade(trade) for trade in insider_trades],
+        summary=_serialize_insider_activity_summary(build_insider_activity_summary(insider_trades)),
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/institutional-holdings", response_model=CompanyInstitutionalHoldingsResponse)
+def company_institutional_holdings(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyInstitutionalHoldingsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyInstitutionalHoldingsResponse(
+            company=None,
+            institutional_holdings=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+        )
+
+    holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
+    holdings = get_company_institutional_holdings(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=holdings_cache_state)
+        if holdings_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    return CompanyInstitutionalHoldingsResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, holdings_last_checked),
+            last_checked_institutional=holdings_last_checked,
+        ),
+        institutional_holdings=[_serialize_institutional_holding(holding) for holding in holdings],
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/institutional-holdings/summary", response_model=CompanyInstitutionalHoldingsSummaryResponse)
+def company_institutional_holdings_summary(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyInstitutionalHoldingsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyInstitutionalHoldingsSummaryResponse(
+            company=None,
+            summary=InstitutionalHoldingsSummaryPayload(total_rows=0, unique_managers=0, amended_rows=0, latest_reporting_date=None),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+        )
+
+    holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
+    holdings = get_company_institutional_holdings(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=holdings_cache_state)
+        if holdings_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    rows = [_serialize_institutional_holding(holding) for holding in holdings]
+    return CompanyInstitutionalHoldingsSummaryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, holdings_last_checked),
+            last_checked_institutional=holdings_last_checked,
+        ),
+        summary=_build_institutional_holdings_summary(rows),
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/form-144-filings", response_model=CompanyForm144Response)
+def company_form144_filings(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyForm144Response:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyForm144Response(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+        )
+
+    form144_last_checked, form144_cache_state = get_company_form144_cache_status(session, snapshot.company)
+    filings = get_company_form144_filings(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=form144_cache_state)
+        if form144_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    return CompanyForm144Response(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, form144_last_checked),
+        ),
+        filings=[_serialize_form144_filing(filing) for filing in filings],
+        refresh=refresh,
+    )
+
+
+@app.get("/api/companies/{ticker}/comment-letters", response_model=CompanyCommentLettersResponse)
+def company_comment_letters(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyCommentLettersResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
+        return CompanyCommentLettersResponse(
+            company=None,
+            letters=[],
+            refresh=refresh,
+            error=None,
+            **_empty_provenance_contract("company_missing"),
+        )
+
+    letters_last_checked, letters_cache_state = get_company_comment_letters_cache_status(session, snapshot.company)
+    letters = [_serialize_comment_letter(letter) for letter in get_company_comment_letters(session, snapshot.company.id)]
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=letters_cache_state)
+        if letters_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    merged_last_checked = _merge_last_checked(snapshot.last_checked, letters_last_checked)
+    return CompanyCommentLettersResponse(
+        company=_serialize_company(snapshot, last_checked=merged_last_checked),
+        letters=letters,
+        refresh=refresh,
+        error=None,
+        **_comment_letters_provenance_contract(letters, last_refreshed_at=merged_last_checked, refresh=refresh),
+    )
+
+
+@app.get("/api/companies/{ticker}/earnings", response_model=CompanyEarningsResponse)
+def company_earnings(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyEarningsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEarningsResponse(
+            company=None,
+            earnings_releases=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        )
+
+    earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
+    earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
+    refresh = _refresh_for_earnings(snapshot, earnings_cache_state)
+    payload = [_serialize_earnings_release(release) for release in earnings_releases]
+    return CompanyEarningsResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, earnings_last_checked),
+            last_checked_earnings=earnings_last_checked,
+        ),
+        earnings_releases=payload,
+        refresh=refresh,
+        diagnostics=_diagnostics_for_earnings_releases(payload, refresh),
+    )
+
+
+@app.get("/api/companies/{ticker}/earnings/summary", response_model=CompanyEarningsSummaryResponse)
+def company_earnings_summary(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyEarningsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEarningsSummaryResponse(
+            company=None,
+            summary=_build_earnings_summary([]),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        )
+
+    earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
+    earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
+    refresh = _refresh_for_earnings(snapshot, earnings_cache_state)
+    payload = [_serialize_earnings_release(release) for release in earnings_releases]
+    return CompanyEarningsSummaryResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, earnings_last_checked),
+            last_checked_earnings=earnings_last_checked,
+        ),
+        summary=_build_earnings_summary(payload),
+        refresh=refresh,
+        diagnostics=_diagnostics_for_earnings_releases(payload, refresh),
+    )
+
+
+@app.get("/api/companies/{ticker}/earnings/workspace", response_model=CompanyEarningsWorkspaceResponse)
+def company_earnings_workspace(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyEarningsWorkspaceResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEarningsWorkspaceResponse(
+            company=None,
+            earnings_releases=[],
+            summary=_build_earnings_summary([]),
+            model_points=[],
+            backtests=EarningsBacktestPayload(
+                window_sessions=3,
+                quality_directional_consistency=None,
+                quality_total_windows=0,
+                quality_consistent_windows=0,
+                eps_directional_consistency=None,
+                eps_total_windows=0,
+                eps_consistent_windows=0,
+                windows=[],
+            ),
+            peer_context=EarningsPeerContextPayload(
+                peer_group_basis="market_sector",
+                peer_group_size=0,
+                quality_percentile=None,
+                eps_drift_percentile=None,
+                sector_group_size=0,
+                sector_quality_percentile=None,
+                sector_eps_drift_percentile=None,
+            ),
+            alerts=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        )
+
+    earnings_last_checked, earnings_cache_state = get_company_earnings_cache_status(session, snapshot.company)
+    model_last_checked, model_cache_state = get_company_earnings_model_cache_status(session, snapshot.company.id)
+    earnings_releases = get_company_earnings_releases(session, snapshot.company.id)
+    model_rows = get_company_earnings_model_points(session, snapshot.company.id)
+    refresh = _refresh_for_earnings_workspace(snapshot, earnings_cache_state, model_cache_state)
+
+    release_payload = [_serialize_earnings_release(release) for release in earnings_releases]
+    model_payload = [_serialize_earnings_model_point(point) for point in model_rows]
+    backtest_payload = EarningsBacktestPayload.model_validate(
+        build_earnings_directional_backtest(
+            model_rows,
+            earnings_releases,
+            _visible_price_history(session, snapshot.company.id),
+        )
+    )
+    latest_point = model_rows[-1] if model_rows else None
+    peer_payload = EarningsPeerContextPayload.model_validate(
+        build_earnings_peer_percentiles(session, snapshot.company, latest_point)
+    )
+    alert_profile = build_sector_alert_profile(session, snapshot.company)
+    alerts_payload = [EarningsAlertPayload.model_validate(item) for item in build_earnings_alerts(model_rows, profile=alert_profile)]
+
+    return CompanyEarningsWorkspaceResponse(
+        company=_serialize_company(
+            snapshot,
+            last_checked=_merge_last_checked(snapshot.last_checked, _merge_last_checked(earnings_last_checked, model_last_checked)),
+            last_checked_earnings=_merge_last_checked(earnings_last_checked, model_last_checked),
+        ),
+        earnings_releases=release_payload,
+        summary=_build_earnings_summary(release_payload),
+        model_points=model_payload,
+        backtests=backtest_payload,
+        peer_context=peer_payload,
+        alerts=alerts_payload,
+        refresh=refresh,
+        diagnostics=_diagnostics_for_earnings_releases(release_payload, refresh, model_payload),
+    )
+
+
+@app.get("/api/insiders/{ticker}", response_model=InsiderAnalyticsResponse)
+def insider_analytics(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> InsiderAnalyticsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    trades = get_company_insider_trades(session, snapshot.company.id, limit=400)
+    return _serialize_insider_analytics(build_insider_analytics(trades))
+
+
+@app.get("/api/ownership/{ticker}", response_model=OwnershipAnalyticsResponse)
+def ownership_analytics(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> OwnershipAnalyticsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    holdings = get_company_institutional_holdings(session, snapshot.company.id, limit=600)
+    analytics = build_ownership_analytics(holdings)
+    return _serialize_ownership_analytics(analytics)
+
+
+@app.post(
+    "/api/companies/{ticker}/refresh",
+    response_model=RefreshQueuedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def refresh_company(
+    ticker: str,
+    force: bool = False,
+    session: Session = Depends(get_db_session),
+) -> RefreshQueuedResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    queue_ticker = snapshot.company.ticker if snapshot is not None else normalized_ticker
+    job_id = queue_company_refresh(queue_ticker, force=force)
+    return RefreshQueuedResponse(
+        status="queued",
+        ticker=queue_ticker,
+        force=force,
+        refresh=RefreshState(triggered=True, reason="manual", ticker=queue_ticker, job_id=job_id),
+    )
+
+
+@app.get("/api/companies/{ticker}/models", response_model=CompanyModelsResponse)
+async def company_models(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    model: str | None = Query(default=None),
+    expand: str | None = Query(default=None, description="optional expansions: input_periods, formula_details"),
+    dupont_mode: str | None = Query(default=None, description="optional DuPont basis: auto|annual|ttm"),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+) -> CompanyModelsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    requested_expand = _read_singleton_query_param_or_400(request, "expand", fallback=expand)
+    requested_dupont_mode = _read_singleton_query_param_or_400(request, "dupont_mode", fallback=dupont_mode)
+    parsed_as_of, requested_expansions, normalized_mode, normalized_as_of = _normalize_company_models_query_controls(
+        requested_as_of=requested_as_of,
+        expand=requested_expand,
+        dupont_mode=requested_dupont_mode,
+    )
+    requested_models = _parse_requested_models(model)
+    include_input_periods = "input_periods" in requested_expansions
+    include_formula_details = "formula_details" in requested_expansions
+    if not settings.valuation_workbench_enabled:
+        requested_models = [
+            item
+            for item in requested_models
+            if item not in {"reverse_dcf", "roic", "capital_allocation"}
+        ]
+    normalized_expansions = ",".join(sorted(requested_expansions)) or "default"
+    hot_key = (
+        f"models:{normalized_ticker}:models={','.join(requested_models)}:dupont={normalized_mode or 'default'}"
+        f":expand={normalized_expansions}:asof={normalized_as_of}"
+    )
+    hot_tags = _build_hot_cache_tags(
+        ticker=normalized_ticker,
+        datasets=("financials", "prices"),
+        schema_versions=(HOT_CACHE_SCHEMA_VERSIONS["models"],),
+        as_of=normalized_as_of,
+    )
+    token = None
+    try:
+        async with _session_scope() as session:
+            cached_hot = await _get_hot_cached_payload(hot_key)
+            if cached_hot is not None:
+                if cached_hot.is_fresh:
+                    return _hot_cache_json_response(request, http_response, cached_hot)
+
+                payload_data = _decode_hot_cache_payload(cached_hot)
+                cached_response = CompanyModelsResponse.model_validate(payload_data)
+                if not cached_hot.is_fresh:
+                    stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
+                    cached_response = cached_response.model_copy(
+                        update={
+                            "refresh": stale_refresh,
+                            "diagnostics": _with_stale_flags(cached_response.diagnostics, _stale_flags_from_refresh(stale_refresh)),
+                            "confidence_flags": sorted(set([*cached_response.confidence_flags, *_confidence_flags_from_refresh(stale_refresh)])),
+                        }
+                    )
+
+                not_modified = _apply_conditional_headers(
+                    request,
+                    http_response,
+                    cached_response,
+                    last_modified=cached_response.company.last_checked if cached_response.company else None,
+                )
+                if not_modified is not None:
+                    return not_modified  # type: ignore[return-value]
+                return cached_response
+
+            def build_models_payload(sync_session: Session) -> CompanyModelsResponse:
+                snapshot = _resolve_cached_company_snapshot(sync_session, normalized_ticker)
+                if snapshot is None:
+                    payload = CompanyModelsResponse(
+                        company=None,
+                        requested_models=requested_models,
+                        models=[],
+                        refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+                        diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+                        **_empty_provenance_contract("company_missing"),
+                    )
+                    return _apply_requested_as_of(payload, requested_as_of)
+
+                refresh = _refresh_for_snapshot(snapshot)
+                financials = get_company_financials(sync_session, snapshot.company.id)
+                price_last_checked, _price_cache_state = _visible_price_cache_status(sync_session, snapshot.company.id)
+                price_history: list[PriceHistory] = []
+                if parsed_as_of is not None:
+                    price_history = _visible_price_history(sync_session, snapshot.company.id)
+                    financials = select_point_in_time_financials(financials, parsed_as_of)
+                    price_history = filter_price_history_as_of(price_history, parsed_as_of)
+
+                if parsed_as_of is None:
+                    config_by_model = {"dupont": {"mode": dupont_model.get_mode()}}
+                    models: list[ModelRun | dict[str, Any]] = get_company_models(
+                        sync_session,
+                        snapshot.company.id,
+                        requested_models or None,
+                        config_by_model=config_by_model,
+                    )
+                    available_model_names = {_model_name(model_run).lower() for model_run in models}
+                    missing_requested_models = [
+                        model_name for model_name in requested_models if model_name.lower() not in available_model_names
+                    ]
+                    if requested_models and (snapshot.cache_state == "fresh" or missing_requested_models):
+                        model_names_to_compute = requested_models if snapshot.cache_state == "fresh" else missing_requested_models
+                        model_job_results = ModelEngine(sync_session).compute_models(
+                            snapshot.company.id,
+                            model_names=model_names_to_compute,
+                            force=False,
+                        )
+                        if any(not result.cached for result in model_job_results):
+                            sync_session.commit()
+                        models = get_company_models(
+                            sync_session,
+                            snapshot.company.id,
+                            requested_models or None,
+                            config_by_model=config_by_model,
+                        )
+                else:
+                    latest_price = latest_price_as_of(price_history, parsed_as_of)
+                    dataset = build_company_dataset(
+                        snapshot.company,
+                        financials,
+                        build_market_snapshot(latest_price),
+                        as_of_date=parsed_as_of,
+                    )
+                    models = ModelEngine(sync_session).evaluate_models(
+                        dataset,
+                        model_names=requested_models or None,
+                        created_at=datetime.now(timezone.utc),
+                    )
+                company_context = _model_company_context(snapshot.company)
+                status_counts: dict[str, int] = {}
+                for model_run in models:
+                    result = _model_result_payload(model_run, company_context=company_context)
+                    model_status = str(result.get("model_status") or result.get("status") or "insufficient_data")
+                    status_counts[model_status] = status_counts.get(model_status, 0) + 1
+                logging.getLogger(__name__).info(
+                    "TELEMETRY model_view ticker=%s models=%s status_counts=%s",
+                    snapshot.company.ticker,
+                    ",".join(requested_models) if requested_models else "all",
+                    status_counts,
+                )
+                serialized_models = [
+                    _serialize_model_payload(
+                        model_run,
+                        company_context=company_context,
+                        include_input_periods=include_input_periods,
+                        include_formula_details=include_formula_details,
+                    )
+                    for model_run in models
+                ]
+                diagnostics = _diagnostics_for_models(serialized_models, refresh)
+                payload = CompanyModelsResponse(
+                    company=_serialize_company(snapshot),
+                    requested_models=requested_models,
+                    models=serialized_models,
+                    refresh=refresh,
+                    diagnostics=diagnostics,
+                    **_models_provenance_contract(
+                        models,
+                        financials,
+                        price_last_checked=price_last_checked,
+                        diagnostics=diagnostics,
+                        refresh=refresh,
+                    ),
+                )
+                return _apply_requested_as_of(payload, requested_as_of)
+
+            if normalized_mode is not None:
+                token = dupont_model.set_mode_override(normalized_mode)
+
+            payload = await _fill_hot_cached_payload(
+                hot_key,
+                model_type=CompanyModelsResponse,
+                tags=hot_tags,
+                fill=lambda: _run_with_session_binding(session, build_models_payload),
+            )
+            not_modified = _apply_conditional_headers(
+                request,
+                http_response,
+                payload,
+                last_modified=payload.company.last_checked if payload.company else None,
+            )
+            if not_modified is not None:
+                return not_modified  # type: ignore[return-value]
+            return payload
+    finally:
+        if token is not None:
+            dupont_model.reset_mode_override(token)
+
+
+@app.get("/api/formulas", response_model=FormulaListResponse)
+def list_formulas(
+    ids: str | None = Query(default=None, description="Optional comma-separated formula ids"),
+    include_details: bool = Query(default=False),
+) -> FormulaListResponse:
+    formula_ids = [item.strip() for item in (ids or "").split(",") if item.strip()] or None
+    formulas = list_formula_metadata(formula_ids=formula_ids, include_details=include_details)
+    return FormulaListResponse(
+        schema_version=FORMULA_REGISTRY_VERSION,
+        include_details=include_details,
+        formulas=[
+            FormulaMetadataPayload.model_validate(item) if include_details else FormulaSummaryPayload.model_validate(item)
+            for item in formulas
+        ],
+    )
+
+
+@app.get("/api/formulas/{formula_id}", response_model=FormulaMetadataPayload)
+def get_formula(formula_id: str) -> FormulaMetadataPayload:
+    metadata = get_formula_metadata(formula_id)
+    if metadata is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="formula not found")
+    return FormulaMetadataPayload.model_validate(metadata.as_dict())
+
+
 async def company_oil_scenario_overlay(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
 ) -> CompanyOilScenarioOverlayResponse:
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario_overlay:{normalized_ticker}"
@@ -503,7 +2582,7 @@ async def company_oil_scenario_overlay(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyOilScenarioOverlayResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_cached_company_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -546,13 +2625,13 @@ async def company_oil_scenario_overlay(
                         stale_flags=["company_missing", "oil_scenario_overlay_missing"],
                         missing_field_flags=["oil_scenario_overlay_missing"],
                     ),
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing", "oil_scenario_overlay_missing"),
                 )
 
             payload, cache_state = get_company_oil_scenario_overlay(sync_session, snapshot.company.id)
             last_checked = get_company_oil_scenario_overlay_last_checked(sync_session, snapshot.company.id)
-            refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+            refresh = _refresh_for_oil_scenario_overlay(snapshot, cache_state)
             return _serialize_oil_scenario_overlay_response(
                 company=_serialize_company(snapshot, last_checked=_merge_last_checked(snapshot.last_checked, last_checked)),
                 payload=payload
@@ -586,7 +2665,6 @@ async def company_oil_scenario(
     request: Request,
     http_response: Response,
     ticker: str,
-    background_tasks: BackgroundTasks,
 ) -> CompanyOilScenarioResponse:
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario:{normalized_ticker}"
@@ -604,7 +2682,7 @@ async def company_oil_scenario(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyOilScenarioResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_cached_company_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_cached_company_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -689,13 +2767,13 @@ async def company_oil_scenario(
                         stale_flags=["company_missing", "oil_scenario_missing"],
                         missing_field_flags=["oil_scenario_missing"],
                     ),
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing", "oil_scenario_missing"),
                 )
 
             payload, cache_state = get_company_oil_scenario_overlay(sync_session, snapshot.company.id)
             last_checked = get_company_oil_scenario_overlay_last_checked(sync_session, snapshot.company.id)
-            refresh = _refresh_for_oil_scenario_overlay(background_tasks, snapshot, cache_state)
+            refresh = _refresh_for_oil_scenario_overlay(snapshot, cache_state)
             default_checked_at = last_checked or snapshot.last_checked or datetime.now(timezone.utc)
             base_payload = payload or build_company_oil_scenario_overlay_placeholder(snapshot.company, checked_at=default_checked_at)
             public_payload = build_company_oil_scenario_public_payload(
@@ -850,6 +2928,16 @@ def latest_model_evaluation(
     if not_modified is not None:
         return not_modified  # type: ignore[return-value]
     return payload
+
+
+@app.get("/api/companies/{ticker}/market-context", response_model=CompanyMarketContextResponse)
+def company_market_context(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyMarketContextResponse:
+    from app.api.handlers.market_context import company_market_context as _handler
+
+    return _handler(ticker=ticker, session=session)
 
 
 def _parse_datetime_value(value: Any, default: datetime) -> datetime:
@@ -1069,6 +3157,206 @@ def _validated_oil_exposure_profile(raw_payload: Any) -> OilExposureProfilePaylo
     )
 
 
+@app.get("/api/market-context", response_model=CompanyMarketContextResponse)
+def global_market_context(
+    session: Session = Depends(get_db_session),
+) -> CompanyMarketContextResponse:
+    from app.api.handlers.market_context import global_market_context as _handler
+
+    return _handler(session=session)
+
+
+@app.get("/api/companies/{ticker}/sector-context", response_model=CompanySectorContextResponse)
+def company_sector_context(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanySectorContextResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
+        fetched_at = datetime.now(timezone.utc)
+        return CompanySectorContextResponse(
+            company=None,
+            status="insufficient_data",
+            matched_plugin_ids=[],
+            plugins=[],
+            fetched_at=fetched_at,
+            refresh=refresh,
+            provenance=[],
+            as_of=None,
+            last_refreshed_at=fetched_at.isoformat(),
+            source_mix={
+                "source_ids": [],
+                "source_tiers": [],
+                "primary_source_ids": [],
+                "fallback_source_ids": [],
+                "official_only": False,
+            },
+            confidence_flags=["company_missing", "no_relevant_sector_plugins"],
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    company = snapshot.company
+    payload = get_company_sector_context(
+        session,
+        company.id,
+        sector=company.sector,
+        market_sector=company.market_sector,
+        market_industry=company.market_industry,
+    )
+    return CompanySectorContextResponse(
+        company=_serialize_company(snapshot),
+        status=str(payload.get("status") or "unavailable"),
+        matched_plugin_ids=list(payload.get("matched_plugin_ids") or []),
+        plugins=list(payload.get("plugins") or []),
+        fetched_at=payload.get("fetched_at") or datetime.now(timezone.utc).isoformat(),
+        refresh=refresh,
+        provenance=list(payload.get("provenance") or []),
+        as_of=payload.get("as_of"),
+        last_refreshed_at=payload.get("last_refreshed_at"),
+        source_mix=dict(payload.get("source_mix") or {}),
+        confidence_flags=list(payload.get("confidence_flags") or []),
+    )
+
+
+@app.get("/api/companies/{ticker}/charts", response_model=CompanyChartsDashboardResponse)
+def company_charts(
+    ticker: str,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsDashboardResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    return _build_company_charts_response(
+        session,
+        normalized_ticker,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+    )
+
+
+@app.post("/api/companies/{ticker}/charts/what-if", response_model=CompanyChartsDashboardResponse)
+def company_charts_what_if(
+    ticker: str,
+    payload: CompanyChartsWhatIfRequest | None = Body(default=None),
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsDashboardResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    return _build_company_charts_what_if_response(
+        session,
+        normalized_ticker,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+        payload=payload or CompanyChartsWhatIfRequest(),
+    )
+
+
+@app.get("/api/companies/{ticker}/charts/forecast-accuracy", response_model=CompanyChartsForecastAccuracyResponse)
+def company_charts_forecast_accuracy(
+    ticker: str,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsForecastAccuracyResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
+    hot_key = f"charts-forecast-accuracy:{normalized_ticker}:asof={normalized_as_of}"
+    cached_hot = shared_hot_response_cache.get_sync(hot_key, route="charts")
+    if cached_hot is not None and cached_hot.is_fresh:
+        return CompanyChartsForecastAccuracyResponse.model_validate(_decode_hot_cache_payload(cached_hot))
+
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
+        return CompanyChartsForecastAccuracyResponse(
+            company=None,
+            status="insufficient_history",
+            insufficient_history_reason="No persisted company snapshot is available yet.",
+            max_backtests=6,
+            metrics=[],
+            aggregate=CompanyChartsForecastAccuracyAggregatePayload(),
+            samples=[],
+            refresh=refresh,
+            diagnostics=_build_data_quality_diagnostics(missing_field_flags=["company_missing", "forecast_accuracy_insufficient_history"]),
+            **_empty_provenance_contract(),
+        )
+
+    stored_snapshot, payload = _load_company_charts_forecast_accuracy_snapshot_record(
+        session,
+        snapshot.company.id,
+        as_of=parsed_as_of,
+    )
+    refresh = _refresh_for_company_charts_forecast_accuracy(
+        session,
+        snapshot,
+        stored_snapshot=stored_snapshot,
+        as_of=parsed_as_of,
+    )
+    if payload is None:
+        if hasattr(session, "execute") and hasattr(session, "commit"):
+            generated = recompute_and_persist_company_charts_forecast_accuracy(
+                session,
+                snapshot.company.id,
+                as_of=parsed_as_of,
+            )
+            if generated is not None:
+                session.commit()
+                response = generated.model_copy(
+                    update={
+                        "refresh": RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None),
+                    }
+                )
+                shared_hot_response_cache.store_sync(
+                    hot_key,
+                    route="charts",
+                    payload=response.model_dump(mode="json"),
+                    tags=_build_hot_cache_tags(
+                        ticker=snapshot.company.ticker,
+                        datasets=("charts_forecast_accuracy",),
+                        schema_versions=(CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,),
+                        as_of=normalized_as_of,
+                    ),
+                )
+                return response
+        if not refresh.triggered:
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
+        return CompanyChartsForecastAccuracyResponse(
+            company=_serialize_company(snapshot),
+            status="insufficient_history",
+            insufficient_history_reason="Forecast accuracy payload is still building for this company.",
+            max_backtests=6,
+            metrics=[],
+            aggregate=CompanyChartsForecastAccuracyAggregatePayload(),
+            samples=[],
+            refresh=refresh,
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["forecast_accuracy_missing"], missing_field_flags=["forecast_accuracy_unavailable"]),
+            **_empty_provenance_contract(),
+        )
+
+    response = payload.model_copy(update={"refresh": refresh})
+    shared_hot_response_cache.store_sync(
+        hot_key,
+        route="charts",
+        payload=response.model_dump(mode="json"),
+        tags=_build_hot_cache_tags(
+            ticker=snapshot.company.ticker,
+            datasets=("charts_forecast_accuracy",),
+            schema_versions=(CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,),
+            as_of=normalized_as_of,
+        ),
+    )
+    return response
+
+
 _PROJECTION_STUDIO_VIEWER_HEADER = "x-ft-projection-viewer"
 _PROJECTION_STUDIO_VIEWER_COOKIE = "ft_projection_viewer"
 _PROJECTION_STUDIO_AUTH_HEADERS = (
@@ -1120,10 +3408,230 @@ def _resolve_projection_studio_viewer(
     return None, CompanyChartsScenarioViewerPayload()
 
 
+def company_charts_scenarios(
+    ticker: str,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioListResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    scenarios = [
+        serialize_company_charts_scenario(
+            scenario,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        )
+        for scenario in list_company_charts_scenarios(
+            session,
+            company_id=snapshot.company.id,
+            viewer_key=viewer_key,
+        )
+    ]
+    return CompanyChartsScenarioListResponse(viewer=viewer, scenarios=scenarios)
+
+
+def company_charts_scenario_create(
+    ticker: str,
+    payload: CompanyChartsScenarioUpsertRequest,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    if payload.visibility == "private" and not viewer.can_create_private:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private Projection Studio scenarios require a local viewer or signed-in identity.",
+        )
+
+    scenario = create_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        payload=payload,
+        viewer_key=viewer_key,
+    )
+    if hasattr(session, "commit"):
+        session.commit()
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            scenario,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_scenario_detail(
+    ticker: str,
+    scenario_id: str,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    scenario = get_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        scenario_id=scenario_id,
+    )
+    if scenario is None or not viewer_can_access_company_charts_scenario(scenario, viewer_key=viewer_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projection Studio scenario not found.")
+
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            scenario,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_scenario_update(
+    ticker: str,
+    scenario_id: str,
+    payload: CompanyChartsScenarioUpsertRequest,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    scenario = get_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        scenario_id=scenario_id,
+    )
+    if scenario is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projection Studio scenario not found.")
+    if not viewer_can_edit_company_charts_scenario(scenario, viewer_key=viewer_key):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot update this Projection Studio scenario.")
+    if payload.visibility == "private" and not viewer.can_create_private:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private Projection Studio scenarios require a local viewer or signed-in identity.",
+        )
+
+    updated = update_company_charts_scenario(session, scenario=scenario, payload=payload)
+    if hasattr(session, "commit"):
+        session.commit()
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            updated,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_scenario_clone(
+    ticker: str,
+    scenario_id: str,
+    payload: CompanyChartsScenarioCloneRequest,
+    request: Request = None,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsScenarioDetailPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    viewer_key, viewer = _resolve_projection_studio_viewer(request)
+    source_scenario = get_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        scenario_id=scenario_id,
+    )
+    if source_scenario is None or not viewer_can_access_company_charts_scenario(source_scenario, viewer_key=viewer_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projection Studio scenario not found.")
+
+    requested_visibility = payload.visibility or source_scenario.visibility
+    if requested_visibility == "private" and not viewer.can_create_private:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private Projection Studio scenarios require a local viewer or signed-in identity.",
+        )
+
+    cloned = clone_company_charts_scenario(
+        session,
+        company_id=snapshot.company.id,
+        source_scenario=source_scenario,
+        payload=payload,
+        viewer_key=viewer_key,
+    )
+    if hasattr(session, "commit"):
+        session.commit()
+    return CompanyChartsScenarioDetailPayload(
+        viewer=viewer,
+        scenario=serialize_company_charts_scenario(
+            cloned,
+            ticker=snapshot.company.ticker,
+            viewer_key=viewer_key,
+        ),
+    )
+
+
+def company_charts_share_snapshot_create(
+    ticker: str,
+    payload: CompanyChartsShareSnapshotPayload,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsShareSnapshotRecordPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    created = create_company_charts_share_snapshot(
+        session,
+        company_id=snapshot.company.id,
+        payload=payload.model_copy(update={"ticker": snapshot.company.ticker}),
+    )
+    if hasattr(session, "commit"):
+        session.commit()
+    return serialize_company_charts_share_snapshot(created, ticker=snapshot.company.ticker)
+
+
+def company_charts_share_snapshot_detail(
+    ticker: str,
+    snapshot_id: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyChartsShareSnapshotRecordPayload:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    record = get_company_charts_share_snapshot(
+        session,
+        company_id=snapshot.company.id,
+        snapshot_id=snapshot_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Charts share snapshot not found.")
+
+    return serialize_company_charts_share_snapshot(record, ticker=snapshot.company.ticker)
+
+
 def _build_company_charts_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -1137,7 +3645,7 @@ def _build_company_charts_response(
 
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return _build_company_charts_bootstrap_for_missing_ticker(
             normalized_ticker,
             refresh=refresh,
@@ -1150,7 +3658,6 @@ def _build_company_charts_response(
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_charts(
-        background_tasks,
         resolved_snapshot,
         stored_snapshot=stored_snapshot,
         as_of=parsed_as_of,
@@ -1183,7 +3690,7 @@ def _build_company_charts_response(
                 )
                 return response
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, resolved_snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(resolved_snapshot.company.ticker, reason="missing")
         return _build_company_charts_bootstrap_for_snapshot(
             resolved_snapshot,
             refresh=refresh,
@@ -1213,7 +3720,6 @@ def _build_company_charts_response(
 def _build_company_charts_what_if_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -1222,7 +3728,7 @@ def _build_company_charts_what_if_response(
 ) -> CompanyChartsDashboardResponse:
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return _build_company_charts_bootstrap_for_missing_ticker(
             normalized_ticker,
             refresh=refresh,
@@ -1282,10 +3788,27 @@ def _attempt_inline_company_snapshot_refresh_for_charts(
     return _resolve_company_brief_snapshot(session, normalized_ticker)
 
 
+@app.get("/api/companies/{ticker}/brief", response_model=CompanyResearchBriefResponse)
+def company_brief(
+    ticker: str,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyResearchBriefResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    return _build_company_research_brief_response(
+        session,
+        normalized_ticker,
+        requested_as_of=requested_as_of,
+        parsed_as_of=parsed_as_of,
+    )
+
+
 def _build_company_research_brief_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -1293,7 +3816,7 @@ def _build_company_research_brief_response(
 ) -> CompanyResearchBriefResponse:
     resolved_snapshot = snapshot or _resolve_company_brief_snapshot(session, normalized_ticker)
     if resolved_snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return _build_company_brief_bootstrap_for_missing_ticker(
             normalized_ticker,
             refresh=refresh,
@@ -1306,14 +3829,13 @@ def _build_company_research_brief_response(
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_brief(
-        background_tasks,
         resolved_snapshot,
         stored_snapshot=stored_snapshot,
         as_of=parsed_as_of,
     )
     if payload is None:
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, resolved_snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(resolved_snapshot.company.ticker, reason="missing")
         return _build_company_brief_bootstrap_for_snapshot(
             session,
             resolved_snapshot,
@@ -1491,7 +4013,6 @@ def _load_company_charts_forecast_accuracy_snapshot_record(
 
 
 def _refresh_for_company_charts(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     *,
     stored_snapshot: Any | None,
@@ -1499,17 +4020,16 @@ def _refresh_for_company_charts(
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
-            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+            return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
-    return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    return _trigger_refresh(snapshot.company.ticker, reason="stale")
 
 
 def _refresh_for_company_charts_forecast_accuracy(
-    background_tasks: BackgroundTasks,
     session: Session,
     snapshot: CompanyCacheSnapshot,
     *,
@@ -1518,16 +4038,16 @@ def _refresh_for_company_charts_forecast_accuracy(
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
-            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if not _snapshot_last_checked_is_fresh(stored_snapshot):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if _charts_forecast_accuracy_sources_newer_than_snapshot(session, snapshot.company.id, stored_snapshot):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
@@ -1859,7 +4379,6 @@ def _load_company_research_brief_snapshot_record(
 
 
 def _refresh_for_company_brief(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     *,
     stored_snapshot: Any | None,
@@ -1867,13 +4386,13 @@ def _refresh_for_company_brief(
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
-            return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+            return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
-    return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+    return _trigger_refresh(snapshot.company.ticker, reason="stale")
 
 
 def _snapshot_last_checked_is_fresh(stored_snapshot: Any) -> bool:
@@ -2274,6 +4793,145 @@ def _format_research_brief_card_number(value: float | int, *, currency: bool = F
     return f"${formatted}" if currency else formatted
 
 
+@app.get("/api/companies/{ticker}/peers", response_model=CompanyPeersResponse)
+async def company_peers(
+    request: Request,
+    http_response: Response,
+    ticker: str,
+    peers: str | None = Query(default=None),
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+) -> CompanyPeersResponse:
+    from app.api.handlers.company_overview import company_peers as _company_peers_handler
+
+    return await _company_peers_handler(
+        request=request,
+        http_response=http_response,
+        ticker=ticker,
+        peers=peers,
+        as_of=as_of,
+    )
+
+
+@app.get("/api/companies/{ticker}/filings", response_model=CompanyFilingsResponse)
+def company_filings(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyFilingsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyFilingsResponse(
+            company=None,
+            filings=[],
+            timeline_source="sec_submissions",
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+
+    cached_filings = _load_filings_from_cache(snapshot.company.cik)
+    if cached_filings is not None:
+        return CompanyFilingsResponse(
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(cached_filings)),
+            filings=cached_filings,
+            timeline_source="sec_submissions",
+            refresh=refresh,
+            diagnostics=_diagnostics_for_filings_timeline(cached_filings, refresh, "sec_submissions"),
+            error=None,
+        )
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_recent_filings(snapshot.company.cik, filing_index)
+        _store_filings_in_cache(snapshot.company.cik, filings)
+        return CompanyFilingsResponse(
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(filings)),
+            filings=filings,
+            timeline_source="sec_submissions",
+            refresh=refresh,
+            diagnostics=_diagnostics_for_filings_timeline(filings, refresh, "sec_submissions"),
+            error=None,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load SEC filing timeline for '%s'", snapshot.company.ticker)
+        _evict_filings_cache(snapshot.company.cik)
+        fallback_filings = _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
+        return CompanyFilingsResponse(
+            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(fallback_filings)),
+            filings=fallback_filings,
+            timeline_source="cached_financials",
+            refresh=refresh,
+            diagnostics=_diagnostics_for_filings_timeline(fallback_filings, refresh, "cached_financials"),
+            error=(
+                "SEC submissions are temporarily unavailable. Showing cached annual and quarterly filings only."
+                if fallback_filings
+                else "SEC submissions are temporarily unavailable. Try refreshing again shortly."
+            ),
+        )
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/beneficial-ownership", response_model=CompanyBeneficialOwnershipResponse)
+def company_beneficial_ownership(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyBeneficialOwnershipResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyBeneficialOwnershipResponse(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
+    filings = _enrich_beneficial_ownership_amendment_history(
+        [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+    )
+    return CompanyBeneficialOwnershipResponse(
+        company=_serialize_company(snapshot),
+        filings=filings,
+        refresh=refresh,
+        error=None,
+    )
+
+
+@app.get("/api/companies/{ticker}/beneficial-ownership/summary", response_model=CompanyBeneficialOwnershipSummaryResponse)
+def company_beneficial_ownership_summary(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyBeneficialOwnershipSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyBeneficialOwnershipSummaryResponse(
+            company=None,
+            summary=_empty_beneficial_ownership_summary(),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    cached_reports = get_company_beneficial_ownership_reports(session, snapshot.company.id)
+    filings = _enrich_beneficial_ownership_amendment_history(
+        [_serialize_cached_beneficial_ownership_report(report) for report in cached_reports]
+    )
+    return CompanyBeneficialOwnershipSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_beneficial_ownership_summary(filings),
+        refresh=refresh,
+        error=None,
+    )
+
+
 REGISTRATION_FORMS = {
     "S-1", "S-1/A",
     "S-3", "S-3/A",
@@ -2300,6 +4958,168 @@ _REGISTRATION_FORM_SUMMARIES: dict[str, str] = {
     "424B4": "Prospectus supplement filed under Rule 424(b)(4).",
     "424B5": "Prospectus supplement filed under Rule 424(b)(5).",
 }
+
+
+@app.get("/api/companies/{ticker}/capital-raises", response_model=CompanyCapitalRaisesResponse)
+def company_capital_raises(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalRaisesResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyCapitalRaisesResponse(
+            company=None,
+            filings=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    cached_events = get_company_capital_markets_events(session, snapshot.company.id)
+    filings = [_serialize_cached_capital_markets_event(event) for event in cached_events]
+    return CompanyCapitalRaisesResponse(
+        company=_serialize_company(snapshot),
+        filings=filings,
+        refresh=refresh,
+        diagnostics=_diagnostics_for_capital_markets(filings, refresh),
+        error=None,
+    )
+
+
+@app.get("/api/companies/{ticker}/capital-markets", response_model=CompanyCapitalRaisesResponse)
+def company_capital_markets(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalRaisesResponse:
+    return company_capital_raises(ticker=ticker, session=session)
+
+
+@app.get("/api/companies/{ticker}/capital-markets/summary", response_model=CompanyCapitalMarketsSummaryResponse)
+def company_capital_markets_summary(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyCapitalMarketsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyCapitalMarketsSummaryResponse(
+            company=None,
+            summary=_empty_capital_markets_summary(),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    rows = [_serialize_cached_capital_markets_event(event) for event in get_company_capital_markets_events(session, snapshot.company.id)]
+    return CompanyCapitalMarketsSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_capital_markets_summary(rows),
+        refresh=refresh,
+        diagnostics=_diagnostics_for_capital_markets(rows, refresh),
+        error=None,
+    )
+
+
+@app.get("/api/companies/{ticker}/events", response_model=CompanyEventsResponse)
+def company_events(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyEventsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyEventsResponse(
+            company=None,
+            events=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    return CompanyEventsResponse(
+        company=_serialize_company(snapshot),
+        events=events,
+        refresh=refresh,
+        diagnostics=_diagnostics_for_filing_events(events, refresh),
+        error=None,
+    )
+
+
+@app.get("/api/companies/{ticker}/filing-events", response_model=CompanyEventsResponse)
+def company_filing_events(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyEventsResponse:
+    return company_events(ticker=ticker, session=session)
+
+
+@app.get("/api/companies/{ticker}/filing-events/summary", response_model=CompanyFilingEventsSummaryResponse)
+def company_filing_events_summary(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyFilingEventsSummaryResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyFilingEventsSummaryResponse(
+            company=None,
+            summary=_empty_filing_events_summary(),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+            error=None,
+        )
+
+    refresh = _refresh_for_snapshot(snapshot)
+    rows = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    return CompanyFilingEventsSummaryResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_filing_events_summary(rows),
+        refresh=refresh,
+        diagnostics=_diagnostics_for_filing_events(rows, refresh),
+        error=None,
+    )
+
+
+@app.get("/api/companies/{ticker}/activity-feed", response_model=CompanyActivityFeedResponse)
+def company_activity_feed(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyActivityFeedResponse:
+    overview = _build_company_activity_overview_response(ticker=ticker, session=session)
+    return CompanyActivityFeedResponse(
+        company=overview.company,
+        entries=overview.entries,
+        refresh=overview.refresh,
+        error=overview.error,
+    )
+
+
+@app.get("/api/companies/{ticker}/alerts", response_model=CompanyAlertsResponse)
+def company_alerts(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyAlertsResponse:
+    overview = _build_company_activity_overview_response(ticker=ticker, session=session)
+    return CompanyAlertsResponse(
+        company=overview.company,
+        alerts=overview.alerts,
+        summary=overview.summary,
+        refresh=overview.refresh,
+        error=overview.error,
+    )
+
+
+@app.get("/api/companies/{ticker}/activity-overview", response_model=CompanyActivityOverviewResponse)
+def company_activity_overview(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyActivityOverviewResponse:
+    return _build_company_activity_overview_response(ticker=ticker, session=session)
 
 
 def _build_watchlist_preloaded_activity_data(
@@ -2441,79 +5261,384 @@ def _load_watchlist_summary_preload(
     }
 
 
-def _refresh_for_snapshot(background_tasks: BackgroundTasks, snapshot: CompanyCacheSnapshot) -> RefreshState:
+@app.post("/api/watchlist/summary", response_model=WatchlistSummaryResponse)
+def watchlist_summary(
+    payload: WatchlistSummaryRequest,
+    session: Session = Depends(get_db_session),
+) -> WatchlistSummaryResponse:
+    normalized_tickers = _normalize_watchlist_tickers(payload.tickers)
+    if len(normalized_tickers) > 50:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A maximum of 50 tickers is allowed")
+
+    try:
+        snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+        coverage_counts = get_company_coverage_counts(
+            session,
+            [snapshot.company.id for snapshot in snapshots_by_ticker.values()],
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load watchlist summary snapshots")
+        return WatchlistSummaryResponse(
+            tickers=normalized_tickers,
+            companies=[_build_missing_watchlist_summary_item(ticker) for ticker in normalized_tickers],
+        )
+
+    preload: dict[str, Any] | None = None
+    try:
+        preload = _load_watchlist_summary_preload(session, snapshots_by_ticker)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to batch watchlist summary preload data")
+
+    companies: list[WatchlistSummaryItemPayload] = []
+    preload_token = _watchlist_summary_preload_ctx.set(preload)
+    try:
+        for ticker in normalized_tickers:
+            snapshot = snapshots_by_ticker.get(ticker)
+            if snapshot is None:
+                companies.append(_build_missing_watchlist_summary_item(ticker))
+                continue
+            try:
+                companies.append(
+                    _build_watchlist_summary_item(
+                        session,
+                        ticker,
+                        snapshot=snapshot,
+                        coverage_counts=coverage_counts.get(snapshot.company.id),
+                    )
+                )
+            except Exception:
+                logging.getLogger(__name__).exception("Unable to build watchlist summary item for '%s'", ticker)
+                companies.append(_build_missing_watchlist_summary_item(ticker))
+    finally:
+        _watchlist_summary_preload_ctx.reset(preload_token)
+    logging.getLogger(__name__).info(
+        "TELEMETRY watchlist_summary tickers=%s companies=%s",
+        len(normalized_tickers),
+        len(companies),
+    )
+    return WatchlistSummaryResponse(tickers=normalized_tickers, companies=companies)
+
+
+@app.get("/api/watchlist/calendar", response_model=WatchlistCalendarResponse)
+def watchlist_calendar(
+    tickers: list[str] = Query(default_factory=list),
+    session: Session = Depends(get_db_session),
+) -> WatchlistCalendarResponse:
+    normalized_tickers = _normalize_watchlist_tickers(tickers)
+    if len(normalized_tickers) > 50:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="A maximum of 50 tickers is allowed")
+
+    window_start = _watchlist_calendar_today()
+    window_end = window_start + timedelta(days=WATCHLIST_CALENDAR_WINDOW_DAYS)
+    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+
+    events: list[WatchlistCalendarEventPayload] = []
+    for ticker in normalized_tickers:
+        snapshot = snapshots_by_ticker.get(ticker)
+        if snapshot is None:
+            continue
+        try:
+            events.extend(
+                _build_watchlist_calendar_company_events(
+                    session,
+                    snapshot,
+                    window_start=window_start,
+                    window_end=window_end,
+                )
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to build watchlist calendar events for '%s'", ticker)
+
+    events.extend(_build_watchlist_13f_deadline_events(window_start=window_start, window_end=window_end))
+    events.sort(key=lambda item: (item.date, item.ticker or "", item.title, item.id))
+    logging.getLogger(__name__).info(
+        "TELEMETRY watchlist_calendar tickers=%s events=%s",
+        len(normalized_tickers),
+        len(events),
+    )
+    return WatchlistCalendarResponse(
+        tickers=normalized_tickers,
+        window_start=window_start,
+        window_end=window_end,
+        events=events,
+    )
+
+
+@app.get("/api/source-registry", response_model=SourceRegistryResponse)
+def source_registry(
+    session: Session = Depends(get_db_session),
+) -> SourceRegistryResponse:
+    generated_at = datetime.now(timezone.utc)
+    sources = [_build_source_registry_entry_payload(source_id) for source_id in _sorted_source_registry_ids()]
+    try:
+        health = _build_source_registry_health_payload(session, now=generated_at)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to build source registry health payload")
+        health = _empty_source_registry_health_payload()
+    return SourceRegistryResponse(
+        strict_official_mode=settings.strict_official_mode,
+        generated_at=generated_at,
+        sources=sources,
+        health=health,
+    )
+
+
+@app.get("/api/filings/{ticker}", response_model=list[FilingTimelineItemPayload])
+def filings_timeline(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> list[FilingTimelineItemPayload]:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown ticker '{normalized_ticker}'")
+
+    client = EdgarClient()
+    try:
+        submissions = client.get_submissions(snapshot.company.cik)
+        filing_index = client.build_filing_index(submissions)
+        filings = _serialize_recent_filings(snapshot.company.cik, filing_index)
+        timeline: list[FilingTimelineItemPayload] = []
+        for filing in filings:
+            timeline.append(
+                FilingTimelineItemPayload(
+                    date=filing.filing_date or filing.report_date,
+                    form=filing.form,
+                    description=_filing_timeline_description(filing),
+                    accession=filing.accession_number,
+                )
+            )
+        return timeline
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load normalized filing timeline for '%s'", snapshot.company.ticker)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to load filings")
+    finally:
+        client.close()
+
+
+@app.get("/api/search_filings", response_model=list[FilingSearchResultPayload])
+def search_filings(
+    q: str = Query(..., min_length=2, max_length=120),
+) -> list[FilingSearchResultPayload]:
+    client = EdgarClient()
+    try:
+        response = client._request("GET", settings.sec_search_base_url, params={"q": q})
+        payload = response.json()
+        hits = ((payload or {}).get("hits") or {}).get("hits") or []
+        results: list[FilingSearchResultPayload] = []
+        for item in hits:
+            parsed = _serialize_search_filing_hit(item)
+            if parsed is not None:
+                results.append(parsed)
+        return results
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to search SEC filings for query '%s'", q)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to search filings")
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/financial-restatements", response_model=CompanyFinancialRestatementsResponse)
+def company_financial_restatements(
+    ticker: str,
+    request: Request = None,
+    as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
+    session: Session = Depends(get_db_session),
+) -> CompanyFinancialRestatementsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        payload = CompanyFinancialRestatementsResponse(
+            company=None,
+            summary=_empty_financial_restatements_summary(),
+            restatements=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            **_empty_provenance_contract("company_missing"),
+        )
+        return _apply_requested_as_of(payload, requested_as_of)
+
+    refresh = _refresh_for_snapshot(snapshot)
+    records = get_company_financial_restatements(session, snapshot.company.id)
+    if parsed_as_of is not None:
+        records = [record for record in records if _financial_restatement_effective_at(record) <= parsed_as_of]
+
+    serialized = [_serialize_financial_restatement(record) for record in records]
+    confidence_flags = set(_confidence_flags_from_refresh(refresh))
+    for record in serialized:
+        confidence_flags.update(record.confidence_impact.flags)
+
+    usages: list[SourceUsage] = []
+    companyfacts_usage = _source_usage_from_hint(
+        "https://data.sec.gov/api/xbrl/companyfacts/",
+        role="primary",
+        as_of=requested_as_of or _latest_financial_restatement_as_of(records),
+        last_refreshed_at=snapshot.last_checked,
+        default_source_id="sec_companyfacts",
+    )
+    if companyfacts_usage is not None:
+        usages.append(companyfacts_usage)
+    if any(record.source.startswith("https://www.sec.gov/Archives/") for record in records):
+        filing_usage = _source_usage_from_hint(
+            "https://www.sec.gov/Archives/",
+            role="supplemental",
+            as_of=requested_as_of or _latest_financial_restatement_as_of(records),
+            last_refreshed_at=snapshot.last_checked,
+            default_source_id="sec_edgar",
+        )
+        if filing_usage is not None:
+            usages.append(filing_usage)
+
+    payload = CompanyFinancialRestatementsResponse(
+        company=_serialize_company(snapshot),
+        summary=_build_financial_restatements_summary(serialized),
+        restatements=serialized,
+        refresh=refresh,
+        **_build_provenance_contract(
+            usages,
+            as_of=requested_as_of or _latest_financial_restatement_as_of(records),
+            last_refreshed_at=_merge_last_checked(snapshot.last_checked, *(record.last_checked for record in records)),
+            confidence_flags=sorted(confidence_flags),
+        ),
+    )
+    return _apply_requested_as_of(payload, requested_as_of)
+
+
+@app.get("/api/companies/{ticker}/financial-history", response_model=CompanyFactsResponse)
+def company_financial_history(
+    ticker: str,
+    session: Session = Depends(get_db_session),
+) -> CompanyFactsResponse:
+    normalized = _normalize_search_query(ticker)
+    resolved_cik = _normalize_cik_query(normalized)
+    if resolved_cik:
+        cik = resolved_cik
+    else:
+        snapshot = _resolve_cached_company_snapshot(session, _normalize_ticker(ticker))
+        if snapshot is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown ticker")
+        cik = snapshot.company.cik
+
+    client = EdgarClient()
+    try:
+        facts = client.get_companyfacts(cik)
+        if not isinstance(facts, dict):
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unexpected SEC companyfacts payload")
+        return CompanyFactsResponse(facts=facts.get("facts", {}))
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load SEC companyfacts for '%s'", cik)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to load SEC companyfacts")
+    finally:
+        client.close()
+
+
+@app.get("/api/companies/{ticker}/filings/view", response_class=HTMLResponse)
+def company_filing_view(
+    ticker: str,
+    source_url: str = Query(..., min_length=1),
+    session: Session = Depends(get_db_session),
+) -> HTMLResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown ticker")
+
+    normalized_source_url = source_url.strip()
+    if not _is_allowed_sec_embed_url(normalized_source_url):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported filing URL")
+
+    parsed = urlparse(normalized_source_url)
+    if parsed.netloc == "data.sec.gov" and parsed.path.endswith(".json"):
+        return HTMLResponse(_render_unavailable_filing_view(normalized_source_url))
+
+    client = EdgarClient()
+    try:
+        payload, content_type = _fetch_sec_document(client, normalized_source_url)
+        return HTMLResponse(_build_embedded_filing_html(payload, normalized_source_url, content_type))
+    except HTTPException:
+        raise
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to load SEC filing document for '%s'", normalized_source_url)
+        return HTMLResponse(_render_unavailable_filing_view(normalized_source_url), status_code=status.HTTP_502_BAD_GATEWAY)
+    finally:
+        client.close()
+
+
+def _refresh_for_snapshot(snapshot: CompanyCacheSnapshot) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_capital_structure(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     last_capital_structure_check: datetime | None,
     history: list[Any],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if last_capital_structure_check is None or not history:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_oil_scenario_overlay(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     cache_state: Literal["fresh", "stale", "missing"],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if cache_state in {"missing", "stale"}:
-        return _trigger_cached_company_refresh(background_tasks, snapshot.company.ticker, reason=cache_state)
+        return _trigger_cached_company_refresh(snapshot.company.ticker, reason=cache_state)
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_governance(
-    background_tasks: BackgroundTasks,
     session: Session,
     snapshot: CompanyCacheSnapshot,
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
 
     _last_checked, proxy_cache_state = get_company_proxy_cache_status(session, snapshot.company)
     if proxy_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=proxy_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=proxy_cache_state)
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_earnings(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     earnings_cache_state: Literal["fresh", "stale", "missing"],
 ) -> RefreshState:
     if snapshot.cache_state == "missing":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if snapshot.cache_state == "stale":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if earnings_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=earnings_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=earnings_cache_state)
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_earnings_workspace(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     earnings_cache_state: Literal["fresh", "stale", "missing"],
     model_cache_state: Literal["fresh", "stale", "missing"],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if earnings_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=earnings_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=earnings_cache_state)
     if model_cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=model_cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=model_cache_state)
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
@@ -2588,33 +5713,6 @@ def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
         stale_flags = diagnostics.get("stale_flags")
         if isinstance(stale_flags, list) and "company_missing" in stale_flags:
             return True
-
-    if payload.get("company") is None and _payload_tree_has_company_missing_marker(payload):
-        return True
-
-    return False
-
-
-def _payload_tree_has_company_missing_marker(value: Any) -> bool:
-    if isinstance(value, dict):
-        confidence_flags = value.get("confidence_flags")
-        if isinstance(confidence_flags, list) and "company_missing" in confidence_flags:
-            return True
-
-        diagnostics = value.get("diagnostics")
-        if isinstance(diagnostics, dict):
-            stale_flags = diagnostics.get("stale_flags")
-            if isinstance(stale_flags, list) and "company_missing" in stale_flags:
-                return True
-
-        refresh = value.get("refresh")
-        if isinstance(refresh, dict) and refresh.get("triggered") is True and refresh.get("reason") == "missing":
-            return True
-
-        return any(_payload_tree_has_company_missing_marker(item) for item in value.values())
-
-    if isinstance(value, list):
-        return any(_payload_tree_has_company_missing_marker(item) for item in value)
 
     return False
 
@@ -2771,7 +5869,14 @@ def _company_overview_hot_key(
     as_of: str,
     price_token: str = "default",
 ) -> str:
-    return f"overview:{normalized_ticker}:view={financials_view}:asof={as_of}:prices={price_token}"
+    from app.api.handlers.company_overview import _company_overview_hot_key as _company_overview_hot_key_impl
+
+    return _company_overview_hot_key_impl(
+        normalized_ticker,
+        financials_view=financials_view,
+        as_of=as_of,
+        price_token=price_token,
+    )
 
 
 def _company_workspace_bootstrap_hot_key(
@@ -2785,13 +5890,17 @@ def _company_workspace_bootstrap_hot_key(
     include_earnings_summary: bool,
     price_token: str = "default",
 ) -> str:
-    return (
-        f"workspace_bootstrap:{normalized_ticker}:view={financials_view}:asof={as_of}"
-        f":overview={1 if include_overview_brief else 0}"
-        f":insiders={1 if include_insiders else 0}"
-        f":institutional={1 if include_institutional else 0}"
-        f":earnings={1 if include_earnings_summary else 0}"
-        f":prices={price_token}"
+    from app.api.handlers.company_overview import _company_workspace_bootstrap_hot_key as _company_workspace_bootstrap_hot_key_impl
+
+    return _company_workspace_bootstrap_hot_key_impl(
+        normalized_ticker,
+        financials_view=financials_view,
+        as_of=as_of,
+        include_overview_brief=include_overview_brief,
+        include_insiders=include_insiders,
+        include_institutional=include_institutional,
+        include_earnings_summary=include_earnings_summary,
+        price_token=price_token,
     )
 
 
@@ -2886,7 +5995,6 @@ def _visible_financials_for_company(
 def _build_company_financials_response(
     session: Session,
     normalized_ticker: str,
-    background_tasks: BackgroundTasks,
     *,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -2903,7 +6011,7 @@ def _build_company_financials_response(
             company=None,
             financials=[],
             price_history=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -2911,7 +6019,7 @@ def _build_company_financials_response(
 
     financials = _visible_financials_for_company(session, resolved_snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, resolved_snapshot.company.id)
-    refresh = _refresh_for_financial_page(background_tasks, resolved_snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(resolved_snapshot, price_cache_state, financials)
     effective_price_end_date = price_end_date
     if parsed_as_of is not None:
         parsed_as_of_date = parsed_as_of.date()
@@ -3007,30 +6115,28 @@ def _resolve_canonical_ticker(session: Session, identity: Any) -> str | None:
 
 
 def _refresh_for_financial_page(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     price_cache_state: Literal["fresh", "stale", "missing"],
     financials: list[FinancialStatement],
 ) -> RefreshState:
     if snapshot.cache_state == "missing" or price_cache_state == "missing":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if snapshot.cache_state == "stale" or price_cache_state == "stale":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if _needs_segment_backfill(financials):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
 
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _refresh_for_segment_history(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
     financials: list[FinancialStatement],
 ) -> RefreshState:
     if snapshot.cache_state in {"missing", "stale"}:
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason=snapshot.cache_state)
+        return _trigger_refresh(snapshot.company.ticker, reason=snapshot.cache_state)
     if _needs_segment_backfill(financials):
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
@@ -3170,35 +6276,32 @@ def _sanitize_model_result_for_strict_official_mode(model_name: str, result: dic
 
 
 def _refresh_for_filing_insights(
-    background_tasks: BackgroundTasks,
     snapshot: CompanyCacheSnapshot,
 ) -> RefreshState:
     if snapshot.cache_state == "missing":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+        return _trigger_refresh(snapshot.company.ticker, reason="missing")
     if snapshot.cache_state == "stale":
-        return _trigger_refresh(background_tasks, snapshot.company.ticker, reason="stale")
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
 
 
 def _trigger_refresh(
-    background_tasks: BackgroundTasks,
     ticker: str,
     *,
     reason: Literal["manual", "missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=(reason == "missing"))
+    job_id = queue_company_refresh(normalized_ticker, force=(reason == "missing"))
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
 def _trigger_cached_company_refresh(
-    background_tasks: BackgroundTasks,
     ticker: str,
     *,
     reason: Literal["missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(background_tasks, normalized_ticker, force=False)
+    job_id = queue_company_refresh(normalized_ticker, force=False)
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
@@ -3313,59 +6416,6 @@ def _stale_flags_from_refresh(refresh: RefreshState | None, *reasons: str | None
     return sorted(set(flags))
 
 
-def _normalize_as_of(value: DateType | datetime | str | None) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc).isoformat()
-        return value.astimezone(timezone.utc).isoformat()
-    if isinstance(value, DateType):
-        return value.isoformat()
-    text = str(value).strip()
-    return text or None
-
-
-def _parse_as_of(value: DateType | datetime | str | None) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    if isinstance(value, DateType):
-        return datetime(value.year, value.month, value.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    text = str(value).strip()
-    if not text:
-        return None
-    if len(text) == 10 and text.count("-") == 2 and "T" not in text and " " not in text:
-        try:
-            parsed_date = DateType.fromisoformat(text)
-        except ValueError:
-            return None
-        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        try:
-            parsed_date = DateType.fromisoformat(text)
-        except ValueError:
-            return None
-        return datetime(parsed_date.year, parsed_date.month, parsed_date.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _validated_as_of(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    parsed = _parse_as_of(value)
-    if parsed is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="as_of must be an ISO-8601 date or timestamp")
-    return parsed
-
-
 def _read_singleton_query_param_or_400(
     request: Request | None,
     name: str,
@@ -3382,43 +6432,6 @@ def _read_singleton_query_param_or_400(
         return normalized or None
     except DuplicateSingletonQueryParamError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-def _normalize_company_models_query_controls(
-    *,
-    requested_as_of: str | None,
-    expand: str | None,
-    dupont_mode: str | None,
-) -> tuple[datetime | None, set[str], str | None, str]:
-    parsed_as_of = _validated_as_of(requested_as_of)
-    requested_expansions = {item.strip().lower() for item in (expand or "").split(",") if item.strip()}
-    allowed_expansions = {"input_periods", "formula_details"}
-    if requested_expansions - allowed_expansions:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="expand must be one of: formula_details, input_periods",
-        )
-
-    normalized_mode = (dupont_mode or "").lower() or None
-    if normalized_mode is not None and normalized_mode not in {"auto", "annual", "ttm"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dupont_mode must be one of: auto, annual, ttm")
-
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
-    return parsed_as_of, requested_expansions, normalized_mode, normalized_as_of
-
-
-def _normalize_company_financials_query_controls(
-    *,
-    requested_as_of: str | None,
-    view: str | None,
-) -> tuple[datetime | None, str, str]:
-    parsed_as_of = _validated_as_of(requested_as_of)
-    normalized_view = (view or "").strip().lower() or "full"
-    if normalized_view not in {"full", "core_segments", "core"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="view must be one of: full, core_segments, core")
-
-    normalized_as_of = _normalize_as_of(parsed_as_of) or "latest"
-    return parsed_as_of, normalized_view, normalized_as_of
 
 
 def _normalize_price_history_query_controls(
@@ -6445,7 +9458,6 @@ def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
 def _build_company_activity_overview_response(
     *,
     ticker: str,
-    background_tasks: BackgroundTasks,
     session: Session,
 ) -> CompanyActivityOverviewResponse:
     normalized_ticker = _normalize_ticker(ticker)
@@ -6457,12 +9469,12 @@ def _build_company_activity_overview_response(
             alerts=[],
             summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
             market_context_status=get_cached_market_context_status(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
             **_empty_provenance_contract("company_missing"),
         )
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
     persisted_payload = _load_snapshot_backed_activity_overview_response(
         session,
         snapshot,
@@ -6891,6 +9903,162 @@ def _watchlist_calendar_today() -> DateType:
     return datetime.now(timezone.utc).date()
 
 
+def _sorted_source_registry_ids() -> list[str]:
+    return sorted(
+        SOURCE_REGISTRY.keys(),
+        key=lambda source_id: (
+            SOURCE_REGISTRY_TIER_ORDER.get(SOURCE_REGISTRY[source_id].tier, 99),
+            SOURCE_REGISTRY[source_id].display_label,
+            source_id,
+        ),
+    )
+
+
+def _build_source_registry_entry_payload(source_id: str) -> SourceRegistryEntryPayload:
+    definition = SOURCE_REGISTRY[source_id]
+    disabled_in_current_mode = settings.strict_official_mode and definition.tier in STRICT_OFFICIAL_DISABLED_SOURCE_TIERS
+    if disabled_in_current_mode:
+        strict_note = "Strict official mode is enabled, so this fallback source is currently suppressed."
+    elif settings.strict_official_mode:
+        strict_note = "Strict official mode is enabled and this source remains available because it is official/public or derived from official inputs."
+    else:
+        strict_note = "Strict official mode is disabled, so this source is currently available."
+    return SourceRegistryEntryPayload(
+        source_id=definition.source_id,
+        source_tier=definition.tier,
+        display_label=definition.display_label,
+        url=definition.url,
+        default_freshness_ttl_seconds=definition.default_freshness_ttl_seconds,
+        disclosure_note=definition.disclosure_note,
+        strict_official_mode_state="disabled" if disabled_in_current_mode else "available",
+        strict_official_mode_note=strict_note,
+    )
+
+
+def _build_source_registry_health_payload(
+    session: Session,
+    *,
+    now: datetime,
+) -> SourceRegistryHealthPayload:
+    cached_company_checks = [last_checked for last_checked in session.execute(select(_source_registry_latest_checks_subquery().c.last_checked)).scalars() if last_checked is not None]
+    normalized_checks = [_normalize_utc_datetime(last_checked) for last_checked in cached_company_checks]
+    ages = [max((now - last_checked).total_seconds(), 0.0) for last_checked in normalized_checks if last_checked is not None]
+    average_age_seconds = (sum(ages) / len(ages)) if ages else None
+    return SourceRegistryHealthPayload(
+        total_companies_cached=len(ages),
+        average_data_age_seconds=average_age_seconds,
+        recent_error_window_hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
+        sources_with_recent_errors=_build_source_registry_error_payloads(session, now=now),
+    )
+
+
+def _empty_source_registry_health_payload() -> SourceRegistryHealthPayload:
+    return SourceRegistryHealthPayload(
+        total_companies_cached=0,
+        average_data_age_seconds=None,
+        recent_error_window_hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
+        sources_with_recent_errors=[],
+    )
+
+
+def _build_source_registry_error_payloads(
+    session: Session,
+    *,
+    now: datetime,
+) -> list[SourceRegistryErrorPayload]:
+    cutoff = now - timedelta(hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS)
+    rows = session.execute(
+        select(
+            DatasetRefreshState.dataset,
+            DatasetRefreshState.company_id,
+            DatasetRefreshState.failure_count,
+            DatasetRefreshState.last_error,
+            DatasetRefreshState.updated_at,
+        ).where(
+            DatasetRefreshState.last_error.is_not(None),
+            DatasetRefreshState.updated_at >= cutoff,
+        )
+    ).all()
+
+    aggregates: dict[str, dict[str, Any]] = {}
+    for dataset_id, company_id, failure_count, last_error, updated_at in rows:
+        for source_id in SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(str(dataset_id), ()): 
+            definition = get_source_definition(source_id)
+            if definition is None or not last_error:
+                continue
+            aggregate = aggregates.setdefault(
+                source_id,
+                {
+                    "source_id": source_id,
+                    "source_tier": definition.tier,
+                    "display_label": definition.display_label,
+                    "affected_dataset_ids": set(),
+                    "affected_company_ids": set(),
+                    "failure_count": 0,
+                    "last_error": str(last_error),
+                    "last_error_at": _normalize_utc_datetime(updated_at),
+                },
+            )
+            aggregate["affected_dataset_ids"].add(str(dataset_id))
+            aggregate["affected_company_ids"].add(int(company_id))
+            aggregate["failure_count"] += int(failure_count or 1)
+            normalized_updated_at = _normalize_utc_datetime(updated_at)
+            if normalized_updated_at >= aggregate["last_error_at"]:
+                aggregate["last_error_at"] = normalized_updated_at
+                aggregate["last_error"] = str(last_error)
+
+    return [
+        SourceRegistryErrorPayload(
+            source_id=str(aggregate["source_id"]),
+            source_tier=aggregate["source_tier"],
+            display_label=str(aggregate["display_label"]),
+            affected_dataset_ids=sorted(str(item) for item in aggregate["affected_dataset_ids"]),
+            affected_company_count=len(aggregate["affected_company_ids"]),
+            failure_count=int(aggregate["failure_count"]),
+            last_error=str(aggregate["last_error"]),
+            last_error_at=aggregate["last_error_at"],
+        )
+        for aggregate in sorted(
+            aggregates.values(),
+            key=lambda item: (
+                -item["last_error_at"].timestamp(),
+                str(item["display_label"]),
+            ),
+        )
+    ]
+
+
+def _source_registry_latest_checks_subquery():
+    statement_checks = (
+        select(
+            FinancialStatement.company_id.label("company_id"),
+            func.max(FinancialStatement.last_checked).label("last_checked"),
+        )
+        .where(FinancialStatement.statement_type == CANONICAL_STATEMENT_TYPE)
+        .group_by(FinancialStatement.company_id)
+        .subquery()
+    )
+
+    refresh_checks = (
+        select(
+            DatasetRefreshState.company_id.label("company_id"),
+            func.max(DatasetRefreshState.last_checked).label("last_checked"),
+        )
+        .where(DatasetRefreshState.dataset == "financials")
+        .group_by(DatasetRefreshState.company_id)
+        .subquery()
+    )
+
+    return (
+        select(
+            statement_checks.c.company_id.label("company_id"),
+            func.coalesce(refresh_checks.c.last_checked, statement_checks.c.last_checked).label("last_checked"),
+        )
+        .outerjoin(refresh_checks, refresh_checks.c.company_id == statement_checks.c.company_id)
+        .subquery()
+    )
+
+
 def _normalize_utc_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -7116,7 +10284,6 @@ def _build_watchlist_13f_deadline_events(
 
 def _build_watchlist_summary_item(
     session: Session,
-    background_tasks: BackgroundTasks,
     ticker: str,
     *,
     snapshot: CompanyCacheSnapshot | None = None,
@@ -7124,9 +10291,9 @@ def _build_watchlist_summary_item(
 ) -> WatchlistSummaryItemPayload:
     snapshot = snapshot or _resolve_cached_company_snapshot(session, ticker)
     if snapshot is None:
-        return _build_missing_watchlist_summary_item(background_tasks, ticker)
+        return _build_missing_watchlist_summary_item(ticker)
 
-    refresh = _refresh_for_snapshot(background_tasks, snapshot)
+    refresh = _refresh_for_snapshot(snapshot)
 
     financial_periods = int((coverage_counts or {}).get("financial_periods", 0))
     price_points = int((coverage_counts or {}).get("price_points", 0))
@@ -7261,14 +10428,14 @@ def _build_watchlist_summary_item(
     )
 
 
-def _build_missing_watchlist_summary_item(background_tasks: BackgroundTasks, ticker: str) -> WatchlistSummaryItemPayload:
+def _build_missing_watchlist_summary_item(ticker: str) -> WatchlistSummaryItemPayload:
     return WatchlistSummaryItemPayload(
         ticker=ticker,
         name=None,
         sector=None,
         cik=None,
         last_checked=None,
-        refresh=_trigger_refresh(background_tasks, ticker, reason="missing"),
+        refresh=_trigger_refresh(ticker, reason="missing"),
         alert_summary=AlertsSummaryPayload(total=0, high=0, medium=0, low=0),
         latest_alert=None,
         latest_activity=None,
@@ -7589,7 +10756,6 @@ def _normalize_compare_tickers(value: str | None) -> list[str]:
 
 def _build_company_compare_item(
     session: Session,
-    background_tasks: BackgroundTasks,
     ticker: str,
     requested_as_of: str | None,
     parsed_as_of: datetime | None,
@@ -7598,7 +10764,7 @@ def _build_company_compare_item(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = snapshot or _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyCompareItemPayload(
             ticker=normalized_ticker,
             financials=_apply_requested_as_of(
@@ -7643,7 +10809,7 @@ def _build_company_compare_item(
 
     financials = _visible_financials_for_company(session, snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
     compare_financials = financials
     compare_price_history = price_history
@@ -7683,7 +10849,7 @@ def _build_company_compare_item(
         metric_rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
         last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
         if not metric_rows:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
                 staleness_reason = "metrics_missing"
         summary = build_summary_payload(metric_rows, "ttm")
@@ -7971,10 +11137,12 @@ def _wrap_db_handler(function: Any) -> Any:
     async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
         async with _session_scope() as session:
             def invoke(sync_session: Session) -> Any:
-                main_module = sys.modules.get(f"{__name__.split('.', 1)[0]}.main")
-                if main_module is None:
-                    raise RuntimeError("app.main must be loaded before invoking handler wrappers")
-                rebound = main_module._clone_legacy_function(function)
+                rebound = function
+                if getattr(function, "__module__", None) == __name__:
+                    main_module = sys.modules.get(f"{__name__.split('.', 1)[0]}.main")
+                    if main_module is None:
+                        raise RuntimeError("app.main must be loaded before invoking handler wrappers")
+                    rebound = main_module._clone_legacy_function(function)
                 with bind_request_sync_session(sync_session):
                     return rebound(*args, **kwargs, session=sync_session)
 
@@ -8006,86 +11174,6 @@ def _wrap_session_backed_handlers() -> None:
     for name, value in list(globals().items()):
         if _has_sync_db_dependency(value):
             globals()[name] = _wrap_db_handler(value)
-
-
-# Import after the legacy handler module is fully defined so extracted handler
-# modules can depend on _shared utilities without circular import failures.
-from app.api.handlers.company_overview import company_brief, company_overview, company_peers, company_workspace_bootstrap
-from app.api.handlers.earnings import company_earnings, company_earnings_summary, company_earnings_workspace
-from app.api.handlers.events import (
-    company_activity_feed,
-    company_activity_overview,
-    company_alerts,
-    company_capital_markets,
-    company_capital_markets_summary,
-    company_capital_raises,
-    company_comment_letters,
-    company_events,
-    company_filing_events,
-    company_filing_events_summary,
-)
-from app.api.handlers.filings import company_filing_view, company_filings, filings_timeline, search_filings
-from app.api.handlers.financials import (
-    company_capital_structure,
-    company_charts,
-    company_charts_forecast_accuracy,
-    company_charts_scenario_clone,
-    company_charts_scenario_create,
-    company_charts_scenario_detail,
-    company_charts_scenario_update,
-    company_charts_scenarios,
-    company_charts_share_snapshot_create,
-    company_charts_share_snapshot_detail,
-    company_charts_what_if,
-    company_changes_since_last_filing,
-    company_compare,
-    company_derived_metrics,
-    company_derived_metrics_summary,
-    company_equity_claim_risk,
-    company_filing_insights,
-    company_financial_history,
-    company_financial_restatements,
-    company_financials,
-    company_metrics_timeseries,
-    company_segment_history,
-)
-from app.api.handlers.governance import company_executive_compensation, company_governance, company_governance_summary
-from app.api.handlers.jobs import (
-    cache_metrics,
-    healthcheck,
-    invalidate_cache_metrics,
-    observability_snapshot,
-    performance_audit_snapshot,
-    pool_status,
-    readiness_check,
-    refresh_company,
-    reset_performance_audit,
-    stream_job_events,
-)
-from app.api.handlers.market_context import company_market_context, company_sector_context, global_market_context
-from app.api.handlers.models import company_models, company_oil_scenario, company_oil_scenario_overlay, get_formula, latest_model_evaluation, list_formulas
-from app.api.handlers.ownership import (
-    company_beneficial_ownership,
-    company_beneficial_ownership_summary,
-    company_form144_filings,
-    company_institutional_holdings,
-    company_institutional_holdings_summary,
-    company_insider_trades,
-    insider_analytics,
-    ownership_analytics,
-)
-from app.api.handlers.screener import official_screener_filters, official_screener_search
-from app.api.handlers.search import resolve_company_identifier, search_companies
-from app.api.handlers.source_registry import (
-    _build_source_registry_entry_payload,
-    _build_source_registry_error_payloads,
-    _build_source_registry_health_payload,
-    _empty_source_registry_health_payload,
-    _sorted_source_registry_ids,
-    _source_registry_latest_checks_subquery,
-    source_registry,
-)
-from app.api.handlers.workspace import watchlist_calendar, watchlist_summary
 
 
 _wrap_session_backed_handlers()

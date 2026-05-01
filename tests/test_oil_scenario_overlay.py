@@ -8,9 +8,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import _shared as _shared_handlers
 import app.services.oil_scenario_overlay as overlay_service
 from app.db import get_db_session
 from app.main import app
+
+
+def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
+    monkeypatch.setattr(main_module, name, value)
+    if hasattr(_shared_handlers, name):
+        monkeypatch.setattr(_shared_handlers, name, value)
 
 
 def _snapshot(ticker: str = "XOM"):
@@ -133,15 +140,15 @@ def _client():
 
 
 def test_oil_scenario_overlay_reads_cached_payload_without_live_fetch(monkeypatch):
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "fresh"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_main_and_shared(monkeypatch, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "fresh"))
+    _patch_main_and_shared(
+        monkeypatch,
         "get_company_oil_scenario_overlay_last_checked",
         lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc),
     )
-    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: pytest.fail("refresh should not queue for fresh cache"))
-    monkeypatch.setattr(main_module, "EdgarClient", lambda: pytest.fail("hot read path should not instantiate SEC client"))
+    _patch_main_and_shared(monkeypatch, "queue_company_refresh", lambda *_args, **_kwargs: pytest.fail("refresh should not queue for fresh cache"))
+    _patch_main_and_shared(monkeypatch, "EdgarClient", lambda: pytest.fail("hot read path should not instantiate SEC client"))
 
     with _client() as client:
         response = client.get("/api/companies/XOM/oil-scenario-overlay")
@@ -160,17 +167,17 @@ def test_oil_scenario_overlay_reads_cached_payload_without_live_fetch(monkeypatc
 def test_oil_scenario_overlay_returns_stale_payload_and_queues_revalidation(monkeypatch):
     queued: list[tuple[str, bool]] = []
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "stale"))
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_main_and_shared(monkeypatch, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (_overlay_payload(), "stale"))
+    _patch_main_and_shared(
+        monkeypatch,
         "get_company_oil_scenario_overlay_last_checked",
         lambda *_args, **_kwargs: datetime(2026, 4, 3, tzinfo=timezone.utc),
     )
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(
+        monkeypatch,
         "queue_company_refresh",
-        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-stale",
+        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-stale",
     )
 
     with _client() as client:
@@ -187,13 +194,13 @@ def test_oil_scenario_overlay_returns_stale_payload_and_queues_revalidation(monk
 def test_oil_scenario_overlay_returns_placeholder_shell_when_dataset_missing(monkeypatch):
     queued: list[tuple[str, bool]] = []
 
-    monkeypatch.setattr(main_module, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
-    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (None, "missing"))
-    monkeypatch.setattr(main_module, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        main_module,
+    _patch_main_and_shared(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_main_and_shared(monkeypatch, "get_company_oil_scenario_overlay", lambda *_args, **_kwargs: (None, "missing"))
+    _patch_main_and_shared(monkeypatch, "get_company_oil_scenario_overlay_last_checked", lambda *_args, **_kwargs: None)
+    _patch_main_and_shared(
+        monkeypatch,
         "queue_company_refresh",
-        lambda _background_tasks, ticker, force=False: queued.append((ticker, force)) or "job-oil-missing",
+        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-missing",
     )
 
     with _client() as client:

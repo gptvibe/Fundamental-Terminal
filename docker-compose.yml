@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fundamentals}
       POSTGRES_USER: ${POSTGRES_USER:-fundamental}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fundamental}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -43,7 +43,7 @@ services:
     init: true
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       API_HOST: 0.0.0.0
       API_PORT: 8000
@@ -80,7 +80,7 @@ services:
     restart: unless-stopped
     command: ["/bin/sh", "/app/docker/backend/start-worker.sh"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
       WORKER_IDENTIFIERS: ${WORKER_IDENTIFIERS:-AAPL MSFT NVDA AMZN}
@@ -114,7 +114,7 @@ services:
     pull_policy: always
     command: ["/bin/sh", "/app/docker/backend/start-prewarm.sh"]
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://fundamental:fundamental@postgres:5432/fundamentals}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
       FRESHNESS_WINDOW_HOURS: ${FRESHNESS_WINDOW_HOURS:-24}

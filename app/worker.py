@@ -83,7 +83,7 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
                 if once:
                     return 0
                 if not status_broker.has_blocking_queue:
-                    threading.Event().wait(effective_poll_interval)
+                    time.sleep(effective_poll_interval)
                 continue
 
             if service is None:
@@ -133,7 +133,7 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
 def enqueue_refresh_jobs(identifiers: list[str], *, force: bool = False) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     for identifier in identifiers:
-        job_id = queue_company_refresh(None, identifier, force=force)
+        job_id = queue_company_refresh(identifier, force=force)
         logger.info("Queued refresh job %s for %s", job_id, identifier.strip().upper())
     return 0
 

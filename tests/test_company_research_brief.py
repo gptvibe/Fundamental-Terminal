@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from fastapi import BackgroundTasks
-
 import app.main as main_module
 from app.services.company_research_brief import _statement_value
 
@@ -20,7 +18,7 @@ def test_company_brief_returns_bootstrap_payload_for_uncached_ticker(monkeypatch
     monkeypatch.setattr(
         main_module,
         "_trigger_refresh",
-        lambda background_tasks, ticker, reason: main_module.RefreshState(
+        lambda ticker, reason: main_module.RefreshState(
             triggered=True,
             reason=reason,
             ticker=ticker,
@@ -28,7 +26,7 @@ def test_company_brief_returns_bootstrap_payload_for_uncached_ticker(monkeypatch
         ),
     )
 
-    response = main_module.company_brief("acme", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_brief("acme", as_of=None, session=object())
 
     assert response.build_state == "building"
     assert response.build_status == "No persisted company snapshot is available yet. A refresh has been queued to build the first brief."
@@ -73,7 +71,7 @@ def test_company_brief_returns_composite_payload_when_cached_company_exists(monk
     monkeypatch.setattr(
         main_module,
         "_refresh_for_snapshot",
-        lambda background_tasks, cached_snapshot: main_module.RefreshState(
+        lambda cached_snapshot: main_module.RefreshState(
             triggered=False,
             reason="fresh",
             ticker=cached_snapshot.company.ticker,
@@ -115,7 +113,7 @@ def test_company_brief_returns_composite_payload_when_cached_company_exists(monk
         ),
     )
 
-    response = main_module.company_brief("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_brief("ACME", as_of=None, session=object())
 
     assert response.build_state == "ready"
     assert response.build_status == "Research brief ready."
@@ -172,7 +170,7 @@ def test_company_brief_returns_stale_snapshot_and_queues_background_refresh(monk
         ),
     )
 
-    response = main_module.company_brief("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_brief("ACME", as_of=None, session=object())
 
     assert response.build_state == "ready"
     assert response.refresh.triggered is True
@@ -221,7 +219,7 @@ def test_company_overview_reuses_shared_snapshot_for_financials_and_brief(monkey
     monkeypatch.setattr(main_module, "_build_company_financials_response", _build_financials)
     monkeypatch.setattr(main_module, "_build_company_research_brief_response", _build_brief)
 
-    response = main_module.company_overview("ACME", BackgroundTasks(), as_of=None, session=object())
+    response = main_module.company_overview("ACME", as_of=None, session=object())
 
     assert response.company is not None
     assert response.company.ticker == "ACME"

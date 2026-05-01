@@ -16,6 +16,37 @@ def _clear_market_caches() -> None:
     market_data_module._clear_market_shared_cache()
 
 
+def test_market_data_client_uses_market_specific_http_settings(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        market_data_module,
+        "settings",
+        SimpleNamespace(
+            strict_official_mode=False,
+            market_user_agent="market-test-agent",
+            market_timeout_seconds=12.5,
+            sec_user_agent="sec-test-agent",
+            sec_timeout_seconds=30,
+        ),
+    )
+
+    class _FakeClient:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(market_data_module.httpx, "Client", _FakeClient)
+
+    client = market_data_module.MarketDataClient()
+    client.close()
+
+    assert captured["headers"]["User-Agent"] == "market-test-agent"
+    assert captured["timeout"] == 12.5
+
+
 def test_market_data_client_skips_yahoo_urls_when_strict_mode_enabled(monkeypatch) -> None:
     observed_urls: list[str] = []
 
@@ -24,8 +55,8 @@ def test_market_data_client_skips_yahoo_urls_when_strict_mode_enabled(monkeypatc
         "settings",
         SimpleNamespace(
             strict_official_mode=True,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
         ),
     )
 
@@ -54,8 +85,8 @@ def test_market_data_client_raises_unavailable_for_yahoo_404(monkeypatch) -> Non
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
         ),
@@ -94,8 +125,8 @@ def test_market_data_client_caches_market_profile_within_ttl(monkeypatch) -> Non
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=3600,
@@ -137,8 +168,8 @@ def test_market_data_client_market_profile_cache_expires(monkeypatch) -> None:
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=1,
@@ -192,8 +223,8 @@ def test_market_data_client_market_profile_cache_ignores_invalid_entries(monkeyp
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=3600,
@@ -246,8 +277,8 @@ def test_market_data_client_market_profile_cache_does_not_override_strict_mode(m
         "settings",
         SimpleNamespace(
             strict_official_mode=True,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_profile_cache_ttl_seconds=3600,
         ),
     )
@@ -275,8 +306,8 @@ def test_market_data_client_uses_shared_market_profile_cache_after_local_clear(m
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=3600,
@@ -340,8 +371,8 @@ def test_market_data_client_uses_shared_price_history_cache_with_bucketed_key(mo
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=3600,
@@ -408,8 +439,8 @@ def test_market_data_client_coalesces_concurrent_market_profile_fetches(monkeypa
         "settings",
         SimpleNamespace(
             strict_official_mode=False,
-            sec_user_agent="test-agent",
-            sec_timeout_seconds=10,
+            market_user_agent="test-agent",
+            market_timeout_seconds=10,
             market_max_retries=1,
             market_retry_backoff_seconds=0.01,
             market_profile_cache_ttl_seconds=3600,
