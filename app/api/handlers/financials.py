@@ -81,7 +81,7 @@ async def company_financials(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyFinancialsResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -151,7 +151,7 @@ def company_segment_history(
             kind=kind,
             years=years,
             periods=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(
                 stale_flags=["company_missing"],
                 missing_field_flags=["segment_history_empty"],
@@ -222,7 +222,7 @@ async def company_capital_structure(
             payload_data = _decode_hot_cache_payload(cached_hot)
             cached_response = CompanyCapitalStructureResponse.model_validate(payload_data)
             if not cached_hot.is_fresh:
-                stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                 cached_response = cached_response.model_copy(
                     update={
                         "refresh": stale_refresh,
@@ -249,7 +249,7 @@ async def company_capital_structure(
                     latest=None,
                     history=[],
                     last_capital_structure_check=None,
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "capital_structure_missing"]),
                     **_empty_provenance_contract("company_missing", "capital_structure_missing"),
                 )
@@ -314,7 +314,7 @@ def company_equity_claim_risk(
     if snapshot is None:
         payload = CompanyEquityClaimRiskResponse(
             company=None,
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing", "equity_claim_risk_missing"], missing_field_flags=["financials_missing", "capital_structure_missing", "capital_markets_missing", "filing_events_missing"]),
         )
         return _apply_requested_as_of(payload, requested_as_of)
@@ -342,7 +342,7 @@ def company_filing_insights(
         return CompanyFilingInsightsResponse(
             company=None,
             insights=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
@@ -374,7 +374,7 @@ def company_changes_since_last_filing(
         payload = CompanyChangesSinceLastFilingResponse(
             company=None,
             summary=ChangesSinceLastFilingSummaryPayload(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -529,7 +529,7 @@ def company_metrics_timeseries(
             last_financials_check=None,
             last_price_check=None,
             staleness_reason="company_missing",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -596,7 +596,7 @@ def company_derived_metrics(
             last_financials_check=None,
             last_price_check=None,
             staleness_reason="company_missing",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -616,7 +616,7 @@ def company_derived_metrics(
         )
         last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
         if not rows:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
                 staleness_reason = "metrics_missing"
 
@@ -727,7 +727,7 @@ def company_derived_metrics_summary(
             last_financials_check=None,
             last_price_check=None,
             staleness_reason="company_missing",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             **_empty_provenance_contract("company_missing"),
         )
@@ -742,7 +742,7 @@ def company_derived_metrics_summary(
         rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
         last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
         if not rows:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
                 staleness_reason = "metrics_missing"
 
@@ -878,7 +878,7 @@ def company_charts_forecast_accuracy(
 
     snapshot = _resolve_company_brief_snapshot(session, normalized_ticker)
     if snapshot is None:
-        refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyChartsForecastAccuracyResponse(
             company=None,
             status="insufficient_history",
@@ -898,7 +898,6 @@ def company_charts_forecast_accuracy(
         as_of=parsed_as_of,
     )
     refresh = _refresh_for_company_charts_forecast_accuracy(
-        background_tasks,
         session,
         snapshot,
         stored_snapshot=stored_snapshot,
@@ -931,7 +930,7 @@ def company_charts_forecast_accuracy(
                 )
                 return response
         if not refresh.triggered:
-            refresh = _trigger_refresh(background_tasks, snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
         return CompanyChartsForecastAccuracyResponse(
             company=_serialize_company(snapshot),
             status="insufficient_history",
@@ -1205,7 +1204,7 @@ def company_financial_restatements(
             company=None,
             summary=_empty_financial_restatements_summary(),
             restatements=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             **_empty_provenance_contract("company_missing"),
         )
         return _apply_requested_as_of(payload, requested_as_of)

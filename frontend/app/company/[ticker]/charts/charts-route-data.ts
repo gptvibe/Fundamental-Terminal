@@ -39,7 +39,7 @@ export function resolveDashboardMode(rawMode: string | null, hasProjectionStudio
 }
 
 export async function loadCompanyCharts(
-  baseUrl: string,
+  backendApiBaseUrl: string,
   ticker: string,
   asOf: string | null
 ): Promise<{ ok: true; data: CompanyChartsDashboardResponse } | { ok: false; failure: ChartsLoadFailure }> {
@@ -50,7 +50,7 @@ export async function loadCompanyCharts(
   const suffix = params.toString() ? `?${params.toString()}` : "";
 
   try {
-    const response = await fetch(`${baseUrl}/backend/api/companies/${encodeURIComponent(ticker)}/charts${suffix}`, {
+    const response = await fetch(`${backendApiBaseUrl}/api/companies/${encodeURIComponent(ticker)}/charts${suffix}`, {
       headers: {
         Accept: "application/json",
       },
@@ -81,7 +81,7 @@ export async function loadCompanyChartsRouteData(
   ticker: string,
   asOf: string | null
 ): Promise<{ ok: true; data: CompanyChartsDashboardResponse } | { ok: false; failure: ChartsLoadFailure }> {
-  return loadCompanyCharts(resolveServerBaseUrl(), ticker, asOf);
+  return loadCompanyCharts(resolveBackendApiBaseUrl(), ticker, asOf);
 }
 
 export function resolveServerBaseUrl(): string {
@@ -94,6 +94,10 @@ export function resolveServerBaseUrl(): string {
   }
 
   return `${protocol}://${host}`;
+}
+
+function resolveBackendApiBaseUrl(): string {
+  return process.env.BACKEND_API_BASE_URL ?? "http://127.0.0.1:8000";
 }
 
 export function buildCompanyChartsMetadata(

@@ -226,7 +226,7 @@ describe("CompanyChartsPage server route", () => {
     render(jsx);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:3000/backend/api/companies/NVDA/charts?as_of=2025-12-27",
+      "http://127.0.0.1:8000/api/companies/NVDA/charts?as_of=2025-12-27",
       expect.objectContaining({ next: expect.objectContaining({ revalidate: 20 }) })
     );
   });

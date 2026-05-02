@@ -12,7 +12,7 @@ export async function GET(
 ) {
   const { ticker, snapshotId } = await context.params;
   const layout = normalizeChartShareLayout(new URL(request.url).searchParams.get("layout"));
-  const record = await loadCompanyChartsShareSnapshot(ticker, snapshotId, { baseUrl: new URL(request.url).origin });
+  const record = await loadCompanyChartsShareSnapshot(ticker, snapshotId);
 
   if (!record) {
     return new Response("Snapshot not found", { status: 404 });

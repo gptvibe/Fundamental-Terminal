@@ -204,3 +204,38 @@ def test_dispatch_map_covers_all_handler_shim_targets() -> None:
 
     assert discovered_targets
     assert discovered_targets <= set(dispatch_handlers.ROUTE_HANDLERS)
+
+
+def test_split_financials_forecast_accuracy_refresh_call_matches_helper_signature() -> None:
+    tree = _parse_module(ROOT / "app" / "api" / "handlers" / "financials.py")
+
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_refresh_for_company_charts_forecast_accuracy"
+    ]
+
+    assert calls
+    assert len(calls) == 1
+
+    call = calls[0]
+    assert len(call.args) == 2
+    assert isinstance(call.args[0], ast.Name) and call.args[0].id == "session"
+    assert isinstance(call.args[1], ast.Name) and call.args[1].id == "snapshot"
+
+
+def test_split_financials_trigger_refresh_calls_do_not_pass_background_tasks() -> None:
+    tree = _parse_module(ROOT / "app" / "api" / "handlers" / "financials.py")
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "_trigger_refresh":
+            continue
+        if not node.args:
+            continue
+
+        first_arg = node.args[0]
+        assert not (isinstance(first_arg, ast.Name) and first_arg.id == "background_tasks")

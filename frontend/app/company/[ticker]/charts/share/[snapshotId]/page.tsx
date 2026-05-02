@@ -13,7 +13,7 @@ type CompanyChartsSharePageProps = {
 export async function generateMetadata({ params }: CompanyChartsSharePageProps): Promise<Metadata> {
   const { ticker, snapshotId } = await params;
   const baseUrl = resolveChartShareServerBaseUrl();
-  const record = await loadCompanyChartsShareSnapshot(ticker, snapshotId, { baseUrl });
+  const record = await loadCompanyChartsShareSnapshot(ticker, snapshotId);
   if (!record) {
     return {
       title: "Charts Share Snapshot",
@@ -25,8 +25,7 @@ export async function generateMetadata({ params }: CompanyChartsSharePageProps):
 
 export default async function CompanyChartsSharePage({ params }: CompanyChartsSharePageProps) {
   const { ticker, snapshotId } = await params;
-  const baseUrl = resolveChartShareServerBaseUrl();
-  const record = await loadCompanyChartsShareSnapshot(ticker, snapshotId, { baseUrl });
+  const record = await loadCompanyChartsShareSnapshot(ticker, snapshotId);
 
   if (!record) {
     notFound();

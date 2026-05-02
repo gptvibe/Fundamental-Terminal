@@ -146,7 +146,7 @@ describe("CompanyChartsPage", () => {
     render(jsx);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://localhost:3000/backend/api/companies/ACME/charts?as_of=2026-04-17",
+      "http://127.0.0.1:8000/api/companies/ACME/charts?as_of=2026-04-17",
       expect.objectContaining({ next: expect.objectContaining({ revalidate: 20 }) })
     );
     expect(screen.getByTestId("charts-dashboard").textContent).toBe("dashboard:outlook:disabled");

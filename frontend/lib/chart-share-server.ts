@@ -7,11 +7,11 @@ import type { CompanyChartsShareSnapshotRecordPayload } from "@/lib/types";
 export async function loadCompanyChartsShareSnapshot(
   ticker: string,
   snapshotId: string,
-  options?: { baseUrl?: string }
+  options?: { backendApiBaseUrl?: string }
 ): Promise<CompanyChartsShareSnapshotRecordPayload | null> {
-  const baseUrl = options?.baseUrl ?? resolveChartShareServerBaseUrl();
+  const backendApiBaseUrl = options?.backendApiBaseUrl ?? resolveBackendApiBaseUrl();
   const response = await fetch(
-    `${baseUrl}/backend/api/companies/${encodeURIComponent(ticker)}/charts/share-snapshots/${encodeURIComponent(snapshotId)}`,
+    `${backendApiBaseUrl}/api/companies/${encodeURIComponent(ticker)}/charts/share-snapshots/${encodeURIComponent(snapshotId)}`,
     {
       cache: "no-store",
       headers: {
@@ -37,6 +37,10 @@ export function resolveChartShareServerBaseUrl(): string {
   }
 
   return `${protocol}://${host}`;
+}
+
+function resolveBackendApiBaseUrl(): string {
+  return process.env.BACKEND_API_BASE_URL ?? "http://127.0.0.1:8000";
 }
 
 export function buildCompanyChartsShareMetadata(
