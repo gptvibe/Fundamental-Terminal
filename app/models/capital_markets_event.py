@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -38,6 +38,9 @@ class CapitalMarketsEvent(Base):
     offering_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
     shelf_size: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_late_filer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    plan_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    registered_shares: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares_parse_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

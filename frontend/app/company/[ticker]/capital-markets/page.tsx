@@ -10,9 +10,9 @@ import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyEquityClaimRisk } from "@/lib/api";
+import { getCompanyCapitalMarkets, getCompanyEquityClaimRisk } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
-import type { CompanyEquityClaimRiskResponse, EquityClaimRiskEvidencePayload } from "@/lib/types";
+import type { CapitalRaisePayload, CompanyCapitalRaisesResponse, CompanyEquityClaimRiskResponse, EquityClaimRiskEvidencePayload } from "@/lib/types";
 
 export default function CompanyCapitalMarketsPage() {
   const params = useParams<{ ticker: string }>();
@@ -33,6 +33,8 @@ export default function CompanyCapitalMarketsPage() {
   const [riskData, setRiskData] = useState<CompanyEquityClaimRiskResponse | null>(null);
   const [riskLoading, setRiskLoading] = useState(true);
   const [riskError, setRiskError] = useState<string | null>(null);
+  const [capitalMarketsData, setCapitalMarketsData] = useState<CompanyCapitalRaisesResponse | null>(null);
+  const [capitalMarketsLoading, setCapitalMarketsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,6 +63,31 @@ export default function CompanyCapitalMarketsPage() {
       cancelled = true;
     };
   }, [reloadKey, requestedAsOf, ticker]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCapitalMarkets() {
+      try {
+        setCapitalMarketsLoading(true);
+        const data = await getCompanyCapitalMarkets(ticker);
+        if (!cancelled) setCapitalMarketsData(data);
+      } catch {
+        // S-8 section degrades gracefully; no explicit error state needed.
+      } finally {
+        if (!cancelled) setCapitalMarketsLoading(false);
+      }
+    }
+
+    void loadCapitalMarkets();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
+  const equityPlanFilings = (capitalMarketsData?.filings ?? []).filter(
+    (f) => f.form === "S-8" || f.form === "S-8/A"
+  );
 
   const summary = riskData?.summary ?? null;
   const shareCountBridge = riskData?.share_count_bridge ?? null;
@@ -267,6 +294,34 @@ export default function CompanyCapitalMarketsPage() {
         )}
       </Panel>
 
+      <Panel title="Equity plan registrations (S-8)" subtitle="Employee equity plan registrations filed on Form S-8, showing plan names, registered shares, and parse confidence.">
+        {capitalMarketsLoading && equityPlanFilings.length === 0 ? (
+          <div className="text-muted">Loading equity plan registration filings...</div>
+        ) : equityPlanFilings.length > 0 ? (
+          <div className="workspace-card-stack">
+            <CompanyMetricGrid
+              items={[
+                { label: "S-8 Filings", value: String(equityPlanFilings.length) },
+                {
+                  label: "Total Registered Shares",
+                  value: formatCompactNumber(
+                    equityPlanFilings.reduce((sum, f) => sum + (f.registered_shares ?? 0), 0) || null
+                  ),
+                },
+                { label: "Latest S-8", value: formatDate(equityPlanFilings[0]?.filing_date) },
+              ]}
+            />
+            <div className="workspace-card-stack">
+              {equityPlanFilings.map((filing) => (
+                <EquityPlanFilingCard key={filing.accession_number ?? `${filing.form}-${filing.filing_date}`} filing={filing} />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-muted">No S-8 equity plan registrations are cached for this company yet.</div>
+        )}
+      </Panel>
+
       <Panel title="Hybrid securities and debt maturity wall" subtitle="Warrants, convertibles, and the amount of debt that needs attention in the next two years.">
         {riskError ? (
           <div className="text-muted">Unable to load hybrid-security or debt-wall signals while the pack is unavailable.</div>
@@ -440,6 +495,41 @@ function EvidenceCardBody({ item }: { item: EquityClaimRiskEvidencePayload }) {
       <div className="text-muted workspace-card-copy">{item.detail}</div>
       {item.accession_number ? <div className="text-muted workspace-card-copy">{item.accession_number}</div> : null}
     </>
+  );
+}
+
+function EquityPlanFilingCard({ filing }: { filing: CapitalRaisePayload }) {
+  const confidence = filing.shares_parse_confidence;
+  const confidenceTone = confidence === "high" ? "green" : confidence === "medium" ? "gold" : "red";
+
+  const content = (
+    <>
+      <div className="workspace-card-row">
+        <div className="workspace-pill-row">
+          <span className="pill">{filing.form}</span>
+          {filing.plan_name ? <span className="pill">{filing.plan_name}</span> : null}
+          {confidence ? (
+            <span className={`pill tone-${confidenceTone}`}>{confidence} confidence</span>
+          ) : null}
+        </div>
+        <div className="text-muted">{formatDate(filing.filing_date)}</div>
+      </div>
+      <div className="workspace-card-title">{filing.summary}</div>
+      <div className="text-muted workspace-card-copy">
+        {filing.registered_shares != null
+          ? `Registered shares: ${formatCompactNumber(filing.registered_shares)}`
+          : "Registered shares: not parsed"}
+        {filing.accession_number ? ` · ${filing.accession_number}` : ""}
+      </div>
+    </>
+  );
+
+  return filing.source_url ? (
+    <a href={filing.source_url} target="_blank" rel="noreferrer" className="filing-link-card workspace-card-link">
+      {content}
+    </a>
+  ) : (
+    <div className="filing-link-card">{content}</div>
   );
 }
 

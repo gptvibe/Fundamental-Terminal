@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
+import { BeginnerGuidanceBanner } from "@/components/company/beginner-guidance-banner";
 import { PanelErrorBoundary } from "@/components/company/brief-primitives";
 import { CompanyOverviewStatusStrip } from "@/components/company/company-overview-layout-sections";
+import { FilingRiskSignalsPanel } from "@/components/filings/filing-risk-signals-panel";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -14,6 +16,7 @@ import { DeferredClientSection } from "@/components/performance/deferred-client-
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
+import { useUIDensity } from "@/hooks/use-ui-density";
 import { showAppToast } from "@/lib/app-toast";
 import { COMMAND_PALETTE_EXPORT_MEMO_EVENT, type CommandPaletteTickerDetail } from "@/lib/command-palette-events";
 import {
@@ -25,6 +28,7 @@ import {
   getCompanyChangesSinceLastFiling,
   getCompanyEarningsSummary,
   getCompanyFinancials,
+  getCompanyFilingRiskSignals,
   getCompanyGovernanceSummary,
   getCompanyInsiderTrades,
   getCompanyInstitutionalHoldings,
@@ -193,10 +197,18 @@ export default function CompanyResearchBriefPage() {
     activeJobId ?? refreshState?.job_id ?? initialBriefData?.refresh.job_id ?? null
   );
   const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
-  const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker);
+  const { isBeginnerMode } = useUIDensity();
+  const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker, {
+    defaultOverrides: isBeginnerMode ? { monitor: false } : undefined,
+  });
+  const [dataQualityExpanded, setDataQualityExpanded] = useState(() => !isBeginnerMode);
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
+  const [filingRiskSignals, setFilingRiskSignals] = useState<Awaited<ReturnType<typeof getCompanyFilingRiskSignals>> | null>(null);
+  const [filingRiskSignalsLoading, setFilingRiskSignalsLoading] = useState(true);
+  const [filingRiskSignalsError, setFilingRiskSignalsError] = useState<string | null>(null);
   const pageCompany = company ?? briefData.brief?.company ?? data?.company ?? briefData.activityOverview.data?.company ?? briefData.models.data?.company ?? null;
   const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
+  const hasHighSeverityFilingSignal = (filingRiskSignals?.summary.high_severity_count ?? 0) > 0;
   const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
   const previousAnnual = annualStatements[1] ?? null;
   const foreignIssuerStyleFiling = isForeignIssuerAnnualForm(latestFinancial?.filing_type);
@@ -279,6 +291,41 @@ export default function CompanyResearchBriefPage() {
       { href: `/company/${encodeURIComponent(ticker)}/events`, label: "Events" },
     ],
     [ticker]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFilingRiskSignals() {
+      try {
+        setFilingRiskSignalsLoading(true);
+        setFilingRiskSignalsError(null);
+        const response = await getCompanyFilingRiskSignals(ticker);
+        if (!cancelled) {
+          setFilingRiskSignals(response);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setFilingRiskSignalsError(nextError instanceof Error ? nextError.message : "Unable to load filing risk signals");
+          setFilingRiskSignals(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setFilingRiskSignalsLoading(false);
+        }
+      }
+    }
+
+    void loadFilingRiskSignals();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
+  const filingRiskSignalsPanel = (
+    <Panel title="Filing text signals" subtitle="Investor-relevant filing language already captured from cached SEC text" variant="subtle">
+      <FilingRiskSignalsPanel payload={filingRiskSignals} loading={filingRiskSignalsLoading} error={filingRiskSignalsError} maxItems={4} />
+    </Panel>
   );
 
   const snapshotNarrative = useMemo(
@@ -503,9 +550,11 @@ export default function CompanyResearchBriefPage() {
           connectionState={connectionState}
           presentation="brief"
         >
+          {hasHighSeverityFilingSignal ? filingRiskSignalsPanel : null}
           <Panel title="Risk & red flags" subtitle="Ongoing watchlist of balance-sheet, cash-flow, dilution, and distress signals" variant="subtle">
             <RiskRedFlagPanel financials={financials} />
           </Panel>
+          {hasHighSeverityFilingSignal ? null : filingRiskSignalsPanel}
         </CompanyUtilityRail>
       }
       mainClassName="company-page-grid research-brief-layout"
@@ -571,7 +620,7 @@ export default function CompanyResearchBriefPage() {
         hasWarnings={Boolean(error || briefData.error)}
       />
 
-
+      <BeginnerGuidanceBanner />
 
       <SnapshotSection
         loading={loading}
@@ -620,6 +669,9 @@ export default function CompanyResearchBriefPage() {
           changesState={briefData.changes}
           earningsSummaryState={briefData.earningsSummary}
           activityOverviewState={briefData.activityOverview}
+          modelsState={briefData.models}
+          ownershipSummaryState={briefData.ownershipSummary}
+          governanceSummaryState={briefData.governanceSummary}
           topAlerts={topAlerts}
           latestEntries={latestEntries}
           briefLoading={briefData.loading}
@@ -730,43 +782,58 @@ export default function CompanyResearchBriefPage() {
         rootMargin="480px 0px"
         placeholder={<DeferredSectionPlaceholder title="Data quality & sources" />}
       >
-        <CompanyOverviewDataQualitySourcesSection
-          ticker={ticker}
-          company={pageCompany}
-          refreshState={refreshState}
-          activeJobId={activeJobId}
-          financialsResponse={data}
-          filingTimeline={briefData.filingTimeline}
-          asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
-          lastRefreshedAt={data?.last_refreshed_at ?? null}
-          provenance={data?.provenance ?? null}
-          sourceMix={data?.source_mix ?? null}
-          fallbackLabels={fallbackLabels}
-          warmupPanel={
-            <ResearchBriefWarmupPanel
-              buildState={briefData.buildState}
-              buildStatus={briefData.buildStatus}
-              sectionStatuses={mergeBusinessQualitySectionStatus(briefData.sectionStatuses, {
-                loading,
-                hasFinancials: Boolean(financials.length || latestFinancial),
-              })}
-              summaryCards={briefData.summaryCards}
+        <div className="research-brief-section" id="data-quality">
+          <button
+            type="button"
+            className="research-brief-section-toggle"
+            aria-expanded={dataQualityExpanded ? "true" : "false"}
+            onClick={() => setDataQualityExpanded((prev) => !prev)}
+          >
+            <span className="research-brief-section-toggle-label">Data quality &amp; sources</span>
+            <span className="research-brief-section-toggle-caret" aria-hidden="true">
+              {dataQualityExpanded ? "▲" : "▼"}
+            </span>
+          </button>
+          {dataQualityExpanded ? (
+            <CompanyOverviewDataQualitySourcesSection
+              ticker={ticker}
+              company={pageCompany}
+              refreshState={refreshState}
+              activeJobId={activeJobId}
+              financialsResponse={data}
               filingTimeline={briefData.filingTimeline}
-              refreshState={briefData.brief?.refresh ?? refreshState}
+              asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
+              lastRefreshedAt={data?.last_refreshed_at ?? null}
+              provenance={data?.provenance ?? null}
+              sourceMix={data?.source_mix ?? null}
+              fallbackLabels={fallbackLabels}
+              warmupPanel={
+                <ResearchBriefWarmupPanel
+                  buildState={briefData.buildState}
+                  buildStatus={briefData.buildStatus}
+                  sectionStatuses={mergeBusinessQualitySectionStatus(briefData.sectionStatuses, {
+                    loading,
+                    hasFinancials: Boolean(financials.length || latestFinancial),
+                  })}
+                  summaryCards={briefData.summaryCards}
+                  filingTimeline={briefData.filingTimeline}
+                  refreshState={briefData.brief?.refresh ?? refreshState}
+                />
+              }
+              partialErrors={
+                error || briefData.error ? (
+                  <div className="research-brief-partial-errors">
+                    {[error, briefData.error].filter(Boolean).map((message) => (
+                      <span key={message} className="pill">
+                        {message}
+                      </span>
+                    ))}
+                  </div>
+                ) : null
+              }
             />
-          }
-          partialErrors={
-            error || briefData.error ? (
-              <div className="research-brief-partial-errors">
-                {[error, briefData.error].filter(Boolean).map((message) => (
-                  <span key={message} className="pill">
-                    {message}
-                  </span>
-                ))}
-              </div>
-            ) : null
-          }
-        />
+          ) : null}
+        </div>
       </DeferredClientSection>
     </CompanyWorkspaceShell>
   );

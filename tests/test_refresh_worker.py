@@ -139,6 +139,41 @@ def test_queue_worker_emits_failed_refresh_metric(monkeypatch) -> None:
     assert snapshot["records"][0]["ticker"] == "AAPL"
 
 
+def test_queue_worker_logs_warning_for_unresolved_ticker(monkeypatch) -> None:
+    created_services: list[_FakeService] = []
+    warning_messages: list[str] = []
+    exception_messages: list[str] = []
+
+    monkeypatch.setattr(worker_module, "status_broker", _FakeBroker([_job("job-1", ticker="ZZZZ"), None]))
+    monkeypatch.setattr(worker_module.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(
+        worker_module,
+        "EdgarIngestionService",
+        lambda: created_services.append(_FakeService(f"service-{len(created_services) + 1}")) or created_services[-1],
+    )
+    monkeypatch.setattr(
+        worker_module,
+        "run_refresh_job",
+        lambda _identifier, **_kwargs: (_ for _ in ()).throw(ValueError("Unable to resolve SEC company for 'ZZZZ'")),
+    )
+    monkeypatch.setattr(worker_module.logger, "warning", lambda message, *_args: warning_messages.append(message))
+    monkeypatch.setattr(worker_module.logger, "exception", lambda message, *_args: exception_messages.append(message))
+
+    result = worker_module.run_refresh_queue_worker(poll_interval_seconds=0.01, once=True)
+
+    assert result == 0
+    assert warning_messages == ["Refresh worker skipped unresolved ticker for job %s (%s): %s"]
+    assert exception_messages == []
+    assert len(created_services) == 1
+    assert created_services[0].close_calls == 1
+
+
+def test_expected_refresh_failure_classifier() -> None:
+    assert worker_module._is_expected_refresh_failure(ValueError("Unable to resolve SEC company for 'ZZZZ'")) is True
+    assert worker_module._is_expected_refresh_failure(ValueError("Company identifier is required")) is False
+    assert worker_module._is_expected_refresh_failure(RuntimeError("boom")) is False
+
+
 def test_queue_worker_uses_sleep_for_non_blocking_idle_poll(monkeypatch) -> None:
     class _StopLoop(RuntimeError):
         pass

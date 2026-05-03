@@ -160,7 +160,7 @@ export default function CompanyInsidersPage() {
         <InsiderRoleActivityChart trades={insiderTrades} />
       </Panel>
 
-      <Panel title="Insider Transactions" subtitle="Sortable Form 4 activity with buy, sell, and 10b5-1 details">
+      <Panel title="Insider Transactions" subtitle="Sortable Form 4 activity with planned vs discretionary sale context to reduce false alarm on routine selling">
         <InsiderTransactionsTable ticker={ticker} trades={insiderTrades} loading={loading && insiderData === null} error={insiderError} refresh={insiderData?.refresh ?? null} />
       </Panel>
 

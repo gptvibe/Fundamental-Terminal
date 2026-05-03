@@ -21,6 +21,7 @@ from app.models import (
     EarningsRelease,
     ExecutiveCompensation,
     FilingEvent,
+    FilingRiskSignal,
     FinancialRestatement,
     FinancialStatement,
     Form144Filing,
@@ -354,6 +355,38 @@ def get_company_filing_insights(
         .limit(limit)
     )
     return list(session.execute(statement).scalars())
+
+
+def get_company_filing_risk_signals(
+    session: Session,
+    company_id: int,
+    *,
+    limit: int = 24,
+) -> list[FilingRiskSignal]:
+    statement = (
+        select(FilingRiskSignal)
+        .where(FilingRiskSignal.company_id == company_id)
+        .order_by(
+            FilingRiskSignal.filed_date.desc().nullslast(),
+            FilingRiskSignal.severity.asc(),
+            FilingRiskSignal.accession_number.desc(),
+            FilingRiskSignal.signal_category.asc(),
+        )
+        .limit(limit)
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_company_filing_risk_signals_cache_status(session: Session, company: Company) -> tuple[datetime | None, str]:
+    state_last_checked, state_cache = cache_state_for_dataset(session, company.id, "filing_risk_signals")
+    if state_cache != "missing":
+        return state_last_checked, state_cache
+
+    statement = select(func.max(FilingRiskSignal.last_checked)).where(FilingRiskSignal.company_id == company.id)
+    last_checked = _normalize_datetime(session.execute(statement).scalar_one_or_none())
+    if last_checked is not None:
+        mark_dataset_checked(session, company.id, "filing_risk_signals", checked_at=last_checked, success=True)
+    return last_checked, _cache_state_from_last_checked(last_checked)
 
 
 def get_company_models(

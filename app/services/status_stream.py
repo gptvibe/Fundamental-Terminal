@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import settings
@@ -270,6 +270,8 @@ class SharedStatusBroker:
     ) -> str:
         normalized_ticker = ticker.strip().upper()
         now = datetime.now(timezone.utc)
+        pending_job_id = uuid.uuid4().hex
+        event: JobEvent | None = None
 
         with self._sync_session_scope() as session:
             existing_job = self._get_active_job(session, ticker=normalized_ticker, kind=kind, dataset=dataset)
@@ -281,48 +283,93 @@ class SharedStatusBroker:
                 company = ensure_company(session, normalized_ticker)
                 resolved_company_id = company.id if company is not None else None
 
-            job = RefreshJob(
-                job_id=uuid.uuid4().hex,
-                company_id=resolved_company_id,
-                ticker=normalized_ticker,
-                dataset=dataset,
-                kind=kind,
-                force=force,
-                status="queued",
-                requested_at=now,
-                updated_at=now,
-            )
-            try:
-                session.add(job)
-                session.flush()
-                event = self._append_event(
-                    session,
-                    job,
-                    timestamp=now,
-                    stage="queued",
-                    message=f"{kind.title()} job queued for {normalized_ticker}",
-                    status="queued",
-                )
-                if resolved_company_id is not None:
-                    set_active_refresh_job(
-                        session,
+            inserted = False
+            dialect_name = getattr(getattr(session, "bind", None), "dialect", None)
+            dialect_name = getattr(dialect_name, "name", "")
+
+            if dialect_name == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+
+                insert_stmt = (
+                    postgresql_insert(RefreshJob)
+                    .values(
+                        job_id=pending_job_id,
                         company_id=resolved_company_id,
+                        ticker=normalized_ticker,
                         dataset=dataset,
-                        job_id=job.job_id,
+                        kind=kind,
+                        force=force,
+                        status="queued",
+                        requested_at=now,
                         updated_at=now,
                     )
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-                existing_job = self._get_active_job(session, ticker=normalized_ticker, kind=kind, dataset=dataset)
+                    .on_conflict_do_nothing(
+                        index_elements=[RefreshJob.ticker, RefreshJob.dataset],
+                        index_where=text("status IN ('queued', 'running')"),
+                    )
+                    .returning(RefreshJob.job_id)
+                )
+                inserted_job_id = session.execute(insert_stmt).scalar_one_or_none()
+                if inserted_job_id is not None:
+                    pending_job_id = inserted_job_id
+                    inserted = True
+            else:
+                job = RefreshJob(
+                    job_id=pending_job_id,
+                    company_id=resolved_company_id,
+                    ticker=normalized_ticker,
+                    dataset=dataset,
+                    kind=kind,
+                    force=force,
+                    status="queued",
+                    requested_at=now,
+                    updated_at=now,
+                )
+                try:
+                    session.add(job)
+                    session.flush()
+                    inserted = True
+                except IntegrityError:
+                    session.rollback()
+                    existing_job = self._get_active_job_for_dataset(session, ticker=normalized_ticker, dataset=dataset)
+                    if existing_job is not None:
+                        return existing_job.job_id
+                    raise
+
+            if not inserted:
+                existing_job = self._get_active_job_for_dataset(session, ticker=normalized_ticker, dataset=dataset)
                 if existing_job is not None:
                     return existing_job.job_id
-                raise
+                raise RuntimeError(f"Unable to enqueue refresh job for {normalized_ticker}")
 
-        _emit_event_log(job.job_id, event)
-        self._publish_realtime_event(job.job_id, event)
-        self._enqueue_job_signal(job.job_id)
-        return job.job_id
+            job = self._get_job(session, pending_job_id, for_update=True)
+            if job is None:
+                raise RuntimeError(f"Refresh job {pending_job_id} was created but could not be reloaded")
+
+            event = self._append_event(
+                session,
+                job,
+                timestamp=now,
+                stage="queued",
+                message=f"{kind.title()} job queued for {normalized_ticker}",
+                status="queued",
+            )
+            if resolved_company_id is not None:
+                set_active_refresh_job(
+                    session,
+                    company_id=resolved_company_id,
+                    dataset=dataset,
+                    job_id=job.job_id,
+                    updated_at=now,
+                )
+            session.commit()
+
+        if event is None:
+            raise RuntimeError(f"Refresh job {pending_job_id} was created without an event")
+        _emit_event_log(pending_job_id, event)
+        self._publish_realtime_event(pending_job_id, event)
+        self._enqueue_job_signal(pending_job_id)
+        return pending_job_id
 
     def get_active_job_id(self, *, ticker: str, kind: str, dataset: str = "company_refresh") -> str | None:
         normalized_ticker = ticker.strip().upper()
@@ -1029,6 +1076,19 @@ class SharedStatusBroker:
             .where(
                 RefreshJob.ticker == ticker,
                 RefreshJob.kind == kind,
+                RefreshJob.dataset == dataset,
+                RefreshJob.status.in_(tuple(ACTIVE_JOB_STATES)),
+            )
+            .order_by(RefreshJob.requested_at.desc(), RefreshJob.id.desc())
+            .limit(1)
+        )
+        return session.execute(statement).scalar_one_or_none()
+
+    def _get_active_job_for_dataset(self, session, *, ticker: str, dataset: str) -> RefreshJob | None:
+        statement: Select[tuple[RefreshJob]] = (
+            select(RefreshJob)
+            .where(
+                RefreshJob.ticker == ticker,
                 RefreshJob.dataset == dataset,
                 RefreshJob.status.in_(tuple(ACTIVE_JOB_STATES)),
             )

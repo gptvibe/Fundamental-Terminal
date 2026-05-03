@@ -17,13 +17,13 @@ def company_insider_trades(
             company=None,
             insider_trades=[],
             summary=_serialize_insider_activity_summary(build_insider_activity_summary([])),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     insider_last_checked, insider_cache_state = get_company_insider_trade_cache_status(session, snapshot.company)
     insider_trades = get_company_insider_trades(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=insider_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=insider_cache_state)
         if insider_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -51,13 +51,13 @@ def company_institutional_holdings(
         return CompanyInstitutionalHoldingsResponse(
             company=None,
             institutional_holdings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
     holdings = get_company_institutional_holdings(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=holdings_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=holdings_cache_state)
         if holdings_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -84,13 +84,13 @@ def company_institutional_holdings_summary(
         return CompanyInstitutionalHoldingsSummaryResponse(
             company=None,
             summary=InstitutionalHoldingsSummaryPayload(total_rows=0, unique_managers=0, amended_rows=0, latest_reporting_date=None),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     holdings_last_checked, holdings_cache_state = get_company_institutional_holdings_cache_status(session, snapshot.company)
     holdings = get_company_institutional_holdings(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=holdings_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=holdings_cache_state)
         if holdings_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -118,13 +118,13 @@ def company_form144_filings(
         return CompanyForm144Response(
             company=None,
             filings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
         )
 
     form144_last_checked, form144_cache_state = get_company_form144_cache_status(session, snapshot.company)
     filings = get_company_form144_filings(session, snapshot.company.id)
     refresh = (
-        _trigger_refresh(background_tasks, snapshot.company.ticker, reason=form144_cache_state)
+        _trigger_refresh(snapshot.company.ticker, reason=form144_cache_state)
         if form144_cache_state in {"missing", "stale"}
         else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     )
@@ -179,7 +179,7 @@ def company_beneficial_ownership(
         return CompanyBeneficialOwnershipResponse(
             company=None,
             filings=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
         )
 
@@ -208,7 +208,7 @@ def company_beneficial_ownership_summary(
         return CompanyBeneficialOwnershipSummaryResponse(
             company=None,
             summary=_empty_beneficial_ownership_summary(),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             error=None,
         )
 
@@ -235,3 +235,4 @@ __all__ = [
     "insider_analytics",
     "ownership_analytics",
 ]
+

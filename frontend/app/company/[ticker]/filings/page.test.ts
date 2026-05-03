@@ -46,6 +46,10 @@ vi.mock("@/components/filings/filing-parser-insights", () => ({
   FilingParserInsights: () => React.createElement("div", null, "insights"),
 }));
 
+vi.mock("@/components/filings/filing-risk-signals-panel", () => ({
+  FilingRiskSignalsPanel: () => React.createElement("div", null, "filing-risk-signals"),
+}));
+
 vi.mock("@/components/filings/filing-document-viewer", () => ({
   FilingDocumentViewer: () => React.createElement("div", null, "viewer"),
 }));
@@ -62,6 +66,13 @@ vi.mock("@/lib/api", () => ({
     company: null,
     insights: [],
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+  })),
+  getCompanyFilingRiskSignals: vi.fn(async () => ({
+    company: null,
+    summary: { total_signals: 0, high_severity_count: 0, medium_severity_count: 0, latest_filed_date: null },
+    signals: [],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    diagnostics: {} as never,
   })),
   getCompanyChangesSinceLastFiling: vi.fn(async () => ({
     company: null,
@@ -108,6 +119,7 @@ describe("CompanyFilingsPage", () => {
     expect(html).toContain("SEC-first filing workflow");
     expect(html).toContain("Recent Filing Timeline");
     expect(html).toContain("Filing Parser Snapshot");
+    expect(html).toContain("Filing text signals");
     expect(html).toContain("High-Signal Filing Changes");
     expect(html).toContain("Filing Viewer");
     expect(html).toContain("Form Coverage");

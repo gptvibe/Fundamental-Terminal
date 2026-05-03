@@ -19,6 +19,7 @@ from app.models.executive_compensation import ExecutiveCompensation
 from app.models.financial_restatement import FinancialRestatement
 from app.models.financial_statement import FinancialStatement
 from app.models.filing_event import FilingEvent
+from app.models.filing_risk_signal import FilingRiskSignal
 from app.models.form144_filing import Form144Filing
 from app.models.insider_trade import InsiderTrade
 from app.models.institutional_fund import InstitutionalFund
@@ -57,6 +58,7 @@ __all__ = [
     "FinancialRestatement",
     "FinancialStatement",
     "FilingEvent",
+    "FilingRiskSignal",
     "Form144Filing",
     "InsiderTrade",
     "InstitutionalFund",

@@ -50,3 +50,23 @@ def test_collect_capital_markets_events_marks_late_filer_notices():
     row = rows[0]
     assert row.event_type == "Late Filing Notice"
     assert row.is_late_filer is True
+
+
+def test_collect_capital_markets_events_excludes_unknown_form():
+    """Forms not in SUPPORTED_CAPITAL_FORMS must be silently skipped."""
+    filing_index = {
+        "0000003": FilingMetadata(
+            accession_number="0000003",
+            form="10-K",
+            filing_date=date(2026, 3, 22),
+            report_date=date(2026, 3, 22),
+            primary_document="10k.htm",
+            primary_doc_description="Annual report.",
+            items=None,
+        )
+    }
+
+    rows = collect_capital_markets_events("0001000000", filing_index)
+
+    assert len(rows) == 0
+

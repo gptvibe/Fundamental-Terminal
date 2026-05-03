@@ -16,7 +16,7 @@ def company_earnings(
         return CompanyEarningsResponse(
             company=None,
             earnings_releases=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
@@ -48,7 +48,7 @@ def company_earnings_summary(
         return CompanyEarningsSummaryResponse(
             company=None,
             summary=_build_earnings_summary([]),
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
@@ -102,7 +102,7 @@ def company_earnings_workspace(
                 sector_eps_drift_percentile=None,
             ),
             alerts=[],
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
         )
 
@@ -146,3 +146,4 @@ def company_earnings_workspace(
 
 
 __all__ = ["company_earnings", "company_earnings_summary", "company_earnings_workspace"]
+

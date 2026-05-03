@@ -55,7 +55,7 @@ async def company_models(
                 payload_data = _decode_hot_cache_payload(cached_hot)
                 cached_response = CompanyModelsResponse.model_validate(payload_data)
                 if not cached_hot.is_fresh:
-                    stale_refresh = _trigger_refresh(background_tasks, normalized_ticker, reason="stale")
+                    stale_refresh = _trigger_refresh(normalized_ticker, reason="stale")
                     cached_response = cached_response.model_copy(
                         update={
                             "refresh": stale_refresh,
@@ -81,7 +81,7 @@ async def company_models(
                         company=None,
                         requested_models=requested_models,
                         models=[],
-                        refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                        refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                         diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
                         **_empty_provenance_contract("company_missing"),
                     )
@@ -288,7 +288,7 @@ async def company_oil_scenario_overlay(
                         stale_flags=["company_missing", "oil_scenario_overlay_missing"],
                         missing_field_flags=["oil_scenario_overlay_missing"],
                     ),
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing", "oil_scenario_overlay_missing"),
                 )
 
@@ -432,7 +432,7 @@ async def company_oil_scenario(
                         stale_flags=["company_missing", "oil_scenario_missing"],
                         missing_field_flags=["oil_scenario_missing"],
                     ),
-                    refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+                    refresh=_trigger_refresh(normalized_ticker, reason="missing"),
                     **_empty_provenance_contract("company_missing", "oil_scenario_missing"),
                 )
 
@@ -604,3 +604,4 @@ __all__ = [
     "company_oil_scenario_overlay",
     "latest_model_evaluation",
 ]
+

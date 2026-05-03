@@ -54,6 +54,12 @@ class InsiderTrade(Base):
     footnote_tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     transaction_code: Mapped[str | None] = mapped_column(String(8), nullable=True)
     is_10b5_1: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    sale_context: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    plan_adoption_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    plan_modification: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    plan_modification_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    plan_signal_confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    plan_signal_provenance: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     source: Mapped[str] = mapped_column(String(255), nullable=False)
     last_updated: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

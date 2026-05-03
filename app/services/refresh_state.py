@@ -27,6 +27,7 @@ DatasetName = Literal[
     "institutional",
     "beneficial_ownership",
     "filings",
+    "filing_risk_signals",
     "capital_markets",
     "comment_letters",
     "proxy",

@@ -50,19 +50,27 @@ export function useActiveBriefSection(sectionIds: string[]): string {
   return activeSectionId;
 }
 
-export function useResearchBriefSectionPreferences(ticker: string): {
+export function useResearchBriefSectionPreferences(
+  ticker: string,
+  options?: { defaultOverrides?: Record<string, boolean> }
+): {
   expandedSections: Record<string, boolean>;
   toggleSection: (sectionId: string) => void;
 } {
   const storageKey = `${RESEARCH_BRIEF_SECTION_STORAGE_PREFIX}:${ticker}`;
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() =>
-    createDefaultResearchBriefSectionState()
-  );
+  const defaultOverrides = options?.defaultOverrides;
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => ({
+    ...createDefaultResearchBriefSectionState(),
+    ...defaultOverrides,
+  }));
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false);
   const canPersistPreferencesRef = useRef(true);
 
   useEffect(() => {
-    const defaultState = createDefaultResearchBriefSectionState();
+    const defaultState = {
+      ...createDefaultResearchBriefSectionState(),
+      ...defaultOverrides,
+    };
 
     try {
       const rawState = window.localStorage.getItem(storageKey);
@@ -80,6 +88,7 @@ export function useResearchBriefSectionPreferences(ticker: string): {
     } finally {
       setHasLoadedPreferences(true);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
   useEffect(() => {

@@ -27,6 +27,12 @@ function makeTrade(partial: Partial<InsiderTradePayload>): InsiderTradePayload {
     expiration_date: partial.expiration_date ?? null,
     footnote_tags: partial.footnote_tags ?? null,
     is_10b5_1: partial.is_10b5_1 ?? false,
+    sale_context: partial.sale_context ?? null,
+    plan_adoption_date: partial.plan_adoption_date ?? null,
+    plan_modification: partial.plan_modification ?? null,
+    plan_modification_date: partial.plan_modification_date ?? null,
+    plan_signal_confidence: partial.plan_signal_confidence ?? null,
+    plan_signal_provenance: partial.plan_signal_provenance ?? null,
   };
 }
 
@@ -60,5 +66,26 @@ describe("InsiderTransactionsTable", () => {
 
     expect(html).toContain("0001234567-26-000777");
     expect(html).not.toContain("href=\"0001234567-26-000777\"");
+  });
+
+  it("labels planned sales clearly when 10b5-1 plan context is available", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(InsiderTransactionsTable, {
+        ticker: "ACME",
+        trades: [
+          makeTrade({
+            action: "sell",
+            is_10b5_1: true,
+            sale_context: "planned",
+            plan_adoption_date: "2026-01-05",
+            plan_signal_confidence: "high",
+          }),
+        ],
+      })
+    );
+
+    expect(html).toContain("Planned sale");
+    expect(html).toContain("adopted Jan 05, 2026");
+    expect(html).toContain("confidence: high");
   });
 });

@@ -26,7 +26,7 @@ from app.config import SecClientConfig, build_sec_client_config, settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
-from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, CommentLetter, Company, EarningsRelease, FilingEvent, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
+from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, CommentLetter, Company, EarningsRelease, FilingEvent, FilingRiskSignal, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_parser import FilingParser, ParsedFilingInsight, SUPPORTED_PARSER_FORMS
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -63,6 +63,7 @@ ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
 INTERIM_FORMS = {"10-Q", "6-K"}
 CANONICAL_STATEMENT_TYPE = "canonical_xbrl"
 FILING_PARSER_STATEMENT_TYPE = "filing_parser"
+FILING_RISK_SIGNALS_DATASET = "filing_risk_signals"
 RESTATEMENT_TRACKED_FORMS = {"10-K", "10-Q"}
 RECONCILIATION_METRICS = ("revenue", "net_income", "operating_income")
 RECONCILIATION_SUPPORTED_FORMS = SUPPORTED_PARSER_FORMS & RESTATEMENT_TRACKED_FORMS
@@ -709,7 +710,24 @@ class NormalizedInsiderTrade:
     footnote_tags: list[str] | None
     transaction_code: str | None
     is_10b5_1: bool
+    sale_context: str | None
+    plan_adoption_date: date | None
+    plan_modification: str | None
+    plan_modification_date: date | None
+    plan_signal_confidence: str | None
+    plan_signal_provenance: list[str] | None
     source: str
+
+
+@dataclass(slots=True)
+class Form4PlanSignal:
+    is_10b5_1: bool
+    sale_context: str | None = None
+    plan_adoption_date: date | None = None
+    plan_modification: str | None = None
+    plan_modification_date: date | None = None
+    plan_signal_confidence: str | None = None
+    plan_signal_provenance: list[str] | None = None
 
 
 @dataclass(slots=True)
@@ -2093,6 +2111,13 @@ class EdgarIngestionService:
             parsed_insights=parsed_filing_insights,
             checked_at=checked_at,
         )
+        _replace_filing_risk_signals(
+            session=session,
+            company=company,
+            parsed_insights=parsed_filing_insights,
+            checked_at=checked_at,
+            payload_version_hash=payload_version_hash,
+        )
         _touch_company_statements(session, company.id, checked_at, payload_version_hash=payload_version_hash)
         precompute_core_models(session, company.id, reporter=reporter)
         return statements_written + parsed_statements_written
@@ -2961,10 +2986,13 @@ class EdgarIngestionService:
 
             statements_written = 0
             financials_state = get_dataset_state(session, company.id, "financials")
+            filing_risk_signals_state = get_dataset_state(session, company.id, FILING_RISK_SIGNALS_DATASET)
             can_reuse_financials = (
                 not policy.force
                 and financials_state is not None
                 and financials_state.payload_version_hash == financials_fingerprint
+                and filing_risk_signals_state is not None
+                and filing_risk_signals_state.payload_version_hash == financials_fingerprint
             )
             if can_reuse_financials:
                 reporter.step("normalize", "SEC financial inputs unchanged; reusing cached normalized statements.")
@@ -2974,6 +3002,14 @@ class EdgarIngestionService:
                     checked_at,
                     payload_version_hash=financials_fingerprint,
                     invalidate_hot_cache=False,
+                )
+                mark_dataset_checked(
+                    session,
+                    company.id,
+                    FILING_RISK_SIGNALS_DATASET,
+                    checked_at=checked_at,
+                    success=True,
+                    payload_version_hash=financials_fingerprint,
                 )
             else:
                 reporter.step("filing", "Parsing filing reports...")
@@ -4177,6 +4213,12 @@ def _upsert_insider_trades(
             "footnote_tags": trade.footnote_tags,
             "transaction_code": trade.transaction_code,
             "is_10b5_1": trade.is_10b5_1,
+            "sale_context": trade.sale_context,
+            "plan_adoption_date": trade.plan_adoption_date,
+            "plan_modification": trade.plan_modification,
+            "plan_modification_date": trade.plan_modification_date,
+            "plan_signal_confidence": trade.plan_signal_confidence,
+            "plan_signal_provenance": trade.plan_signal_provenance,
             "source": trade.source,
             "last_checked": checked_at,
         }
@@ -4204,6 +4246,12 @@ def _upsert_insider_trades(
             "footnote_tags": statement.excluded.footnote_tags,
             "transaction_code": statement.excluded.transaction_code,
             "is_10b5_1": statement.excluded.is_10b5_1,
+            "sale_context": statement.excluded.sale_context,
+            "plan_adoption_date": statement.excluded.plan_adoption_date,
+            "plan_modification": statement.excluded.plan_modification,
+            "plan_modification_date": statement.excluded.plan_modification_date,
+            "plan_signal_confidence": statement.excluded.plan_signal_confidence,
+            "plan_signal_provenance": statement.excluded.plan_signal_provenance,
             "source": statement.excluded.source,
             "last_updated": func.now(),
             "last_checked": statement.excluded.last_checked,
@@ -4650,7 +4698,13 @@ def _parse_form4_transactions(
                 if str(node.attrib.get("id") or "").strip()
             }
             footnote_tags = _normalize_form4_footnote_tags(footnote_ids, footnotes)
-            is_10b5_1 = document_10b5_1 or _footnotes_indicate_10b5_1(footnote_ids, footnotes)
+            plan_signal = _extract_form4_plan_signal(
+                footnote_ids=footnote_ids,
+                footnotes=footnotes,
+                action=_normalize_insider_action(transaction_code, acquired_disposed),
+                document_10b5_1=document_10b5_1,
+            )
+            is_10b5_1 = plan_signal.is_10b5_1
             action = _normalize_insider_action(transaction_code, acquired_disposed)
 
             for owner in owners:
@@ -4676,6 +4730,12 @@ def _parse_form4_transactions(
                         footnote_tags=footnote_tags,
                         transaction_code=transaction_code,
                         is_10b5_1=is_10b5_1,
+                        sale_context=plan_signal.sale_context,
+                        plan_adoption_date=plan_signal.plan_adoption_date,
+                        plan_modification=plan_signal.plan_modification,
+                        plan_modification_date=plan_signal.plan_modification_date,
+                        plan_signal_confidence=plan_signal.plan_signal_confidence,
+                        plan_signal_provenance=plan_signal.plan_signal_provenance,
                         source=source_url,
                     )
                 )
@@ -4735,8 +4795,9 @@ def _normalize_insider_action(transaction_code: str | None, acquired_disposed: s
 
 def _footnotes_indicate_10b5_1(footnote_ids: set[str], footnotes: dict[str, str]) -> bool:
     for footnote_id in footnote_ids:
-        normalized_text = re.sub(r"[^a-z0-9]+", "", footnotes.get(footnote_id, "").lower())
-        if "10b51" in normalized_text:
+        text = footnotes.get(footnote_id, "")
+        normalized_text = re.sub(r"[^a-z0-9]+", "", text.lower())
+        if "10b51" in normalized_text and not _text_negates_10b5_1(text):
             return True
     return False
 
@@ -4750,7 +4811,7 @@ def _normalize_form4_footnote_tags(footnote_ids: set[str], footnotes: dict[str, 
         text = footnotes.get(footnote_id, "")
         normalized = re.sub(r"\s+", " ", text.lower()).strip()
         compact = re.sub(r"[^a-z0-9]+", "", normalized)
-        if "10b51" in compact:
+        if "10b51" in compact and not _text_negates_10b5_1(text):
             tags.add("10b5-1")
         if "gift" in normalized:
             tags.add("gift")
@@ -4764,6 +4825,176 @@ def _normalize_form4_footnote_tags(footnote_ids: set[str], footnotes: dict[str, 
             tags.add("equity-award")
 
     return sorted(tags) if tags else None
+
+
+def _extract_form4_plan_signal(
+    *,
+    footnote_ids: set[str],
+    footnotes: dict[str, str],
+    action: str,
+    document_10b5_1: bool,
+) -> Form4PlanSignal:
+    relevant_notes: list[tuple[str, str]] = []
+    for footnote_id in sorted(footnote_ids):
+        text = footnotes.get(footnote_id, "").strip()
+        if text:
+            relevant_notes.append((footnote_id, text))
+
+    references_10b5_in_footnotes = any(_text_mentions_10b5_1(note) and not _text_negates_10b5_1(note) for _, note in relevant_notes)
+    is_10b5_1 = bool(document_10b5_1 or references_10b5_in_footnotes)
+
+    adoption_date: date | None = None
+    plan_modification: str | None = None
+    plan_modification_date: date | None = None
+    has_explicit_planned = False
+    has_explicit_discretionary = False
+    provenance: list[str] = []
+
+    if document_10b5_1:
+        provenance.append("ownershipDocument.aff10b5One")
+
+    for footnote_id, note in relevant_notes:
+        normalized_note = note.lower()
+        if _text_mentions_10b5_1(note) or any(keyword in normalized_note for keyword in ("trading plan", "adopted", "amended", "terminated")):
+            provenance.append(f"footnote:{footnote_id}")
+
+        if _is_explicit_discretionary_text(note):
+            has_explicit_discretionary = True
+        if _is_explicit_planned_text(note):
+            has_explicit_planned = True
+
+        if adoption_date is None:
+            adoption_date = _extract_plan_adoption_date(note)
+
+        note_modification, note_modification_date = _extract_plan_modification(note)
+        if note_modification is not None:
+            if plan_modification is None:
+                plan_modification = note_modification
+            elif plan_modification != note_modification:
+                plan_modification = "amendment_or_termination"
+            if plan_modification_date is None and note_modification_date is not None:
+                plan_modification_date = note_modification_date
+
+    sale_context: str | None = None
+    if action == "sell":
+        if has_explicit_discretionary:
+            sale_context = "discretionary"
+        elif is_10b5_1 or has_explicit_planned or adoption_date is not None:
+            sale_context = "planned"
+        elif footnote_ids:
+            sale_context = "unknown"
+
+    confidence: str | None = None
+    if has_explicit_discretionary or has_explicit_planned:
+        confidence = "high"
+    elif is_10b5_1 and provenance:
+        confidence = "medium"
+    elif adoption_date is not None or plan_modification is not None:
+        confidence = "low"
+
+    return Form4PlanSignal(
+        is_10b5_1=is_10b5_1,
+        sale_context=sale_context,
+        plan_adoption_date=adoption_date,
+        plan_modification=plan_modification,
+        plan_modification_date=plan_modification_date,
+        plan_signal_confidence=confidence,
+        plan_signal_provenance=provenance or None,
+    )
+
+
+def _text_mentions_10b5_1(value: str) -> bool:
+    compact = re.sub(r"[^a-z0-9]+", "", value.lower())
+    return "10b51" in compact
+
+
+def _text_negates_10b5_1(value: str) -> bool:
+    normalized = re.sub(r"\s+", " ", value.lower()).strip()
+    return bool(
+        re.search(r"\bnot\s+(?:pursuant\s+to|under|subject\s+to)\b[^\n\.;]{0,80}\b10b5\s*-?\s*1\b", normalized)
+        or re.search(r"\boutside\s+(?:of\s+)?(?:a\s+)?(?:rule\s+)?10b5\s*-?\s*1\b", normalized)
+    )
+
+
+def _is_explicit_planned_text(value: str) -> bool:
+    normalized = re.sub(r"\s+", " ", value.lower()).strip()
+    if _text_negates_10b5_1(value):
+        return False
+    if re.search(r"\b(?:pursuant\s+to|under|in\s+accordance\s+with|subject\s+to)\b[^\n\.;]{0,120}\b10b5\s*-?\s*1\b", normalized):
+        return True
+    if _text_mentions_10b5_1(value) and "trading plan" in normalized:
+        return True
+    if _text_mentions_10b5_1(value) and re.search(r"\b(?:adopted|entered\s+into|established)\b", normalized):
+        return True
+    return False
+
+
+def _is_explicit_discretionary_text(value: str) -> bool:
+    normalized = re.sub(r"\s+", " ", value.lower()).strip()
+    return bool(
+        _text_negates_10b5_1(value)
+        or re.search(r"\bdiscretionary\s+sale\b", normalized)
+        or re.search(r"\bsale\s+was\s+discretionary\b", normalized)
+    )
+
+
+def _extract_plan_adoption_date(value: str) -> date | None:
+    normalized = re.sub(r"\s+", " ", value.lower()).strip()
+    if "plan" not in normalized:
+        return None
+
+    match = re.search(
+        r"\b(?:adopted|entered\s+into|established)\b\s*(?:on\s*)?(?P<date>[A-Za-z]+\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return _parse_natural_language_date(match.group("date"))
+
+
+def _extract_plan_modification(value: str) -> tuple[str | None, date | None]:
+    normalized = re.sub(r"\s+", " ", value.lower()).strip()
+    if "plan" not in normalized and not _text_mentions_10b5_1(value):
+        return None, None
+
+    has_amendment = bool(re.search(r"\b(?:amend|amended|modif(?:y|ied)|revise(?:d)?)\b", normalized))
+    has_termination = bool(re.search(r"\b(?:terminate|terminated|cancel(?:led)?|ceased)\b", normalized))
+    if not has_amendment and not has_termination:
+        return None, None
+
+    if has_amendment and has_termination:
+        modification = "amendment_or_termination"
+    elif has_amendment:
+        modification = "amendment"
+    else:
+        modification = "termination"
+
+    match = re.search(
+        r"\b(?:amend(?:ed)?|modif(?:y|ied)|revise(?:d)?|terminate(?:d)?|cancel(?:led)?|ceased)\b\s*(?:on\s*)?(?P<date>[A-Za-z]+\s+\d{1,2},?\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})",
+        value,
+        flags=re.IGNORECASE,
+    )
+    modification_date = _parse_natural_language_date(match.group("date")) if match else None
+    return modification, modification_date
+
+
+def _parse_natural_language_date(value: str | None) -> date | None:
+    cleaned = _clean_text(value)
+    if cleaned is None:
+        return None
+
+    iso_or_numeric = _parse_flexible_date(cleaned)
+    if iso_or_numeric is not None:
+        return iso_or_numeric
+
+    normalized = re.sub(r"\b(\d{1,2})(st|nd|rd|th)\b", r"\1", cleaned, flags=re.IGNORECASE)
+    for pattern in ("%B %d, %Y", "%b %d, %Y", "%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.strptime(normalized, pattern).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _parse_form4_bool(value: Any) -> bool:
@@ -5001,7 +5232,7 @@ def _upsert_filing_parser_statements(
             "period_end": item.period_end,
             "filing_type": item.filing_type,
             "statement_type": FILING_PARSER_STATEMENT_TYPE,
-            "data": item.data,
+            "data": _json_ready(item.data),
             "selected_facts": {},
             "reconciliation": {},
             "source": item.source,
@@ -5050,6 +5281,70 @@ def _replace_financial_restatements(
 
     session.execute(insert(FinancialRestatement).values(payload))
     return len(payload)
+
+
+def _replace_filing_risk_signals(
+    session: Session,
+    company: Company,
+    parsed_insights: list[ParsedFilingInsight],
+    checked_at: datetime,
+    payload_version_hash: str | None = None,
+) -> int:
+    session.execute(delete(FilingRiskSignal).where(FilingRiskSignal.company_id == company.id))
+
+    payload = _build_filing_risk_signal_payloads(company, parsed_insights, checked_at)
+    if payload:
+        session.execute(insert(FilingRiskSignal).values(payload))
+
+    mark_dataset_checked(
+        session,
+        company.id,
+        FILING_RISK_SIGNALS_DATASET,
+        checked_at=checked_at,
+        success=True,
+        payload_version_hash=payload_version_hash,
+    )
+    return len(payload)
+
+
+def _build_filing_risk_signal_payloads(
+    company: Company,
+    parsed_insights: list[ParsedFilingInsight],
+    checked_at: datetime,
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for item in parsed_insights:
+        risk_signals = item.data.get("risk_signals") if isinstance(item.data, dict) else None
+        if not isinstance(risk_signals, list):
+            continue
+        for match in risk_signals:
+            if not isinstance(match, dict):
+                continue
+            signal_category = str(match.get("signal_category") or "").strip()
+            matched_phrase = str(match.get("matched_phrase") or "").strip()
+            context_snippet = str(match.get("context_snippet") or "").strip()
+            if not signal_category or not matched_phrase or not context_snippet:
+                continue
+            payloads.append(
+                {
+                    "company_id": company.id,
+                    "ticker": str(match.get("ticker") or company.ticker),
+                    "cik": str(match.get("cik") or company.cik),
+                    "accession_number": str(match.get("accession_number") or item.accession_number),
+                    "form_type": str(match.get("form_type") or item.filing_type),
+                    "filed_date": match.get("filed_date") or item.period_end,
+                    "signal_category": signal_category,
+                    "matched_phrase": matched_phrase[:255],
+                    "context_snippet": context_snippet[:1000],
+                    "confidence": str(match.get("confidence") or "medium"),
+                    "severity": str(match.get("severity") or "medium"),
+                    "source": str(match.get("source") or item.source),
+                    "provenance": str(match.get("provenance") or "sec_filing_text"),
+                    "last_updated": checked_at,
+                    "last_checked": checked_at,
+                }
+            )
+    return payloads
 
 
 def _build_financial_restatement_payloads(

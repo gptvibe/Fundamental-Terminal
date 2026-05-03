@@ -716,6 +716,38 @@ export interface CompanyFilingInsightsResponse {
   diagnostics: DataQualityDiagnosticsPayload;
 }
 
+export interface FilingRiskSignalPayload {
+  ticker: string;
+  cik: string;
+  accession_number: string;
+  form_type: string;
+  filed_date: string | null;
+  signal_category: string;
+  matched_phrase: string;
+  context_snippet: string;
+  confidence: string;
+  severity: string;
+  source: string;
+  provenance: string;
+  last_updated: string | null;
+  last_checked: string | null;
+}
+
+export interface FilingRiskSignalSummaryPayload {
+  total_signals: number;
+  high_severity_count: number;
+  medium_severity_count: number;
+  latest_filed_date: string | null;
+}
+
+export interface CompanyFilingRiskSignalsResponse {
+  company: CompanyPayload | null;
+  summary: FilingRiskSignalSummaryPayload;
+  signals: FilingRiskSignalPayload[];
+  refresh: RefreshState;
+  diagnostics: DataQualityDiagnosticsPayload;
+}
+
 export interface FilingComparisonReferencePayload {
   accession_number: string | null;
   filing_type: string;
@@ -952,6 +984,12 @@ export interface InsiderTradePayload {
   expiration_date: string | null;
   footnote_tags: string[] | null;
   is_10b5_1: boolean;
+  sale_context?: "planned" | "discretionary" | "unknown" | null;
+  plan_adoption_date?: string | null;
+  plan_modification?: "amendment" | "termination" | "amendment_or_termination" | null;
+  plan_modification_date?: string | null;
+  plan_signal_confidence?: "high" | "medium" | "low" | null;
+  plan_signal_provenance?: string[] | null;
 }
 
 export interface InsiderActivityMetricsPayload {
@@ -1671,6 +1709,9 @@ export interface CapitalRaisePayload {
   offering_amount: number | null;
   shelf_size: number | null;
   is_late_filer: boolean;
+  plan_name: string | null;
+  registered_shares: number | null;
+  shares_parse_confidence: string | null;
 }
 
 export interface CompanyCapitalRaisesResponse {
@@ -1686,8 +1727,10 @@ export interface CapitalMarketsSummaryPayload {
   late_filer_notices: number;
   registration_filings: number;
   prospectus_filings: number;
+  equity_plan_registrations: number;
   latest_filing_date: string | null;
   max_offering_amount: number | null;
+  total_registered_equity_plan_shares: number | null;
 }
 
 export interface CompanyCapitalMarketsSummaryResponse {

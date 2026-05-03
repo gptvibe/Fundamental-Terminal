@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.api.handlers._common import main_bound
 from app.api.handlers._shared import *  # noqa: F401,F403
+from app.api.schemas.filings import CompanyFilingRiskSignalsResponse, FilingRiskSignalPayload, FilingRiskSignalSummaryPayload
 
 
 @main_bound
@@ -17,7 +18,7 @@ def company_filings(
             company=None,
             filings=[],
             timeline_source="sec_submissions",
-            refresh=_trigger_refresh(background_tasks, normalized_ticker, reason="missing"),
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
@@ -67,6 +68,43 @@ def company_filings(
         )
     finally:
         client.close()
+
+
+@main_bound
+def company_filing_risk_signals(
+    ticker: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> CompanyFilingRiskSignalsResponse:
+    normalized_ticker = _normalize_ticker(ticker)
+    snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
+    if snapshot is None:
+        return CompanyFilingRiskSignalsResponse(
+            company=None,
+            summary=FilingRiskSignalSummaryPayload(total_signals=0, high_severity_count=0, medium_severity_count=0, latest_filed_date=None),
+            signals=[],
+            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
+        )
+
+    signals_last_checked, signals_cache_state = get_company_filing_risk_signals_cache_status(session, snapshot.company)
+    signals = get_company_filing_risk_signals(session, snapshot.company.id)
+    refresh = (
+        _trigger_refresh(snapshot.company.ticker, reason=signals_cache_state)
+        if signals_cache_state in {"missing", "stale"}
+        else RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    )
+    serialized = [_serialize_filing_risk_signal(signal) for signal in signals]
+    return CompanyFilingRiskSignalsResponse(
+        company=_serialize_company(snapshot, last_checked=signals_last_checked),
+        summary=_build_filing_risk_signal_summary(serialized),
+        signals=serialized,
+        refresh=refresh,
+        diagnostics=_build_data_quality_diagnostics(
+            coverage_ratio=1.0 if serialized else 0.0,
+            stale_flags=[] if serialized else ["filing_risk_signals_missing"],
+        ),
+    )
 
 
 @main_bound
@@ -160,4 +198,32 @@ def company_filing_view(
         client.close()
 
 
-__all__ = ["company_filing_view", "company_filings", "filings_timeline", "search_filings"]
+def _serialize_filing_risk_signal(signal: Any) -> FilingRiskSignalPayload:
+    return FilingRiskSignalPayload(
+        ticker=str(signal.ticker),
+        cik=str(signal.cik),
+        accession_number=str(signal.accession_number),
+        form_type=str(signal.form_type),
+        filed_date=getattr(signal, "filed_date", None),
+        signal_category=str(signal.signal_category),
+        matched_phrase=str(signal.matched_phrase),
+        context_snippet=str(signal.context_snippet),
+        confidence=str(signal.confidence),
+        severity=str(signal.severity),
+        source=str(signal.source),
+        provenance=str(signal.provenance),
+        last_updated=getattr(signal, "last_updated", None),
+        last_checked=getattr(signal, "last_checked", None),
+    )
+
+
+def _build_filing_risk_signal_summary(signals: list[FilingRiskSignalPayload]) -> FilingRiskSignalSummaryPayload:
+    return FilingRiskSignalSummaryPayload(
+        total_signals=len(signals),
+        high_severity_count=sum(1 for signal in signals if signal.severity == "high"),
+        medium_severity_count=sum(1 for signal in signals if signal.severity == "medium"),
+        latest_filed_date=max((signal.filed_date for signal in signals if signal.filed_date is not None), default=None),
+    )
+
+
+__all__ = ["company_filing_risk_signals", "company_filing_view", "company_filings", "filings_timeline", "search_filings"]

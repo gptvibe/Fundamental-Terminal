@@ -10,6 +10,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.beneficial_ownership_report import BeneficialOwnershipReport
     from app.models.capital_markets_event import CapitalMarketsEvent
+    from app.models.filing_risk_signal import FilingRiskSignal
     from app.models.company_charts_scenario import CompanyChartsScenario
     from app.models.company_charts_share_snapshot import CompanyChartsShareSnapshot
     from app.models.capital_structure_snapshot import CapitalStructureSnapshot
@@ -99,6 +100,11 @@ class Company(Base):
         passive_deletes=True,
     )
     comment_letters: Mapped[list["CommentLetter"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    filing_risk_signals: Mapped[list["FilingRiskSignal"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

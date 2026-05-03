@@ -5,7 +5,7 @@ from starlette.responses import HTMLResponse
 
 from app.api.handlers import filings as handlers
 from app.api.source_contracts import add_user_visible_route
-from app.api.schemas.filings import CompanyFilingsResponse, FilingSearchResultPayload, FilingTimelineItemPayload
+from app.api.schemas.filings import CompanyFilingRiskSignalsResponse, CompanyFilingsResponse, FilingSearchResultPayload, FilingTimelineItemPayload
 
 
 def build_router() -> APIRouter:
@@ -37,5 +37,12 @@ def build_router() -> APIRouter:
         handlers.company_filing_view,
         methods=["GET"],
         response_class=HTMLResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/companies/{ticker}/filing-risk-signals",
+        handlers.company_filing_risk_signals,
+        methods=["GET"],
+        response_model=CompanyFilingRiskSignalsResponse,
     )
     return router

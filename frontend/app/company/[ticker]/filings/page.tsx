@@ -8,6 +8,7 @@ import { FilingEventCategoryChart } from "@/components/charts/filing-event-categ
 import { ChangesSinceLastFilingCard } from "@/components/company/changes-since-last-filing-card";
 import { FilingDocumentViewer } from "@/components/filings/filing-document-viewer";
 import { FilingParserInsights } from "@/components/filings/filing-parser-insights";
+import { FilingRiskSignalsPanel } from "@/components/filings/filing-risk-signals-panel";
 import { CompanyFilingsTimeline } from "@/components/filings/company-filings-timeline";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -15,9 +16,9 @@ import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-she
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyChangesSinceLastFiling, getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilings } from "@/lib/api";
+import { getCompanyChangesSinceLastFiling, getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilingRiskSignals, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyChangesSinceLastFilingResponse, CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingsResponse } from "@/lib/types";
+import type { CompanyChangesSinceLastFilingResponse, CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingRiskSignalsResponse, CompanyFilingsResponse } from "@/lib/types";
 
 export default function CompanyFilingsPage() {
   const params = useParams<{ ticker: string }>();
@@ -46,6 +47,9 @@ export default function CompanyFilingsPage() {
   const [changesData, setChangesData] = useState<CompanyChangesSinceLastFilingResponse | null>(null);
   const [changesLoading, setChangesLoading] = useState(true);
   const [changesError, setChangesError] = useState<string | null>(null);
+  const [filingRiskSignalsData, setFilingRiskSignalsData] = useState<CompanyFilingRiskSignalsResponse | null>(null);
+  const [filingRiskSignalsLoading, setFilingRiskSignalsLoading] = useState(true);
+  const [filingRiskSignalsError, setFilingRiskSignalsError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +76,35 @@ export default function CompanyFilingsPage() {
     }
 
     void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFilingRiskSignals() {
+      try {
+        setFilingRiskSignalsLoading(true);
+        setFilingRiskSignalsError(null);
+        setFilingRiskSignalsData(null);
+        const response = await getCompanyFilingRiskSignals(ticker);
+        if (!cancelled) {
+          setFilingRiskSignalsData(response);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setFilingRiskSignalsError(nextError instanceof Error ? nextError.message : "Unable to load filing risk signals");
+        }
+      } finally {
+        if (!cancelled) {
+          setFilingRiskSignalsLoading(false);
+        }
+      }
+    }
+
+    void loadFilingRiskSignals();
     return () => {
       cancelled = true;
     };
@@ -302,6 +335,10 @@ export default function CompanyFilingsPage() {
           error={insightsError}
           refresh={insightsData?.refresh == null ? refreshState : insightsData.refresh}
         />
+      </Panel>
+
+      <Panel title="Filing text signals" subtitle="Risk language extracted from cached 10-K, 10-Q, and 8-K filing text">
+        <FilingRiskSignalsPanel payload={filingRiskSignalsData} loading={filingRiskSignalsLoading || workspaceLoading} error={filingRiskSignalsError} />
       </Panel>
 
       <Panel title="High-Signal Filing Changes" subtitle="Curated filing-text changes on the brief, full evidence and supporting deltas here in the drill-down">

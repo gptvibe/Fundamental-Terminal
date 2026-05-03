@@ -16,6 +16,7 @@ import {
   getCompanyFinancials,
   getCompanyFinancialRestatements,
   getCompanyFilingInsights,
+  getCompanyFilingRiskSignals,
   getCompanyFilings,
   getCompanyMarketContext,
   getCompanyOverview,
@@ -54,6 +55,7 @@ describe("api route stability", () => {
     await getCompanyEarningsWorkspace("AAPL");
     await getCompanyFilings("MSFT");
     await getCompanyFilingInsights("NVDA");
+    await getCompanyFilingRiskSignals("CRM");
     await getCompanyMarketContext("AMD");
     await getCompanyOverview("AAPL");
     await getCompanyWorkspaceBootstrap("AAPL", { includeOverviewBrief: true, includeInsiders: true });
@@ -80,41 +82,46 @@ describe("api route stability", () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       4,
-      "/backend/api/companies/AMD/market-context",
+      "/backend/api/companies/CRM/filing-risk-signals",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       5,
-      "/backend/api/companies/AAPL/overview",
+      "/backend/api/companies/AMD/market-context",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       6,
-      "/backend/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&include_insiders=true",
+      "/backend/api/companies/AAPL/overview",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       7,
-      "/backend/api/companies/AAPL/brief",
+      "/backend/api/companies/AAPL/workspace-bootstrap?include_overview_brief=true&include_insiders=true",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       8,
-      "/backend/api/model-evaluations/latest",
+      "/backend/api/companies/AAPL/brief",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       9,
-      "/backend/api/companies/AAPL/capital-structure",
+      "/backend/api/model-evaluations/latest",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       10,
-      "/backend/api/companies/AAPL/peers?peers=MSFT%2CNVDA",
+      "/backend/api/companies/AAPL/capital-structure",
       expect.objectContaining({ cache: "no-store" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       11,
+      "/backend/api/companies/AAPL/peers?peers=MSFT%2CNVDA",
+      expect.objectContaining({ cache: "no-store" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      12,
       "/backend/api/companies/compare?tickers=AAPL%2CMSFT",
       expect.objectContaining({ cache: "no-store" })
     );

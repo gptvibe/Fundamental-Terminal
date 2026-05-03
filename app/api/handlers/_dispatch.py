@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from app.api.handlers.company_overview import company_brief, company_overview, company_peers, company_workspace_bootstrap
+from app.api.handlers.filings import company_filing_risk_signals
 from app.api.handlers._shared import (
     cache_metrics,
     company_activity_feed,
@@ -115,6 +116,7 @@ ROUTE_HANDLERS: dict[str, Callable[..., Any]] = {
     "company_filing_events": company_filing_events,
     "company_filing_events_summary": company_filing_events_summary,
     "company_filing_insights": company_filing_insights,
+    "company_filing_risk_signals": company_filing_risk_signals,
     "company_filing_view": company_filing_view,
     "company_filings": company_filings,
     "company_financial_history": company_financial_history,

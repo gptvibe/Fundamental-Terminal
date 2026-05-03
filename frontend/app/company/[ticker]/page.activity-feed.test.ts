@@ -14,6 +14,7 @@ import {
   getCompanyChangesSinceLastFiling,
   getCompanyEquityClaimRisk,
   getCompanyEarningsSummary,
+  getCompanyFilingRiskSignals,
   getCompanyGovernanceSummary,
   getCompanyModels,
   getCompanyPeers,
@@ -136,6 +137,10 @@ vi.mock("@/components/company/research-brief-plain-english-panel", () => ({
   ResearchBriefPlainEnglishPanel: () => React.createElement("div", null, "plain-english-brief-panel"),
 }));
 
+vi.mock("@/components/filings/filing-risk-signals-panel", () => ({
+  FilingRiskSignalsPanel: () => React.createElement("div", null, "filing-risk-signals-panel"),
+}));
+
 vi.mock("@/components/models/investment-summary-panel", () => ({
   InvestmentSummaryPanel: () => React.createElement("div", null, "investment-summary-panel"),
 }));
@@ -149,6 +154,7 @@ vi.mock("@/lib/api", () => ({
   getCompanyChangesSinceLastFiling: vi.fn(),
   getCompanyEquityClaimRisk: vi.fn(),
   getCompanyEarningsSummary: vi.fn(),
+  getCompanyFilingRiskSignals: vi.fn(),
   getCompanyGovernanceSummary: vi.fn(),
   getCompanyModels: vi.fn(),
   getCompanyPeers: vi.fn(),
@@ -215,6 +221,7 @@ beforeEach(() => {
   vi.mocked(getCompanyCapitalMarketsSummary).mockResolvedValue(buildCapitalMarketsSummaryResponse());
   vi.mocked(getCompanyGovernanceSummary).mockResolvedValue(buildGovernanceSummaryResponse());
   vi.mocked(getCompanyBeneficialOwnershipSummary).mockResolvedValue(buildOwnershipSummaryResponse());
+  vi.mocked(getCompanyFilingRiskSignals).mockResolvedValue(buildFilingRiskSignalsResponse());
   vi.mocked(getCompanyModels).mockResolvedValue(buildModelsResponse());
   vi.mocked(getCompanyPeers).mockResolvedValue(buildPeersResponse());
   vi.mocked(getCompanyResearchBrief).mockResolvedValue(buildResearchBriefResponse());
@@ -253,9 +260,9 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
     expect(screen.getByText("plain-english-brief-panel")).toBeTruthy();
-    expect(screen.getByText("Equity claim risk pack summary")).toBeTruthy();
-    expect(screen.getByText("Dilution pressure remains elevated because recent financing and reporting signals are still active.")).toBeTruthy();
     await waitFor(() => {
+      expect(screen.getByText("Equity claim risk pack summary")).toBeTruthy();
+      expect(screen.getByText("Dilution pressure remains elevated because recent financing and reporting signals are still active.")).toBeTruthy();
       expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
       expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
     });
@@ -1399,5 +1406,45 @@ function buildPeersResponse() {
     },
     confidence_flags: [],
     refresh,
+  };
+}
+
+function buildFilingRiskSignalsResponse() {
+  return {
+    company: null,
+    summary: {
+      total_signals: 1,
+      high_severity_count: 1,
+      medium_severity_count: 0,
+      latest_filed_date: "2026-02-01",
+    },
+    signals: [
+      {
+        ticker: "ACME",
+        cik: "0000000000",
+        accession_number: "0000000000-26-000001",
+        form_type: "10-K",
+        filed_date: "2026-02-01",
+        signal_category: "material_weakness",
+        matched_phrase: "material weakness",
+        context_snippet: "A material weakness was identified.",
+        confidence: "high",
+        severity: "high",
+        source: "https://www.sec.gov/Archives/edgar/data/0/1.htm",
+        provenance: "sec_filing_text",
+        last_updated: "2026-02-01T00:00:00Z",
+        last_checked: "2026-02-01T00:00:00Z",
+      },
+    ],
+    refresh: { triggered: false, reason: "fresh", ticker: "ACME", job_id: null },
+    diagnostics: {
+      coverage_ratio: 1,
+      fallback_ratio: null,
+      stale_flags: [],
+      parser_confidence: null,
+      missing_field_flags: [],
+      reconciliation_penalty: null,
+      reconciliation_disagreement_count: 0,
+    },
   };
 }

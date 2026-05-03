@@ -48,6 +48,24 @@ Definition of done:
 
 - Persisted SEC-derived capital structure intelligence is available through a cache-first API and visible on financials/models with explicit provenance and confidence metadata. ✓
 
+## Backlog: Comment-Letter Document Enrichment (Discovery Only)
+
+Current state:
+
+- [x] `CORRESP` filing metadata is already persisted and surfaced through cache-first company routes.
+- [ ] Document-level issuer correspondence enrichment is not shipped yet.
+
+Planned vertical slice:
+
+- [ ] Extend `comment_letters` persistence to store archive document metadata and extracted text for supported correspondence documents.
+- [ ] Keep `GET /api/companies/{ticker}/comment-letters` cache-first and add cached detail payload coverage for enriched correspondence content.
+- [ ] Add a frontend correspondence detail surface on top of the existing SEC feed list.
+- [ ] Add parser, persistence, route, and UI fixtures/tests for SEC staff letters, issuer responses, and unsupported document formats.
+
+Definition of done:
+
+- [ ] Do not mark complete until correspondence document enrichment is persisted, API-visible, frontend-visible, and fully tested without live SEC request-path fetches.
+
 ## Sprint 9: Valuation Workbench Depth (Shipped 2026-03-22)
 
 ### Valuation foundations

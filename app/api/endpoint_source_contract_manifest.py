@@ -302,6 +302,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "sec_edgar",
     ),
     ("GET", "/api/companies/{ticker}/filing-insights"): _official_only_contract("sec_edgar"),
+    ("GET", "/api/companies/{ticker}/filing-risk-signals"): _official_only_contract("sec_edgar"),
     (
         "GET",
         "/api/companies/{ticker}/changes-since-last-filing",

@@ -40,6 +40,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/{ticker}/oil-scenario"),
         ("GET", "/api/companies/{ticker}/oil-scenario-overlay"),
         ("GET", "/api/companies/{ticker}/filing-insights"),
+        ("GET", "/api/companies/{ticker}/filing-risk-signals"),
         ("GET", "/api/companies/{ticker}/changes-since-last-filing"),
         ("GET", "/api/companies/{ticker}/metrics-timeseries"),
         ("GET", "/api/companies/{ticker}/metrics"),

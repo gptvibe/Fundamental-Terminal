@@ -17,6 +17,12 @@ from app.services.status_stream import ClaimedJob, status_broker
 logger = logging.getLogger(__name__)
 
 
+def _is_expected_refresh_failure(exc: Exception) -> bool:
+    if isinstance(exc, ValueError) and "Unable to resolve SEC company for" in str(exc):
+        return True
+    return False
+
+
 def _worker_health_heartbeat_file() -> str:
     return os.getenv("DATA_FETCHER_HEALTH_HEARTBEAT_FILE", "/tmp/data-fetcher-worker-heartbeat").strip() or "/tmp/data-fetcher-worker-heartbeat"
 
@@ -129,8 +135,11 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
                         claim_token=job.claim_token,
                         service=service,
                     )
-            except Exception:
-                logger.exception("Refresh worker failed for job %s (%s)", job.job_id, job.ticker)
+            except Exception as exc:
+                if _is_expected_refresh_failure(exc):
+                    logger.warning("Refresh worker skipped unresolved ticker for job %s (%s): %s", job.job_id, job.ticker, exc)
+                else:
+                    logger.exception("Refresh worker failed for job %s (%s)", job.job_id, job.ticker)
                 _close_refresh_service(service)
                 service = None
             finally:

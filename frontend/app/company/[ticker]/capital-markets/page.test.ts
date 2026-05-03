@@ -192,6 +192,40 @@ vi.mock("@/lib/api", () => ({
     },
     confidence_flags: [],
   })),
+  getCompanyCapitalMarkets: vi.fn(async () => ({
+    company: null,
+    filings: [
+      {
+        accession_number: "0000099-26-000001",
+        form: "S-8",
+        filing_date: "2026-03-15",
+        report_date: "2026-03-15",
+        primary_document: "s8.htm",
+        primary_doc_description: "Registration of 12,000,000 shares pursuant to the 2026 Long-Term Incentive Plan",
+        source_url: "https://example.com/s8",
+        summary: "Registration of 12,000,000 shares pursuant to the 2026 Long-Term Incentive Plan",
+        event_type: "Equity Plan Registration",
+        security_type: "Common Equity",
+        offering_amount: null,
+        shelf_size: null,
+        is_late_filer: false,
+        plan_name: "2026 Long-Term Incentive Plan",
+        registered_shares: 12000000,
+        shares_parse_confidence: "high",
+      },
+    ],
+    refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
+    diagnostics: {
+      coverage_ratio: 1,
+      fallback_ratio: 0,
+      stale_flags: [],
+      parser_confidence: null,
+      missing_field_flags: [],
+      reconciliation_penalty: null,
+      reconciliation_disagreement_count: 0,
+    },
+    error: null,
+  })),
 }));
 
 describe("CompanyCapitalMarketsPage", () => {
@@ -206,11 +240,22 @@ describe("CompanyCapitalMarketsPage", () => {
     expect(screen.getByRole("heading", { name: "Investor summary" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Share-count bridge" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Financing capacity and dependency" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Equity plan registrations (S-8)" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Hybrid securities and debt maturity wall" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Covenant, restatement, and control signals" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Provenance and diagnostics" })).toBeTruthy();
     expect(screen.getByText("Capital needs look elevated because dilution, financing, and reporting signals are all active.")).toBeTruthy();
     expect(screen.getByText("Latest share-count bridge")).toBeTruthy();
     expect(screen.getByText("dilution-chart")).toBeTruthy();
+  });
+
+  it("renders S-8 equity plan filing card with plan name and confidence", async () => {
+    render(React.createElement(CompanyCapitalMarketsPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("2026 Long-Term Incentive Plan")).toBeTruthy();
+    });
+
+    expect(screen.getByText(/high confidence/i)).toBeTruthy();
   });
 });

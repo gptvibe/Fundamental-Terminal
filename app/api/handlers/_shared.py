@@ -274,6 +274,8 @@ from app.services.cache_queries import (
     get_company_filing_events,
     get_company_filing_events_by_company_ids,
     get_company_filing_insights,
+    get_company_filing_risk_signals,
+    get_company_filing_risk_signals_cache_status,
     get_company_financials,
     get_company_financials_by_company_ids,
     get_company_regulated_bank_financials,
@@ -8193,6 +8195,12 @@ def _serialize_insider_trade(trade: InsiderTrade) -> InsiderTradePayload:
         expiration_date=getattr(trade, "expiration_date", None),
         footnote_tags=getattr(trade, "footnote_tags", None),
         is_10b5_1=trade.is_10b5_1,
+        sale_context=getattr(trade, "sale_context", None),
+        plan_adoption_date=getattr(trade, "plan_adoption_date", None),
+        plan_modification=getattr(trade, "plan_modification", None),
+        plan_modification_date=getattr(trade, "plan_modification_date", None),
+        plan_signal_confidence=getattr(trade, "plan_signal_confidence", None),
+        plan_signal_provenance=getattr(trade, "plan_signal_provenance", None),
     )
 
 
@@ -9412,6 +9420,9 @@ def _serialize_cached_capital_markets_event(event) -> CapitalRaisePayload:
         offering_amount=event.offering_amount,
         shelf_size=event.shelf_size,
         is_late_filer=event.is_late_filer,
+        plan_name=getattr(event, "plan_name", None),
+        registered_shares=getattr(event, "registered_shares", None),
+        shares_parse_confidence=getattr(event, "shares_parse_confidence", None),
     )
 
 
@@ -9430,6 +9441,9 @@ def _serialize_normalized_capital_markets_event(event) -> CapitalRaisePayload:
         offering_amount=event.offering_amount,
         shelf_size=event.shelf_size,
         is_late_filer=event.is_late_filer,
+        plan_name=getattr(event, "plan_name", None),
+        registered_shares=getattr(event, "registered_shares", None),
+        shares_parse_confidence=getattr(event, "shares_parse_confidence", None),
     )
 
 
@@ -9442,14 +9456,21 @@ def _build_capital_markets_summary(filings: list[CapitalRaisePayload]) -> Capita
         default=None,
     )
     max_offering_amount = max((filing.offering_amount for filing in filings if filing.offering_amount is not None), default=None)
+    equity_plan_filings = [f for f in filings if f.event_type == "Equity Plan Registration"]
+    total_registered_equity_plan_shares: float | None = None
+    if equity_plan_filings:
+        share_values = [f.registered_shares for f in equity_plan_filings if f.registered_shares is not None]
+        total_registered_equity_plan_shares = sum(share_values) if share_values else None
 
     return CapitalMarketsSummaryPayload(
         total_filings=len(filings),
         late_filer_notices=sum(1 for filing in filings if filing.is_late_filer),
         registration_filings=sum(1 for filing in filings if filing.event_type == "Registration"),
         prospectus_filings=sum(1 for filing in filings if filing.event_type == "Prospectus"),
+        equity_plan_registrations=len(equity_plan_filings),
         latest_filing_date=latest_filing_date,
         max_offering_amount=max_offering_amount,
+        total_registered_equity_plan_shares=total_registered_equity_plan_shares,
     )
 
 
@@ -9459,8 +9480,10 @@ def _empty_capital_markets_summary() -> CapitalMarketsSummaryPayload:
         late_filer_notices=0,
         registration_filings=0,
         prospectus_filings=0,
+        equity_plan_registrations=0,
         latest_filing_date=None,
         max_offering_amount=None,
+        total_registered_equity_plan_shares=None,
     )
 
 

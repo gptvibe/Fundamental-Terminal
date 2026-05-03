@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date as DateType
+from datetime import date as DateType, datetime as DateTimeType
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -40,3 +40,35 @@ class CompanyFilingsResponse(BaseModel):
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
+
+
+class FilingRiskSignalPayload(BaseModel):
+    ticker: str
+    cik: str
+    accession_number: str
+    form_type: str
+    filed_date: DateType | None = None
+    signal_category: str
+    matched_phrase: str
+    context_snippet: str
+    confidence: str
+    severity: str
+    source: str
+    provenance: str
+    last_updated: DateTimeType | None = None
+    last_checked: DateTimeType | None = None
+
+
+class FilingRiskSignalSummaryPayload(BaseModel):
+    total_signals: int
+    high_severity_count: int
+    medium_severity_count: int
+    latest_filed_date: DateType | None = None
+
+
+class CompanyFilingRiskSignalsResponse(BaseModel):
+    company: CompanyPayload | None
+    summary: FilingRiskSignalSummaryPayload
+    signals: list[FilingRiskSignalPayload]
+    refresh: RefreshState
+    diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)

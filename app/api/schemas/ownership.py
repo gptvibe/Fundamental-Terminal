@@ -29,6 +29,12 @@ class InsiderTradePayload(BaseModel):
     expiration_date: DateType | None = None
     footnote_tags: list[str] | None = None
     is_10b5_1: bool
+    sale_context: Literal["planned", "discretionary", "unknown"] | None = None
+    plan_adoption_date: DateType | None = None
+    plan_modification: Literal["amendment", "termination", "amendment_or_termination"] | None = None
+    plan_modification_date: DateType | None = None
+    plan_signal_confidence: Literal["high", "medium", "low"] | None = None
+    plan_signal_provenance: list[str] | None = None
 
 
 class InsiderActivityMetricsPayload(BaseModel):

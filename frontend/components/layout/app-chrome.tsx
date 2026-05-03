@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { AppLogo } from "@/components/layout/app-logo";
+import { DensityToggle } from "@/components/layout/density-toggle";
 import { CompanyAutocompleteMenu } from "@/components/search/company-autocomplete-menu";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { resolveCompanyIdentifier, searchCompanies } from "@/lib/api";
@@ -674,6 +675,8 @@ export function AppChrome({ children }: AppChromeProps) {
             Saved
             <span className="app-device-shortcut-count">{savedCompanyCount}</span>
           </button>
+
+          <DensityToggle />
 
           <span className="app-tools-label">Theme</span>
 

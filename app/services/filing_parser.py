@@ -8,6 +8,8 @@ from typing import Callable
 
 from bs4 import BeautifulSoup
 
+from app.services.filing_risk_signals import extract_filing_risk_signals
+
 SUPPORTED_PARSER_FORMS = {"10-K", "10-Q", "8-K"}
 
 _HIGH_SIGNAL_FOOTNOTE_CONFIG: tuple[tuple[str, str, tuple[str, ...]], ...] = (
@@ -218,6 +220,28 @@ class FilingParser:
             "footnotes": footnotes,
             "non_gaap": non_gaap,
             "controls": controls,
+            "risk_signals": [
+                {
+                    "ticker": item.ticker,
+                    "cik": item.cik,
+                    "accession_number": item.accession_number,
+                    "form_type": item.form_type,
+                    "filed_date": item.filed_date,
+                    "signal_category": item.signal_category,
+                    "matched_phrase": item.matched_phrase,
+                    "context_snippet": item.context_snippet,
+                    "confidence": item.confidence,
+                    "severity": item.severity,
+                    "source": item.source,
+                    "provenance": item.provenance,
+                }
+                for item in extract_filing_risk_signals(
+                    cik=cik,
+                    filing_metadata=metadata,
+                    filing_text=main_text,
+                    source=source,
+                )
+            ],
         }
         return ParsedFilingInsight(
             accession_number=accession_number,

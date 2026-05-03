@@ -6908,6 +6908,60 @@ select {
   line-height: 1.55;
 }
 
+.what-changed-highlight-list {
+  display: grid;
+  gap: 10px;
+}
+
+.what-changed-highlight-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 132%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 82%, transparent);
+}
+
+.what-changed-highlight-item.tone-red {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--panel-border));
+}
+
+.what-changed-highlight-item.tone-gold {
+  border-color: color-mix(in srgb, var(--warning) 34%, var(--panel-border));
+}
+
+.what-changed-highlight-item.tone-cyan {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--panel-border));
+}
+
+.what-changed-highlight-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.what-changed-highlight-title {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.what-changed-highlight-detail {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.what-changed-highlight-meta {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .company-pulse-card-pills,
 .research-brief-partial-errors {
   display: flex;
@@ -6920,6 +6974,122 @@ select {
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
   gap: 10px 12px;
   margin: 0;
+}
+
+/* ── Density toggle ─────────────────────────────────────────── */
+
+.app-density-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Beginner guidance banner ───────────────────────────────── */
+
+.beginner-guidance-banner {
+  grid-column: 1 / -1;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  background: var(--panel-alt);
+  padding: 14px 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.beginner-guidance-header {
+  display: grid;
+  gap: 4px;
+}
+
+.beginner-guidance-kicker {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-cyan);
+}
+
+.beginner-guidance-tagline {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.beginner-guidance-switch-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--accent-cyan);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.beginner-guidance-switch-link:hover {
+  color: var(--text);
+}
+
+.beginner-glossary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.beginner-glossary-entry {
+  display: grid;
+  gap: 2px;
+}
+
+.beginner-glossary-term {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  color: var(--text);
+  text-transform: uppercase;
+}
+
+.beginner-glossary-def {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── Collapsible data-quality wrapper ───────────────────────── */
+
+.research-brief-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--panel-border);
+  padding: 10px 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.research-brief-section-toggle:hover {
+  color: var(--text);
+}
+
+.research-brief-section-toggle-label {
+  flex: 1;
+  text-align: left;
+}
+
+.research-brief-section-toggle-caret {
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
 .evidence-meta-item {
@@ -10260,10 +10430,39 @@ select {
   border: 1px solid transparent;
 }
 
+.insider-plan-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.insider-plan-detail {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
 .insider-plan-pill-yes {
   background: color-mix(in srgb, var(--warning) 11%, transparent);
   border-color: color-mix(in srgb, var(--warning) 18%, transparent);
   color: #ffe38b;
+}
+
+.insider-plan-pill-planned {
+  background: color-mix(in srgb, #0ea5e9 16%, transparent);
+  border-color: color-mix(in srgb, #0ea5e9 30%, transparent);
+  color: #d8f2ff;
+}
+
+.insider-plan-pill-discretionary {
+  background: color-mix(in srgb, #f97316 16%, transparent);
+  border-color: color-mix(in srgb, #f97316 28%, transparent);
+  color: #ffe8d6;
+}
+
+.insider-plan-pill-unknown {
+  background: color-mix(in srgb, #94a3b8 16%, transparent);
+  border-color: color-mix(in srgb, #94a3b8 24%, transparent);
+  color: #e2e8f0;
 }
 
 .insider-plan-pill-no {

@@ -33,6 +33,7 @@ import {
   CompanyFilingEventsSummaryResponse,
   CompanyFilingsResponse,
   CompanyFilingInsightsResponse,
+  CompanyFilingRiskSignalsResponse,
   CompanyForm144Response,
   CompanyGovernanceResponse,
   CompanyGovernanceSummaryResponse,
@@ -114,6 +115,7 @@ const READ_POLICY_BY_PATH: Array<{ pattern: RegExp; policy: ReadCachePolicy }> =
   { pattern: /^\/companies\/[^/]+\/capital-structure(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/charts(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
   { pattern: /^\/companies\/[^/]+\/brief(?:\?|$)/, policy: STABLE_SEC_POLICY },
+  { pattern: /^\/companies\/[^/]+\/filing-risk-signals(?:\?|$)/, policy: STABLE_SEC_POLICY },
   { pattern: /^\/companies\/[^/]+\/earnings\/summary(?:\?|$)/, policy: { ttlMs: 30_000, staleMs: 120_000 } },
   { pattern: /^\/companies\/[^/]+\/models(?:\?|$)/, policy: STABLE_SEC_POLICY },
   { pattern: /^\/companies\/[^/]+\/oil-scenario(?:\?|$)/, policy: { ttlMs: 45_000, staleMs: 180_000 } },
@@ -1807,6 +1809,10 @@ export function getCompanyCommentLetters(ticker: string): Promise<CompanyComment
 
 export function getCompanyFilingInsights(ticker: string): Promise<CompanyFilingInsightsResponse> {
   return fetchJson(`/companies/${encodeURIComponent(ticker)}/filing-insights`);
+}
+
+export function getCompanyFilingRiskSignals(ticker: string): Promise<CompanyFilingRiskSignalsResponse> {
+  return fetchJson(`/companies/${encodeURIComponent(ticker)}/filing-risk-signals`);
 }
 
 export function getCompanyInsiderTrades(

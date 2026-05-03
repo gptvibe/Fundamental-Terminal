@@ -32,7 +32,7 @@ async def search_companies(
         payload = _decode_hot_cache_payload(cached_hot)
         cached_response = CompanySearchResponse.model_validate(payload)
         if refresh and _looks_like_ticker(normalized_query):
-            stale_refresh = _trigger_refresh(background_tasks, _normalize_ticker(normalized_query), reason="stale")
+            stale_refresh = _trigger_refresh(_normalize_ticker(normalized_query), reason="stale")
             cached_response = cached_response.model_copy(update={"refresh": stale_refresh})
 
         not_modified = _apply_conditional_headers(
@@ -89,7 +89,7 @@ async def search_companies(
                     refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
             elif exact_match is None:
                 if not snapshots and _looks_like_ticker(normalized_query):
-                    refresh_state = _trigger_refresh(background_tasks, normalized_ticker, reason="missing")
+                    refresh_state = _trigger_refresh(normalized_ticker, reason="missing")
                 else:
                     refresh_state = RefreshState(
                         triggered=False,
@@ -98,7 +98,7 @@ async def search_companies(
                         job_id=None,
                     )
             elif exact_match.cache_state in {"missing", "stale"}:
-                refresh_state = _trigger_refresh(background_tasks, exact_match.company.ticker, reason=exact_match.cache_state)
+                refresh_state = _trigger_refresh(exact_match.company.ticker, reason=exact_match.cache_state)
             else:
                 refresh_state = RefreshState(triggered=False, reason="fresh", ticker=exact_match.company.ticker, job_id=None)
 
@@ -173,3 +173,4 @@ async def resolve_company_identifier(query: str = Query(..., min_length=1)) -> C
 
 
 __all__ = ["resolve_company_identifier", "search_companies"]
+

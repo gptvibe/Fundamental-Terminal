@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 
 import { AlertOrEntryCard, EvidenceCard, PanelErrorBoundary, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
@@ -16,11 +16,16 @@ import {
 import { formatDate } from "@/lib/format";
 import type {
   CompanyActivityOverviewResponse,
+  CompanyBeneficialOwnershipSummaryResponse,
   CompanyChangesSinceLastFilingResponse,
   CompanyEarningsSummaryResponse,
+  CompanyGovernanceSummaryResponse,
+  CompanyModelsResponse,
 } from "@/lib/types";
 import type { AsyncState } from "@/components/company/brief-primitives";
 
+import { WhatChangedHighlights } from "../_components/what-changed-highlights";
+import { buildWhatChangedHighlights } from "../_lib/what-changed-summary";
 import { formatFeedEntryType } from "../_lib/research-brief-utils";
 
 const ChangesSinceLastFilingCard = dynamic(
@@ -41,6 +46,9 @@ type WhatChangedSectionProps = {
   changesState: AsyncState<CompanyChangesSinceLastFilingResponse>;
   earningsSummaryState: AsyncState<CompanyEarningsSummaryResponse>;
   activityOverviewState: AsyncState<CompanyActivityOverviewResponse>;
+  modelsState: AsyncState<CompanyModelsResponse>;
+  ownershipSummaryState: AsyncState<CompanyBeneficialOwnershipSummaryResponse>;
+  governanceSummaryState: AsyncState<CompanyGovernanceSummaryResponse>;
   topAlerts: CompanyActivityOverviewResponse["alerts"];
   latestEntries: CompanyActivityOverviewResponse["entries"];
   briefLoading: boolean;
@@ -56,6 +64,9 @@ export const WhatChangedSection = memo(function WhatChangedSection({
   changesState,
   earningsSummaryState,
   activityOverviewState,
+  modelsState,
+  ownershipSummaryState,
+  governanceSummaryState,
   topAlerts,
   latestEntries,
   briefLoading,
@@ -66,6 +77,31 @@ export const WhatChangedSection = memo(function WhatChangedSection({
   expanded,
   onToggle,
 }: WhatChangedSectionProps) {
+  const highlights = useMemo(
+    () =>
+      buildWhatChangedHighlights({
+        changes: changesState.data,
+        earningsSummary: earningsSummaryState.data,
+        activityOverview: activityOverviewState.data,
+        models: modelsState.data,
+        ownershipSummary: ownershipSummaryState.data,
+        governanceSummary: governanceSummaryState.data,
+      }),
+    [
+      activityOverviewState.data,
+      changesState.data,
+      earningsSummaryState.data,
+      governanceSummaryState.data,
+      modelsState.data,
+      ownershipSummaryState.data,
+    ]
+  );
+
+  const highlightsLoading =
+    (changesState.loading && !changesState.data) ||
+    (earningsSummaryState.loading && !earningsSummaryState.data) ||
+    (activityOverviewState.loading && !activityOverviewState.data);
+
   return (
     <ResearchBriefSection
       id="what-changed"
@@ -94,6 +130,13 @@ export const WhatChangedSection = memo(function WhatChangedSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      <EvidenceCard
+        title="What changed now"
+        copy="Deterministic highlights ranked by recency first, then severity, with source provenance on every line."
+      >
+        <WhatChangedHighlights items={highlights} loading={highlightsLoading} />
+      </EvidenceCard>
+
       <EvidenceCard title="Update scoreboard" copy="The shortest possible read on filing deltas, earnings capture, and alert volume.">
         {changesState.error && !changesState.data && earningsSummaryState.error && !earningsSummaryState.data ? (
           <ResearchBriefStateBlock

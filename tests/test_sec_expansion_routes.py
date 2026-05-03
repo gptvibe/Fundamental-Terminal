@@ -1558,6 +1558,12 @@ def test_serialize_insider_trade_includes_filing_metadata_fields():
         value=2_281_250.0,
         ownership_after=950000.0,
         is_10b5_1=False,
+        sale_context="planned",
+        plan_adoption_date=date(2026, 1, 5),
+        plan_modification="amendment",
+        plan_modification_date=date(2026, 2, 1),
+        plan_signal_confidence="high",
+        plan_signal_provenance=["footnote:F1"],
     )
 
     payload = main_module._serialize_insider_trade(trade)
@@ -1566,6 +1572,12 @@ def test_serialize_insider_trade_includes_filing_metadata_fields():
     assert payload.filing_type == "4"
     assert payload.accession_number == "0000320193-26-000001"
     assert payload.source and payload.source.startswith("https://www.sec.gov/Archives")
+    assert payload.sale_context == "planned"
+    assert payload.plan_adoption_date == date(2026, 1, 5)
+    assert payload.plan_modification == "amendment"
+    assert payload.plan_modification_date == date(2026, 2, 1)
+    assert payload.plan_signal_confidence == "high"
+    assert payload.plan_signal_provenance == ["footnote:F1"]
 
 
 def test_form144_filings_route_returns_cached_rows(monkeypatch):

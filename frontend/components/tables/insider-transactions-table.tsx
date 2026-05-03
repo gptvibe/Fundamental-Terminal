@@ -99,7 +99,8 @@ export function InsiderTransactionsTable({
           price: formatCurrency(trade.price),
           value: formatCurrency(trade.value),
           ownership_after: formatInteger(trade.ownership_after),
-          plan_10b5_1: trade.is_10b5_1 ? "Yes" : "No",
+          plan_10b5_1: formatPlanContextForExport(trade),
+          plan_confidence: trade.plan_signal_confidence ? trade.plan_signal_confidence : "--",
           footnotes: formatFootnoteTags(trade.footnote_tags),
           filing_url: trade.source ?? "",
         };
@@ -276,9 +277,15 @@ export function InsiderTransactionsTable({
                   <td className="numeric-cell">{formatCurrency(trade.value)}</td>
                   <td className="numeric-cell">{formatInteger(trade.ownership_after)}</td>
                   <td>
-                    <span className={`insider-plan-pill ${trade.is_10b5_1 ? "insider-plan-pill-yes" : "insider-plan-pill-no"}`}>
-                      {trade.is_10b5_1 ? "Yes" : "No"}
-                    </span>
+                    {(() => {
+                      const planBadge = resolvePlanBadge(trade);
+                      return (
+                        <div className="insider-plan-cell">
+                          <span className={`insider-plan-pill ${planBadge.className}`}>{planBadge.label}</span>
+                          {planBadge.detail ? <span className="insider-plan-detail">{planBadge.detail}</span> : null}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>{formatFootnoteTags(trade.footnote_tags)}</td>
                 </tr>
@@ -447,6 +454,59 @@ function formatFootnoteTags(tags: string[] | null) {
     return "--";
   }
   return tags.slice(0, 3).join(", ");
+}
+
+function resolvePlanBadge(trade: InsiderTradePayload): { label: string; detail: string | null; className: string } {
+  const action = normalizeAction(trade.action);
+  const confidence = trade.plan_signal_confidence ? `confidence: ${trade.plan_signal_confidence}` : null;
+
+  if (action === "sell" && trade.sale_context === "planned") {
+    const adoptionDate = trade.plan_adoption_date ? `adopted ${formatDate(trade.plan_adoption_date)}` : null;
+    const detail = [adoptionDate, confidence].filter(Boolean).join(" | ") || null;
+    return {
+      label: "Planned sale",
+      detail,
+      className: "insider-plan-pill-planned",
+    };
+  }
+
+  if (action === "sell" && trade.sale_context === "discretionary") {
+    return {
+      label: "Discretionary sale",
+      detail: confidence,
+      className: "insider-plan-pill-discretionary",
+    };
+  }
+
+  if (action === "sell" && trade.sale_context === "unknown") {
+    return {
+      label: "Sale context unclear",
+      detail: confidence,
+      className: "insider-plan-pill-unknown",
+    };
+  }
+
+  if (trade.is_10b5_1) {
+    return {
+      label: "10b5-1 referenced",
+      detail: confidence,
+      className: "insider-plan-pill-yes",
+    };
+  }
+
+  return {
+    label: "No plan signal",
+    detail: null,
+    className: "insider-plan-pill-no",
+  };
+}
+
+function formatPlanContextForExport(trade: InsiderTradePayload): string {
+  const badge = resolvePlanBadge(trade);
+  if (badge.detail) {
+    return `${badge.label} (${badge.detail})`;
+  }
+  return badge.label;
 }
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;

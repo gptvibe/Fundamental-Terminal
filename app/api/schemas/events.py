@@ -22,6 +22,9 @@ class CapitalRaisePayload(BaseModel):
     offering_amount: Number = None
     shelf_size: Number = None
     is_late_filer: bool = False
+    plan_name: str | None = None
+    registered_shares: Number = None
+    shares_parse_confidence: str | None = None
 
 
 class CompanyCapitalRaisesResponse(BaseModel):
@@ -37,8 +40,10 @@ class CapitalMarketsSummaryPayload(BaseModel):
     late_filer_notices: int
     registration_filings: int
     prospectus_filings: int
+    equity_plan_registrations: int = 0
     latest_filing_date: DateType | None = None
     max_offering_amount: Number = None
+    total_registered_equity_plan_shares: Number = None
 
 
 class CompanyCapitalMarketsSummaryResponse(BaseModel):
