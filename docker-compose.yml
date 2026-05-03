@@ -100,7 +100,7 @@ services:
       DATA_FETCHER_HEALTH_QUEUE_PID_FILE: ${DATA_FETCHER_HEALTH_QUEUE_PID_FILE:-/tmp/data-fetcher-queue.pid}
       DATA_FETCHER_HEALTH_MAX_STALE_SECONDS: ${DATA_FETCHER_HEALTH_MAX_STALE_SECONDS:-75}
     healthcheck:
-      test: ["CMD-SHELL", "/bin/sh /app/docker/backend/healthcheck-data-fetcher.sh"]
+      test: ["CMD", "/bin/sh", "/app/docker/backend/healthcheck-data-fetcher.sh"]
       interval: 20s
       timeout: 10s
       retries: 6
@@ -150,6 +150,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(5000) }).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     networks:

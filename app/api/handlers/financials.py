@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.api.handlers import _shared as shared_module
 from app.api.handlers._common import main_bound
 from app.api.handlers._shared import *  # noqa: F401,F403
 
@@ -892,12 +893,12 @@ def company_charts_forecast_accuracy(
             **_empty_provenance_contract(),
         )
 
-    stored_snapshot, payload = _load_company_charts_forecast_accuracy_snapshot_record(
+    stored_snapshot, payload = shared_module._load_company_charts_forecast_accuracy_snapshot_record(
         session,
         snapshot.company.id,
         as_of=parsed_as_of,
     )
-    refresh = _refresh_for_company_charts_forecast_accuracy(
+    refresh = shared_module._refresh_for_company_charts_forecast_accuracy(
         session,
         snapshot,
         stored_snapshot=stored_snapshot,

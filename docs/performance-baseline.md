@@ -2,6 +2,8 @@
 
 Generated: 2026-04-05T10:52:54.829Z
 
+Related optimization summary: [docs/performance-notes.md](performance-notes.md)
+
 ## Run Command
 
 ```bash

@@ -1,5 +1,5 @@
-from app.contracts.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState
-from app.contracts.company_charts import (
+from app.contracts.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState  # noqa: F401
+from app.contracts.company_charts import (  # noqa: F401
     CompanyChartsAssumptionItemPayload,
     CompanyChartsAssumptionsCardPayload,
     CompanyChartsCardPayload,

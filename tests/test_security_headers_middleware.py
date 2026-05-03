@@ -99,3 +99,34 @@ def test_hsts_is_not_added_for_http_self_hosted_requests(monkeypatch) -> None:
         assert "Strict-Transport-Security" not in response.headers
     finally:
         _restore_settings(original_settings)
+
+
+def test_hsts_is_added_when_x_forwarded_proto_is_https(monkeypatch) -> None:
+    """Behind a TLS-terminating proxy that sets x-forwarded-proto: https,
+    the plain-HTTP backend request should still receive HSTS."""
+    original_settings = _override_settings(security_headers_enabled=True)
+    _patch_legacy_targets(monkeypatch, "_session_scope", _healthy_session_scope)
+
+    try:
+        client = TestClient(create_app())
+        response = client.get("/readyz", headers={"x-forwarded-proto": "https"})
+
+        assert response.status_code == 200
+        assert response.headers["Strict-Transport-Security"] == "max-age=31536000; includeSubDomains"
+    finally:
+        _restore_settings(original_settings)
+
+
+def test_hsts_is_not_added_when_x_forwarded_proto_is_http(monkeypatch) -> None:
+    """A plain-HTTP x-forwarded-proto header must not trigger HSTS."""
+    original_settings = _override_settings(security_headers_enabled=True)
+    _patch_legacy_targets(monkeypatch, "_session_scope", _healthy_session_scope)
+
+    try:
+        client = TestClient(create_app())
+        response = client.get("/readyz", headers={"x-forwarded-proto": "http"})
+
+        assert response.status_code == 200
+        assert "Strict-Transport-Security" not in response.headers
+    finally:
+        _restore_settings(original_settings)

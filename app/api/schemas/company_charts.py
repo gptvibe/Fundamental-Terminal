@@ -1,4 +1,4 @@
-from app.contracts.company_charts import (
+from app.contracts.company_charts import (  # noqa: F401
     CompanyChartsAssumptionItemPayload,
     CompanyChartsAssumptionsCardPayload,
     CompanyChartsCardPayload,

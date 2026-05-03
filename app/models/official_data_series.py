@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import DateTime, Index, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base

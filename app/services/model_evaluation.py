@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from math import sqrt
 from statistics import fmean
 from types import SimpleNamespace
-from typing import Any, Callable, Iterable, Iterator, Sequence
+from typing import Any, Callable, Iterator, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session

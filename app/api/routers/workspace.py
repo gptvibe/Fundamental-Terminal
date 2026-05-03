@@ -12,7 +12,6 @@ from app.api.schemas.workspace import (
     CompanyEarningsWorkspaceResponse,
     ResearchWorkspaceDeleteResponse,
     ResearchWorkspacePayload,
-    ResearchWorkspaceUpsertRequest,
     WatchlistCalendarResponse,
     WatchlistSummaryResponse,
 )

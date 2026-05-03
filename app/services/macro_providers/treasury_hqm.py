@@ -14,7 +14,7 @@ from __future__ import annotations
 import csv
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from io import StringIO
 from typing import Sequence
 

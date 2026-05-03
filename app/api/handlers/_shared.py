@@ -7,28 +7,25 @@ import inspect
 import logging
 from copy import deepcopy
 from functools import wraps
-import hashlib
 import html
 import json
-import math
 import os
 import re
 import sys
-import threading
 import time
 from email.utils import formatdate
 from datetime import date as DateType, datetime, timedelta, timezone
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status
+from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status  # noqa: F401
 import httpx
 from pydantic import BaseModel
 from starlette.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.schemas import (
+from app.api.schemas import (  # noqa: F401
     ActivityFeedEntryPayload,
     AlertPayload,
     AlertsSummaryPayload,
@@ -79,8 +76,6 @@ from app.api.schemas import (
     CompanyChartsShareSnapshotPayload,
     CompanyChartsShareSnapshotRecordPayload,
     CompanyChartsSummaryPayload,
-    CompanyChartsWhatIfImpactMetricPayload,
-    CompanyChartsWhatIfImpactSummaryPayload,
     CompanyChartsWhatIfOverridePayload,
     CompanyChartsWhatIfPayload,
     CompanyChartsWhatIfRequest,
@@ -93,7 +88,6 @@ from app.api.schemas import (
     CompanyEarningsSummaryResponse,
     CompanyEarningsWorkspaceResponse,
     CompanyEquityClaimRiskResponse,
-    EquityClaimRiskSummaryPayload,
     CompanyEventsResponse,
     CompanyExecutiveCompensationResponse,
     CompanyFactsResponse,
@@ -142,6 +136,7 @@ from app.api.schemas import (
     EarningsReleasePayload,
     EarningsSummaryPayload,
     ExecCompRowPayload,
+    EquityClaimRiskSummaryPayload,
     FilingEventPayload,
     FilingEventsSummaryPayload,
     FilingParserControlsPayload,
@@ -237,12 +232,6 @@ from app.api.schemas import (
     WatchlistSummaryItemPayload,
     WatchlistSummaryRequest,
     WatchlistSummaryResponse,
-    events,
-    filings,
-    financials,
-    formulas,
-    health,
-    models,
 )
 from app.api.validation import _normalize_as_of, _normalize_company_financials_query_controls, _normalize_company_models_query_controls, _parse_as_of, _validated_as_of
 from app.config import settings
@@ -261,7 +250,7 @@ from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
 from app.services.ownership_analytics import build_ownership_analytics
-from app.services.peer_comparison import build_peer_comparison
+from app.services.peer_comparison import build_peer_comparison  # noqa: F401
 from app.services.capital_structure_intelligence import snapshot_effective_at
 from app.services.segment_analysis import build_segment_analysis
 from app.services.cache_queries import (
@@ -274,7 +263,6 @@ from app.services.cache_queries import (
     get_company_capital_structure_last_checked,
     get_company_capital_structure_snapshots,
     get_company_coverage_counts,
-    get_company_filing_events_cache_status,
     get_company_earnings_cache_status,
     get_company_earnings_model_cache_status,
     get_company_earnings_model_points,
@@ -282,7 +270,7 @@ from app.services.cache_queries import (
     get_company_derived_metric_points,
     get_company_derived_metrics_last_checked,
     get_company_financial_restatements,
-    get_company_executive_compensation,
+    get_company_executive_compensation,  # noqa: F401
     get_company_filing_events,
     get_company_filing_events_by_company_ids,
     get_company_filing_insights,
@@ -316,11 +304,9 @@ from app.services.cache_queries import (
     latest_price_as_of,
     select_point_in_time_financials,
 )
-from app.services.beneficial_ownership import collect_beneficial_ownership_reports
 from app.services.company_charts_dashboard import (
     CHARTS_FORECAST_ACCURACY_SCHEMA_VERSION,
     CHARTS_DASHBOARD_SCHEMA_VERSION,
-    build_company_charts_forecast_accuracy_response,
     build_company_charts_dashboard_response,
     get_company_charts_forecast_accuracy_snapshot,
     get_company_charts_dashboard_snapshot,
@@ -358,7 +344,7 @@ from app.services.derived_metrics_mart import (
 from app.services.market_context import get_cached_market_context_status
 import app.services.market_data as market_data_service
 from app.services.model_evaluation import get_latest_model_evaluation_run, serialize_model_evaluation_run
-from app.services.oil_exposure import classify_company_oil_exposure, classify_oil_exposure
+from app.services.oil_exposure import classify_oil_exposure
 from app.services.oil_scenario import build_company_oil_scenario_public_payload
 from app.services.fetch_trigger import queue_company_refresh
 from app.services.filing_changes import build_changes_since_last_filing
@@ -370,7 +356,7 @@ from app.services.oil_scenario_overlay import (
 from app.services.segment_history import build_segment_history
 from app.services.sector_context import get_company_sector_context
 from app.services.screener import build_official_screener_filter_catalog, run_official_screener
-from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, ProxyVoteOutcome, parse_proxy_filing_signals
+from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
 from app.services.formula_registry import FORMULA_REGISTRY_VERSION, get_formula_metadata, list_formula_metadata

@@ -623,4 +623,141 @@ describe("useCompanyWorkspace", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.company?.ticker).toBe("AAPL");
   });
+
+  describe("Partial Failures - Optional Data", () => {
+    it("handles insider trades fetch failure while keeping core data", async () => {
+      const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+      const fetchFinancials = vi.mocked(getCompanyFinancials);
+      const fetchInsiders = vi.mocked(getCompanyInsiderTrades);
+
+      // Bootstrap fails with 501, falling back to legacy path
+      fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
+
+      // Financials succeed
+      fetchFinancials.mockResolvedValue(
+        buildFinancialsResponse({
+          company: {
+            ticker: "RKLB",
+            name: "Rocket Lab Corp",
+            sector: "Space",
+            market_sector: "Space",
+            last_checked: "2026-03-31T00:00:00Z",
+            cache_state: "fresh",
+          },
+          refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
+        }) as never
+      );
+
+      // Insider trades fail
+      fetchInsiders.mockRejectedValue(new Error("API request failed: 503 Service Unavailable"));
+
+      const { result } = renderHook(() =>
+        useCompanyWorkspace("RKLB", {
+          includeInsiders: true,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      // Core workspace should still load successfully
+      expect(result.current.company?.ticker).toBe("RKLB");
+      expect(result.current.financials.length).toBeGreaterThanOrEqual(0);
+      // Insider data should have error but not block the entire workspace
+      expect(result.current.insiderError).toBeDefined();
+      expect(result.current.insiderError).toMatch(/API request failed: 503/);
+      // Main error should be null since core data loaded
+      expect(result.current.error).toBeNull();
+    });
+
+    it("handles institutional holdings fetch failure while keeping core data", async () => {
+      const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+      const fetchFinancials = vi.mocked(getCompanyFinancials);
+      const fetchHoldings = vi.mocked(getCompanyInstitutionalHoldings);
+
+      fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
+      fetchFinancials.mockResolvedValue(
+        buildFinancialsResponse({
+          company: {
+            ticker: "RKLB",
+            name: "Rocket Lab Corp",
+            sector: "Space",
+            market_sector: "Space",
+            last_checked: "2026-03-31T00:00:00Z",
+            cache_state: "fresh",
+          },
+          refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
+        }) as never
+      );
+
+      fetchHoldings.mockRejectedValue(new Error("API request failed: 502 Bad Gateway"));
+
+      const { result } = renderHook(() =>
+        useCompanyWorkspace("RKLB", {
+          includeInstitutional: true,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      // Core workspace should still load successfully
+      expect(result.current.company?.ticker).toBe("RKLB");
+      expect(result.current.financials.length).toBeGreaterThanOrEqual(0);
+      // Institutional data should have error but not block the entire workspace
+      expect(result.current.institutionalError).toBeDefined();
+      expect(result.current.institutionalError).toMatch(/API request failed: 502/);
+      // Main error should be null since core data loaded
+      expect(result.current.error).toBeNull();
+    });
+
+    it("handles multiple optional data failures independently", async () => {
+      const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+      const fetchFinancials = vi.mocked(getCompanyFinancials);
+      const fetchInsiders = vi.mocked(getCompanyInsiderTrades);
+      const fetchHoldings = vi.mocked(getCompanyInstitutionalHoldings);
+
+      fetchBootstrap.mockRejectedValue(buildApiError(501, "Not Implemented"));
+      fetchFinancials.mockResolvedValue(
+        buildFinancialsResponse({
+          company: {
+            ticker: "RKLB",
+            name: "Rocket Lab Corp",
+            sector: "Space",
+            market_sector: "Space",
+            last_checked: "2026-03-31T00:00:00Z",
+            cache_state: "fresh",
+          },
+          refresh: { triggered: false, reason: "fresh", ticker: "RKLB", job_id: null },
+        }) as never
+      );
+
+      fetchInsiders.mockRejectedValue(new Error("Insider data unavailable"));
+      fetchHoldings.mockRejectedValue(new Error("Holdings data unavailable"));
+
+      const { result } = renderHook(() =>
+        useCompanyWorkspace("RKLB", {
+          includeInsiders: true,
+          includeInstitutional: true,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      // Core workspace should still load
+      expect(result.current.company?.ticker).toBe("RKLB");
+      expect(result.current.financials.length).toBeGreaterThanOrEqual(0);
+      // Both optional fields should have errors
+      expect(result.current.insiderError).toBeDefined();
+      expect(result.current.insiderError).toMatch(/Insider data unavailable/);
+      expect(result.current.institutionalError).toBeDefined();
+      expect(result.current.institutionalError).toMatch(/Holdings data unavailable/);
+      // Main error should be null since core data loaded
+      expect(result.current.error).toBeNull();
+    });
+  });
 });

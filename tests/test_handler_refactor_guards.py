@@ -213,8 +213,10 @@ def test_split_financials_forecast_accuracy_refresh_call_matches_helper_signatur
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_refresh_for_company_charts_forecast_accuracy"
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "shared_module"
+        and node.func.attr == "_refresh_for_company_charts_forecast_accuracy"
     ]
 
     assert calls

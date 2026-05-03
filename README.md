@@ -192,6 +192,12 @@ npm run dev
 
 Useful optional environment variables live in [.env.example](.env.example).
 
+To verify the checked-in Docker health checks without starting the stack:
+
+```bash
+python scripts/verify_docker_healthchecks.py
+```
+
 ## Production Hardening
 
 The app now includes:
@@ -239,6 +245,8 @@ It reports:
 The route-level breakdown is intended to answer a simple question quickly: when a route is slow, is the time in DB work, Redis/cache coordination, upstream fetches, JSON serialization, or application-side calculation.
 
 For a longer operator guide, see [docs/observability.md](docs/observability.md).
+
+Recent backend performance optimization outcomes are captured in [docs/performance-notes.md](docs/performance-notes.md).
 
 ## Key Workspaces
 

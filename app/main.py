@@ -13,8 +13,8 @@ from app.middleware import (
     register_performance_audit_middleware,
     register_rate_limit_middleware,
 )
-from app.middleware.company_cache import _canonicalize_company_query_string, _company_route_hot_cache_keys
-from app.middleware.conditional_get import _build_company_cache_etag
+from app.middleware.company_cache import _canonicalize_company_query_string, _company_route_hot_cache_keys  # noqa: F401
+from app.middleware.conditional_get import _build_company_cache_etag  # noqa: F401
 from app.performance_audit import PerformanceAuditJSONResponse
 
 

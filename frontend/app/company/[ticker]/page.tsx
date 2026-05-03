@@ -6,13 +6,17 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
+import { BriefBusinessQualitySection } from "@/components/company/brief-business-quality-section";
+import { BriefMonitorSection } from "@/components/company/brief-monitor-section";
+import { AlertOrEntryCard, EvidenceCard, PanelErrorBoundary, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import type { AsyncState, MonitorChecklistItem, ResearchBriefCue, SectionLink } from "@/components/company/brief-primitives";
+import { BriefValuationSection } from "@/components/company/brief-valuation-section";
 import { ResearchBriefPlainEnglishPanel } from "@/components/company/research-brief-plain-english-panel";
 import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
-import { EvidenceMetaBlock } from "@/components/ui/evidence-meta-block";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { showAppToast } from "@/lib/app-toast";
@@ -41,7 +45,6 @@ import {
   toneForEntryBadge,
   toneForEntryCard,
   toneForEntryType,
-  toneForInsiderSentiment,
   type SemanticTone,
 } from "@/lib/activity-feed-tone";
 import { MODEL_NAMES } from "@/lib/constants";
@@ -73,46 +76,69 @@ import type {
 
 const PriceFundamentalsModule = dynamic(
   () => import("@/components/charts/price-fundamentals-module").then((module) => module.PriceFundamentalsModule),
-  { ssr: false, loading: () => <div className="text-muted">Loading price and fundamentals...</div> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="research-brief-state research-brief-state-loading">
+        <div className="grid-empty-kicker">Snapshot</div>
+        <div className="grid-empty-title">Loading price and fundamentals</div>
+        <div className="grid-empty-copy">Preparing the persisted price-versus-fundamentals comparison.</div>
+      </div>
+    ),
+  }
 );
 const BusinessSegmentBreakdown = dynamic(
   () => import("@/components/charts/business-segment-breakdown").then((module) => module.BusinessSegmentBreakdown),
-  { ssr: false, loading: () => <div className="text-muted">Loading segment breakdown...</div> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="research-brief-state research-brief-state-loading">
+        <div className="grid-empty-kicker">Snapshot</div>
+        <div className="grid-empty-title">Loading segment breakdown</div>
+        <div className="grid-empty-copy">Reading the latest persisted segment and geography disclosures.</div>
+      </div>
+    ),
+  }
 );
 const ChangesSinceLastFilingCard = dynamic(
   () => import("@/components/company/changes-since-last-filing-card").then((module) => module.ChangesSinceLastFilingCard),
-  { ssr: false, loading: () => <div className="text-muted">Loading filing comparison...</div> }
-);
-const CashFlowWaterfallChart = dynamic(
-  () => import("@/components/charts/cash-flow-waterfall-chart").then((module) => module.CashFlowWaterfallChart),
-  { ssr: false, loading: () => <div className="text-muted">Loading cash flow bridge...</div> }
-);
-const MarginTrendChart = dynamic(
-  () => import("@/components/charts/margin-trend-chart").then((module) => module.MarginTrendChart),
-  { ssr: false, loading: () => <div className="text-muted">Loading margin trends...</div> }
-);
-const FinancialQualitySummary = dynamic(
-  () => import("@/components/company/financial-quality-summary").then((module) => module.FinancialQualitySummary),
-  { ssr: false, loading: () => <div className="text-muted">Loading quality summary...</div> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="research-brief-state research-brief-state-loading">
+        <div className="grid-empty-kicker">What changed</div>
+        <div className="grid-empty-title">Loading filing comparison</div>
+        <div className="grid-empty-copy">Preparing the highest-signal filing changes from the latest cached comparison.</div>
+      </div>
+    ),
+  }
 );
 const ShareDilutionTrackerChart = dynamic(
   () => import("@/components/charts/share-dilution-tracker-chart").then((module) => module.ShareDilutionTrackerChart),
-  { ssr: false, loading: () => <div className="text-muted">Loading dilution tracker...</div> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="research-brief-state research-brief-state-loading">
+        <div className="grid-empty-kicker">Capital &amp; risk</div>
+        <div className="grid-empty-title">Loading dilution tracker</div>
+        <div className="grid-empty-copy">Reading cached share-count history to determine dilution direction.</div>
+      </div>
+    ),
+  }
 );
 const CapitalStructureIntelligencePanel = dynamic(
   () => import("@/components/company/capital-structure-intelligence-panel").then((module) => module.CapitalStructureIntelligencePanel),
-  { ssr: false, loading: () => <div className="text-muted">Loading capital structure intelligence...</div> }
+  {
+    ssr: false,
+    loading: () => (
+      <div className="research-brief-state research-brief-state-loading">
+        <div className="grid-empty-kicker">Capital &amp; risk</div>
+        <div className="grid-empty-title">Loading capital structure intelligence</div>
+        <div className="grid-empty-copy">Preparing the persisted debt, lease, payout, and dilution intelligence.</div>
+      </div>
+    ),
+  }
 );
-const InvestmentSummaryPanel = dynamic(
-  () => import("@/components/models/investment-summary-panel").then((module) => module.InvestmentSummaryPanel),
-  { ssr: false, loading: () => <div className="text-muted">Loading valuation summary...</div> }
-);
-
-type AsyncState<T> = {
-  data: T | null;
-  error: string | null;
-  loading: boolean;
-};
 
 type ResearchBriefAsyncState = {
   activityOverview: AsyncState<CompanyActivityOverviewResponse>;
@@ -136,27 +162,6 @@ type ResearchBriefDataState = ResearchBriefAsyncState & {
   sectionStatuses: ResearchBriefSectionStatusPayload[];
   filingTimeline: FilingTimelineItemPayload[];
   summaryCards: ResearchBriefSummaryCardPayload[];
-};
-
-type ResearchBriefCue = {
-  label: string;
-  asOf?: string | null;
-  lastRefreshedAt?: string | null;
-  lastChecked?: string | null;
-  provenance?: ProvenanceEntryPayload[] | null;
-  sourceMix?: SourceMixPayload | null;
-  confidenceFlags?: string[] | null;
-};
-
-type SectionLink = {
-  href: string;
-  label: string;
-};
-
-type MonitorChecklistItem = {
-  title: string;
-  detail: string;
-  tone: SemanticTone;
 };
 
 type BriefCompany = {
@@ -707,12 +712,14 @@ export default function CompanyResearchBriefPage() {
               message="Preparing the persisted price-versus-fundamentals comparison used at the top of the brief."
             />
           ) : priceHistory.length || fundamentalsTrendData.length ? (
-            <PriceFundamentalsModule
-              priceData={priceHistory}
-              fundamentalsData={fundamentalsTrendData}
-              title="Price and operating momentum"
-              subtitle="Start with price action, revenue growth, EPS trend, and free-cash-flow direction before diving into specialist evidence."
-            />
+            <PanelErrorBoundary kicker="Snapshot" title="Unable to render momentum view">
+              <PriceFundamentalsModule
+                priceData={priceHistory}
+                fundamentalsData={fundamentalsTrendData}
+                title="Price and operating momentum"
+                subtitle="Start with price action, revenue growth, EPS trend, and free-cash-flow direction before diving into specialist evidence."
+              />
+            </PanelErrorBoundary>
           ) : (
             <ResearchBriefStateBlock
               kind="empty"
@@ -769,7 +776,9 @@ export default function CompanyResearchBriefPage() {
               message="Reading the latest persisted segment and geography disclosures from cached filings."
             />
           ) : financials.length ? (
-            <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
+            <PanelErrorBoundary kicker="Snapshot" title="Unable to render segment breakdown">
+              <BusinessSegmentBreakdown financials={financials} segmentAnalysis={data?.segment_analysis ?? null} />
+            </PanelErrorBoundary>
           ) : (
             <ResearchBriefStateBlock
               kind="empty"
@@ -781,18 +790,20 @@ export default function CompanyResearchBriefPage() {
         </EvidenceCard>
       </ResearchBriefSection>
 
-      <ResearchBriefPlainEnglishPanel
-        ticker={ticker}
-        models={briefData.models.data?.models ?? []}
-        modelsLoading={briefData.models.loading}
-        modelsError={briefData.models.error}
-        latestFinancial={latestFinancial}
-        previousAnnual={previousAnnual}
-        diagnostics={data?.diagnostics ?? null}
-        confidenceFlags={data?.confidence_flags ?? null}
-        strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
-        reloadKey={reloadKey}
-      />
+      <PanelErrorBoundary kicker="Analysis" title="Unable to render plain-English analysis">
+        <ResearchBriefPlainEnglishPanel
+          ticker={ticker}
+          models={briefData.models.data?.models ?? []}
+          modelsLoading={briefData.models.loading}
+          modelsError={briefData.models.error}
+          latestFinancial={latestFinancial}
+          previousAnnual={previousAnnual}
+          diagnostics={data?.diagnostics ?? null}
+          confidenceFlags={data?.confidence_flags ?? null}
+          strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
+          reloadKey={reloadKey}
+        />
+      </PanelErrorBoundary>
 
       <ResearchBriefSectionNav activeSectionId={activeSectionId} />
 
@@ -877,13 +888,15 @@ export default function CompanyResearchBriefPage() {
           copy="Only the highest-signal filing changes surface here by default; the filings drill-down keeps the broader metric and evidence detail."
           className="is-wide"
         >
-          <ChangesSinceLastFilingCard
-            ticker={ticker}
-            reloadKey={reloadKey}
-            initialPayload={briefData.changes.data}
-            detailMode="brief"
-            deferFetch={briefData.loading}
-          />
+          <PanelErrorBoundary kicker="What changed" title="Unable to render filing comparison">
+            <ChangesSinceLastFilingCard
+              ticker={ticker}
+              reloadKey={reloadKey}
+              initialPayload={briefData.changes.data}
+              detailMode="brief"
+              deferFetch={briefData.loading}
+            />
+          </PanelErrorBoundary>
         </EvidenceCard>
 
         <EvidenceCard
@@ -989,92 +1002,23 @@ export default function CompanyResearchBriefPage() {
         </EvidenceCard>
       </ResearchBriefSection>
 
-      <ResearchBriefSection
-        id="business-quality"
-        title="Business quality"
-        question="Is the business getting stronger, weaker, or just noisier?"
-        summary={businessQualityNarrative}
-        cues={[
-          {
-            label: "Financial quality inputs",
-            asOf: data?.as_of,
-            lastRefreshedAt: data?.last_refreshed_at,
-            lastChecked: pageCompany?.last_checked_financials,
-            provenance: data?.provenance,
-            sourceMix: data?.source_mix,
-            confidenceFlags: data?.confidence_flags,
-          },
-        ]}
-        links={businessQualityLinks}
-        expanded={expandedSections["business-quality"] ?? true}
-        onToggle={() => toggleSection("business-quality")}
-      >
-        <EvidenceCard title="Quality summary" copy="A compact read on margins, profitability, leverage, growth, and share-count direction.">
-          {error && !financials.length ? (
-            <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load quality summary" message={error} />
-          ) : loading && !financials.length ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Business quality"
-              title="Loading annual quality read"
-              message="Preparing the latest persisted profitability, leverage, and growth view from annual filings."
-            />
-          ) : financials.length ? (
-            <FinancialQualitySummary financials={financials} />
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Business quality"
-              title="No annual quality history yet"
-              message="This summary appears after the cache includes enough annual filings to compare profitability and growth cleanly."
-            />
-          )}
-        </EvidenceCard>
-
-        <EvidenceCard title="Margin trends" copy="Gross, operating, net, and free-cash-flow margin direction from cached filings.">
-          {error && !financials.length ? (
-            <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load margin trends" message={error} />
-          ) : loading && !financials.length ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Business quality"
-              title="Loading margin trends"
-              message="Building the persisted margin history used to judge whether operating quality is improving or degrading."
-            />
-          ) : financials.length ? (
-            <MarginTrendChart financials={financials} />
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Business quality"
-              title="No margin history yet"
-              message="Margin trend charts appear once multiple comparable filing periods are cached for the company."
-            />
-          )}
-        </EvidenceCard>
-
-        <EvidenceCard title="Cash flow bridge" copy="How operating cash flow turns into free cash flow and how much room capital allocation still has.">
-          {error && !financials.length ? (
-            <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load cash flow bridge" message={error} />
-          ) : loading && !financials.length ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Business quality"
-              title="Loading cash flow bridge"
-              message="Preparing the persisted cash flow waterfall used to separate accounting noise from cash-generation strength."
-            />
-          ) : financials.length ? (
-            <CashFlowWaterfallChart financials={financials} />
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Business quality"
-              title="No cash flow bridge yet"
-              message="The bridge populates when cached filings include operating cash flow, capex, and capital allocation inputs."
-            />
-          )}
-        </EvidenceCard>
-      </ResearchBriefSection>
+      <PanelErrorBoundary kicker="Business quality" title="Unable to render business quality section">
+        <BriefBusinessQualitySection
+          financials={financials}
+          loading={loading}
+          error={error}
+          narrative={businessQualityNarrative}
+          asOf={data?.as_of}
+          lastRefreshedAt={data?.last_refreshed_at}
+          lastCheckedFinancials={pageCompany?.last_checked_financials}
+          provenance={data?.provenance}
+          sourceMix={data?.source_mix}
+          confidenceFlags={data?.confidence_flags}
+          links={businessQualityLinks}
+          expanded={expandedSections["business-quality"] ?? true}
+          onToggle={() => toggleSection("business-quality")}
+        />
+      </PanelErrorBoundary>
 
       <ResearchBriefSection
         id="capital-risk"
@@ -1185,11 +1129,13 @@ export default function CompanyResearchBriefPage() {
               message="Preparing the persisted debt, lease, payout, and dilution intelligence for the brief."
             />
           ) : briefData.capitalStructure.data?.latest ? (
-            <CapitalStructureIntelligencePanel
-              ticker={ticker}
-              reloadKey={reloadKey}
-              initialPayload={briefData.capitalStructure.data}
-            />
+            <PanelErrorBoundary kicker="Capital & risk" title="Unable to render capital structure intelligence">
+              <CapitalStructureIntelligencePanel
+                ticker={ticker}
+                reloadKey={reloadKey}
+                initialPayload={briefData.capitalStructure.data}
+              />
+            </PanelErrorBoundary>
           ) : (
             <ResearchBriefStateBlock
               kind="empty"
@@ -1211,7 +1157,9 @@ export default function CompanyResearchBriefPage() {
               message="Reading cached share-count history to determine whether the equity claim is being diluted or defended."
             />
           ) : financials.length ? (
-            <ShareDilutionTrackerChart financials={financials} />
+            <PanelErrorBoundary kicker="Capital & risk" title="Unable to render dilution tracker">
+              <ShareDilutionTrackerChart financials={financials} />
+            </PanelErrorBoundary>
           ) : (
             <ResearchBriefStateBlock
               kind="empty"
@@ -1288,217 +1236,34 @@ export default function CompanyResearchBriefPage() {
         </EvidenceCard>
       </ResearchBriefSection>
 
-      <ResearchBriefSection
-        id="valuation"
-        title="Valuation"
-        question="How does the current price compare with peers and cached model ranges?"
-        summary={valuationNarrative}
-        cues={[
-          {
-            label: "Valuation models",
-            asOf: briefData.models.data?.as_of,
-            lastRefreshedAt: briefData.models.data?.last_refreshed_at,
-            provenance: briefData.models.data?.provenance,
-            sourceMix: briefData.models.data?.source_mix,
-            confidenceFlags: briefData.models.data?.confidence_flags,
-          },
-          {
-            label: "Peer comparison",
-            asOf: briefData.peers.data?.as_of,
-            lastRefreshedAt: briefData.peers.data?.last_refreshed_at,
-            provenance: briefData.peers.data?.provenance,
-            sourceMix: briefData.peers.data?.source_mix,
-            confidenceFlags: briefData.peers.data?.confidence_flags,
-          },
-        ]}
-        links={valuationLinks}
-        expanded={expandedSections.valuation ?? true}
-        onToggle={() => toggleSection("valuation")}
-      >
-        <EvidenceCard
-          title="Valuation summary"
-          copy="Use the default brief to see the cached underwriting conclusion, then jump into the full Models workspace when you need the full assumption tree."
-          className="is-wide"
-        >
-          {briefData.models.error && !briefData.models.data ? (
-            <ResearchBriefStateBlock kind="error" kicker="Valuation" title="Unable to load valuation summary" message={briefData.models.error} />
-          ) : briefData.models.loading && !briefData.models.data ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Valuation"
-              title="Loading valuation summary"
-              message="Preparing the cached DCF, residual income, and diagnostic model outputs for the brief."
-            />
-          ) : briefData.models.data?.models.length ? (
-            <InvestmentSummaryPanel
-              ticker={ticker}
-              models={briefData.models.data.models}
-              financials={financials}
-              priceHistory={priceHistory}
-              strictOfficialMode={Boolean(briefData.models.data.company?.strict_official_mode ?? pageCompany?.strict_official_mode)}
-            />
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Valuation"
-              title="No cached model outputs yet"
-              message="Refresh the company to backfill persisted model outputs before using the brief as a valuation read."
-            />
-          )}
-        </EvidenceCard>
+      <PanelErrorBoundary kicker="Valuation" title="Unable to render valuation section">
+        <BriefValuationSection
+          ticker={ticker}
+          modelsState={briefData.models}
+          peersState={briefData.peers}
+          financials={financials}
+          priceHistory={priceHistory}
+          strictOfficialMode={Boolean(briefData.models.data?.company?.strict_official_mode ?? pageCompany?.strict_official_mode)}
+          narrative={valuationNarrative}
+          links={valuationLinks}
+          expanded={expandedSections.valuation ?? true}
+          onToggle={() => toggleSection("valuation")}
+        />
+      </PanelErrorBoundary>
 
-        <EvidenceCard title="Peer comparison snapshot" copy="A compact relative view so the brief can answer whether current multiples look rich, cheap, or roughly in line before deeper peer work.">
-          {briefData.peers.error && !briefData.peers.data ? (
-            <ResearchBriefStateBlock kind="error" kicker="Valuation" title="Unable to load peer snapshot" message={briefData.peers.error} />
-          ) : briefData.peers.loading && !briefData.peers.data ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Valuation"
-              title="Loading peer snapshot"
-              message="Preparing the persisted peer universe and comparison metrics for the brief."
-            />
-          ) : briefData.peers.data?.peers.length ? (
-            <PeerComparisonSnapshot response={briefData.peers.data} />
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Valuation"
-              title="No peer snapshot yet"
-              message="Peer comparison will appear after more cached companies are available in the comparison universe."
-            />
-          )}
-        </EvidenceCard>
-      </ResearchBriefSection>
-
-      <ResearchBriefSection
-        id="monitor"
-        title="Monitor"
-        question="What should I keep watching after I leave this page?"
-        summary={monitorNarrative}
-        cues={[
-          {
-            label: "Monitoring feed",
-            asOf: briefData.activityOverview.data?.as_of,
-            lastRefreshedAt: briefData.activityOverview.data?.last_refreshed_at,
-            lastChecked: pageCompany?.last_checked,
-            provenance: briefData.activityOverview.data?.provenance,
-            sourceMix: briefData.activityOverview.data?.source_mix,
-            confidenceFlags: briefData.activityOverview.data?.confidence_flags,
-          },
-        ]}
-        links={monitorLinks}
-        expanded={expandedSections.monitor ?? true}
-        onToggle={() => toggleSection("monitor")}
-      >
-        <EvidenceCard title="Priority alerts" copy="The monitor starts with the highest-signal items the user is likely to revisit first.">
-          {briefData.activityOverview.error && !briefData.activityOverview.data ? (
-            <ResearchBriefStateBlock kind="error" kicker="Monitor" title="Unable to load alerts" message={briefData.activityOverview.error} />
-          ) : briefData.activityOverview.loading && !briefData.activityOverview.data ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Monitor"
-              title="Loading alert watchlist"
-              message="Preparing the cached alert feed that powers the brief's monitor section."
-            />
-          ) : topAlerts.length ? (
-            <div className="workspace-card-stack">
-              {topAlerts.map((alert) => {
-                const levelTone = toneForAlertLevel(alert.level);
-                const sourceTone = toneForAlertSource(alert.source);
-
-                return (
-                  <AlertOrEntryCard
-                    key={alert.id}
-                    href={alert.href}
-                    tone={levelTone}
-                    topLeft={
-                      <>
-                        <span className={`pill tone-${levelTone}`}>{alert.level}</span>
-                        <span className={`pill tone-${sourceTone}`}>{alert.source}</span>
-                      </>
-                    }
-                    topRight={formatDate(alert.date)}
-                    title={alert.title}
-                    detail={alert.detail}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Monitor"
-              title="No active alerts"
-              message="The monitor will list high-priority cached alerts here when thresholds are triggered."
-            />
-          )}
-        </EvidenceCard>
-
-        <EvidenceCard title="Latest timeline" copy="Chronological recent activity keeps the monitor grounded in dated SEC evidence instead of a generic task list.">
-          {briefData.activityOverview.error && !briefData.activityOverview.data ? (
-            <ResearchBriefStateBlock kind="error" kicker="Monitor" title="Unable to load timeline" message={briefData.activityOverview.error} />
-          ) : briefData.activityOverview.loading && !briefData.activityOverview.data ? (
-            <ResearchBriefStateBlock
-              kind="loading"
-              kicker="Monitor"
-              title="Loading SEC timeline"
-              message="Preparing recent filing, governance, ownership, and insider events for the watchlist-style closeout."
-            />
-          ) : latestEntries.length ? (
-            <div className="workspace-card-stack">
-              {latestEntries.map((entry) => {
-                const typeTone = toneForEntryType(entry.type);
-                const badgeTone = toneForEntryBadge(entry.type, entry.badge);
-                const cardTone = toneForEntryCard(entry);
-
-                return (
-                  <AlertOrEntryCard
-                    key={entry.id}
-                    href={entry.href}
-                    tone={cardTone}
-                    topLeft={
-                      <>
-                        <span className={`pill tone-${typeTone}`}>{formatFeedEntryType(entry.type)}</span>
-                        <span className={`pill tone-${badgeTone}`}>{entry.badge}</span>
-                      </>
-                    }
-                    topRight={formatDate(entry.date)}
-                    title={entry.title}
-                    detail={entry.detail}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Monitor"
-              title="No timeline entries yet"
-              message="Recent filing and ownership activity will populate here once the monitoring feed has dated SEC events to show."
-            />
-          )}
-        </EvidenceCard>
-
-        <EvidenceCard title="Monitor checklist" copy="The last step in the brief is explicit: what to re-check next, and why.">
-          {monitorChecklist.length ? (
-            <div className="research-brief-checklist-grid">
-              {monitorChecklist.map((item) => (
-                <div key={item.title} className={`research-brief-checklist-card tone-${item.tone}`}>
-                  <div className="research-brief-checklist-title">{item.title}</div>
-                  <div className="research-brief-checklist-detail">{item.detail}</div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <ResearchBriefStateBlock
-              kind="empty"
-              kicker="Monitor"
-              title="No next-step checklist yet"
-              message="The monitor checklist appears once the brief has enough cached activity and freshness data to recommend the next review points."
-            />
-          )}
-        </EvidenceCard>
-      </ResearchBriefSection>
+      <PanelErrorBoundary kicker="Monitor" title="Unable to render monitor section">
+        <BriefMonitorSection
+          activityOverviewState={briefData.activityOverview}
+          topAlerts={topAlerts}
+          latestEntries={latestEntries}
+          monitorChecklist={monitorChecklist}
+          narrative={monitorNarrative}
+          lastChecked={pageCompany?.last_checked}
+          links={monitorLinks}
+          expanded={expandedSections.monitor ?? true}
+          onToggle={() => toggleSection("monitor")}
+        />
+      </PanelErrorBoundary>
     </CompanyWorkspaceShell>
   );
 }
@@ -1818,54 +1583,6 @@ function persistResearchBriefSectionState(storageKey: string, expandedSections: 
   }
 }
 
-function ResearchBriefSection({
-  id,
-  title,
-  question,
-  summary,
-  cues,
-  links,
-  expanded,
-  onToggle,
-  children,
-}: {
-  id: string;
-  title: string;
-  question: string;
-  summary?: string | null;
-  cues: ResearchBriefCue[];
-  links: SectionLink[];
-  expanded: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
-  const contentId = `${id}-content`;
-
-  return (
-    <section id={id} data-brief-section className="research-brief-anchor">
-      <Panel
-        title={title}
-        subtitle={question}
-        aside={<ResearchBriefSectionControls links={links} expanded={expanded} title={title} contentId={contentId} onToggle={onToggle} />}
-        variant="subtle"
-        bodyId={contentId}
-        bodyHidden={!expanded}
-        className="research-brief-section-panel"
-      >
-        <div className="research-brief-section-stack">
-          {summary || cues.length ? (
-            <div className="research-brief-section-intro">
-              {summary ? <p className="research-brief-section-summary">{summary}</p> : null}
-              <ResearchBriefFreshness cues={cues} />
-            </div>
-          ) : null}
-          <div className="research-brief-evidence-grid">{children}</div>
-        </div>
-      </Panel>
-    </section>
-  );
-}
-
 function ResearchBriefHeroSummary({
   summary,
   metrics,
@@ -1994,226 +1711,6 @@ function ResearchBriefSectionNav({ activeSectionId }: { activeSectionId: string 
         </a>
       ))}
     </nav>
-  );
-}
-
-function ResearchBriefSectionControls({
-  links,
-  expanded,
-  title,
-  contentId,
-  onToggle,
-}: {
-  links: SectionLink[];
-  expanded: boolean;
-  title: string;
-  contentId: string;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="research-brief-section-controls">
-      <SectionLinks links={links} />
-      <button
-        type="button"
-        className="research-brief-section-toggle"
-        aria-controls={contentId}
-        aria-label={`${expanded ? "Collapse" : "Expand"} ${title}`}
-        data-expanded={expanded ? "true" : "false"}
-        onClick={onToggle}
-      >
-        <span>{expanded ? "Collapse" : "Expand"}</span>
-        <span className="research-brief-section-toggle-chevron" aria-hidden="true" />
-      </button>
-    </div>
-  );
-}
-
-function SectionLinks({ links }: { links: SectionLink[] }) {
-  return (
-    <div className="research-brief-section-links">
-      {links.map((link) => (
-        <Link key={link.href} href={link.href} className="research-brief-section-link">
-          {link.label}
-        </Link>
-      ))}
-    </div>
-  );
-}
-
-function ResearchBriefFreshness({ cues }: { cues: ResearchBriefCue[] }) {
-  const visibleCues = cues.filter(
-    (cue) => cue.asOf || cue.lastRefreshedAt || cue.lastChecked || cue.provenance?.length || cue.sourceMix || cue.confidenceFlags?.length
-  );
-
-  if (!visibleCues.length) {
-    return null;
-  }
-
-  return (
-    <div className="research-brief-freshness-grid">
-      {visibleCues.map((cue) => {
-        const sourceSummary = formatEvidenceSourceSummary(cue.sourceMix, cue.provenance);
-        const fallbackLabel = formatEvidenceFallbackLabel(cue.provenance, cue.sourceMix);
-        const confidenceFlags = (cue.confidenceFlags ?? []).slice(0, 2);
-
-        return (
-          <div key={cue.label} className="research-brief-freshness-card">
-            <div className="research-brief-freshness-head">
-              <div className="research-brief-freshness-title">{cue.label}</div>
-              {confidenceFlags.length ? <div className="research-brief-freshness-flags">Flags: {confidenceFlags.map(humanizeToken).join(", ")}</div> : null}
-            </div>
-            <EvidenceMetaBlock
-              items={[
-                { label: "Source", value: sourceSummary, emphasized: true },
-                { label: "As of", value: cue.asOf ? formatDate(cue.asOf) : "Pending" },
-                { label: "Freshness", value: formatBriefEvidenceFreshness(cue.lastRefreshedAt, cue.lastChecked) },
-                { label: "Fallback label", value: fallbackLabel },
-              ]}
-            />
-            {cue.provenance?.length ? (
-              <div className="research-brief-freshness-note">
-                {cue.provenance.length.toLocaleString()} registry source{cue.provenance.length === 1 ? "" : "s"} backing this section.
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function EvidenceCard({
-  title,
-  copy,
-  className,
-  children,
-}: {
-  title: string;
-  copy: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className={`research-brief-evidence-card${className ? ` ${className}` : ""}`}>
-      <div className="research-brief-evidence-head">
-        <h3 className="research-brief-evidence-title">{title}</h3>
-        <p className="research-brief-evidence-copy">{copy}</p>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ResearchBriefStateBlock({
-  kind,
-  kicker,
-  title,
-  message,
-  minHeight = 220,
-}: {
-  kind: "loading" | "empty" | "error";
-  kicker: string;
-  title: string;
-  message: string;
-  minHeight?: number;
-}) {
-  return (
-    <div className={`research-brief-state research-brief-state-${kind}${minHeight <= 180 ? " is-compact" : ""}`}>
-      <div className="grid-empty-kicker">{kicker}</div>
-      <div className="grid-empty-title">{title}</div>
-      <div className="grid-empty-copy">{message}</div>
-    </div>
-  );
-}
-
-function PeerComparisonSnapshot({ response }: { response: CompanyPeersResponse }) {
-  const rows = response.peers.slice(0, 4);
-
-  return (
-    <div className="research-brief-table-stack">
-      <div className="company-data-table-shell">
-        <table className="company-data-table company-data-table-compact">
-          <thead>
-            <tr>
-              <th>Company</th>
-              <th className="is-numeric">Price</th>
-              <th className="is-numeric">P/E</th>
-              <th className="is-numeric">EV / EBIT</th>
-              <th className="is-numeric">Revenue Growth</th>
-              <th className="is-numeric">ROIC</th>
-              <th className="is-numeric">Fair Value Gap</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((peer) => (
-              <tr key={peer.ticker} className={peer.is_focus ? "research-brief-table-row-focus" : undefined}>
-                <td>
-                  <div className="research-brief-peer-cell">
-                    <strong>{peer.ticker}</strong>
-                    <span className="text-muted">{peer.name}</span>
-                  </div>
-                </td>
-                <td className="is-numeric">{formatCompactCurrency(peer.latest_price)}</td>
-                <td className="is-numeric">{formatMultiple(peer.pe)}</td>
-                <td className="is-numeric">{formatMultiple(peer.ev_to_ebit)}</td>
-                <td className="is-numeric">{formatPercent(peer.revenue_growth)}</td>
-                <td className="is-numeric">{formatPercent(peer.roic)}</td>
-                <td className="is-numeric">{formatPercent(peer.fair_value_gap)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {response.notes.fair_value_gap ? <div className="text-muted workspace-note-line">{response.notes.fair_value_gap}</div> : null}
-      {response.notes.ev_to_ebit ? <div className="text-muted workspace-note-line">{response.notes.ev_to_ebit}</div> : null}
-    </div>
-  );
-}
-
-function AlertOrEntryCard({
-  href,
-  tone,
-  topLeft,
-  topRight,
-  title,
-  detail,
-}: {
-  href: string | null;
-  tone: SemanticTone;
-  topLeft: ReactNode;
-  topRight: string;
-  title: string;
-  detail: string;
-}) {
-  const cardClassName = `filing-link-card company-pulse-card tone-${tone}`;
-  const content = (
-    <>
-      <div className="company-pulse-card-top">
-        <div className="company-pulse-card-pills">{topLeft}</div>
-        <div className="text-muted">{topRight}</div>
-      </div>
-      <div className="company-pulse-card-title">{title}</div>
-      <div className="company-pulse-card-detail">{detail}</div>
-    </>
-  );
-
-  if (href) {
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className={`${cardClassName} research-brief-linked-card`}
-      >
-        {content}
-      </a>
-    );
-  }
-
-  return (
-    <div className={`${cardClassName} research-brief-linked-card`}>
-      {content}
-    </div>
   );
 }
 
@@ -2668,55 +2165,6 @@ function median(values: Array<number | null | undefined>): number | null {
   return numericValues[middle];
 }
 
-function formatSourceMixLabel(sourceMix: SourceMixPayload | null | undefined, provenance: ProvenanceEntryPayload[] | null | undefined): string | null {
-  const fallbackLabels = resolveCommercialFallbackLabels(provenance, sourceMix);
-
-  if (sourceMix?.official_only) {
-    return "Official/public only";
-  }
-
-  if (fallbackLabels.length) {
-    return "Official + labeled fallback";
-  }
-
-  if (provenance?.length) {
-    return "Cached source mix";
-  }
-
-  return null;
-}
-
-function formatEvidenceSourceSummary(sourceMix: SourceMixPayload | null | undefined, provenance: ProvenanceEntryPayload[] | null | undefined): string {
-  return formatSourceMixLabel(sourceMix, provenance) ?? "Pending";
-}
-
-function formatEvidenceFallbackLabel(
-  provenance: ProvenanceEntryPayload[] | null | undefined,
-  sourceMix: SourceMixPayload | null | undefined,
-): string {
-  const fallbackLabels = resolveCommercialFallbackLabels(provenance, sourceMix);
-
-  if (fallbackLabels.length) {
-    return fallbackLabels.join(", ");
-  }
-
-  if (sourceMix?.official_only || provenance?.length) {
-    return "Official only";
-  }
-
-  return "Pending";
-}
-
-function formatBriefEvidenceFreshness(lastRefreshedAt: string | null | undefined, lastChecked: string | null | undefined): string {
-  if (lastRefreshedAt) {
-    return `Refreshed ${formatDate(lastRefreshedAt)}`;
-  }
-  if (lastChecked) {
-    return `Checked ${formatDate(lastChecked)}`;
-  }
-  return "Pending";
-}
-
 function formatCompactCurrency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) {
     return "—";
@@ -2739,10 +2187,6 @@ function formatFeedEntryType(type: string): string {
   }
 
   return type;
-}
-
-function humanizeToken(value: string): string {
-  return value.replaceAll("_", " ");
 }
 
 function mapBriefResponseToAsyncState(brief: CompanyResearchBriefResponse): ResearchBriefDataState {

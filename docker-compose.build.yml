@@ -67,7 +67,7 @@ services:
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
     healthcheck:
-      test: ["CMD", "python", "-c", "from app.services.status_stream import status_broker; import sys; snapshot = status_broker.worker_health_snapshot(); sys.exit(0 if int(snapshot.get('live_worker_count', 0) or 0) > 0 else 1)"]
+      test: ["CMD", "/bin/sh", "/app/docker/backend/healthcheck-data-fetcher.sh"]
       interval: 20s
       timeout: 10s
       retries: 6
@@ -104,6 +104,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/', { signal: AbortSignal.timeout(5000) }).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
     ports:
       - "3000:3000"
 

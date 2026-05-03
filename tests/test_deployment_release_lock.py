@@ -9,6 +9,8 @@ def test_published_compose_defaults_to_latest_images_with_explicit_overrides() -
     assert "APP_IMAGE_TAG" not in compose_text
     assert "${BACKEND_IMAGE:-gptvibe/fundamentalterminal:backend-latest}" in compose_text
     assert "${FRONTEND_IMAGE:-gptvibe/fundamentalterminal:frontend-latest}" in compose_text
+    assert "healthcheck-data-fetcher.sh" in compose_text
+    assert "http://127.0.0.1:3000/" in compose_text
 
 
 def test_python_runtime_and_dev_requirements_stay_split() -> None:

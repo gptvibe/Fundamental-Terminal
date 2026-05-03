@@ -209,3 +209,76 @@ def test_worker_lifecycle_heartbeat_writes_health_file(monkeypatch, tmp_path) ->
     assert seen_heartbeats == [("worker-test-1", "idle")]
     assert health_file.exists()
     assert int(health_file.read_text(encoding="utf-8").strip()) > 0
+
+
+def test_queue_worker_propagates_claim_errors_and_clears_heartbeat(monkeypatch) -> None:
+    clear_calls: list[str] = []
+
+    class _ClaimFailureBroker:
+        has_blocking_queue = True
+
+        def requeue_expired_jobs(self, *, limit: int) -> None:
+            assert limit == 10
+
+        def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float):
+            assert worker_id
+            assert timeout_seconds == 0.5
+            raise RuntimeError("claim failed")
+
+        def heartbeat_worker(
+            self,
+            worker_id: str,
+            *,
+            state: str,
+            current_job_id: str | None = None,
+            ticker: str | None = None,
+        ) -> None:
+            assert worker_id
+            assert state
+
+        def clear_worker_heartbeat(self, worker_id: str) -> None:
+            clear_calls.append(worker_id)
+
+    monkeypatch.setattr(worker_module, "status_broker", _ClaimFailureBroker())
+    monkeypatch.setattr(worker_module.threading, "Thread", _FakeThread)
+
+    with pytest.raises(RuntimeError, match="claim failed"):
+        worker_module.run_refresh_queue_worker(poll_interval_seconds=0.5, once=False)
+
+    assert len(clear_calls) == 1
+
+
+def test_queue_worker_propagates_recovery_errors_and_clears_heartbeat(monkeypatch) -> None:
+    clear_calls: list[str] = []
+
+    class _RecoveryFailureBroker:
+        has_blocking_queue = True
+
+        def requeue_expired_jobs(self, *, limit: int) -> None:
+            assert limit == 10
+            raise RuntimeError("recovery failed")
+
+        def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float):
+            raise AssertionError("claim_next_job_blocking should not be called after recovery failure")
+
+        def heartbeat_worker(
+            self,
+            worker_id: str,
+            *,
+            state: str,
+            current_job_id: str | None = None,
+            ticker: str | None = None,
+        ) -> None:
+            assert worker_id
+            assert state
+
+        def clear_worker_heartbeat(self, worker_id: str) -> None:
+            clear_calls.append(worker_id)
+
+    monkeypatch.setattr(worker_module, "status_broker", _RecoveryFailureBroker())
+    monkeypatch.setattr(worker_module.threading, "Thread", _FakeThread)
+
+    with pytest.raises(RuntimeError, match="recovery failed"):
+        worker_module.run_refresh_queue_worker(poll_interval_seconds=0.25, once=False)
+
+    assert len(clear_calls) == 1

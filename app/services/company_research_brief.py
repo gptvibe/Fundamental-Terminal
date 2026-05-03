@@ -47,7 +47,6 @@ from app.research_brief_contracts import (
     EarningsReleasePayload,
     EarningsSummaryPayload,
     GovernanceSummaryPayload,
-    GovernanceVoteOutcomePayload,
     ModelPayload,
     PeerMetricsPayload,
     PeerOptionPayload,
@@ -90,7 +89,6 @@ from app.services.cache_queries import (
     get_company_price_history,
     get_company_proxy_statements,
     get_company_snapshot,
-    latest_price_as_of,
     select_point_in_time_financials,
 )
 from app.services.equity_claim_risk import build_company_equity_claim_risk_response

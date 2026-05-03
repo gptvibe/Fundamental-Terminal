@@ -6,6 +6,8 @@ import { ChartShareCard } from "@/components/company/chart-share-card";
 import { CHART_SHARE_LAYOUTS, buildCompanyChartsShareImagePath } from "@/lib/chart-share";
 import { buildCompanyChartsShareMetadata, loadCompanyChartsShareSnapshot, resolveChartShareServerBaseUrl } from "@/lib/chart-share-server";
 
+import styles from "./page.module.css";
+
 type CompanyChartsSharePageProps = {
   params: Promise<{ ticker: string; snapshotId: string }>;
 };
@@ -32,38 +34,29 @@ export default async function CompanyChartsSharePage({ params }: CompanyChartsSh
   }
 
   return (
-    <main style={{ minHeight: "100vh", background: "#07111b", color: "#f7f4ed", padding: "32px 20px" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", display: "flex", flexDirection: "column", gap: 22 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 20, flexWrap: "wrap", alignItems: "center" }}>
+    <main className={styles.page}>
+      <div className={styles.shell}>
+        <div className={styles.header}>
           <div>
-            <div style={{ fontSize: 14, textTransform: "uppercase", letterSpacing: 1.2, color: "#8ea5b7" }}>Charts Share Snapshot</div>
-            <h1 style={{ margin: "8px 0 6px", fontSize: 36, lineHeight: 1.05 }}>{record.payload.company_name ?? record.ticker}</h1>
-            <p style={{ margin: 0, color: "#cad7e3" }}>{record.payload.title}</p>
+            <div className={styles.eyebrow}>Charts Share Snapshot</div>
+            <h1 className={styles.title}>{record.payload.company_name ?? record.ticker}</h1>
+            <p className={styles.subtitle}>{record.payload.title}</p>
           </div>
-          <Link href={record.payload.source_path} style={{ color: "#8fe5b4", textDecoration: "none", fontWeight: 600 }}>
+          <Link href={record.payload.source_path} className={styles.liveLink}>
             Open live charts
           </Link>
         </div>
 
-        <div style={{ borderRadius: 28, overflow: "hidden", border: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className={styles.cardFrame}>
           <ChartShareCard snapshot={record.payload} layout="landscape" />
         </div>
 
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+        <div className={styles.downloadLinks}>
           {Object.entries(CHART_SHARE_LAYOUTS).map(([layoutKey, config]) => (
             <a
               key={layoutKey}
               href={buildCompanyChartsShareImagePath(record.share_path, layoutKey as keyof typeof CHART_SHARE_LAYOUTS)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                padding: "10px 14px",
-                borderRadius: 999,
-                color: "#f7f4ed",
-                textDecoration: "none",
-                background: "rgba(255,255,255,0.07)",
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
+              className={styles.downloadLink}
             >
               {config.label} PNG
             </a>

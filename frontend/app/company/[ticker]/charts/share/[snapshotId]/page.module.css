@@ -1,0 +1,79 @@
+.page {
+  min-height: 100vh;
+  padding: 32px 20px;
+  color: #f7f4ed;
+  background: #07111b;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.eyebrow {
+  color: #8ea5b7;
+  font-size: 14px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 8px 0 6px;
+  font-size: 36px;
+  line-height: 1.05;
+}
+
+.subtitle {
+  margin: 0;
+  color: #cad7e3;
+}
+
+.liveLink {
+  color: #8fe5b4;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cardFrame {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 28px;
+}
+
+.downloadLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.downloadLink {
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 14px;
+  color: #f7f4ed;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 24px 16px;
+  }
+
+  .title {
+    font-size: 28px;
+  }
+}

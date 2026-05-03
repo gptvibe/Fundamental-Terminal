@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
+from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, RefreshState
 from app.api.schemas.events import AlertsSummaryPayload
 
 

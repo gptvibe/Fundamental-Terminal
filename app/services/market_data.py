@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 import httpx
-from sqlalchemy import Select, case, func, or_, select, update
+from sqlalchemy import Select, case, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 

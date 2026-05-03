@@ -14,7 +14,6 @@ if str(ROOT) not in sys.path:
 from app.db.session import SessionLocal, get_engine
 from app.services.model_evaluation import (
     FIXTURE_CANDIDATE_LABEL,
-    FIXTURE_SUITE_KEY,
     OIL_OVERLAY_FIXTURE_CANDIDATE_LABEL,
     OIL_OVERLAY_FIXTURE_SUITE_KEY,
     build_baseline_payload,
