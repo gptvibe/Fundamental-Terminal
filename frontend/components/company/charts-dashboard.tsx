@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Area,
   Bar,
@@ -18,6 +18,7 @@ import {
 
 import { ChartsModeSwitch } from "@/components/company/charts-mode-switch";
 import { ChartShareActions } from "@/components/company/chart-share-actions";
+import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { Dialog } from "@/components/ui/dialog";
 import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
 import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
@@ -108,6 +109,9 @@ const EMPTY_QUARTER_CHANGE: CompanyChartsQuarterChangePayload = {
   empty_state: "Not enough period history for a change summary yet.",
 };
 
+const ABOVE_FOLD_PRIMARY_CARD_COUNT = 1;
+const ABOVE_FOLD_SECONDARY_CARD_COUNT = 1;
+
 export function CompanyChartsDashboard({
   payload,
   activeMode = "outlook",
@@ -140,6 +144,10 @@ export function CompanyChartsDashboard({
   const freshnessLine = useMemo(() => buildChartsFreshnessLine(payload), [payload]);
   const sourceLine = useMemo(() => outlookSpec.summary.source_badges.slice(0, 2).join(" · "), [outlookSpec.summary.source_badges]);
   const hasSecondaryOutlookCards = secondaryCards.length > 0;
+  const initialPrimaryCards = useMemo(() => primaryCards.slice(0, ABOVE_FOLD_PRIMARY_CARD_COUNT), [primaryCards]);
+  const deferredPrimaryCards = useMemo(() => primaryCards.slice(ABOVE_FOLD_PRIMARY_CARD_COUNT), [primaryCards]);
+  const initialSecondaryCards = useMemo(() => secondaryCards.slice(0, ABOVE_FOLD_SECONDARY_CARD_COUNT), [secondaryCards]);
+  const deferredSecondaryCards = useMemo(() => secondaryCards.slice(ABOVE_FOLD_SECONDARY_CARD_COUNT), [secondaryCards]);
   const shareSnapshot = useMemo(() => buildOutlookChartShareSnapshot(payload), [payload]);
   const eventOverlay = outlookSpec.event_overlay ?? payload.event_overlay ?? EMPTY_EVENT_OVERLAY;
   const quarterChange = outlookSpec.quarter_change ?? payload.quarter_change ?? EMPTY_QUARTER_CHANGE;
@@ -202,8 +210,12 @@ export function CompanyChartsDashboard({
       </header>
 
       <KeyAssumptionsStrip card={detailCards.find((card) => card.key === "forecast_assumptions") ?? null} />
-      <EventOverlayPanel overlay={eventOverlay} enabledEventTypes={enabledEventTypeList} onToggleEventType={toggleEventType} />
-      <QuarterChangePanel panel={quarterChange} />
+      <DeferredClientSection placeholder={<LightweightPanelPlaceholder title="Event overlays" />}>
+        <EventOverlayPanel overlay={eventOverlay} enabledEventTypes={enabledEventTypeList} onToggleEventType={toggleEventType} />
+      </DeferredClientSection>
+      <DeferredClientSection placeholder={<LightweightPanelPlaceholder title="What changed since last quarter?" />}>
+        <QuarterChangePanel panel={quarterChange} />
+      </DeferredClientSection>
 
       <section className="charts-dashboard-matrix" aria-label="Growth outlook dashboard">
         <aside className="charts-summary-panel" aria-label="Growth outlook summary">
@@ -260,7 +272,7 @@ export function CompanyChartsDashboard({
           ) : null}
         </aside>
 
-        {primaryCards.map((card) => (
+        {initialPrimaryCards.map((card) => (
           <MetricChartCard
             key={card.key}
             card={card}
@@ -275,19 +287,59 @@ export function CompanyChartsDashboard({
         <GrowthSummaryCard card={primaryComparisonCard} className="charts-card-matrix" />
       </section>
 
+      {deferredPrimaryCards.length ? (
+        <section className="charts-card-grid charts-card-grid-secondary" aria-label="Growth outlook extended metrics">
+          {deferredPrimaryCards.map((card) => (
+            <DeferredClientSection
+              key={card.key}
+              placeholder={<MetricChartCardPlaceholder title={card.title} />}
+            >
+              <MetricChartCard
+                card={card}
+                palette={CARD_PALETTES[card.key] ?? CARD_PALETTES.revenue}
+                overlayEvents={eventOverlay.events}
+                enabledEventTypes={enabledEventTypeList}
+                metricDiff={metricDiffByCard.get(card.key) ?? null}
+                onOpenMetricDiff={setSelectedMetricDiff}
+              />
+            </DeferredClientSection>
+          ))}
+        </section>
+      ) : null}
+
       {hasSecondaryOutlookCards ? (
         <section className="charts-card-grid charts-card-grid-secondary" aria-label="Growth outlook details">
-          {secondaryCards.map((card, index) => (
-            <MetricChartCard
+          {initialSecondaryCards.map((card, index) => (
+            <DeferredClientSection
               key={card.key}
-              card={card}
-              palette={CARD_PALETTES[card.key] ?? CARD_PALETTES.revenue}
-              className={index === 0 ? "charts-card-wide" : undefined}
-              overlayEvents={eventOverlay.events}
-              enabledEventTypes={enabledEventTypeList}
-              metricDiff={metricDiffByCard.get(card.key) ?? null}
-              onOpenMetricDiff={setSelectedMetricDiff}
-            />
+              forceVisible
+              placeholder={<MetricChartCardPlaceholder title={card.title} />}
+            >
+              <MetricChartCard
+                card={card}
+                palette={CARD_PALETTES[card.key] ?? CARD_PALETTES.revenue}
+                className={index === 0 ? "charts-card-wide" : undefined}
+                overlayEvents={eventOverlay.events}
+                enabledEventTypes={enabledEventTypeList}
+                metricDiff={metricDiffByCard.get(card.key) ?? null}
+                onOpenMetricDiff={setSelectedMetricDiff}
+              />
+            </DeferredClientSection>
+          ))}
+          {deferredSecondaryCards.map((card) => (
+            <DeferredClientSection
+              key={card.key}
+              placeholder={<MetricChartCardPlaceholder title={card.title} />}
+            >
+              <MetricChartCard
+                card={card}
+                palette={CARD_PALETTES[card.key] ?? CARD_PALETTES.revenue}
+                overlayEvents={eventOverlay.events}
+                enabledEventTypes={enabledEventTypeList}
+                metricDiff={metricDiffByCard.get(card.key) ?? null}
+                onOpenMetricDiff={setSelectedMetricDiff}
+              />
+            </DeferredClientSection>
           ))}
         </section>
       ) : null}
@@ -295,7 +347,12 @@ export function CompanyChartsDashboard({
       {detailCards.length ? (
         <section className="charts-detail-grid" aria-label="Forecast details">
           {detailCards.map((card) => (
-            <ForecastAssumptionsCard key={card.key} card={card} />
+            <DeferredClientSection
+              key={card.key}
+              placeholder={<AssumptionsCardPlaceholder title={card.title} />}
+            >
+              <ForecastAssumptionsCard card={card} />
+            </DeferredClientSection>
           ))}
         </section>
       ) : null}
@@ -305,16 +362,52 @@ export function CompanyChartsDashboard({
   );
 }
 
-function HeroSummaryStat({ label, value }: { label: string; value: string }) {
+function LightweightPanelPlaceholder({ title }: { title: string }) {
+  return (
+    <section className="charts-quarter-change-panel" aria-label={title}>
+      <div className="charts-quarter-change-title">{title}</div>
+      <div className="charts-card-empty">Loading cached context for this section...</div>
+    </section>
+  );
+}
+
+function MetricChartCardPlaceholder({ title }: { title: string }) {
+  return (
+    <section className="charts-card charts-card-metric">
+      <div className="charts-card-header">
+        <div className="charts-card-copy">
+          <h2 className="charts-card-title">{title}</h2>
+          <p className="charts-card-subtitle">Preparing chart view from cached series.</p>
+        </div>
+      </div>
+      <div className="charts-card-empty">Loading chart panel...</div>
+    </section>
+  );
+}
+
+function AssumptionsCardPlaceholder({ title }: { title: string }) {
+  return (
+    <section className="charts-card charts-card-assumptions">
+      <div className="charts-card-header">
+        <div>
+          <h2 className="charts-card-title">{title}</h2>
+        </div>
+      </div>
+      <div className="charts-card-empty">Loading assumptions...</div>
+    </section>
+  );
+}
+
+const HeroSummaryStat = memo(function HeroSummaryStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="charts-page-hero-stat">
       <div className="charts-page-hero-stat-label">{label}</div>
       <div className="charts-page-hero-stat-value">{value}</div>
     </div>
   );
-}
+});
 
-function KeyAssumptionsStrip({ card }: { card: CompanyChartsAssumptionsCardPayload | null }) {
+const KeyAssumptionsStrip = memo(function KeyAssumptionsStrip({ card }: { card: CompanyChartsAssumptionsCardPayload | null }) {
   const summaryItems = useMemo(
     () =>
       (card?.items ?? [])
@@ -347,45 +440,45 @@ function KeyAssumptionsStrip({ card }: { card: CompanyChartsAssumptionsCardPaylo
       </div>
     </section>
   );
-}
+});
 
-function PrimaryScoreBadge({ badge }: { badge: CompanyChartsScoreBadgePayload }) {
+const PrimaryScoreBadge = memo(function PrimaryScoreBadge({ badge }: { badge: CompanyChartsScoreBadgePayload }) {
   return (
     <div className={`charts-primary-score charts-tone-${badge.tone}`}>
       <div className="charts-primary-score-label">{badge.label}</div>
       <div className="charts-primary-score-value">{badge.score == null ? "—" : Math.round(badge.score)}</div>
     </div>
   );
-}
+});
 
-function ScoreBadge({ badge, compact = false }: { badge: CompanyChartsScoreBadgePayload; compact?: boolean }) {
+const ScoreBadge = memo(function ScoreBadge({ badge, compact = false }: { badge: CompanyChartsScoreBadgePayload; compact?: boolean }) {
   return (
     <div className={`charts-score-badge charts-tone-${badge.tone} ${compact ? "is-compact" : ""}`}>
       <div className="charts-score-badge-label">{badge.label}</div>
       <div className="charts-score-badge-value">{badge.score == null ? "—" : Math.round(badge.score)}</div>
     </div>
   );
-}
+});
 
-function SummaryDataLine({ label, value }: { label: string; value: string }) {
+const SummaryDataLine = memo(function SummaryDataLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="charts-summary-data-line">
       <span className="charts-summary-data-line-label">{label}</span>
       <span className="charts-summary-data-line-value">{value}</span>
     </div>
   );
-}
+});
 
-function LegendInlineItem({ item }: { item: CompanyChartsLegendItemPayload }) {
+const LegendInlineItem = memo(function LegendInlineItem({ item }: { item: CompanyChartsLegendItemPayload }) {
   return (
     <div className="charts-legend-inline-item">
       <span className={`charts-legend-swatch charts-legend-tone-${item.tone} charts-legend-style-${item.style}`} aria-hidden="true" />
       <span className="charts-legend-inline-label">{item.label}</span>
     </div>
   );
-}
+});
 
-function EventOverlayPanel({
+const EventOverlayPanel = memo(function EventOverlayPanel({
   overlay,
   enabledEventTypes,
   onToggleEventType,
@@ -430,9 +523,9 @@ function EventOverlayPanel({
       </div>
     </section>
   );
-}
+});
 
-function QuarterChangePanel({ panel }: { panel: CompanyChartsQuarterChangePayload }) {
+const QuarterChangePanel = memo(function QuarterChangePanel({ panel }: { panel: CompanyChartsQuarterChangePayload }) {
   if (panel.empty_state) {
     return (
       <section className="charts-quarter-change-panel" aria-label="What changed since last quarter">
@@ -460,9 +553,9 @@ function QuarterChangePanel({ panel }: { panel: CompanyChartsQuarterChangePayloa
       </div>
     </section>
   );
-}
+});
 
-function MetricDiffDialog({ diff, onClose }: { diff: CompanyChartsMetricDiffPayload | null; onClose: () => void }) {
+const MetricDiffDialog = memo(function MetricDiffDialog({ diff, onClose }: { diff: CompanyChartsMetricDiffPayload | null; onClose: () => void }) {
   if (!diff) {
     return null;
   }
@@ -499,18 +592,18 @@ function MetricDiffDialog({ diff, onClose }: { diff: CompanyChartsMetricDiffPayl
       {diff.stale_cache ? <div className="charts-metric-diff-note">Snapshot cache is stale, so this explanation may lag newly filed updates.</div> : null}
     </Dialog>
   );
-}
+});
 
-function MetricDiffCell({ label, value }: { label: string; value: string }) {
+const MetricDiffCell = memo(function MetricDiffCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="charts-metric-diff-cell">
       <div className="charts-metric-diff-label">{label}</div>
       <div className="charts-metric-diff-value">{value}</div>
     </div>
   );
-}
+});
 
-function MetricChartCard({
+const MetricChartCard = memo(function MetricChartCard({
   card,
   palette,
   className,
@@ -679,15 +772,15 @@ function MetricChartCard({
       ) : null}
     </section>
   );
-}
+});
 
-function SeriesMarker({ color, dashed }: { color: string; dashed: boolean }) {
+const SeriesMarker = memo(function SeriesMarker({ color, dashed }: { color: string; dashed: boolean }) {
   return (
     <svg className={`charts-card-series-marker ${dashed ? "is-dashed" : ""}`} viewBox="0 0 18 10" aria-hidden="true">
       <line className="charts-card-series-marker-line" x1="1" y1="5" x2="17" y2="5" stroke={color} strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
-}
+});
 
 export function MetricChartTooltipContent({
   active,
@@ -707,6 +800,8 @@ export function MetricChartTooltipContent({
     return null;
   }
 
+  const seriesByKey = new Map(seriesList.map((item) => [item.key, item]));
+
   const phaseLabel = activeRow.forecastZone ? "Projected period" : "Reported period";
   const formattedLabel = typeof label === "string" || typeof label === "number" ? String(label) : activeRow.periodLabel;
 
@@ -720,7 +815,7 @@ export function MetricChartTooltipContent({
         {visibleEntries.map((entry) => {
           const dataKey = typeof entry.dataKey === "string" ? entry.dataKey : String(entry.dataKey ?? "");
           const normalizedValue = Array.isArray(entry.value) ? entry.value[0] : entry.value;
-          const series = seriesList.find((item) => item.key === dataKey);
+          const series = seriesByKey.get(dataKey);
           const pointMeta = activeRow.pointMeta[dataKey];
           const kindLabel = pointMeta?.seriesKind === "forecast" ? "Projected" : pointMeta?.seriesKind === "actual" ? "Reported" : "Context";
           const annotation = pointMeta?.annotation ?? null;
@@ -750,7 +845,7 @@ export function MetricChartTooltipContent({
   );
 }
 
-function GrowthSummaryCard({ card, className }: { card: CompanyChartsComparisonCardPayload; className?: string }) {
+const GrowthSummaryCard = memo(function GrowthSummaryCard({ card, className }: { card: CompanyChartsComparisonCardPayload; className?: string }) {
   return (
     <section className={`charts-card charts-card-summary ${className ?? ""}`.trim()}>
       <div className="charts-card-header">
@@ -781,9 +876,9 @@ function GrowthSummaryCard({ card, className }: { card: CompanyChartsComparisonC
       )}
     </section>
   );
-}
+});
 
-function ForecastAssumptionsCard({ card }: { card: CompanyChartsAssumptionsCardPayload }) {
+const ForecastAssumptionsCard = memo(function ForecastAssumptionsCard({ card }: { card: CompanyChartsAssumptionsCardPayload }) {
   return (
     <section className="charts-card charts-card-assumptions">
       <div className="charts-card-header">
@@ -808,7 +903,7 @@ function ForecastAssumptionsCard({ card }: { card: CompanyChartsAssumptionsCardP
       )}
     </section>
   );
-}
+});
 
 function buildMetricDiffByCard(panel: CompanyChartsQuarterChangePayload): Map<string, CompanyChartsMetricDiffPayload> {
   const map = new Map<string, CompanyChartsMetricDiffPayload>();
@@ -852,6 +947,7 @@ function buildChartRows(
   enabledEventTypes: string[] = []
 ): ChartRow[] {
   const byPeriod = new Map<string, ChartRow>();
+  const enabledEventTypeSet = enabledEventTypes.length ? new Set(enabledEventTypes) : null;
 
   for (const series of seriesList) {
     for (const point of series.points) {
@@ -880,7 +976,14 @@ function buildChartRows(
   }
 
   for (const series of seriesList) {
-    const lastPoint = [...series.points].reverse().find((point) => point.value != null);
+    let lastPoint = null as CompanyChartsSeriesPayload["points"][number] | null;
+    for (let index = series.points.length - 1; index >= 0; index -= 1) {
+      const point = series.points[index];
+      if (point.value != null) {
+        lastPoint = point;
+        break;
+      }
+    }
     if (!lastPoint) {
       continue;
     }
@@ -892,13 +995,13 @@ function buildChartRows(
   }
 
   const rows = Array.from(byPeriod.values());
-  if (!rows.length || !overlayEvents.length || !enabledEventTypes.length) {
+  if (!rows.length || !overlayEvents.length || !enabledEventTypeSet) {
     return rows;
   }
 
   const rowByLabel = new Map(rows.map((row) => [row.periodLabel, row]));
   for (const event of overlayEvents) {
-    if (!enabledEventTypes.includes(event.event_type)) {
+    if (!enabledEventTypeSet.has(event.event_type)) {
       continue;
     }
     const direct = event.period_label ? rowByLabel.get(event.period_label) : null;

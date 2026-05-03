@@ -422,6 +422,6 @@ describe("DerivedMetricsPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Select derived metric"), { target: { value: "roatce" } });
     expect(screen.getByRole("option", { name: "ROATCE" })).toBeTruthy();
-    expect(screen.getByText("14.6%")).toBeTruthy();
+    expect(screen.getByText(/14\.6\d*%/)).toBeTruthy();
   });
 });

@@ -339,14 +339,13 @@ describe("CompanyChartsDashboard", () => {
     const matrixTitles = within(dashboard)
       .getAllByRole("heading", { level: 2 })
       .map((heading) => heading.textContent);
-    expect(matrixTitles).toEqual([
-      "Revenue",
-      "Revenue Growth",
-      "Profit Metrics",
-      "Cash Flow Metrics",
-      "EPS",
-      "Growth Summary",
-    ]);
+    expect(matrixTitles).toEqual(["Revenue", "Growth Summary"]);
+
+    const extendedMetrics = screen.getByLabelText("Growth outlook extended metrics");
+    expect(within(extendedMetrics).getByText("Revenue Growth")).toBeTruthy();
+    expect(within(extendedMetrics).getByText("Profit Metrics")).toBeTruthy();
+    expect(within(extendedMetrics).getByText("Cash Flow Metrics")).toBeTruthy();
+    expect(within(extendedMetrics).getByText("EPS")).toBeTruthy();
 
     expect(within(summary).queryByText("Revenue")).toBeNull();
     expect(within(detailCards).getByText("Revenue Outlook Bridge")).toBeTruthy();

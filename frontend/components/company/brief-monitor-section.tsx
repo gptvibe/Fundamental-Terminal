@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { AlertOrEntryCard, EvidenceCard, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
 import type { AsyncState, MonitorChecklistItem, ResearchBriefCue, SectionLink } from "@/components/company/brief-primitives";
 import {
@@ -12,7 +13,7 @@ import {
 import { formatDate } from "@/lib/format";
 import type { ActivityFeedEntryPayload, AlertPayload, CompanyActivityOverviewResponse } from "@/lib/types";
 
-export function BriefMonitorSection({
+export const BriefMonitorSection = memo(function BriefMonitorSection({
   activityOverviewState,
   topAlerts,
   latestEntries,
@@ -166,7 +167,7 @@ export function BriefMonitorSection({
       </EvidenceCard>
     </ResearchBriefSection>
   );
-}
+});
 
 function formatFeedEntryType(type: string): string {
   if (type === "form144") {

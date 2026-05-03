@@ -6553,6 +6553,35 @@ select {
   font-size: 0.95rem;
 }
 
+.company-overview-status-strip {
+  display: grid;
+  gap: 8px;
+}
+
+.company-overview-data-quality {
+  display: grid;
+  gap: 12px;
+}
+
+.company-overview-data-quality-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.company-overview-data-quality-body {
+  display: grid;
+  gap: 10px;
+}
+
+.deferred-client-section-pending {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
+}
+
+.deferred-client-section-visible {
+  content-visibility: visible;
+}
+
 .research-brief-hero {
   display: grid;
   gap: 14px;

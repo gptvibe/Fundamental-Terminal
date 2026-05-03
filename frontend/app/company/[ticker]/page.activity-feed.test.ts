@@ -234,22 +234,36 @@ describe("CompanyResearchBriefPage", () => {
     });
 
     expect(screen.getByRole("button", { name: "Refresh Brief Data" })).toBeTruthy();
+    expect(screen.getByLabelText("Top provenance and freshness strip")).toBeTruthy();
+    expect(screen.getByText("Source mix")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "What changed" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Business quality" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Capital & risk" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Valuation" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
+    expect(screen.getAllByText("Source freshness timeline").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Collapse Snapshot" })).toBeTruthy();
     expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
     expect(screen.getAllByText("high")[0]?.className).toContain("tone-red");
+    await waitFor(() => {
+      expect(screen.getByText("Ownership watch")).toBeTruthy();
+    });
     expect(screen.getByText("Ownership watch").closest(".research-brief-checklist-card")?.className).toContain("tone-cyan");
     expect(screen.getByText(/includes a labeled commercial fallback from Yahoo Finance/i)).toBeTruthy();
     expect(screen.getByText("price-fundamentals")).toBeTruthy();
     expect(screen.getByText("plain-english-brief-panel")).toBeTruthy();
     expect(screen.getByText("Equity claim risk pack summary")).toBeTruthy();
     expect(screen.getByText("Dilution pressure remains elevated because recent financing and reporting signals are still active.")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
+      expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
+    });
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
+    const snapshotHeading = screen.getByRole("heading", { name: "Snapshot" });
+    const dataQualityHeading = screen.getByRole("heading", { name: "Data quality & sources" });
+    expect(snapshotHeading.compareDocumentPosition(dataQualityHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(getCompanyActivityOverview).not.toHaveBeenCalled();
     expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
     expect(getCompanyEarningsSummary).not.toHaveBeenCalled();
@@ -577,6 +591,26 @@ describe("CompanyResearchBriefPage", () => {
 
     expect(screen.getByText(/Queued behind 2 other refreshes before the first overview starts/i)).toBeTruthy();
     expect(screen.getByText(/Refresh queue: 2 refreshes ahead before this company snapshot starts/i)).toBeTruthy();
+  });
+
+  it("keeps stale-data warnings visible while rendering the reorganized layout", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      company: {
+        ...buildWorkspaceMock().company,
+        cache_state: "stale",
+      },
+      error: "Backend refresh lagging for ACME",
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+    });
+
+    expect(screen.getByText("Review stale or partial inputs below")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
+    expect(screen.getByText("Partial data and fallback warnings")).toBeTruthy();
   });
 });
 

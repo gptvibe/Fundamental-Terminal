@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 
 import { EvidenceCard, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
@@ -12,7 +13,7 @@ const InvestmentSummaryPanel = dynamic(
   { ssr: false, loading: () => <div className="text-muted">Loading valuation summary...</div> }
 );
 
-export function BriefValuationSection({
+export const BriefValuationSection = memo(function BriefValuationSection({
   ticker,
   modelsState,
   peersState,
@@ -120,10 +121,12 @@ export function BriefValuationSection({
       </EvidenceCard>
     </ResearchBriefSection>
   );
-}
+});
 
-function PeerComparisonSnapshot({ response }: { response: CompanyPeersResponse }) {
-  const rows = response.peers.slice(0, 4);
+const PeerComparisonSnapshot = memo(function PeerComparisonSnapshot({ response }: { response: CompanyPeersResponse }) {
+  const rows = useMemo(() => response.peers.slice(0, 4), [response.peers]);
+  const fairValueGapNote = useMemo(() => response.notes.fair_value_gap, [response.notes.fair_value_gap]);
+  const evToEbitNote = useMemo(() => response.notes.ev_to_ebit, [response.notes.ev_to_ebit]);
 
   return (
     <div className="research-brief-table-stack">
@@ -160,11 +163,11 @@ function PeerComparisonSnapshot({ response }: { response: CompanyPeersResponse }
           </tbody>
         </table>
       </div>
-      {response.notes.fair_value_gap ? <div className="text-muted workspace-note-line">{response.notes.fair_value_gap}</div> : null}
-      {response.notes.ev_to_ebit ? <div className="text-muted workspace-note-line">{response.notes.ev_to_ebit}</div> : null}
+      {fairValueGapNote ? <div className="text-muted workspace-note-line">{fairValueGapNote}</div> : null}
+      {evToEbitNote ? <div className="text-muted workspace-note-line">{evToEbitNote}</div> : null}
     </div>
   );
-}
+});
 
 function formatCompactCurrency(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) {

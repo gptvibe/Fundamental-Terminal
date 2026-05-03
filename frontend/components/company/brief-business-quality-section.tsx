@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import dynamic from "next/dynamic";
 
 import { EvidenceCard, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
@@ -19,7 +20,7 @@ const CashFlowWaterfallChart = dynamic(
   { ssr: false, loading: () => <div className="text-muted">Loading cash flow bridge...</div> }
 );
 
-export function BriefBusinessQualitySection({
+export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySection({
   financials,
   loading,
   error,
@@ -138,4 +139,4 @@ export function BriefBusinessQualitySection({
       </EvidenceCard>
     </ResearchBriefSection>
   );
-}
+});

@@ -473,7 +473,9 @@ describe("CompanyModelsPage", () => {
     expect(screen.getByTestId("forecast-trust-cue")).toBeTruthy();
     expect(screen.getByText("User Scenario")).toBeTruthy();
     expect(screen.getByText("MAPE 12.00%")).toBeTruthy();
-    expect(screen.getByText("Current DCF fair value per share (model-derived)")).toBeTruthy();
+    expect(
+      screen.getByText((content) => content.includes("Current DCF fair value per share") && content.includes("model-derived"))
+    ).toBeTruthy();
     expect(screen.getByText("Scenario impact signal (heuristic, no model rerun)")).toBeTruthy();
     expect(screen.getByText("Strong Upside Signal")).toBeTruthy();
     expect(screen.getByText("Heuristic band: approximately +10% to +30% directional impact")).toBeTruthy();
@@ -739,7 +741,7 @@ describe("CompanyModelsPage", () => {
     expect(screen.getByText(/free cash flow is treated as an FCFF proxy/i)).toBeTruthy();
     expect(screen.getByText(/Enterprise Value Proxy instead of a precise equity fair value/i)).toBeTruthy();
     expect(screen.getByText("Current DCF fair value per share unavailable for this run")).toBeTruthy();
-    expect(screen.queryByText("Current DCF fair value per share (model-derived)")).toBeNull();
+    expect(screen.queryByText(/model-derived/i)).toBeNull();
   });
 
   it("includes forecast source-state and accuracy metadata in JSON exports", async () => {

@@ -6,17 +6,24 @@ interface DeferredClientSectionProps {
   children: ReactNode;
   placeholder?: ReactNode;
   rootMargin?: string;
+  forceVisible?: boolean;
 }
 
 export function DeferredClientSection({
   children,
   placeholder = <div className="text-muted">Loading section...</div>,
-  rootMargin = "240px 0px"
+  rootMargin = "240px 0px",
+  forceVisible = false,
 }: DeferredClientSectionProps) {
   const [visible, setVisible] = useState(false);
   const markerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
+    if (forceVisible) {
+      setVisible(true);
+      return;
+    }
+
     if (visible) {
       return;
     }
@@ -43,7 +50,11 @@ export function DeferredClientSection({
 
     observer.observe(marker);
     return () => observer.disconnect();
-  }, [rootMargin, visible]);
+  }, [forceVisible, rootMargin, visible]);
 
-  return <div ref={markerRef}>{visible ? children : placeholder}</div>;
+  return (
+    <div ref={markerRef} className={visible ? "deferred-client-section-visible" : "deferred-client-section-pending"}>
+      {visible ? children : placeholder}
+    </div>
+  );
 }
