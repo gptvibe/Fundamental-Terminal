@@ -70,22 +70,22 @@ const NUMERIC_FILTERS: NumericFilterField[] = [
 ];
 
 const RANKING_COLUMNS: RankingColumnConfig[] = [
-  { key: "quality", label: "Quality", sortField: "quality_score", tone: "positive" },
-  { key: "value", label: "Value", sortField: "value_score", tone: "positive" },
-  { key: "capital_allocation", label: "Capital Allocation", sortField: "capital_allocation_score", tone: "positive" },
-  { key: "dilution_risk", label: "Dilution Risk", sortField: "dilution_risk_score", tone: "risk" },
-  { key: "filing_risk", label: "Filing Risk", sortField: "filing_risk_score", tone: "risk" },
+  { key: "quality", label: "Quality (0–100)", sortField: "quality_score", tone: "positive" },
+  { key: "value", label: "Value (0–100)", sortField: "value_score", tone: "positive" },
+  { key: "capital_allocation", label: "Capital Alloc. (0–100)", sortField: "capital_allocation_score", tone: "positive" },
+  { key: "dilution_risk", label: "Dilution Risk (0–100)", sortField: "dilution_risk_score", tone: "risk" },
+  { key: "filing_risk", label: "Filing Risk (0–100)", sortField: "filing_risk_score", tone: "risk" },
 ];
 
 const METRIC_COLUMNS: MetricColumnConfig[] = [
-  { field: "revenue_growth", label: "Revenue Growth", sortField: "revenue_growth" },
-  { field: "operating_margin", label: "Operating Margin", sortField: "operating_margin" },
-  { field: "fcf_margin", label: "FCF Margin", sortField: "fcf_margin" },
-  { field: "leverage_ratio", label: "Leverage", sortField: "leverage_ratio" },
-  { field: "dilution", label: "Dilution", sortField: "dilution" },
-  { field: "sbc_burden", label: "SBC Burden", sortField: "sbc_burden" },
-  { field: "shareholder_yield", label: "Shareholder Yield", sortField: "shareholder_yield" },
-  { field: "filing_lag_days", label: "Filing Lag", sortField: "filing_lag_days" },
+  { field: "revenue_growth", label: "Rev Growth (%)", sortField: "revenue_growth" },
+  { field: "operating_margin", label: "Op Margin (%)", sortField: "operating_margin" },
+  { field: "fcf_margin", label: "FCF Margin (%)", sortField: "fcf_margin" },
+  { field: "leverage_ratio", label: "Leverage (×)", sortField: "leverage_ratio" },
+  { field: "dilution", label: "Dilution (%)", sortField: "dilution" },
+  { field: "sbc_burden", label: "SBC Burden (%)", sortField: "sbc_burden" },
+  { field: "shareholder_yield", label: "Sh. Yield (%)", sortField: "shareholder_yield" },
+  { field: "filing_lag_days", label: "Filing Lag (days)", sortField: "filing_lag_days" },
 ];
 
 const SORT_FIELD_LABELS: Record<ScreenerSortField, string> = {

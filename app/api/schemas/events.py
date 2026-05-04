@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date as DateType
+from datetime import date as DateType, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -83,6 +83,17 @@ class CommentLetterPayload(BaseModel):
     filing_date: DateType | None = None
     description: str
     sec_url: str
+    acceptance_datetime: datetime | None = None
+    primary_document: str | None = None
+    document_url: str | None = None
+    document_format: str | None = None
+    correspondent_role: str | None = None
+    document_kind: str | None = None
+    thread_key: str | None = None
+    review_sequence: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    has_document_text: bool = False
+    document_text_excerpt: str | None = None
 
 
 class CompanyCommentLettersResponse(ProvenanceEnvelope):

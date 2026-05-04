@@ -296,6 +296,15 @@ def test_build_changes_since_last_filing_adds_high_signal_text_changes_and_comme
             filing_date=date(2025, 11, 10),
             description="SEC correspondence regarding revenue recognition and non-GAAP presentation.",
             sec_url="https://www.sec.gov/Archives/edgar/data/123456/comment-letter.htm",
+            acceptance_datetime=datetime(2025, 11, 10, 18, 0, tzinfo=timezone.utc),
+            document_url="https://www.sec.gov/Archives/edgar/data/123456/comment-letter.htm",
+            document_format="html",
+            correspondent_role="sec_staff",
+            document_kind="comment_letter",
+            thread_key="review-date:2026-03-15",
+            review_sequence=None,
+            topics=["revenue_recognition", "non_gaap"],
+            document_text="Please expand your revenue recognition disclosure and reconcile the non-GAAP presentation.",
             last_checked=datetime(2025, 11, 10, 20, 0, tzinfo=timezone.utc),
         )
     ]
@@ -311,6 +320,13 @@ def test_build_changes_since_last_filing_adds_high_signal_text_changes_and_comme
     assert comparison["summary"]["comment_letter_count"] == 1
     assert {item["category"] for item in comparison["high_signal_changes"]} >= {"mda", "footnote", "non_gaap", "controls", "comment_letter"}
     assert comparison["comment_letter_history"]["letters_since_previous_filing"] == 1
+    recent_letter = comparison["comment_letter_history"]["recent_letters"][0]
+    assert recent_letter["correspondent_role"] == "sec_staff"
+    assert recent_letter["document_kind"] == "comment_letter"
+    assert recent_letter["thread_key"] == "review-date:2026-03-15"
+    assert recent_letter["topics"] == ["revenue_recognition", "non_gaap"]
+    assert recent_letter["has_document_text"] is True
+    assert "Please expand your revenue recognition disclosure" in recent_letter["document_text_excerpt"]
 
 
 def test_changes_since_last_filing_route_exposes_provenance_and_as_of(monkeypatch) -> None:

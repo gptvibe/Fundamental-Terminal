@@ -58,7 +58,7 @@ const baseTabs: CompanySubnavTab[] = [
   { key: "sec-feed", label: "SEC Feed", suffix: "/sec-feed", section: "more" }
 ];
 
-const oilTab: CompanySubnavTab = { key: "oil", label: "Oil", suffix: "/oil", section: "primary" };
+const oilTab: CompanySubnavTab = { key: "oil", label: "Oil", suffix: "/oil", section: "more" };
 
 const ROUTE_PREFETCH_TAB_KEYS = new Set<string>(["financials", "charts", "models", "peers", "earnings", "filings"]);
 
@@ -66,16 +66,22 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
   const pathname = usePathname();
   const router = useRouter();
   const companyLayout = useCompanyLayoutContext();
-  const moreRef = useRef<HTMLDivElement>(null);
-  const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  const desktopMoreRef = useRef<HTMLDivElement>(null);
+  const desktopMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const desktopMoreMenuRef = useRef<HTMLDivElement>(null);
+
+  const mobileMoreRef = useRef<HTMLDivElement>(null);
+  const mobileMoreButtonRef = useRef<HTMLButtonElement>(null);
+  const mobileMoreMenuRef = useRef<HTMLDivElement>(null);
+
   const prefetchedRoutesRef = useRef<Set<string>>(new Set());
   const [moreOpen, setMoreOpen] = useState(false);
   const [showOilTab, setShowOilTab] = useState(false);
   const baseHref = `/company/${encodeURIComponent(ticker)}`;
   const sharedCompany = companyLayout?.company?.ticker === ticker ? companyLayout.company : null;
   const sharedPublisherCount = companyLayout?.publisherCount ?? 0;
-  const tabs = showOilTab ? [...baseTabs.slice(0, 3), oilTab, ...baseTabs.slice(3)] : baseTabs;
+  const tabs = showOilTab ? [...baseTabs, oilTab] : baseTabs;
   const tabLinks = tabs.map((tab) => ({
     ...tab,
     href: `${baseHref}${tab.suffix}`
@@ -129,7 +135,11 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node | null;
-      if (target && !moreRef.current?.contains(target)) {
+      if (
+        target &&
+        !desktopMoreRef.current?.contains(target) &&
+        !mobileMoreRef.current?.contains(target)
+      ) {
         setMoreOpen(false);
       }
     }
@@ -166,9 +176,12 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     links[targetIndex]?.focus();
   }
 
-  function focusMoreMenuItem(targetIndex: number) {
+  function focusMoreMenuItem(
+    menuRef: React.RefObject<HTMLDivElement | null>,
+    targetIndex: number,
+  ) {
     window.requestAnimationFrame(() => {
-      const items = Array.from(moreMenuRef.current?.querySelectorAll<HTMLAnchorElement>("a.company-subnav-more-link") ?? []);
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLAnchorElement>("a.company-subnav-more-link") ?? []);
       items[targetIndex]?.focus();
     });
   }
@@ -204,11 +217,14 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     }
   }
 
-  function handleMoreTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+  function handleMoreTriggerKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    menuRef: React.RefObject<HTMLDivElement | null>,
+  ) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setMoreOpen(true);
-      focusMoreMenuItem(0);
+      focusMoreMenuItem(menuRef, 0);
       return;
     }
 
@@ -220,7 +236,7 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
       }
 
       setMoreOpen(true);
-      focusMoreMenuItem(0);
+      focusMoreMenuItem(menuRef, 0);
       return;
     }
 
@@ -233,8 +249,12 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     handleTrackKeyDown(event);
   }
 
-  function handleMoreMenuKeyDown(event: ReactKeyboardEvent<HTMLAnchorElement>) {
-    const items = Array.from(moreMenuRef.current?.querySelectorAll<HTMLAnchorElement>("a.company-subnav-more-link") ?? []);
+  function handleMoreMenuKeyDown(
+    event: ReactKeyboardEvent<HTMLAnchorElement>,
+    menuRef: React.RefObject<HTMLDivElement | null>,
+    buttonRef: React.RefObject<HTMLButtonElement | null>,
+  ) {
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLAnchorElement>("a.company-subnav-more-link") ?? []);
     const currentIndex = items.indexOf(event.currentTarget);
     if (currentIndex === -1) {
       return;
@@ -267,7 +287,7 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
     if (event.key === "Escape" || event.key === "ArrowLeft") {
       event.preventDefault();
       setMoreOpen(false);
-      moreButtonRef.current?.focus();
+      buttonRef.current?.focus();
     }
   }
 
@@ -290,25 +310,78 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
         <span className="company-subnav-kicker">{ticker}</span>
         <span className="company-subnav-copy">Company workspace</span>
       </div>
-      <nav className="company-subnav-track company-subnav-track-desktop" aria-label="Company workspace sections">
-        {tabLinks.map((tab) => {
-          const isActive = isTabActive(pathname, baseHref, tab);
 
-          return (
-            <Link
-              key={tab.key}
-              href={tab.href}
-              className={clsx("company-subnav-link", isActive && "is-active")}
-              aria-current={isActive ? "page" : undefined}
-              onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
-              onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
-              onKeyDown={handleTrackKeyDown}
+      {/* Desktop nav — primary tabs + More dropdown */}
+      <nav className="company-subnav-track company-subnav-track-desktop" aria-label="Company workspace sections">
+        <div className="company-subnav-primary-links">
+          {primaryTabs.map((tab) => {
+            const isActive = isTabActive(pathname, baseHref, tab);
+
+            return (
+              <Link
+                key={tab.key}
+                href={tab.href}
+                className={clsx("company-subnav-link", isActive && "is-active")}
+                aria-current={isActive ? "page" : undefined}
+                onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
+                onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
+                onKeyDown={handleTrackKeyDown}
+              >
+                {tab.label}
+              </Link>
+            );
+          })}
+        </div>
+        <div ref={desktopMoreRef} className="company-subnav-more">
+          <button
+            ref={desktopMoreButtonRef}
+            type="button"
+            className={clsx(
+              "company-subnav-link",
+              "company-subnav-more-trigger",
+              activeTab.section === "more" && "is-active",
+              moreOpen && "is-open",
+            )}
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            aria-controls="company-subnav-desktop-more-menu"
+            onClick={() => setMoreOpen((current) => !current)}
+            onKeyDown={(e) => handleMoreTriggerKeyDown(e, desktopMoreMenuRef)}
+          >
+            More
+            <span className="company-subnav-more-caret" aria-hidden="true" />
+          </button>
+          {moreOpen ? (
+            <div
+              ref={desktopMoreMenuRef}
+              id="company-subnav-desktop-more-menu"
+              className="company-subnav-more-menu"
+              aria-label="More company sections"
             >
-              {tab.label}
-            </Link>
-          );
-        })}
+              {moreTabs.map((tab) => {
+                const isActive = isTabActive(pathname, baseHref, tab);
+
+                return (
+                  <Link
+                    key={tab.key}
+                    href={tab.href}
+                    className={clsx("company-subnav-more-link", isActive && "is-active")}
+                    aria-current={isActive ? "page" : undefined}
+                    onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
+                    onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
+                    onClick={() => setMoreOpen(false)}
+                    onKeyDown={(e) => handleMoreMenuKeyDown(e, desktopMoreMenuRef, desktopMoreButtonRef)}
+                  >
+                    {tab.label}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
       </nav>
+
+      {/* Mobile nav — primary tabs + More dropdown */}
       <nav className="company-subnav-track company-subnav-track-mobile" aria-label="Company workspace quick sections">
         <div className="company-subnav-primary-links">
           {primaryTabs.map((tab) => {
@@ -329,21 +402,32 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
             );
           })}
         </div>
-        <div ref={moreRef} className="company-subnav-more">
+        <div ref={mobileMoreRef} className="company-subnav-more">
           <button
-            ref={moreButtonRef}
+            ref={mobileMoreButtonRef}
             type="button"
-            className={clsx("company-subnav-link", "company-subnav-more-trigger", activeTab.section === "more" && "is-active", moreOpen && "is-open")}
+            className={clsx(
+              "company-subnav-link",
+              "company-subnav-more-trigger",
+              activeTab.section === "more" && "is-active",
+              moreOpen && "is-open",
+            )}
             aria-haspopup="menu"
-            aria-controls="company-subnav-more-menu"
+            aria-expanded={moreOpen}
+            aria-controls="company-subnav-mobile-more-menu"
             onClick={() => setMoreOpen((current) => !current)}
-            onKeyDown={handleMoreTriggerKeyDown}
+            onKeyDown={(e) => handleMoreTriggerKeyDown(e, mobileMoreMenuRef)}
           >
             More
             <span className="company-subnav-more-caret" aria-hidden="true" />
           </button>
           {moreOpen ? (
-            <div ref={moreMenuRef} id="company-subnav-more-menu" className="company-subnav-more-menu" aria-label="More company sections">
+            <div
+              ref={mobileMoreMenuRef}
+              id="company-subnav-mobile-more-menu"
+              className="company-subnav-more-menu"
+              aria-label="More company sections"
+            >
               {moreTabs.map((tab) => {
                 const isActive = isTabActive(pathname, baseHref, tab);
 
@@ -356,7 +440,7 @@ export function CompanySubnav({ ticker }: CompanySubnavProps) {
                     onMouseEnter={() => triggerWorkspacePrefetch("hover", tab.href)}
                     onFocus={() => triggerWorkspacePrefetch("focus", tab.href)}
                     onClick={() => setMoreOpen(false)}
-                    onKeyDown={handleMoreMenuKeyDown}
+                    onKeyDown={(e) => handleMoreMenuKeyDown(e, mobileMoreMenuRef, mobileMoreButtonRef)}
                   >
                     {tab.label}
                   </Link>

@@ -1942,6 +1942,48 @@ def test_alerts_endpoint_surfaces_priority_signals(monkeypatch):
     assert "New SEC comment letter correspondence" in titles
 
 
+def test_comment_letters_route_returns_cached_enrichment(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+    monkeypatch.setattr(main_module, "get_company_comment_letters_cache_status", lambda *_args, **_kwargs: (datetime(2026, 3, 20, tzinfo=timezone.utc), "fresh"))
+    monkeypatch.setattr(
+        main_module,
+        "get_company_comment_letters",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(
+                accession_number="0000103",
+                filing_date=date(2026, 3, 20),
+                description="SEC correspondence regarding revenue presentation.",
+                sec_url="https://www.sec.gov/Archives/edgar/data/1/103/index.html",
+                acceptance_datetime=datetime(2026, 3, 20, 14, 30, tzinfo=timezone.utc),
+                primary_document="comment-letter.htm",
+                document_url="https://www.sec.gov/Archives/edgar/data/1/103/comment-letter.htm",
+                document_format="html",
+                correspondent_role="sec_staff",
+                document_kind="comment_letter",
+                thread_key="review-date:2026-03-15",
+                review_sequence=None,
+                topics=["revenue_recognition", "non_gaap"],
+                document_text="Please expand your revenue recognition disclosure and reconcile the non-GAAP presentation.",
+            )
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/comment-letters")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["letters"]) == 1
+    letter = payload["letters"][0]
+    assert letter["document_format"] == "html"
+    assert letter["correspondent_role"] == "sec_staff"
+    assert letter["document_kind"] == "comment_letter"
+    assert letter["thread_key"] == "review-date:2026-03-15"
+    assert letter["topics"] == ["revenue_recognition", "non_gaap"]
+    assert letter["has_document_text"] is True
+    assert "Please expand your revenue recognition disclosure" in letter["document_text_excerpt"]
+
+
     # ---------------------------------------------------------------------------
     # Executive-compensation endpoint tests
     # ---------------------------------------------------------------------------

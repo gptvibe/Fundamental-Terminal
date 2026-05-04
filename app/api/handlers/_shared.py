@@ -8226,11 +8226,32 @@ def _serialize_form144_filing(filing: Form144Filing) -> Form144FilingPayload:
 
 def _serialize_comment_letter(letter) -> CommentLetterPayload:
     return CommentLetterPayload(
-        accession_number=letter.accession_number,
-        filing_date=letter.filing_date,
-        description=letter.description,
-        sec_url=letter.sec_url,
+        accession_number=str(getattr(letter, "accession_number", "") or ""),
+        filing_date=getattr(letter, "filing_date", None),
+        description=str(getattr(letter, "description", "SEC correspondence") or "SEC correspondence"),
+        sec_url=str(getattr(letter, "sec_url", "") or ""),
+        acceptance_datetime=getattr(letter, "acceptance_datetime", None),
+        primary_document=str(getattr(letter, "primary_document", "") or "") or None,
+        document_url=str(getattr(letter, "document_url", "") or "") or None,
+        document_format=str(getattr(letter, "document_format", "") or "") or None,
+        correspondent_role=str(getattr(letter, "correspondent_role", "") or "") or None,
+        document_kind=str(getattr(letter, "document_kind", "") or "") or None,
+        thread_key=str(getattr(letter, "thread_key", "") or "") or None,
+        review_sequence=str(getattr(letter, "review_sequence", "") or "") or None,
+        topics=[str(topic) for topic in (getattr(letter, "topics", None) or []) if str(topic).strip()],
+        has_document_text=bool(getattr(letter, "document_text", None)),
+        document_text_excerpt=_comment_letter_excerpt(getattr(letter, "document_text", None)),
     )
+
+
+def _comment_letter_excerpt(value: object, limit: int = 320) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit].rsplit(" ", 1)[0].strip()
+    return f"{clipped}..." if clipped else f"{text[:limit].strip()}..."
 
 
 def _serialize_earnings_release(release: EarningsRelease) -> EarningsReleasePayload:

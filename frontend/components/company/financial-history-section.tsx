@@ -15,19 +15,21 @@ type MetricConfig = {
   key: "revenue" | "net_income" | "eps" | "operating_cash_flow";
   label: string;
   color: string;
+  description: string;
   format?: (value: number | null) => string;
 };
 
 const METRICS: MetricConfig[] = [
-  { key: "revenue", label: "Revenue", color: "var(--accent)", format: formatCompactNumber },
-  { key: "net_income", label: "Net Income", color: "var(--positive)", format: formatCompactNumber },
+  { key: "revenue", label: "Revenue", color: "var(--accent)", description: "Is the company growing its top line? Sustained revenue growth signals expanding customer demand.", format: formatCompactNumber },
+  { key: "net_income", label: "Net Income", color: "var(--positive)", description: "Is growth translating to profit? Rising net income shows the business is converting revenue into earnings.", format: formatCompactNumber },
   {
     key: "eps",
     label: "EPS (Diluted)",
     color: "var(--warning)",
+    description: "How much profit does each share earn? Diluted EPS accounts for stock options and convertibles — watch for dilution eating into growth.",
     format: (value) => (value == null ? "—" : value.toFixed(2))
   },
-  { key: "operating_cash_flow", label: "Operating Cash Flow", color: "#8B5CF6", format: formatCompactNumber }
+  { key: "operating_cash_flow", label: "Operating Cash Flow", color: "#8B5CF6", description: "Is reported profit backed by real cash? Operating cash flow shows whether earnings quality is high or propped up by accruals.", format: formatCompactNumber }
 ];
 
 export function FinancialHistorySection({ cik }: FinancialHistorySectionProps) {
@@ -146,6 +148,7 @@ export function FinancialHistorySection({ cik }: FinancialHistorySectionProps) {
             metric={metric.key}
             color={metric.color}
             label={metric.label}
+            subtitle={metric.description}
             valueFormatter={metric.format}
           />
         ))}

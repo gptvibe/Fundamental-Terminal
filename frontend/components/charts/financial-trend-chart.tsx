@@ -131,7 +131,7 @@ export function FinancialTrendChart({ financials }: { financials: FinancialPaylo
   return (
     <InteractiveChartFrame
       title="Reported financial trend"
-      subtitle={data.length ? `${data.length} filing periods across revenue, net income, and free cash flow.` : "Awaiting filing periods"}
+      subtitle={data.length ? "Revenue, net income, and free cash flow — is top-line growth translating to profit and cash?" : "Awaiting filing periods"}
       className="price-chart-card"
       headerClassName="price-chart-card-header"
       titleClassName="price-chart-card-title"

@@ -22,6 +22,7 @@ ARG BACKEND_API_BASE_URL=http://backend:8000
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     BACKEND_API_BASE_URL=${BACKEND_API_BASE_URL} \
+    HOSTNAME=0.0.0.0 \
     PORT=3000
 
 RUN addgroup -S nextjs -g 1001 \

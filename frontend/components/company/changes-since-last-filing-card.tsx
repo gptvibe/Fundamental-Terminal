@@ -5,7 +5,7 @@ import { Children, useEffect, useMemo, useState, type ReactNode } from "react";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { getCompanyChangesSinceLastFiling } from "@/lib/api";
-import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
+import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
   CompanyChangesSinceLastFilingResponse,
   FilingComparisonAmendedValuePayload,
@@ -322,19 +322,56 @@ function HighSignalChangeRow({ item }: { item: FilingHighSignalChangePayload }) 
 
 function CommentLetterRow({ item }: { item: FilingCommentLetterItemPayload }) {
   return (
-    <a href={item.sec_url} target="_blank" rel="noreferrer" className="filing-link-card" style={{ display: "grid", gap: 8, textDecoration: "none" }}>
+    <a href={item.document_url ?? item.sec_url} target="_blank" rel="noreferrer" className="filing-link-card" style={{ display: "grid", gap: 8, textDecoration: "none" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <strong>{item.description}</strong>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {item.is_new_since_current_filing ? <span className="pill">new</span> : null}
+          {item.correspondent_role ? <span className="pill">{formatCorrespondentRole(item.correspondent_role)}</span> : null}
+          {item.document_kind ? <span className="pill">{titleCase(item.document_kind)}</span> : null}
+          {item.document_format ? <span className="pill">{item.document_format.toUpperCase()}</span> : null}
           <span className="pill">{item.filing_date ? formatDate(item.filing_date) : "Pending"}</span>
         </div>
       </div>
       <div className="text-muted" style={{ fontSize: 13 }}>
         {item.accession_number ?? "CORRESP"}
+        {item.thread_key ? ` · ${formatThreadKey(item.thread_key)}` : ""}
       </div>
+      {item.topics?.length ? (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {item.topics.slice(0, 4).map((topic) => (
+            <span key={`${item.accession_number ?? item.sec_url}-${topic}`} className="pill">{titleCase(topic)}</span>
+          ))}
+        </div>
+      ) : null}
+      {item.document_text_excerpt ? <div className="text-muted" style={{ fontSize: 13 }}>{item.document_text_excerpt}</div> : null}
     </a>
   );
+}
+
+function formatCorrespondentRole(value: string): string {
+  switch (value) {
+    case "sec_staff":
+      return "SEC Staff";
+    case "issuer":
+      return "Issuer";
+    default:
+      return titleCase(value);
+  }
+}
+
+function formatThreadKey(value: string): string {
+  if (value.startsWith("review-date:")) {
+    return `Thread ${formatDate(value.slice("review-date:".length))}`;
+  }
+  if (value.startsWith("review-sequence:")) {
+    return `Review ${value.slice("review-sequence:".length)}`;
+  }
+  if (value.startsWith("accession-date:")) {
+    const [, dateValue] = value.split(":", 3);
+    return `Thread ${formatDate(dateValue)}`;
+  }
+  return value;
 }
 
 function formatDeltaValue(value: number | null, unit: FilingComparisonMetricDeltaPayload["unit"]): string {

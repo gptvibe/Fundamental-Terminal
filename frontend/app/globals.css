@@ -10,10 +10,15 @@
   --text: #d4d4d8;
   --text-soft: #adadb6;
   --text-muted: #9b9ba5;
+  --text-primary: var(--text);
+  --text-secondary: var(--text-soft);
+  --text-tertiary: var(--text-muted);
 
   /* ── Accent (single) ── */
   --accent: #7eb8da;
   --action-accent: #8fa5b6;
+  --accent-cyan: var(--accent);
+  --accent-warning: var(--warning);
 
   /* ── Semantic ── */
   --positive: #4ade80;
@@ -27,10 +32,14 @@
   /* ── Shadows (panels have none — only tooltips/dropdowns) ── */
   --shadow: none;
   --tooltip-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+  --elevated-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
 
   /* ── Surfaces ── */
   --surface-soft: rgba(17, 18, 20, 0.96);
   --surface-soft-alt: rgba(22, 24, 27, 0.94);
+  --surface-page: var(--bg);
+  --surface-panel: var(--panel);
+  --surface-panel-alt: var(--panel-alt);
   --surface-pill-bg: rgba(113, 113, 122, 0.10);
   --surface-pill-border: rgba(113, 113, 122, 0.18);
   --surface-pill-text: #b0b0ba;
@@ -62,6 +71,7 @@
 
   /* ── Spacing & Shape ── */
   --radius: 6px;
+  --radius-sm: 5px;
   --space-1: 4px;
   --space-2: 6px;
   --space-3: 8px;
@@ -81,7 +91,19 @@
   --surface-card-strong: var(--panel-alt);
   --state-loading-bg: var(--panel);
   --state-empty-bg: var(--panel);
+  --state-success-bg: color-mix(in srgb, var(--positive) 8%, var(--panel));
+  --state-warning-bg: color-mix(in srgb, var(--warning) 8%, var(--panel));
+  --state-danger-bg: color-mix(in srgb, var(--danger) 8%, var(--panel));
   --state-error-border: var(--danger);
+
+  /* ── Consistent layout primitives ── */
+  --border-subtle: var(--panel-border);
+  --panel-padding: 12px;
+  --panel-padding-tight: 10px;
+  --table-header-height: 36px;
+  --table-row-height: 34px;
+  --table-cell-padding-x: 12px;
+  --table-cell-padding-y: 10px;
 
   /* ── Shell ── */
   --command-height: 52px;
@@ -112,15 +134,9 @@
 
   /* ── Charts workspace ── */
   --charts-surface-border: rgba(255, 255, 255, 0.07);
-  --charts-surface-bg: linear-gradient(180deg, rgba(20, 22, 25, 0.98), rgba(14, 16, 19, 0.98));
-  --charts-hero-bg:
-    radial-gradient(circle at top right, rgba(123, 224, 167, 0.08), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012)),
-    #0f1113;
-  --charts-highlight-panel-bg:
-    radial-gradient(circle at top right, rgba(255, 177, 95, 0.08), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012)),
-    #0f1113;
+  --charts-surface-bg: color-mix(in srgb, var(--panel) 96%, #0d0f12);
+  --charts-hero-bg: color-mix(in srgb, var(--panel) 94%, #0c1118);
+  --charts-highlight-panel-bg: color-mix(in srgb, var(--panel-alt) 92%, #11161d);
   --charts-hero-card-border: rgba(255, 255, 255, 0.06);
   --charts-hero-card-bg: rgba(255, 255, 255, 0.025);
   --charts-pill-border: rgba(255, 255, 255, 0.08);
@@ -951,7 +967,7 @@ a.filing-link-card.tone-red:hover,
   border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--panel-border));
   background: color-mix(in srgb, var(--panel) 95%, black);
-  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--elevated-shadow);
 }
 
 .app-data-source-panel-head {
@@ -1006,7 +1022,7 @@ a.filing-link-card.tone-red:hover,
   border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--panel-border));
   background: color-mix(in srgb, var(--panel) 96%, black);
-  box-shadow: 0 20px 36px rgba(0, 0, 0, 0.46);
+  box-shadow: var(--elevated-shadow);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -1101,7 +1117,14 @@ a.filing-link-card.tone-red:hover,
   --text: #27272a;
   --text-soft: #3f3f46;
   --text-muted: #71717a;
+  --text-primary: var(--text);
+  --text-secondary: var(--text-soft);
+  --text-tertiary: var(--text-muted);
   --shadow: none;
+  --elevated-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  --surface-page: var(--bg);
+  --surface-panel: var(--panel);
+  --surface-panel-alt: var(--panel-alt);
   --surface-soft: rgba(255, 255, 255, 0.98);
   --surface-soft-alt: rgba(244, 244, 245, 0.97);
   --surface-pill-bg: rgba(113, 113, 122, 0.08);
@@ -1129,15 +1152,9 @@ a.filing-link-card.tone-red:hover,
   --ag-row-hover: rgba(126, 184, 218, 0.08);
   --ag-selected-row: rgba(74, 222, 128, 0.08);
   --charts-surface-border: rgba(15, 23, 42, 0.08);
-  --charts-surface-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(244, 244, 245, 0.98));
-  --charts-hero-bg:
-    radial-gradient(circle at top right, rgba(123, 224, 167, 0.14), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 244, 245, 0.98)),
-    #ffffff;
-  --charts-highlight-panel-bg:
-    radial-gradient(circle at top right, rgba(255, 177, 95, 0.12), transparent 44%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(244, 244, 245, 0.98)),
-    #ffffff;
+  --charts-surface-bg: color-mix(in srgb, var(--panel) 94%, #eef0f3);
+  --charts-hero-bg: color-mix(in srgb, var(--panel) 96%, #f3f5f8);
+  --charts-highlight-panel-bg: color-mix(in srgb, var(--panel-alt) 92%, #eef2f7);
   --charts-hero-card-border: rgba(15, 23, 42, 0.08);
   --charts-hero-card-bg: rgba(255, 255, 255, 0.72);
   --charts-pill-border: rgba(15, 23, 42, 0.08);
@@ -3142,7 +3159,7 @@ select {
   background: var(--bg);
   border-bottom: 1px solid var(--panel-border);
   padding: 0 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .company-subnav-meta {
@@ -3153,12 +3170,12 @@ select {
 }
 
 .company-subnav-kicker {
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: var(--text-sm);
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  font-family: var(--font-stack);
+  font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .company-subnav-copy {
@@ -3206,9 +3223,9 @@ select {
   border-radius: 0;
   border: 0;
   color: var(--text-muted);
-  font-family: var(--mono);
+  font-family: var(--font-stack);
   font-size: var(--text-sm);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   padding: 8px 10px;
   text-decoration: none;
   text-transform: none;
@@ -3218,7 +3235,7 @@ select {
 }
 
 .company-subnav-link:hover {
-  background: transparent;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
   color: var(--text);
 }
 
@@ -3272,8 +3289,8 @@ select {
   padding: 8px;
   border: 1px solid var(--panel-border);
   border-radius: calc(var(--radius) + 2px);
-  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
-  box-shadow: var(--shadow);
+  background: color-mix(in srgb, var(--panel) 98%, var(--bg));
+  box-shadow: var(--elevated-shadow);
 }
 
 .company-subnav-more-link {
@@ -3281,9 +3298,9 @@ select {
   padding: 10px 12px;
   border-radius: calc(var(--radius) - 4px);
   color: var(--text-muted);
-  font-family: var(--mono);
+  font-family: var(--font-stack);
   font-size: var(--text-sm);
-  letter-spacing: 0.03em;
+  letter-spacing: 0.01em;
   text-decoration: none;
   text-transform: none;
   transition: background-color 120ms ease, color 120ms ease;
@@ -3292,7 +3309,7 @@ select {
 .company-subnav-more-link:hover,
 .company-subnav-more-link.is-active {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .company-subnav-more-link:focus-visible {
@@ -3835,7 +3852,7 @@ select {
   width: 9px;
   height: 9px;
   border-radius: 999px;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--panel) 86%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--panel) 94%, transparent);
   flex: 0 0 auto;
 }
 
@@ -3871,7 +3888,7 @@ select {
   border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--panel-border) 146%, transparent);
   background: color-mix(in srgb, var(--panel) 98%, transparent);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--elevated-shadow);
   color: var(--text-soft);
   opacity: 0;
   pointer-events: none;
@@ -4189,7 +4206,7 @@ select {
 .utility-action-button-primary {
   border-color: color-mix(in srgb, var(--action-accent) 42%, var(--panel-border));
   background: color-mix(in srgb, var(--action-accent) 18%, var(--panel));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
+  box-shadow: none;
 }
 
 .utility-action-button-primary:hover {
@@ -5251,8 +5268,8 @@ select {
 }
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--panel-border);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   box-shadow: none;
   min-width: 0;
@@ -5263,15 +5280,15 @@ select {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 6px;
-  border-bottom: 1px solid var(--panel-border);
+  padding: var(--panel-padding-tight) var(--panel-padding) 8px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .panel-title {
   margin: 0;
   font-size: var(--text-base);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   text-transform: none;
   color: var(--surface-strong-text);
 }
@@ -5284,7 +5301,7 @@ select {
 }
 
 .panel-body {
-  padding: 12px;
+  padding: var(--panel-padding);
   min-width: 0;
 }
 
@@ -5299,11 +5316,11 @@ select {
   border: 1px solid var(--panel-border);
   background: var(--panel);
   color: var(--text-soft);
-  font-family: var(--mono);
+  font-family: var(--font-stack);
   font-size: var(--text-xs);
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-transform: none;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   white-space: nowrap;
@@ -5367,6 +5384,34 @@ select {
   border-color: color-mix(in srgb, var(--danger) 36%, var(--panel-border));
   background: color-mix(in srgb, var(--danger) 12%, var(--surface-pill-bg));
   color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
+.status-pill {
+  font-weight: 600;
+}
+
+.status-pill.tone-fresh {
+  border-color: color-mix(in srgb, var(--positive) 32%, var(--panel-border));
+  background: var(--state-success-bg);
+  color: color-mix(in srgb, var(--positive) 86%, var(--text));
+}
+
+.status-pill.tone-pending {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--panel-border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-pill-bg));
+  color: color-mix(in srgb, var(--accent) 84%, var(--text));
+}
+
+.status-pill.tone-stale {
+  border-color: color-mix(in srgb, var(--warning) 26%, var(--panel-border));
+  background: var(--state-warning-bg);
+  color: color-mix(in srgb, var(--warning) 82%, var(--text));
+}
+
+.status-pill.tone-idle {
+  border-color: color-mix(in srgb, var(--surface-pill-border) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-pill-bg) 82%, transparent);
+  color: var(--text-muted);
 }
 
 .status-console {
@@ -6192,7 +6237,7 @@ select {
   border-radius: var(--radius);
   border: 1px solid color-mix(in srgb, var(--panel-border) 118%, transparent);
   background: var(--surface-card-strong);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 16px 32px rgba(0, 0, 0, 0.24);
+  box-shadow: none;
 }
 
 .summary-card::after {
@@ -6205,19 +6250,19 @@ select {
 }
 
 .accent-green::after {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--positive) 90%, transparent), transparent 72%);
+  background: color-mix(in srgb, var(--positive) 80%, transparent);
 }
 
 .accent-cyan::after {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 90%, transparent), transparent 72%);
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
 }
 
 .accent-gold::after {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--warning) 90%, transparent), transparent 72%);
+  background: color-mix(in srgb, var(--warning) 80%, transparent);
 }
 
 .accent-red::after {
-  background: linear-gradient(90deg, rgba(255, 107, 107, 0.95), transparent 72%);
+  background: color-mix(in srgb, var(--danger) 78%, transparent);
 }
 
 .summary-card-label {
@@ -6454,7 +6499,7 @@ select {
   padding: 28px;
   text-align: center;
   border-radius: var(--radius);
-  border: 1px dashed color-mix(in srgb, var(--panel-border) 135%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
   background: var(--state-empty-bg);
 }
 
@@ -6470,9 +6515,9 @@ select {
 
 .grid-empty-kicker {
   font-size: var(--text-xs);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--accent);
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
 }
 
 .grid-empty-title {
@@ -7946,14 +7991,15 @@ select {
   position: sticky;
   top: 0;
   z-index: 1;
-  padding: 12px 14px;
+  min-height: var(--table-header-height);
+  padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
   text-align: left;
-  background: #121212;
-  color: var(--accent);
+  background: color-mix(in srgb, var(--surface-panel-alt) 90%, transparent);
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
   font-size: var(--text-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 120%, transparent);
 }
 
 .financial-table tbody tr:nth-child(odd) {
@@ -7965,8 +8011,9 @@ select {
 }
 
 .financial-table td {
-  padding: 11px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  min-height: var(--table-row-height);
+  padding: var(--table-cell-padding-y) var(--table-cell-padding-x);
+  border-bottom: 1px solid color-mix(in srgb, var(--panel-border) 100%, transparent);
   color: var(--text);
   white-space: nowrap;
 }
@@ -8009,10 +8056,8 @@ select {
   display: grid;
   place-items: center;
   padding: 16px;
-  background:
-    radial-gradient(circle at top, rgba(126, 184, 218, 0.14), transparent 34%),
-    rgba(6, 8, 10, 0.82);
-  backdrop-filter: blur(16px);
+  background: rgba(6, 8, 10, 0.72);
+  backdrop-filter: blur(8px);
 }
 
 .app-dialog-panel {

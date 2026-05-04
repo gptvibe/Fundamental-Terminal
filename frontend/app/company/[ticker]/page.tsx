@@ -6,14 +6,17 @@ import { useParams } from "next/navigation";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { BeginnerGuidanceBanner } from "@/components/company/beginner-guidance-banner";
+import { BottomAppendix } from "@/components/company/bottom-appendix";
 import { PanelErrorBoundary } from "@/components/company/brief-primitives";
 import { CompanyOverviewStatusStrip } from "@/components/company/company-overview-layout-sections";
+import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
 import { FilingRiskSignalsPanel } from "@/components/filings/filing-risk-signals-panel";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
+import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { useUIDensity } from "@/hooks/use-ui-density";
@@ -95,16 +98,10 @@ const ResearchBriefPlainEnglishPanel = dynamic(
   { loading: () => <DeferredSectionPlaceholder title="Loading plain-English analysis" /> }
 );
 
-const CompanyOverviewDataQualitySourcesSection = dynamic(
-  () => import("@/components/company/company-overview-layout-sections").then((module) => module.CompanyOverviewDataQualitySourcesSection),
-  { loading: () => <DeferredSectionPlaceholder title="Data quality & sources" /> }
-);
-
 function DeferredSectionPlaceholder({ title }: { title: string }) {
   return (
     <div className="research-brief-state research-brief-state-loading" aria-live="polite">
       <h2 className="workspace-state-title">{title}</h2>
-      <div className="grid-empty-kicker">Research brief</div>
       <div className="grid-empty-title">Loading section</div>
       <div className="grid-empty-copy">Preparing persisted cached data for this section.</div>
     </div>
@@ -201,7 +198,6 @@ export default function CompanyResearchBriefPage() {
   const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker, {
     defaultOverrides: isBeginnerMode ? { monitor: false } : undefined,
   });
-  const [dataQualityExpanded, setDataQualityExpanded] = useState(() => !isBeginnerMode);
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
   const [filingRiskSignals, setFilingRiskSignals] = useState<Awaited<ReturnType<typeof getCompanyFilingRiskSignals>> | null>(null);
   const [filingRiskSignalsLoading, setFilingRiskSignalsLoading] = useState(true);
@@ -443,6 +439,8 @@ export default function CompanyResearchBriefPage() {
     () => buildInitialCompanyLoadMessage(initialCompanyLoad, activeRefreshEntry, briefData.buildState, briefData.buildStatus),
     [activeRefreshEntry, briefData.buildState, briefData.buildStatus, initialCompanyLoad]
   );
+  const showWarmupAppendixPanel =
+    initialCompanyLoad || Boolean(activeJobId || refreshState?.job_id) || refreshing || briefData.buildState !== "ready";
   const eagerDeferredSections = process.env.NODE_ENV === "test";
 
   const handleExportResearchPackage = useCallback(async () => {
@@ -620,8 +618,6 @@ export default function CompanyResearchBriefPage() {
         hasWarnings={Boolean(error || briefData.error)}
       />
 
-      <BeginnerGuidanceBanner />
-
       <SnapshotSection
         loading={loading}
         priceHistory={priceHistory}
@@ -782,32 +778,36 @@ export default function CompanyResearchBriefPage() {
         rootMargin="480px 0px"
         placeholder={<DeferredSectionPlaceholder title="Data quality & sources" />}
       >
-        <div className="research-brief-section" id="data-quality">
-          <button
-            type="button"
-            className="research-brief-section-toggle"
-            aria-expanded={dataQualityExpanded ? "true" : "false"}
-            onClick={() => setDataQualityExpanded((prev) => !prev)}
-          >
-            <span className="research-brief-section-toggle-label">Data quality &amp; sources</span>
-            <span className="research-brief-section-toggle-caret" aria-hidden="true">
-              {dataQualityExpanded ? "▲" : "▼"}
-            </span>
-          </button>
-          {dataQualityExpanded ? (
-            <CompanyOverviewDataQualitySourcesSection
-              ticker={ticker}
-              company={pageCompany}
-              refreshState={refreshState}
-              activeJobId={activeJobId}
-              financialsResponse={data}
-              filingTimeline={briefData.filingTimeline}
-              asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
-              lastRefreshedAt={data?.last_refreshed_at ?? null}
-              provenance={data?.provenance ?? null}
-              sourceMix={data?.source_mix ?? null}
-              fallbackLabels={fallbackLabels}
-              warmupPanel={
+        <BottomAppendix
+          id="data-quality"
+          title="Data quality & sources"
+          subtitle="Secondary provenance, diagnostics, and methodology details are grouped here so core interpretations stay first."
+          toggleLabel="Data quality & sources"
+          unmountWhenCollapsed
+          sections={[
+            {
+              id: "source-details",
+              title: "Source freshness timeline",
+              content: (
+                <SourceFreshnessTimeline
+                  ticker={ticker}
+                  company={pageCompany}
+                  refreshState={refreshState}
+                  activeJobId={activeJobId}
+                  financialsResponse={data}
+                  filingTimeline={briefData.filingTimeline}
+                  asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
+                  lastRefreshedAt={data?.last_refreshed_at ?? null}
+                  provenance={data?.provenance ?? null}
+                  sourceMix={data?.source_mix ?? null}
+                />
+              ),
+            },
+            {
+              id: "refresh-state",
+              title: "Refresh state",
+              defaultOpen: showWarmupAppendixPanel,
+              content: showWarmupAppendixPanel ? (
                 <ResearchBriefWarmupPanel
                   buildState={briefData.buildState}
                   buildStatus={briefData.buildStatus}
@@ -819,8 +819,43 @@ export default function CompanyResearchBriefPage() {
                   filingTimeline={briefData.filingTimeline}
                   refreshState={briefData.brief?.refresh ?? refreshState}
                 />
-              }
-              partialErrors={
+              ) : (
+                <div className="text-muted">No refresh build is currently running.</div>
+              ),
+            },
+            {
+              id: "methodology",
+              title: "Methodology",
+              content: (
+                <div className="company-overview-data-quality-help">
+                  <p className="text-muted">
+                    Core fundamentals remain official-source-first. Fallback inputs are explicitly labeled and constrained to
+                    supporting context. Severe stale or missing data warnings stay attached to the chart or table they affect.
+                  </p>
+                  {fallbackLabels.length ? (
+                    <div className="research-brief-partial-errors">
+                      {fallbackLabels.map((label) => (
+                        <span key={label} className="pill">
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted">No commercial fallback labels are active for this company snapshot.</p>
+                  )}
+                  <BeginnerGuidanceBanner />
+                </div>
+              ),
+            },
+            {
+              id: "diagnostics",
+              title: "Diagnostics",
+              content: <DataQualityDiagnostics diagnostics={data?.diagnostics ?? null} />,
+            },
+            {
+              id: "partial-errors",
+              title: "Partial data and fallback warnings",
+              content:
                 error || briefData.error ? (
                   <div className="research-brief-partial-errors">
                     {[error, briefData.error].filter(Boolean).map((message) => (
@@ -829,11 +864,34 @@ export default function CompanyResearchBriefPage() {
                       </span>
                     ))}
                   </div>
-                ) : null
-              }
-            />
-          ) : null}
-        </div>
+                ) : (
+                  <div className="text-muted">No partial errors are currently active.</div>
+                ),
+            },
+            {
+              id: "raw-evidence",
+              title: "Raw evidence/provenance",
+              content: data?.provenance?.length ? (
+                <div className="workspace-card-stack">
+                  {data.provenance.map((entry) => (
+                    <a key={`${entry.source_id}-${entry.role}`} href={entry.url} target="_blank" rel="noreferrer" className="filing-link-card workspace-card-link">
+                      <div className="workspace-card-row">
+                        <div className="workspace-pill-row">
+                          <span className="pill">{entry.display_label}</span>
+                          <span className="pill">{entry.role}</span>
+                        </div>
+                        <div className="text-muted">{entry.as_of ? formatDate(entry.as_of) : "As of pending"}</div>
+                      </div>
+                      <div className="workspace-card-title">{entry.disclosure_note}</div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-muted">No provenance entries are available yet.</div>
+              ),
+            },
+          ]}
+        />
       </DeferredClientSection>
     </CompanyWorkspaceShell>
   );

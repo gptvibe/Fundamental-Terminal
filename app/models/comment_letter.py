@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -28,6 +28,19 @@ class CommentLetter(Base):
     filing_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     description: Mapped[str] = mapped_column(String(500), nullable=False)
     sec_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    acceptance_datetime: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    primary_document: Mapped[str | None] = mapped_column(String(260), nullable=True)
+    document_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    document_format: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    correspondent_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    document_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    thread_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    review_sequence: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    topics: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    document_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    document_text_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    text_extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_checked: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

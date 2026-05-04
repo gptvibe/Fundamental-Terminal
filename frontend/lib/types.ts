@@ -838,6 +838,16 @@ export interface FilingCommentLetterItemPayload {
   description: string;
   sec_url: string;
   is_new_since_current_filing: boolean;
+  acceptance_datetime?: string | null;
+  document_url?: string | null;
+  document_format?: string | null;
+  correspondent_role?: string | null;
+  document_kind?: string | null;
+  thread_key?: string | null;
+  review_sequence?: string | null;
+  topics?: string[];
+  has_document_text?: boolean;
+  document_text_excerpt?: string | null;
 }
 
 export interface FilingCommentLetterHistoryPayload {
@@ -2042,6 +2052,17 @@ export interface CommentLetterPayload {
   filing_date: string | null;
   description: string;
   sec_url: string;
+  acceptance_datetime?: string | null;
+  primary_document?: string | null;
+  document_url?: string | null;
+  document_format?: string | null;
+  correspondent_role?: string | null;
+  document_kind?: string | null;
+  thread_key?: string | null;
+  review_sequence?: string | null;
+  topics?: string[];
+  has_document_text?: boolean;
+  document_text_excerpt?: string | null;
 }
 
 export interface ModelEvaluationMetricDeltaPayload {

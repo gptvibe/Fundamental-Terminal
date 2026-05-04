@@ -11,7 +11,7 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyActivityOverview, getCompanyCommentLetters } from "@/lib/api";
 import { toneForAlertLevel, toneForAlertSource, toneForEntryBadge, toneForEntryCard, toneForEntryType } from "@/lib/activity-feed-tone";
-import { formatDate } from "@/lib/format";
+import { formatDate, titleCase } from "@/lib/format";
 import type { CompanyActivityOverviewResponse, CompanyCommentLettersResponse } from "@/lib/types";
 
 type AlertLevelFilter = "all" | "high" | "medium" | "low";
@@ -289,7 +289,7 @@ export default function CompanySecFeedPage() {
             {commentLetters.map((letter) => (
               <a
                 key={letter.accession_number}
-                href={letter.sec_url}
+                href={letter.document_url ?? letter.sec_url}
                 target="_blank"
                 rel="noreferrer"
                 className="filing-link-card workspace-card-link tone-gold"
@@ -297,11 +297,25 @@ export default function CompanySecFeedPage() {
                 <div className="workspace-card-row">
                   <div className="workspace-pill-row">
                     <span className="pill tone-gold">CORRESP</span>
+                    {letter.correspondent_role ? <span className="pill">{formatCorrespondentRole(letter.correspondent_role)}</span> : null}
+                    {letter.document_kind ? <span className="pill">{titleCase(letter.document_kind)}</span> : null}
+                    {letter.document_format ? <span className="pill">{letter.document_format.toUpperCase()}</span> : null}
                   </div>
                   <div className="text-muted">{formatDate(letter.filing_date)}</div>
                 </div>
                 <div className="workspace-card-title">{letter.description}</div>
-                <div className="text-muted workspace-card-copy">{letter.accession_number}</div>
+                <div className="text-muted workspace-card-copy">
+                  {letter.accession_number}
+                  {letter.thread_key ? ` · ${formatThreadKey(letter.thread_key)}` : ""}
+                </div>
+                {letter.topics?.length ? (
+                  <div className="workspace-pill-row">
+                    {letter.topics.slice(0, 4).map((topic) => (
+                      <span key={`${letter.accession_number}-${topic}`} className="pill">{titleCase(topic)}</span>
+                    ))}
+                  </div>
+                ) : null}
+                {letter.document_text_excerpt ? <div className="text-muted workspace-card-copy">{letter.document_text_excerpt}</div> : null}
               </a>
             ))}
           </div>
@@ -318,4 +332,29 @@ function formatFeedEntryType(type: string): string {
     return "planned-sale";
   }
   return type;
+}
+
+function formatCorrespondentRole(value: string): string {
+  switch (value) {
+    case "sec_staff":
+      return "SEC Staff";
+    case "issuer":
+      return "Issuer";
+    default:
+      return titleCase(value);
+  }
+}
+
+function formatThreadKey(value: string): string {
+  if (value.startsWith("review-date:")) {
+    return `Thread ${formatDate(value.slice("review-date:".length))}`;
+  }
+  if (value.startsWith("review-sequence:")) {
+    return `Review ${value.slice("review-sequence:".length)}`;
+  }
+  if (value.startsWith("accession-date:")) {
+    const [, dateValue] = value.split(":", 3);
+    return `Thread ${formatDate(dateValue)}`;
+  }
+  return value;
 }

@@ -169,6 +169,14 @@ describe("ChangesSinceLastFilingCard", () => {
             description: "SEC correspondence regarding revenue presentation.",
             sec_url: "https://www.sec.gov/Archives/edgar/data/123456/comment-letter.htm",
             is_new_since_current_filing: true,
+            document_url: "https://www.sec.gov/Archives/edgar/data/123456/comment-letter.htm",
+            document_format: "html",
+            correspondent_role: "sec_staff",
+            document_kind: "comment_letter",
+            thread_key: "review-date:2025-11-05",
+            topics: ["revenue_recognition", "non_gaap"],
+            has_document_text: true,
+            document_text_excerpt: "Please expand your revenue recognition disclosure and reconcile the non-GAAP presentation.",
           },
         ],
       },
@@ -214,6 +222,10 @@ describe("ChangesSinceLastFilingCard", () => {
     });
 
     expect(screen.getByText("SEC correspondence regarding revenue presentation.")).toBeTruthy();
+    expect(screen.getByText("SEC Staff")).toBeTruthy();
+    expect(screen.getByText("Comment Letter")).toBeTruthy();
+    expect(screen.getByText("Revenue Recognition")).toBeTruthy();
+    expect(screen.getByText("Please expand your revenue recognition disclosure and reconcile the non-GAAP presentation.")).toBeTruthy();
 
     rerender(React.createElement(ChangesSinceLastFilingCard, { ticker: "AAPL", detailMode: "full" }));
 

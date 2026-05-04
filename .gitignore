@@ -49,6 +49,7 @@ tmp/
 temp/
 .cache/
 review-shots/
+artifacts/temp_*.json
 data/sec_cache/
 
 # IDE / OS

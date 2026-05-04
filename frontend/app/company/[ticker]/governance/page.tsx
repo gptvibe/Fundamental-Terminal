@@ -1,24 +1,33 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { GovernanceFilingChart } from "@/components/charts/governance-filing-chart";
+import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyExecutiveCompensation, getCompanyGovernance, getCompanyGovernanceSummary } from "@/lib/api";
-import { formatCompactNumber, formatDate } from "@/lib/format";
-import { RECHARTS_TOOLTIP_PROPS, CHART_GRID_COLOR, chartTick } from "@/lib/chart-theme";
+import { formatDate } from "@/lib/format";
 import type {
   CompanyExecutiveCompensationResponse,
   CompanyGovernanceResponse,
   CompanyGovernanceSummaryResponse,
   ExecCompRowPayload,
 } from "@/lib/types";
+
+const GovernanceFilingChart = dynamic(
+  () => import("@/components/charts/governance-filing-chart").then((m) => ({ default: m.GovernanceFilingChart })),
+  { ssr: false, loading: () => <div className="text-muted" style={{ minHeight: 280 }}>Loading proxy filing chart...</div> }
+);
+
+const GovernancePayTrendChart = dynamic(
+  () => import("@/components/charts/governance-pay-trend-chart").then((m) => ({ default: m.GovernancePayTrendChart })),
+  { ssr: false, loading: () => <div className="text-muted" style={{ minHeight: 220 }}>Loading pay trend chart...</div> }
+);
 
 export default function CompanyGovernancePage() {
   const params = useParams<{ ticker: string }>();
@@ -180,9 +189,11 @@ export default function CompanyGovernancePage() {
         ]}
       />
 
-      <Panel title="Proxy Filing Mix" subtitle="How much of the visible governance record is definitive proxy versus supplemental material">
-        <GovernanceFilingChart filings={filings} />
-      </Panel>
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 280 }}>Loading proxy filing chart...</div>}>
+        <Panel title="Proxy Filing Mix" subtitle="How much of the visible governance record is definitive proxy versus supplemental material">
+          <GovernanceFilingChart filings={filings} />
+        </Panel>
+      </DeferredClientSection>
 
       <Panel title="Board & Meeting History" subtitle="Meeting date, board nominees, and exec comp signal from each definitive proxy">
         {loading || workspaceLoading ? (
@@ -309,31 +320,18 @@ export default function CompanyGovernancePage() {
 
       {/* Pay Trend Chart */}
       {payTrendData.length >= 2 && (
-        <Panel
-          title="Pay Trend"
-          subtitle="Highest reported total compensation per fiscal year across all named executives"
-        >
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={payTrendData} margin={{ top: 8, right: 16, left: 8, bottom: 4 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={CHART_GRID_COLOR} vertical={false} />
-              <XAxis dataKey="year" tick={chartTick()} axisLine={false} tickLine={false} />
-              <YAxis
-                tick={chartTick()}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v: number) => formatCompactNumber(v) ?? ""}
-              />
-              <Tooltip
-                {...RECHARTS_TOOLTIP_PROPS}
-                formatter={(value: number) => [`$${Math.round(value).toLocaleString()}`, "Peak Total"]}
-              />
-              <Bar dataKey="total" fill="var(--positive)" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Panel>
+        <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 220 }}>Loading pay trend...</div>}>
+          <Panel
+            title="Pay Trend"
+            subtitle="Highest reported total compensation per fiscal year across all named executives"
+          >
+            <GovernancePayTrendChart data={payTrendData} />
+          </Panel>
+        </DeferredClientSection>
       )}
 
-      <Panel title="Proxy Timeline" subtitle="Recent governance-related filings with direct SEC document links">        {error || data?.error ? (
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 220 }}>Loading proxy timeline...</div>}>
+        <Panel title="Proxy Timeline" subtitle="Recent governance-related filings with direct SEC document links">        {error || data?.error ? (
           <div className="text-muted">{error ?? data?.error}</div>
         ) : loading || workspaceLoading ? (
           <div className="text-muted">Loading governance activity...</div>
@@ -396,6 +394,7 @@ export default function CompanyGovernancePage() {
           </div>
         )}
       </Panel>
+      </DeferredClientSection>
     </CompanyWorkspaceShell>
   );
 }

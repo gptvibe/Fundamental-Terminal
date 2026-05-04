@@ -50,7 +50,7 @@ describe("CompanySubnav", () => {
     getCompanyOverview.mockResolvedValue({ company: { oil_support_status: "unsupported" }, financials: { company: { oil_support_status: "unsupported" } } });
   });
 
-  it("includes charts tab and marks it active on charts route", () => {
+  it("shows primary tabs in desktop nav and marks charts tab active on charts route", () => {
     mockUsePathname.mockReturnValue("/company/AAPL/charts");
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
@@ -61,27 +61,35 @@ describe("CompanySubnav", () => {
     expect(chartsTab.getAttribute("aria-current")).toBe("page");
   });
 
-  it("renders all company tabs directly on desktop without a More trigger", () => {
+  it("uses a More dropdown on desktop for specialist sections and keeps primary tabs visible directly", () => {
     mockUsePathname.mockReturnValue("/company/AAPL/earnings");
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
 
-    expect(within(desktopNav).queryByRole("button", { name: "More" })).toBeNull();
+    // Primary tabs are directly visible
+    expect(within(desktopNav).getByRole("link", { name: "Brief" })).toBeTruthy();
+    expect(within(desktopNav).getByRole("link", { name: "Financials" })).toBeTruthy();
+    expect(within(desktopNav).getByRole("link", { name: "Charts" })).toBeTruthy();
+    expect(within(desktopNav).getByRole("link", { name: "Models" })).toBeTruthy();
+    expect(within(desktopNav).getByRole("link", { name: "Peers" })).toBeTruthy();
 
-    const earningsTab = within(desktopNav).getByRole("link", { name: "Earnings" });
-    expect(earningsTab.getAttribute("href")).toBe("/company/AAPL/earnings");
-    expect(earningsTab.getAttribute("aria-current")).toBe("page");
+    // Specialist tabs are behind More dropdown
+    const moreButton = within(desktopNav).getByRole("button", { name: "More" });
+    expect(moreButton.className).toContain("is-active");
+
+    // Open More and verify specialist tabs are present
+    fireEvent.click(moreButton);
+    expect(within(desktopNav).getByRole("link", { name: "Earnings" }).getAttribute("aria-current")).toBe("page");
+    expect(within(desktopNav).getByRole("link", { name: "Filings" })).toBeTruthy();
+    expect(within(desktopNav).getByRole("link", { name: "SEC Feed" })).toBeTruthy();
   });
 
-  it("renders a single primary row and supports arrow-key focus movement", () => {
+  it("supports arrow-key focus movement across primary tabs and More button on desktop", () => {
     mockUsePathname.mockReturnValue("/company/AAPL");
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "AAPL" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
-
-    expect(within(container).queryByText("Core views")).toBeNull();
-    expect(within(container).queryByText("Research feeds")).toBeNull();
 
     const briefTab = within(desktopNav).getByRole("link", { name: "Brief" });
     briefTab.focus();
@@ -106,7 +114,7 @@ describe("CompanySubnav", () => {
     expect(ownershipTab.getAttribute("aria-current")).toBe("page");
   });
 
-  it("waits for shared Models route company state instead of fetching financials for Oil tab visibility", async () => {
+  it("shows Oil in the More menu for eligible tickers once company state resolves", async () => {
     mockUsePathname.mockReturnValue("/company/XOM/models");
     mockUseCompanyLayoutContext.mockReturnValue({
       company: null,
@@ -131,13 +139,16 @@ describe("CompanySubnav", () => {
     });
     rerender(React.createElement(CompanySubnav, { ticker: "XOM" }));
 
+    const moreButton = within(desktopNav).getByRole("button", { name: "More" });
+    fireEvent.click(moreButton);
+
     await waitFor(() => {
       const oilTab = within(desktopNav).getByRole("link", { name: "Oil" });
       expect(oilTab.getAttribute("href")).toBe("/company/XOM/oil");
     });
   });
 
-  it("keeps the Oil tab hidden for unsupported companies", async () => {
+  it("keeps the Oil tab hidden in the More menu for unsupported companies", async () => {
     mockUsePathname.mockReturnValue("/company/KMI/models");
     mockUseCompanyLayoutContext.mockReturnValue({
       company: null,
@@ -153,6 +164,10 @@ describe("CompanySubnav", () => {
       expect(getCompanyFinancials).not.toHaveBeenCalled();
       expect(getCompanyOverview).not.toHaveBeenCalled();
     });
+
+    const moreButton = within(desktopNav).getByRole("button", { name: "More" });
+    fireEvent.click(moreButton);
+
     expect(within(desktopNav).queryByRole("link", { name: "Oil" })).toBeNull();
   });
 
@@ -167,6 +182,9 @@ describe("CompanySubnav", () => {
 
     const { container } = render(React.createElement(CompanySubnav, { ticker: "XOM" }));
     const desktopNav = within(container).getByRole("navigation", { name: "Company workspace sections" });
+
+    const moreButton = within(desktopNav).getByRole("button", { name: "More" });
+    fireEvent.click(moreButton);
 
     await waitFor(() => {
       expect(within(desktopNav).getByRole("link", { name: "Oil" }).getAttribute("href")).toBe("/company/XOM/oil");

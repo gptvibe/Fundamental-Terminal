@@ -349,7 +349,7 @@ def company_filing_insights(
 
     insights = get_company_filing_insights(session, snapshot.company.id)
     insights_last_checked = max((item.last_checked for item in insights if item.last_checked is not None), default=None)
-    refresh = _refresh_for_filing_insights(background_tasks, snapshot)
+    refresh = _refresh_for_filing_insights(snapshot)
     serialized_insights = [_serialize_filing_parser_insight(item) for item in insights]
     return CompanyFilingInsightsResponse(
         company=_serialize_company(snapshot, last_checked=insights_last_checked),

@@ -28,6 +28,7 @@ interface FinancialHistoryLineChartProps {
   metric: "revenue" | "net_income" | "eps" | "operating_cash_flow";
   color: string;
   label: string;
+  subtitle?: string;
   valueFormatter?: (value: number | null) => string;
 }
 
@@ -36,6 +37,7 @@ export function FinancialHistoryLineChart({
   metric,
   color,
   label,
+  subtitle,
   valueFormatter
 }: FinancialHistoryLineChartProps) {
   const formatter = valueFormatter ?? formatCompactNumber;
@@ -91,7 +93,7 @@ export function FinancialHistoryLineChart({
   return (
     <InteractiveChartFrame
       title={label}
-      subtitle={visibleData.length ? `${visibleData.length} annual observations` : "Awaiting annual history"}
+      subtitle={subtitle ?? (visibleData.length ? `${visibleData.length} annual observations — Source: SEC EDGAR companyfacts` : "Awaiting annual history")}
       className="financial-history-chart-shell"
       titleClassName="financial-history-chart-title"
       bodyClassName="financial-history-chart-canvas"

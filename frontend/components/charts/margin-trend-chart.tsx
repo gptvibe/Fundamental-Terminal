@@ -145,7 +145,7 @@ export function MarginTrendChart({ financials, chartState }: MarginTrendChartPro
   return (
     <InteractiveChartFrame
       title="Margin trends"
-      subtitle={data.length ? `${data.length} visible periods of margin history.` : "Awaiting margin history"}
+      subtitle={data.length ? "How much of each revenue dollar converts to gross profit, operating income, net income, and free cash?" : "Awaiting margin history"}
       inspectorTitle="Margin trends"
       inspectorSubtitle="Gross, operating, net, and free-cash-flow margins across the visible filing history."
       hideInlineHeader

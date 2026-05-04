@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import * as React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CompanyResearchBriefPage from "@/app/company/[ticker]/page";
@@ -248,7 +248,23 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByRole("heading", { name: "Capital & risk" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Valuation" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
+    const snapshotHeading = screen.getByRole("heading", { name: "Snapshot" });
+    const whatChangedHeading = screen.getByRole("heading", { name: "What changed" });
+    const businessQualityHeading = screen.getByRole("heading", { name: "Business quality" });
+    const capitalRiskHeading = screen.getByRole("heading", { name: "Capital & risk" });
+    const valuationHeading = screen.getByRole("heading", { name: "Valuation" });
+    const monitorHeading = screen.getByRole("heading", { name: "Monitor" });
+    expect(snapshotHeading.compareDocumentPosition(whatChangedHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(whatChangedHeading.compareDocumentPosition(businessQualityHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(businessQualityHeading.compareDocumentPosition(capitalRiskHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(capitalRiskHeading.compareDocumentPosition(valuationHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(valuationHeading.compareDocumentPosition(monitorHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const appendixToggle = screen.getByRole("button", { name: /Data quality & sources/i });
+    expect(screen.queryByText("Source freshness timeline")).toBeNull();
+    fireEvent.click(appendixToggle);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
+    });
     expect(screen.getAllByText("Source freshness timeline").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Collapse Snapshot" })).toBeTruthy();
     expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
@@ -268,9 +284,9 @@ describe("CompanyResearchBriefPage", () => {
     });
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
-    const snapshotHeading = screen.getByRole("heading", { name: "Snapshot" });
     const dataQualityHeading = screen.getByRole("heading", { name: "Data quality & sources" });
     expect(snapshotHeading.compareDocumentPosition(dataQualityHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(monitorHeading.compareDocumentPosition(dataQualityHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(getCompanyActivityOverview).not.toHaveBeenCalled();
     expect(getCompanyChangesSinceLastFiling).not.toHaveBeenCalled();
     expect(getCompanyEarningsSummary).not.toHaveBeenCalled();
@@ -306,7 +322,7 @@ describe("CompanyResearchBriefPage", () => {
     const view = render(React.createElement(CompanyResearchBriefPage));
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /brief warming|cold start bootstrap/i })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
     });
 
     expect(getCompanyResearchBrief).not.toHaveBeenCalled();
@@ -350,7 +366,7 @@ describe("CompanyResearchBriefPage", () => {
     render(React.createElement(CompanyResearchBriefPage));
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /brief warming|cold start bootstrap/i })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
     });
 
     expect(getCompanyResearchBrief).not.toHaveBeenCalled();
@@ -542,6 +558,8 @@ describe("CompanyResearchBriefPage", () => {
 
     render(React.createElement(CompanyResearchBriefPage));
 
+    fireEvent.click(screen.getByRole("button", { name: /Data quality & sources/i }));
+
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /Brief warming|Cold start bootstrap/i })).toBeTruthy();
     });
@@ -616,7 +634,10 @@ describe("CompanyResearchBriefPage", () => {
     });
 
     expect(screen.getByText("Review stale or partial inputs below")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Data quality & sources/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
+    });
     expect(screen.getByText("Partial data and fallback warnings")).toBeTruthy();
   });
 });

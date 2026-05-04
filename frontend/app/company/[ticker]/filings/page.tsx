@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { clsx } from "clsx";
 
+import { BottomAppendix } from "@/components/company/bottom-appendix";
 import { FilingEventCategoryChart } from "@/components/charts/filing-event-category-chart";
 import { ChangesSinceLastFilingCard } from "@/components/company/changes-since-last-filing-card";
 import { FilingDocumentViewer } from "@/components/filings/filing-document-viewer";
@@ -19,6 +20,22 @@ import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyChangesSinceLastFiling, getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilingRiskSignals, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
 import type { CompanyChangesSinceLastFilingResponse, CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingRiskSignalsResponse, CompanyFilingsResponse } from "@/lib/types";
+
+function describeFilingSummary(filing: CompanyFilingsResponse["filings"][number]): string {
+  if (filing.primary_doc_description) {
+    return filing.primary_doc_description;
+  }
+  if (filing.items) {
+    return filing.form === "8-K" ? `Current report (Items ${filing.items})` : `SEC filing (Items ${filing.items})`;
+  }
+  if (filing.form === "10-K") {
+    return "Annual report";
+  }
+  if (filing.form === "10-Q") {
+    return "Quarterly report";
+  }
+  return `${filing.form} filing`;
+}
 
 export default function CompanyFilingsPage() {
   const params = useParams<{ ticker: string }>();
@@ -313,10 +330,6 @@ export default function CompanyFilingsPage() {
         ]}
       />
 
-      <Panel title="Filing Diagnostics" subtitle="Timeline freshness and parser coverage for the SEC filing workspace">
-        <DataQualityDiagnostics diagnostics={insightsData?.diagnostics ?? data?.diagnostics} />
-      </Panel>
-
       <Panel title="Recent Filing Timeline" subtitle="SEC-first view of annual, quarterly, and current reports with direct source links">
         <CompanyFilingsTimeline
           filings={filings}
@@ -448,6 +461,97 @@ export default function CompanyFilingsPage() {
           </div>
         )}
       </Panel>
+
+      <BottomAppendix
+        id="filings-appendix"
+        title="Filings appendix"
+        subtitle="Secondary diagnostics, parser caveats, and provenance details are grouped here after core filing navigation and analysis."
+        toggleLabel="Filings appendix"
+        sections={[
+          {
+            id: "source-details",
+            title: "Source details",
+            content: (
+              <div className="workspace-card-stack">
+                <div className="workspace-card-copy text-muted">Timeline source: {sourceLabel}</div>
+                <div className="workspace-card-copy text-muted">Recent filings: {filings.length.toLocaleString()} · 8-K events: {allEvents.length.toLocaleString()}</div>
+              </div>
+            ),
+          },
+          {
+            id: "refresh-state",
+            title: "Refresh state",
+            content: (
+              <div className="workspace-pill-row">
+                <span className="pill">{effectiveRefreshState?.job_id ? "Refresh queued" : "No active refresh"}</span>
+                <span className="pill">Latest filing {latestFilingDate ? formatDate(latestFilingDate) : "Pending"}</span>
+                <span className="pill">Last checked {pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : "Pending"}</span>
+              </div>
+            ),
+          },
+          {
+            id: "methodology",
+            title: "Methodology",
+            content: (
+              <div className="text-muted workspace-card-copy">
+                SEC submissions drive the filing timeline and event classification. Parser snapshots are fast, best-effort extracts and may lag fresh submissions during warmup.
+              </div>
+            ),
+          },
+          {
+            id: "diagnostics",
+            title: "Diagnostics",
+            content: <DataQualityDiagnostics diagnostics={insightsData?.diagnostics ?? data?.diagnostics} />,
+          },
+          {
+            id: "partial-errors",
+            title: "Partial errors",
+            content: [error, insightsError, eventsError, changesError, filingRiskSignalsError, data?.error, eventsData?.error]
+              .filter(Boolean)
+              .length ? (
+              <div className="research-brief-partial-errors">
+                {[error, insightsError, eventsError, changesError, filingRiskSignalsError, data?.error, eventsData?.error]
+                  .filter(Boolean)
+                  .map((message) => (
+                    <span key={message} className="pill">
+                      {message}
+                    </span>
+                  ))}
+              </div>
+            ) : (
+              <div className="text-muted">No partial errors are currently active.</div>
+            ),
+          },
+          {
+            id: "raw-evidence",
+            title: "Raw evidence/provenance",
+            content: filings.length ? (
+              <div className="workspace-card-stack">
+                {filings.slice(0, 10).map((filing) => (
+                  <a
+                    key={filing.accession_number ?? `${filing.form}-${filing.filing_date ?? filing.report_date ?? filing.source_url}`}
+                    href={filing.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="filing-link-card workspace-card-link"
+                  >
+                    <div className="workspace-card-row">
+                      <div className="workspace-pill-row">
+                        <span className="pill">{filing.form}</span>
+                        {filing.accession_number ? <span className="pill">{filing.accession_number}</span> : null}
+                      </div>
+                      <div className="text-muted">{formatDate(filing.filing_date ?? filing.report_date)}</div>
+                    </div>
+                    <div className="workspace-card-title">{describeFilingSummary(filing)}</div>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="text-muted">No filing provenance rows are available yet.</div>
+            ),
+          },
+        ]}
+      />
     </CompanyWorkspaceShell>
   );
 }

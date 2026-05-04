@@ -1,10 +1,11 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 
-import { ShareDilutionTrackerChart } from "@/components/charts/share-dilution-tracker-chart";
+import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -13,6 +14,11 @@ import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyCapitalMarkets, getCompanyEquityClaimRisk } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent, titleCase } from "@/lib/format";
 import type { CapitalRaisePayload, CompanyCapitalRaisesResponse, CompanyEquityClaimRiskResponse, EquityClaimRiskEvidencePayload } from "@/lib/types";
+
+const ShareDilutionTrackerChart = dynamic(
+  () => import("@/components/charts/share-dilution-tracker-chart").then((m) => ({ default: m.ShareDilutionTrackerChart })),
+  { ssr: false, loading: () => <div className="text-muted" style={{ minHeight: 280 }}>Loading share dilution chart...</div> }
+);
 
 export default function CompanyCapitalMarketsPage() {
   const params = useParams<{ ticker: string }>();
@@ -230,7 +236,8 @@ export default function CompanyCapitalMarketsPage() {
         )}
       </Panel>
 
-      <Panel title="Share-count bridge" subtitle="Opening shares, issuance, repurchases, and dilution direction anchored to persisted SEC filing history.">
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 260 }}>Loading share-count bridge...</div>}>
+        <Panel title="Share-count bridge" subtitle="Opening shares, issuance, repurchases, and dilution direction anchored to persisted SEC filing history.">
         {riskError ? (
           <div className="text-muted">Unable to load the share-count bridge while the pack is unavailable.</div>
         ) : riskLoading && !shareCountBridge ? (
@@ -263,8 +270,10 @@ export default function CompanyCapitalMarketsPage() {
           <div className="text-muted">No share-count bridge is available yet.</div>
         )}
       </Panel>
+      </DeferredClientSection>
 
-      <Panel title="Financing capacity and dependency" subtitle="Shelf remaining, ATM activity, negative free cash flow pressure, and near-term financing need.">
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 260 }}>Loading financing capacity data...</div>}>
+        <Panel title="Financing capacity and dependency" subtitle="Shelf remaining, ATM activity, negative free cash flow pressure, and near-term financing need.">
         {riskError ? (
           <div className="text-muted">Unable to load financing-capacity data while the pack is unavailable.</div>
         ) : riskLoading && !shelfRegistration && !atmDependency ? (
@@ -293,8 +302,10 @@ export default function CompanyCapitalMarketsPage() {
           <div className="text-muted">No financing-capacity signals are available yet.</div>
         )}
       </Panel>
+      </DeferredClientSection>
 
-      <Panel title="Equity plan registrations (S-8)" subtitle="Employee equity plan registrations filed on Form S-8, showing plan names, registered shares, and parse confidence.">
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 200 }}>Loading equity plan data...</div>}>
+        <Panel title="Equity plan registrations (S-8)" subtitle="Employee equity plan registrations filed on Form S-8, showing plan names, registered shares, and parse confidence.">
         {capitalMarketsLoading && equityPlanFilings.length === 0 ? (
           <div className="text-muted">Loading equity plan registration filings...</div>
         ) : equityPlanFilings.length > 0 ? (
@@ -321,8 +332,10 @@ export default function CompanyCapitalMarketsPage() {
           <div className="text-muted">No S-8 equity plan registrations are cached for this company yet.</div>
         )}
       </Panel>
+      </DeferredClientSection>
 
-      <Panel title="Hybrid securities and debt maturity wall" subtitle="Warrants, convertibles, and the amount of debt that needs attention in the next two years.">
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 260 }}>Loading hybrid securities data...</div>}>
+        <Panel title="Hybrid securities and debt maturity wall" subtitle="Warrants, convertibles, and the amount of debt that needs attention in the next two years.">
         {riskError ? (
           <div className="text-muted">Unable to load hybrid-security or debt-wall signals while the pack is unavailable.</div>
         ) : riskLoading && !hybridSecurities && !debtMaturityWall ? (
@@ -349,8 +362,10 @@ export default function CompanyCapitalMarketsPage() {
           <div className="text-muted">No hybrid-security or debt-wall signals are available yet.</div>
         )}
       </Panel>
+      </DeferredClientSection>
 
-      <Panel title="Covenant, restatement, and control signals" subtitle="Keyword-backed covenant stress cues plus restatement severity and internal-control flags where identifiable.">
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 260 }}>Loading covenant signals...</div>}>
+        <Panel title="Covenant, restatement, and control signals" subtitle="Keyword-backed covenant stress cues plus restatement severity and internal-control flags where identifiable.">
         {riskError ? (
           <div className="text-muted">Unable to load covenant or reporting-control signals while the pack is unavailable.</div>
         ) : riskLoading && !covenantSignals && !reportingControls ? (
@@ -376,8 +391,10 @@ export default function CompanyCapitalMarketsPage() {
           <div className="text-muted">No covenant or reporting-control signals are available yet.</div>
         )}
       </Panel>
+      </DeferredClientSection>
 
-      <Panel title="Provenance and diagnostics" subtitle="Source mix, refresh state, and any missing inputs that can weaken the underwriting read.">
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 200 }}>Loading provenance data...</div>}>
+        <Panel title="Provenance and diagnostics" subtitle="Source mix, refresh state, and any missing inputs that can weaken the underwriting read.">
         {riskError ? (
           <div className="text-muted">The pack failed before provenance and diagnostic details could be displayed.</div>
         ) : riskLoading && !riskData ? (
@@ -435,6 +452,7 @@ export default function CompanyCapitalMarketsPage() {
           <div className="text-muted">No provenance or diagnostic detail is available yet.</div>
         )}
       </Panel>
+      </DeferredClientSection>
     </CompanyWorkspaceShell>
   );
 }

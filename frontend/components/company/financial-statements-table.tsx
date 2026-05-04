@@ -63,6 +63,18 @@ export function FinancialStatementsTable({
   const jsonPayload = useMemo(() => JSON.stringify(exportedFinancials, null, 2), [exportedFinancials]);
   const csvPayload = useMemo(() => buildFinancialsCsv(exportedFinancials), [exportedFinancials]);
 
+  if (!financials.length) {
+    return (
+      <div className="financial-trend-table-shell">
+        <div className="grid-empty-state" style={{ minHeight: 160 }}>
+          <div className="grid-empty-kicker">Financial Statements</div>
+          <div className="grid-empty-title">No filing history available yet</div>
+          <div className="grid-empty-copy">Financial statements appear once filings are cached for this company.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="financial-statements-stack">
       <div className="financial-export-row">
@@ -130,6 +142,7 @@ export function FinancialStatementsTable({
         </div>
       </div>
 
+      <div className="financial-trend-table-note">Values in USD (compact notation). EPS in $/share. Change columns appear when a comparison period is selected.</div>
       <div className="financial-table-shell">
         <table className="financial-table" style={{ minWidth: 860 }}>
           <thead>
@@ -154,10 +167,10 @@ export function FinancialStatementsTable({
                   <td>
                     <MetricLabel label={metric.label} metricKey={metric.key} />
                   </td>
-                  <td>{metric.formatValue(activeValue)}</td>
-                  {activeComparisonFinancial ? <td>{metric.formatValue(comparisonValue)}</td> : null}
-                  {activeComparisonFinancial ? <td style={toneStyle}>{formatMetricDelta(metric, absoluteChange)}</td> : null}
-                  {activeComparisonFinancial ? <td style={toneStyle}>{formatPercent(relativeChange)}</td> : null}
+                  <td className="is-numeric">{metric.formatValue(activeValue)}</td>
+                  {activeComparisonFinancial ? <td className="is-numeric">{metric.formatValue(comparisonValue)}</td> : null}
+                  {activeComparisonFinancial ? <td className="is-numeric" style={toneStyle}>{formatMetricDelta(metric, absoluteChange)}</td> : null}
+                  {activeComparisonFinancial ? <td className="is-numeric" style={toneStyle}>{formatPercent(relativeChange)}</td> : null}
                 </tr>
               );
             })}

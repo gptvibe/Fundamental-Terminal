@@ -71,7 +71,8 @@ FINANCIALS_REFRESH_FINGERPRINT_VERSION = "financials-refresh-fingerprint-v1"
 INSIDER_FILINGS_FINGERPRINT_VERSION = "insider-filings-v1"
 FORM144_FILINGS_FINGERPRINT_VERSION = "form144-filings-v1"
 EARNINGS_RELEASES_FINGERPRINT_VERSION = "earnings-releases-v1"
-COMMENT_LETTERS_FINGERPRINT_VERSION = "comment-letters-v1"
+COMMENT_LETTERS_FINGERPRINT_VERSION = "comment-letters-v2"
+COMMENT_LETTER_PARSER_VERSION = "corresp-parser-v1"
 DERIVED_METRICS_INPUT_FINGERPRINT_VERSION = "derived-metrics-inputs-v1"
 CAPITAL_STRUCTURE_INPUT_FINGERPRINT_VERSION = "capital-structure-inputs-v1"
 EARNINGS_MODELS_INPUT_FINGERPRINT_VERSION = "earnings-models-inputs-v1"
@@ -756,6 +757,19 @@ class NormalizedCommentLetter:
     filing_date: date | None
     description: str
     sec_url: str
+    acceptance_datetime: datetime | None = None
+    primary_document: str | None = None
+    document_url: str | None = None
+    document_format: str | None = None
+    correspondent_role: str | None = None
+    document_kind: str | None = None
+    thread_key: str | None = None
+    review_sequence: str | None = None
+    topics: tuple[str, ...] = ()
+    document_text: str | None = None
+    document_text_sha256: str | None = None
+    text_extracted_at: datetime | None = None
+    parser_version: str | None = None
 
 
 @dataclass(slots=True)
@@ -1327,11 +1341,80 @@ class EdgarClient:
                     filing_date=metadata.filing_date,
                     description=description,
                     sec_url=_build_archive_filing_url(cik, metadata.accession_number, metadata.primary_document),
+                    acceptance_datetime=metadata.acceptance_datetime,
+                    primary_document=(metadata.primary_document or "").strip() or None,
                 )
             )
 
         rows.sort(key=lambda item: (item.filing_date or date.min, item.accession_number), reverse=True)
         return rows
+
+    def enrich_correspondence_filing(
+        self,
+        cik: str,
+        filing_metadata: FilingMetadata,
+        letter: NormalizedCommentLetter,
+        *,
+        checked_at: datetime | None = None,
+    ) -> NormalizedCommentLetter:
+        extracted_at = checked_at or datetime.now(timezone.utc)
+        accession_number = filing_metadata.accession_number
+        primary_document = (filing_metadata.primary_document or "").strip() or None
+        selected_document = primary_document
+        document_format = _comment_letter_document_format(primary_document)
+        document_url = _build_archive_filing_url(cik, accession_number, selected_document) if selected_document else None
+        document_text: str | None = None
+
+        try:
+            directory_index = self.get_filing_directory_index(cik, accession_number)
+        except Exception:
+            logger.exception("Unable to fetch correspondence directory index for accession %s", accession_number)
+            directory_index = None
+
+        if directory_index is not None:
+            selected_document = _select_correspondence_document_name(directory_index, primary_document)
+            document_format = _comment_letter_document_format(selected_document) or document_format
+            document_url = _build_archive_filing_url(cik, accession_number, selected_document) if selected_document else document_url
+
+        if selected_document and document_format in {"html", "txt"}:
+            try:
+                _, payload = self.get_filing_document_text(cik, accession_number, selected_document)
+                document_text = _extract_comment_letter_document_text(payload, document_format)
+            except Exception:
+                logger.exception("Unable to fetch correspondence document for accession %s", accession_number)
+
+        correspondent_role = _detect_comment_letter_role(letter.description, document_text)
+        document_kind = _detect_comment_letter_kind(letter.description, document_text, selected_document)
+        review_sequence = _extract_comment_letter_review_sequence(letter.description, document_text)
+        thread_key = _build_comment_letter_thread_key(
+            accession_number=accession_number,
+            filing_date=letter.filing_date,
+            description=letter.description,
+            document_text=document_text,
+            review_sequence=review_sequence,
+        )
+        topics = tuple(_extract_comment_letter_topics(letter.description, document_text))
+        document_text_sha256 = hashlib.sha256(document_text.encode("utf-8")).hexdigest() if document_text else None
+
+        return NormalizedCommentLetter(
+            accession_number=letter.accession_number,
+            filing_date=letter.filing_date,
+            description=letter.description,
+            sec_url=letter.sec_url,
+            acceptance_datetime=filing_metadata.acceptance_datetime,
+            primary_document=selected_document or primary_document,
+            document_url=document_url,
+            document_format=document_format,
+            correspondent_role=correspondent_role,
+            document_kind=document_kind,
+            thread_key=thread_key,
+            review_sequence=review_sequence,
+            topics=topics,
+            document_text=document_text,
+            document_text_sha256=document_text_sha256,
+            text_extracted_at=extracted_at if document_text else None,
+            parser_version=COMMENT_LETTER_PARSER_VERSION,
+        )
 
 
 class EdgarNormalizer:
@@ -2411,7 +2494,8 @@ class EdgarIngestionService:
         force: bool = False,
     ) -> int:
         reporter.step("corresp", "Caching SEC correspondence filings...")
-        existing_accessions = _existing_comment_letter_accessions(session, company.id)
+        existing_rows = _existing_comment_letter_rows(session, company.id)
+        existing_accessions = set(existing_rows)
         session.commit()
 
         normalized_letters = self.client.get_correspondence_filings(
@@ -2423,9 +2507,30 @@ class EdgarIngestionService:
             version=COMMENT_LETTERS_FINGERPRINT_VERSION,
             payload=normalized_letters,
         )
-        candidate_letters = normalized_letters if force else [
-            letter for letter in normalized_letters if letter.accession_number not in existing_accessions
-        ]
+        candidate_letters: list[NormalizedCommentLetter] = []
+        for letter in normalized_letters:
+            existing_letter = existing_rows.get(letter.accession_number)
+            if not force and letter.accession_number in existing_accessions and not _comment_letter_needs_enrichment(existing_letter):
+                continue
+            filing_metadata = filing_index.get(letter.accession_number)
+            candidate_letters.append(
+                self.client.enrich_correspondence_filing(
+                    company.cik,
+                    filing_metadata,
+                    letter,
+                    checked_at=checked_at,
+                )
+                if filing_metadata is not None
+                else NormalizedCommentLetter(
+                    accession_number=letter.accession_number,
+                    filing_date=letter.filing_date,
+                    description=letter.description,
+                    sec_url=letter.sec_url,
+                    acceptance_datetime=letter.acceptance_datetime,
+                    primary_document=letter.primary_document,
+                    parser_version=COMMENT_LETTER_PARSER_VERSION,
+                )
+            )
 
         reporter.step("database", "Saving SEC correspondence filings to database...")
         letters_written = 0
@@ -4336,6 +4441,19 @@ def _upsert_comment_letters(
             "filing_date": letter.filing_date,
             "description": letter.description,
             "sec_url": letter.sec_url,
+            "acceptance_datetime": letter.acceptance_datetime,
+            "primary_document": letter.primary_document,
+            "document_url": letter.document_url,
+            "document_format": letter.document_format,
+            "correspondent_role": letter.correspondent_role,
+            "document_kind": letter.document_kind,
+            "thread_key": letter.thread_key,
+            "review_sequence": letter.review_sequence,
+            "topics": list(letter.topics) if letter.topics else None,
+            "document_text": letter.document_text,
+            "document_text_sha256": letter.document_text_sha256,
+            "text_extracted_at": letter.text_extracted_at,
+            "parser_version": letter.parser_version,
             "last_checked": checked_at,
         }
         for letter in comment_letters
@@ -4348,6 +4466,19 @@ def _upsert_comment_letters(
             "filing_date": statement.excluded.filing_date,
             "description": statement.excluded.description,
             "sec_url": statement.excluded.sec_url,
+            "acceptance_datetime": statement.excluded.acceptance_datetime,
+            "primary_document": statement.excluded.primary_document,
+            "document_url": statement.excluded.document_url,
+            "document_format": statement.excluded.document_format,
+            "correspondent_role": statement.excluded.correspondent_role,
+            "document_kind": statement.excluded.document_kind,
+            "thread_key": statement.excluded.thread_key,
+            "review_sequence": statement.excluded.review_sequence,
+            "topics": statement.excluded.topics,
+            "document_text": statement.excluded.document_text,
+            "document_text_sha256": statement.excluded.document_text_sha256,
+            "text_extracted_at": statement.excluded.text_extracted_at,
+            "parser_version": statement.excluded.parser_version,
             "last_updated": func.now(),
             "last_checked": statement.excluded.last_checked,
         },
@@ -4481,6 +4612,186 @@ def _load_form144_document(client: EdgarClient, cik: str, filing_metadata: Filin
             continue
 
     raise ValueError(f"Unable to load Form 144 document for accession {accession}")
+
+
+def _select_correspondence_document_name(directory_index: dict[str, Any], primary_document: str | None) -> str | None:
+    candidate_names: list[str] = []
+    if primary_document:
+        candidate_names.append(primary_document)
+
+    for item in directory_index.get("directory", {}).get("item", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or "/" in name:
+            continue
+        if _comment_letter_document_format(name) is None:
+            continue
+        candidate_names.append(name)
+
+    ranked = sorted(
+        {name for name in candidate_names if name},
+        key=lambda name: _comment_letter_document_priority(name, primary_document),
+    )
+    return ranked[0] if ranked else None
+
+
+def _comment_letter_document_priority(name: str, primary_document: str | None) -> tuple[int, int, int, int, str]:
+    normalized = name.lower()
+    format_rank = {"html": 0, "txt": 1, "pdf": 2}.get(_comment_letter_document_format(name) or "", 3)
+    keyword_rank = 0 if any(token in normalized for token in ("response", "corresp", "letter", "upload")) else 1
+    primary_rank = 0 if primary_document and normalized == primary_document.lower() else 1
+    return (primary_rank, format_rank, keyword_rank, len(normalized), normalized)
+
+
+def _comment_letter_document_format(name: str | None) -> str | None:
+    normalized = str(name or "").strip().lower()
+    if normalized.endswith((".htm", ".html")):
+        return "html"
+    if normalized.endswith(".txt"):
+        return "txt"
+    if normalized.endswith(".pdf"):
+        return "pdf"
+    return None
+
+
+def _extract_comment_letter_document_text(payload: str, document_format: str) -> str | None:
+    if document_format == "txt":
+        return _normalize_comment_letter_text(payload)
+    if document_format == "html":
+        soup = BeautifulSoup(payload, "html.parser")
+        for node in soup(["script", "style", "noscript"]):
+            node.decompose()
+        return _normalize_comment_letter_text(soup.get_text("\n", strip=True))
+    return None
+
+
+def _normalize_comment_letter_text(value: str | None) -> str | None:
+    text = str(value or "").replace("\x00", " ")
+    text = re.sub(r"\r\n?", "\n", text)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    cleaned = text.strip()
+    return cleaned or None
+
+
+def _detect_comment_letter_role(description: str | None, document_text: str | None) -> str:
+    normalized = _normalize_comment_letter_signal_text(description, document_text)
+    issuer_markers = (
+        "response letter",
+        "response to comments",
+        "on behalf of",
+        "we respectfully submit",
+        "the company respectfully",
+        "our responses",
+    )
+    staff_markers = (
+        "division of corporation finance",
+        "we have reviewed",
+        "we remind you",
+        "staff comment",
+        "dear ",
+    )
+    if any(marker in normalized for marker in issuer_markers):
+        return "issuer"
+    if any(marker in normalized for marker in staff_markers):
+        return "sec_staff"
+    return "unknown"
+
+
+def _detect_comment_letter_kind(description: str | None, document_text: str | None, document_name: str | None) -> str:
+    normalized = _normalize_comment_letter_signal_text(description, document_text, document_name)
+    if "response letter" in normalized or "response to comments" in normalized:
+        return "response_letter"
+    if "transmittal" in normalized or "upload" in normalized:
+        return "transmittal"
+    if "comment letter" in normalized or "staff comment" in normalized or "division of corporation finance" in normalized:
+        return "comment_letter"
+    return "other"
+
+
+def _extract_comment_letter_review_sequence(description: str | None, document_text: str | None) -> str | None:
+    normalized = _normalize_comment_letter_signal_text(description, document_text)
+    match = re.search(r"(?:review|comment)\s*(?:letter\s*)?(?:no\.?|number)?\s*(\d+)", normalized)
+    if match is not None:
+        return match.group(1)
+    ordinal_map = {
+        "first": "1",
+        "second": "2",
+        "third": "3",
+        "fourth": "4",
+        "fifth": "5",
+    }
+    for label, value in ordinal_map.items():
+        if f"{label} comment letter" in normalized or f"{label} review" in normalized:
+            return value
+    return None
+
+
+def _build_comment_letter_thread_key(
+    *,
+    accession_number: str,
+    filing_date: date | None,
+    description: str | None,
+    document_text: str | None,
+    review_sequence: str | None,
+) -> str:
+    if review_sequence:
+        return f"review-sequence:{review_sequence}"
+    review_date = _extract_comment_letter_anchor_date(description, document_text)
+    if review_date is not None:
+        return f"review-date:{review_date.isoformat()}"
+    if filing_date is not None:
+        return f"accession-date:{filing_date.isoformat()}:{accession_number}"
+    return f"accession:{accession_number}"
+
+
+def _extract_comment_letter_anchor_date(description: str | None, document_text: str | None) -> date | None:
+    text = "\n".join(part for part in (description, document_text) if part)
+    match = re.search(
+        r"(?:dated|date)\s+([A-Z][a-z]+\s+\d{1,2},\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4})",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    value = match.group(1)
+    for fmt in ("%B %d, %Y", "%Y-%m-%d", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_comment_letter_topics(description: str | None, document_text: str | None) -> list[str]:
+    normalized = _normalize_comment_letter_signal_text(description, document_text)
+    topic_keywords = {
+        "revenue_recognition": ("revenue recognition", "revenue presentation", "asc 606", "contract revenue"),
+        "non_gaap": ("non-gaap", "non gaap", "adjusted ebitda", "adjusted earnings"),
+        "segment_reporting": ("segment", "operating segment", "segment reporting"),
+        "internal_controls": ("internal control", "material weakness", "icfr", "disclosure controls"),
+        "liquidity": ("liquidity", "cash flow", "going concern", "debt covenant"),
+        "risk_disclosures": ("risk factor", "risk disclosure", "cybersecurity", "litigation"),
+        "tax": ("tax", "income tax", "valuation allowance"),
+        "share_based_compensation": ("stock-based compensation", "share-based compensation", "equity award"),
+    }
+    matches = [topic for topic, keywords in topic_keywords.items() if any(keyword in normalized for keyword in keywords)]
+    return matches[:4]
+
+
+def _normalize_comment_letter_signal_text(*parts: str | None) -> str:
+    raw = " ".join(str(part or "") for part in parts if part)
+    return re.sub(r"\s+", " ", raw.lower()).strip()
+
+
+def _comment_letter_needs_enrichment(existing_letter: CommentLetter | None) -> bool:
+    return existing_letter is None or str(getattr(existing_letter, "parser_version", "") or "") != COMMENT_LETTER_PARSER_VERSION
+
+
+def _existing_comment_letter_rows(session: Session, company_id: int) -> dict[str, CommentLetter]:
+    statement = select(CommentLetter).where(CommentLetter.company_id == company_id)
+    return {row.accession_number: row for row in session.execute(statement).scalars()}
 
 
 def _parse_form144_filings(

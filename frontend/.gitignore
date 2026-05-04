@@ -2,3 +2,13 @@
 node_modules
 .env.local
 .codex-temp
+
+# Local test run artifacts
+vitest-results*.json
+vitest-targeted*.json
+vitest-projection-studio*.json
+.vitest-summary.json
+test-output.txt
+.playwright_*_output.txt
+.tmp_playwright_check.js
+requested-tests.log

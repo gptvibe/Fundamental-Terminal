@@ -628,6 +628,16 @@ class FilingCommentLetterItemPayload(BaseModel):
     description: str
     sec_url: str
     is_new_since_current_filing: bool = False
+    acceptance_datetime: datetime | None = None
+    document_url: str | None = None
+    document_format: str | None = None
+    correspondent_role: str | None = None
+    document_kind: str | None = None
+    thread_key: str | None = None
+    review_sequence: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    has_document_text: bool = False
+    document_text_excerpt: str | None = None
 
 
 class FilingCommentLetterHistoryPayload(BaseModel):

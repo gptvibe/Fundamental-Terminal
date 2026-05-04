@@ -932,6 +932,16 @@ def _build_comment_letter_history(
                 "description": str(getattr(item, "description", "SEC correspondence") or "SEC correspondence"),
                 "sec_url": str(getattr(item, "sec_url", "") or ""),
                 "is_new_since_current_filing": bool(filing_date is not None and filing_date >= current_cutoff.date()),
+                "acceptance_datetime": getattr(item, "acceptance_datetime", None),
+                "document_url": str(getattr(item, "document_url", "") or "") or None,
+                "document_format": str(getattr(item, "document_format", "") or "") or None,
+                "correspondent_role": str(getattr(item, "correspondent_role", "") or "") or None,
+                "document_kind": str(getattr(item, "document_kind", "") or "") or None,
+                "thread_key": str(getattr(item, "thread_key", "") or "") or None,
+                "review_sequence": str(getattr(item, "review_sequence", "") or "") or None,
+                "topics": [str(topic) for topic in (getattr(item, "topics", None) or []) if str(topic).strip()],
+                "has_document_text": bool(getattr(item, "document_text", None)),
+                "document_text_excerpt": _comment_letter_excerpt(getattr(item, "document_text", None)),
             }
         )
     return {
@@ -940,6 +950,16 @@ def _build_comment_letter_history(
         "latest_filing_date": getattr(ordered[0], "filing_date", None),
         "recent_letters": recent_letters[:5],
     }
+
+
+def _comment_letter_excerpt(value: object, limit: int = 320) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit].rsplit(" ", 1)[0].strip()
+    return f"{clipped}..." if clipped else f"{text[:limit].strip()}..."
 
 
 def _build_comment_letter_change(

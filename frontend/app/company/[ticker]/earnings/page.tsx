@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "r
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
+import { BottomAppendix } from "@/components/company/bottom-appendix";
 import { EarningsTrendChart, type EarningsTrendDatum } from "@/components/charts/earnings-trend-chart";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
@@ -279,10 +280,6 @@ export default function CompanyEarningsPage() {
         ) : null}
       </CompanyResearchHeader>
 
-      <Panel title="Earnings Diagnostics" subtitle="Coverage, fallback, and freshness flags across the cached earnings workspace">
-        <DataQualityDiagnostics diagnostics={workspaceData?.diagnostics} />
-      </Panel>
-
       <Panel title="Reported Revenue vs Diluted EPS" subtitle="SEC earnings releases plotted by reported period so the top-line and per-share trend stay visible at a glance">
         {!loading && !workspaceLoading && useFallbackTrend ? (
           <div className="text-muted" style={{ marginBottom: 12 }}>
@@ -519,6 +516,87 @@ export default function CompanyEarningsPage() {
           <PanelEmptyState message="No earnings releases with metrics, guidance, or capital-return signals are available yet. Enable metadata-only rows to inspect all cached filings." />
         )}
       </Panel>
+
+      <BottomAppendix
+        id="earnings-appendix"
+        title="Earnings appendix"
+        subtitle="Secondary diagnostics, refresh state, and release-source detail live here to keep the core earnings read front-loaded."
+        toggleLabel="Earnings appendix"
+        sections={[
+          {
+            id: "source-details",
+            title: "Source details",
+            content: (
+              <div className="workspace-card-stack">
+                <div className="text-muted workspace-card-copy">
+                  Primary source: SEC 8-K Item 2.02 earnings releases and linked exhibits.
+                </div>
+                <div className="workspace-card-copy text-muted">
+                  Releases tracked: {totalReleases.toLocaleString()} · Parsed: {parsedReleases.toLocaleString()} · Metadata-only: {Math.max(0, totalReleases - parsedReleases).toLocaleString()}
+                </div>
+              </div>
+            ),
+          },
+          {
+            id: "refresh-state",
+            title: "Refresh state",
+            content: (
+              <div className="workspace-pill-row">
+                <span className="pill">{trackedJobId ? "Refresh queued" : "No active refresh"}</span>
+                <span className="pill">Latest filing {latestFilingValue}</span>
+                <span className="pill">Last checked {lastCheckedValue ? formatDate(lastCheckedValue) : "Pending"}</span>
+              </div>
+            ),
+          },
+          {
+            id: "methodology",
+            title: "Methodology",
+            content: (
+              <div className="text-muted workspace-card-copy">
+                Trend charts prioritize parsed release metrics. If releases are metadata-only, the view falls back to cached statement trends while preserving period labeling.
+              </div>
+            ),
+          },
+          {
+            id: "diagnostics",
+            title: "Diagnostics",
+            content: <DataQualityDiagnostics diagnostics={workspaceData?.diagnostics} />,
+          },
+          {
+            id: "partial-errors",
+            title: "Partial errors",
+            content: combinedError ? <div className="text-muted">{combinedError}</div> : <div className="text-muted">No partial errors are currently active.</div>,
+          },
+          {
+            id: "raw-evidence",
+            title: "Raw evidence/provenance",
+            content: sortedReleases.length ? (
+              <div className="workspace-card-stack">
+                {sortedReleases.slice(0, 8).map((release) => (
+                  <a
+                    key={getReleaseKey(release)}
+                    href={release.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="filing-link-card workspace-card-link"
+                  >
+                    <div className="workspace-card-row">
+                      <div className="workspace-pill-row">
+                        <span className="pill">{release.form}</span>
+                        <span className="pill">{release.parse_state.replace(/_/g, " ")}</span>
+                      </div>
+                      <div className="text-muted">{formatDate(release.filing_date ?? release.report_date)}</div>
+                    </div>
+                    <div className="workspace-card-title">{displayReleaseTitle(release)}</div>
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="text-muted">No release evidence is available yet.</div>
+            ),
+          },
+        ]}
+      />
     </CompanyWorkspaceShell>
   );
 }

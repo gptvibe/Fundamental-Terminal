@@ -239,7 +239,7 @@ export function RatioHistoryTable({
 
       {showTableNote ? (
         <div className="company-data-table-note">
-          Columns reflect annual filings in the current shared range. Cell tones compare each period against the prior displayed annual value when the direction is meaningful.
+          Annual profitability, efficiency, and solvency ratios — useful for spotting deteriorating margins or rising leverage before they show up in the headline numbers. Columns reflect the current shared annual range. Green/red tones indicate period-over-period improvement or decline for each metric.
         </div>
       ) : null}
 
@@ -262,6 +262,9 @@ export function RatioHistoryTable({
                   <span className="company-data-cell-strong">
                     <MetricLabel label={row.label} metricKey={row.key} />
                   </span>
+                  {row.direction ? (
+                    <div className="company-data-cell-hint">{row.direction === "higher" ? "↑ higher is better" : "↓ lower is better"}</div>
+                  ) : null}
                 </td>
                 {state.columns.map((statement, columnIndex) => {
                   const value = row.getValue(statement, state.annuals);
@@ -284,6 +287,13 @@ export function RatioHistoryTable({
               </tr>
             ))}
           </tbody>
+          <tfoot>
+            <tr>
+              <td style={{ ...STICKY_COLUMN_STYLE, fontSize: "0.72rem", color: "var(--text-muted, #888)", paddingTop: 8, paddingBottom: 6 }} colSpan={1 + state.columns.length}>
+                Units: all ratios shown as % except Current Ratio (×). Source: annual filings from cached SEC data.
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>

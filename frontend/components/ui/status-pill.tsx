@@ -1,30 +1,14 @@
 import { RefreshState } from "@/lib/types";
 
 export function StatusPill({ state }: { state: RefreshState }) {
-  const tone =
+  const toneClass =
     state.reason === "fresh"
-      ? {
-          borderColor: "color-mix(in srgb, var(--cyan) 34%, var(--panel-border))",
-          background: "color-mix(in srgb, var(--cyan) 10%, var(--surface-pill-bg))",
-          color: "var(--cyan)"
-        }
+      ? "tone-fresh"
       : state.reason === "missing"
-        ? {
-            borderColor: "color-mix(in srgb, var(--cyan) 24%, var(--panel-border))",
-            background: "color-mix(in srgb, var(--cyan) 6%, var(--surface-pill-bg))",
-            color: "color-mix(in srgb, var(--cyan) 82%, var(--text))"
-          }
+        ? "tone-pending"
         : state.reason === "stale"
-          ? {
-              borderColor: "color-mix(in srgb, var(--surface-pill-border) 92%, transparent)",
-              background: "color-mix(in srgb, var(--surface-pill-bg) 88%, transparent)",
-              color: "var(--text-soft)"
-            }
-          : {
-              borderColor: "color-mix(in srgb, var(--surface-pill-border) 88%, transparent)",
-              background: "color-mix(in srgb, var(--surface-pill-bg) 82%, transparent)",
-              color: "var(--text-muted)"
-            };
+          ? "tone-stale"
+          : "tone-idle";
   const stateLabel = state.triggered ? "Updating" : "Ready";
   const reasonLabel =
     state.reason === "fresh"
@@ -38,7 +22,7 @@ export function StatusPill({ state }: { state: RefreshState }) {
             : "Ready";
 
   return (
-    <span className="pill status-pill" style={tone}>
+    <span className={`pill status-pill ${toneClass}`}>
       {stateLabel} · {reasonLabel}
     </span>
   );

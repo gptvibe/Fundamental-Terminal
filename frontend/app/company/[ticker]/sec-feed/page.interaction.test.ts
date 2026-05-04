@@ -154,6 +154,14 @@ vi.mock("@/lib/api", () => ({
         filing_date: "2026-03-12",
         description: "SEC comment letter correspondence",
         sec_url: "https://www.sec.gov/Archives/edgar/data/1/000100000026000777/index.html",
+        document_url: "https://www.sec.gov/Archives/edgar/data/1/000100000026000777/comment-letter.htm",
+        document_format: "html",
+        correspondent_role: "sec_staff",
+        document_kind: "comment_letter",
+        thread_key: "review-date:2026-03-05",
+        topics: ["revenue_recognition", "non_gaap"],
+        has_document_text: true,
+        document_text_excerpt: "Please expand your revenue recognition disclosure and reconcile the non-GAAP presentation.",
       },
     ],
     provenance: [
@@ -199,6 +207,10 @@ describe("CompanySecFeedPage interactions", () => {
     expect(screen.getByText("High (1)").className).toContain("tone-red");
     expect(screen.getAllByText("SEC EDGAR Filing Archive").length).toBeGreaterThan(0);
     expect(screen.getByText("SEC comment letter correspondence")).toBeTruthy();
+    expect(screen.getByText("SEC Staff")).toBeTruthy();
+    expect(screen.getByText("Comment Letter")).toBeTruthy();
+    expect(screen.getByText("Revenue Recognition")).toBeTruthy();
+    expect(screen.getByText("Please expand your revenue recognition disclosure and reconcile the non-GAAP presentation.")).toBeTruthy();
 
     const newest = screen.getByText("Newest Event");
     const older = screen.getByText("Older Event");

@@ -39,6 +39,7 @@ type CompanyOverviewDataQualitySourcesSectionProps = {
   fallbackLabels?: string[];
   warmupPanel: ReactNode;
   partialErrors?: ReactNode;
+  helpAppendix?: ReactNode;
 };
 
 export function CompanyOverviewStatusStrip({
@@ -111,6 +112,7 @@ export function CompanyOverviewDataQualitySourcesSection({
   fallbackLabels = [],
   warmupPanel,
   partialErrors,
+  helpAppendix,
 }: CompanyOverviewDataQualitySourcesSectionProps) {
   return (
     <section className="company-overview-data-quality" aria-label="Data quality and sources">
@@ -120,7 +122,7 @@ export function CompanyOverviewDataQualitySourcesSection({
         variant="subtle"
       >
         <div className="company-overview-data-quality-stack">
-          <details className="subtle-details" open>
+          <details className="subtle-details">
             <summary>Source freshness timeline</summary>
             <div className="subtle-details-body company-overview-data-quality-body">
               <SourceFreshnessTimeline
@@ -138,13 +140,15 @@ export function CompanyOverviewDataQualitySourcesSection({
             </div>
           </details>
 
-          <details className="subtle-details" open>
-            <summary>Brief build and cache diagnostics</summary>
-            <div className="subtle-details-body company-overview-data-quality-body">{warmupPanel}</div>
-          </details>
+          {warmupPanel ? (
+            <details className="subtle-details" open>
+              <summary>Brief build and cache diagnostics</summary>
+              <div className="subtle-details-body company-overview-data-quality-body">{warmupPanel}</div>
+            </details>
+          ) : null}
 
           {partialErrors ? (
-            <details className="subtle-details" open>
+            <details className="subtle-details">
               <summary>Partial data and fallback warnings</summary>
               <div className="subtle-details-body company-overview-data-quality-body">{partialErrors}</div>
             </details>
@@ -170,6 +174,13 @@ export function CompanyOverviewDataQualitySourcesSection({
               )}
             </div>
           </details>
+
+          {helpAppendix ? (
+            <details className="subtle-details">
+              <summary>Help and metric glossary</summary>
+              <div className="subtle-details-body company-overview-data-quality-body">{helpAppendix}</div>
+            </details>
+          ) : null}
         </div>
       </Panel>
     </section>

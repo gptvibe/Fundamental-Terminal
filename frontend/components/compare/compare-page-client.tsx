@@ -131,7 +131,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
             })}
           </section>
 
-          <Panel title="Financial Statements" subtitle="Revenue, operating income, net income, and free cash flow across the latest four visible periods.">
+          <Panel title="Financial Statements" subtitle="Revenue, operating income, net income, and free cash flow across the latest four visible periods. Values in USD (compact notation).">
             <div className="compare-table-shell">
               <table className="compare-table">
                 <thead>
@@ -171,7 +171,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                           return [<td key={`${company.ticker}-${row.key}-empty`} className="compare-table-empty">No data</td>];
                         }
                         return periods.map((period) => (
-                          <td key={`${company.ticker}-${row.key}-${period.period_end}`} className="compare-table-value">
+                          <td key={`${company.ticker}-${row.key}-${period.period_end}`} className="compare-table-value is-numeric">
                             {row.formatter(getFinancialValue(period, row.key))}
                           </td>
                         ));
@@ -183,7 +183,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
             </div>
           </Panel>
 
-          <Panel title="Derived Metrics" subtitle="Margins, returns, leverage, and dilution indicators from the latest summary payload.">
+          <Panel title="Derived Metrics" subtitle="Margins, returns, leverage, and dilution from the latest summary payload. Margins and rates shown as % of revenue; leverage as total-debt/EBITDA proxy.">
             <div className="compare-table-shell">
               <table className="compare-table">
                 <thead>
@@ -201,7 +201,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                       {companies.map((company) => {
                         const metric = getDerivedMetric(company, row.key);
                         return (
-                          <td key={`${company.ticker}-${row.key}`} className="compare-table-value">
+                          <td key={`${company.ticker}-${row.key}`} className="compare-table-value is-numeric">
                             <div className="compare-metric-cell">
                               <span>{row.formatter(metric?.metric_value)}</span>
                               {metric ? (
@@ -218,7 +218,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
             </div>
           </Panel>
 
-          <Panel title="Valuation Models" subtitle="DCF fair value per share, Piotroski F-Score, and Altman Z from the shared models payload.">
+          <Panel title="Valuation Models" subtitle="DCF fair value (USD/share), Piotroski F-Score (0–9: ≥8 strong, ≤4 weak), and Altman Z (≥3 safe zone, ≤1.8 distress zone).">
             <div className="compare-table-shell">
               <table className="compare-table">
                 <thead>
@@ -235,7 +235,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                     {companies.map((company) => {
                       const model = getModel(company, "dcf");
                       return (
-                        <td key={`${company.ticker}-dcf`} className="compare-table-value">
+                        <td key={`${company.ticker}-dcf`} className="compare-table-value is-numeric">
                           <div className="compare-metric-cell">
                             <span>{formatCurrency(getDcfFairValue(company))}</span>
                             {model ? <MetricConfidenceBadge metadata={buildModelConfidence(company, model)} /> : null}
@@ -249,7 +249,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                     {companies.map((company) => {
                       const model = getModel(company, "piotroski");
                       return (
-                        <td key={`${company.ticker}-piotroski`} className="compare-table-value">
+                        <td key={`${company.ticker}-piotroski`} className="compare-table-value is-numeric">
                           <div className="compare-metric-cell">
                             <span>{formatPiotroski(company)}</span>
                             {model ? <MetricConfidenceBadge metadata={buildModelConfidence(company, model)} /> : null}
@@ -263,7 +263,7 @@ export function ComparePageClient({ tickers }: { tickers: string[] }) {
                     {companies.map((company) => {
                       const model = getModel(company, "altman_z");
                       return (
-                        <td key={`${company.ticker}-altman`} className="compare-table-value">
+                        <td key={`${company.ticker}-altman`} className="compare-table-value is-numeric">
                           <div className="compare-metric-cell">
                             <span>{formatRatio(getAltmanZ(company))}</span>
                             {model ? <MetricConfidenceBadge metadata={buildModelConfidence(company, model)} /> : null}
