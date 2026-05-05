@@ -45,13 +45,16 @@ Current gate status: pass, with zero regressions against the repo budget thresho
 
 ## Regression Guardrails
 
-- The performance regression gate now enforces request-count, p50, p95, and average payload budgets for Research Brief-adjacent SEC enrichment summaries:
+- The performance regression gate enforces request-count, p50, p95, and average payload budgets for all hot read routes and Research Brief-adjacent SEC enrichment and workspace summary endpoints:
 	- `/api/companies/{ticker}/beneficial-ownership/summary`
 	- `/api/companies/{ticker}/governance/summary`
 	- `/api/companies/{ticker}/filing-events/summary`
 	- `/api/companies/{ticker}/capital-markets/summary`
 	- `/api/companies/{ticker}/earnings/summary`
+	- `/api/companies/{ticker}/metrics/summary` *(derived metrics mart; persisted/cache-backed)*
+	- `/api/companies/{ticker}/institutional-holdings/summary` *(SEC institutional holdings cache; persisted)*
 - Company page route handlers continue to return persisted/cache-backed data and queue background refresh work; they do not perform synchronous SEC document fetches during page render.
+- No new synchronous SEC enrichment fetches have been added to any page render path.
 
 ## End-to-End Smoke Checks
 

@@ -20,6 +20,8 @@ import {
   getCompanyPeers,
   getCompanyResearchBrief,
 } from "@/lib/api";
+import { showAppToast } from "@/lib/app-toast";
+import { downloadTextFile } from "@/lib/export";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
@@ -35,14 +37,42 @@ vi.mock("@/components/layout/company-workspace-shell", () => ({
 }));
 
 vi.mock("@/components/layout/company-utility-rail", () => ({
-  CompanyUtilityRail: ({ primaryActionLabel, children }: { primaryActionLabel: string; children?: React.ReactNode }) =>
+  CompanyUtilityRail: ({
+    primaryActionLabel,
+    children,
+    extraActions,
+  }: {
+    primaryActionLabel: string;
+    children?: React.ReactNode;
+    extraActions?: Array<{ label: string; description?: string; onClick: () => void; disabled?: boolean }>;
+  }) =>
     React.createElement(
       "aside",
       null,
       React.createElement("button", { type: "button" }, primaryActionLabel),
+      (extraActions ?? []).map((action) =>
+        React.createElement(
+          "div",
+          { key: action.label },
+          React.createElement("button", { type: "button", onClick: action.onClick, disabled: action.disabled }, action.label),
+          action.description ? React.createElement("p", null, action.description) : null,
+        )
+      ),
       children,
     ),
 }));
+
+vi.mock("@/lib/app-toast", () => ({
+  showAppToast: vi.fn(),
+}));
+
+vi.mock("@/lib/export", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/export")>("@/lib/export");
+  return {
+    ...actual,
+    downloadTextFile: vi.fn(),
+  };
+});
 
 vi.mock("@/components/layout/company-research-header", () => ({
   CompanyResearchHeader: ({
@@ -374,6 +404,56 @@ describe("CompanyResearchBriefPage", () => {
     expect(getCompanyResearchBrief).not.toHaveBeenCalled();
   });
 
+  it("exports a Markdown memo from cached brief data and surfaces completion state", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      briefData: buildResearchBriefResponse(),
+    }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Export Memo (Markdown)" })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Export Memo (Markdown)" }));
+
+    await waitFor(() => {
+      expect(downloadTextFile).toHaveBeenCalledWith(
+        "ACME-research-brief-memo.md",
+        expect.stringContaining("# Investment Memo: Acme Corp"),
+        "text/markdown;charset=utf-8"
+      );
+    });
+
+    expect(screen.getByText("Markdown memo exported from cached research brief data.")).toBeTruthy();
+    expect(showAppToast).toHaveBeenCalledWith({ message: "Investment memo exported as Markdown.", tone: "info" });
+    expect(getCompanyResearchBrief).not.toHaveBeenCalled();
+  });
+
+  it("surfaces memo export errors without breaking the brief", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      briefData: buildResearchBriefResponse(),
+    }));
+    vi.mocked(downloadTextFile).mockImplementation(() => {
+      throw new Error("Disk full");
+    });
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Export Memo (Markdown)" })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Export Memo (Markdown)" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Error: Disk full")).toBeTruthy();
+    });
+
+    expect(showAppToast).toHaveBeenCalledWith({ message: "Disk full", tone: "danger" });
+    expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+  });
+
   it("hydrates collapsed brief sections from localStorage", async () => {
     window.localStorage.setItem(
       "fundamental-terminal:research-brief:sections:ACME",
@@ -691,7 +771,23 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
       confidence_flags: [],
       company: {
         ticker: "ACME",
+        cik: "0000001",
         name: "Acme Corp",
+        sector: "Technology",
+        market_sector: "Technology",
+        market_industry: "Software",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: [],
+        strict_official_mode: false,
+        last_checked: "2026-03-10T00:00:00Z",
+        last_checked_financials: "2026-03-10T00:00:00Z",
+        last_checked_prices: "2026-03-10T00:00:00Z",
+        last_checked_insiders: "2026-03-10T00:00:00Z",
+        last_checked_institutional: "2026-03-10T00:00:00Z",
+        last_checked_filings: "2026-03-10T00:00:00Z",
+        earnings_last_checked: "2026-03-10T00:00:00Z",
+        cache_state: "fresh",
       },
       segment_analysis: null,
     },
@@ -701,11 +797,18 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
       name: "Acme Corp",
       sector: "Technology",
       market_sector: "Technology",
+      market_industry: "Software",
+      oil_exposure_type: "non_oil",
+      oil_support_status: "unsupported",
+      oil_support_reasons: [],
       strict_official_mode: false,
       last_checked: "2026-03-10T00:00:00Z",
       last_checked_financials: "2026-03-10T00:00:00Z",
       last_checked_prices: "2026-03-10T00:00:00Z",
       last_checked_insiders: "2026-03-10T00:00:00Z",
+      last_checked_institutional: "2026-03-10T00:00:00Z",
+      last_checked_filings: "2026-03-10T00:00:00Z",
+      earnings_last_checked: "2026-03-10T00:00:00Z",
       cache_state: "fresh",
     },
     financials,
@@ -733,6 +836,8 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
       },
     },
     insiderTrades: [],
+    earningsSummaryData: null,
+    institutionalData: null,
     institutionalHoldings: [
       {
         reporting_date: "2025-12-31",
@@ -745,6 +850,7 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
     insiderError: null,
     institutionalError: null,
     refreshing: false,
+    updating: false,
     refreshState: null,
     activeJobId: null,
     consoleEntries: [],
@@ -758,7 +864,26 @@ function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {
 
 function buildResearchBriefResponse(overrides: Record<string, unknown> = {}) {
   return {
-    company: { ticker: "ACME", name: "Acme Corp", cache_state: "fresh" },
+    company: {
+      ticker: "ACME",
+      cik: "0000001",
+      name: "Acme Corp",
+      sector: "Technology",
+      market_sector: "Technology",
+      market_industry: "Software",
+      oil_exposure_type: "non_oil",
+      oil_support_status: "unsupported",
+      oil_support_reasons: [],
+      strict_official_mode: false,
+      last_checked: "2026-03-10T00:00:00Z",
+      last_checked_financials: "2026-03-10T00:00:00Z",
+      last_checked_prices: "2026-03-10T00:00:00Z",
+      last_checked_insiders: "2026-03-10T00:00:00Z",
+      last_checked_institutional: "2026-03-10T00:00:00Z",
+      last_checked_filings: "2026-03-10T00:00:00Z",
+      earnings_last_checked: "2026-03-10T00:00:00Z",
+      cache_state: "fresh",
+    },
     schema_version: "company_research_brief_v1",
     generated_at: "2026-03-10T00:00:00Z",
     as_of: "2025-12-31",

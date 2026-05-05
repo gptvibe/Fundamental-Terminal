@@ -108,6 +108,21 @@ function makePayload(): CompanyChartsDashboardResponse {
       backtest_metric_sample_sizes: {},
       components: [],
     },
+    event_overlay: {
+      title: "Event overlays",
+      available_event_types: [],
+      default_enabled_event_types: [],
+      events: [],
+      sparse_data_note: null,
+    },
+    quarter_change: {
+      title: "What changed since last quarter?",
+      latest_period_label: null,
+      prior_period_label: null,
+      summary: "",
+      items: [],
+      empty_state: "No quarter-over-quarter changes are available.",
+    },
     projection_studio: {
       methodology: null,
       drivers_used: [],

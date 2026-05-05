@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
 import { getCompanySegmentHistory } from "@/lib/api";
-import type { FinancialPayload, SegmentAnalysisPayload } from "@/lib/types";
+import type { CompanySegmentHistoryResponse, FinancialPayload, SegmentAnalysisPayload } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
@@ -130,7 +130,7 @@ function financialPayload(periodEnd: string, revenue: number, operatingIncome: n
 
 const getCompanySegmentHistoryMock = vi.mocked(getCompanySegmentHistory);
 
-function defaultSegmentHistoryResponse() {
+function defaultSegmentHistoryResponse(): CompanySegmentHistoryResponse {
   return {
     company: null,
     kind: "business",

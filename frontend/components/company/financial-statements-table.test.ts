@@ -54,6 +54,7 @@ function makeFinancial(partial: Partial<FinancialPayload>): FinancialPayload {
     stock_based_compensation: partial.stock_based_compensation ?? null,
     weighted_average_diluted_shares: partial.weighted_average_diluted_shares ?? null,
     segment_breakdown: partial.segment_breakdown ?? [],
+    reconciliation: partial.reconciliation ?? null,
     regulated_bank: partial.regulated_bank ?? null,
   };
 }
@@ -127,7 +128,10 @@ describe("financial statements tables", () => {
     fireEvent.click(screen.getByText("Download JSON"));
 
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
-    const blob = createObjectUrl.mock.calls[0]?.[0] as Blob;
+    const firstCall = createObjectUrl.mock.calls.at(0);
+    expect(firstCall).toBeDefined();
+    const blob = firstCall![0] as Blob;
+    expect(blob).toBeInstanceOf(Blob);
     const payload = JSON.parse(await blob.text()) as FinancialPayload[];
     expect(payload).toHaveLength(2);
     expect(payload[0]?.period_end).toBe("2025-12-31");

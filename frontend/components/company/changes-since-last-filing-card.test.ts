@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChangesSinceLastFilingCard } from "@/components/company/changes-since-last-filing-card";
 import { getCompanyChangesSinceLastFiling } from "@/lib/api";
+import type { CompanyChangesSinceLastFilingResponse } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
   getCompanyChangesSinceLastFiling: vi.fn(),
@@ -237,7 +238,7 @@ describe("ChangesSinceLastFilingCard", () => {
   });
 
   it("reuses the initial payload without issuing a duplicate read", async () => {
-    const initialPayload = {
+    const initialPayload: CompanyChangesSinceLastFilingResponse = {
       company: null,
       current_filing: {
         accession_number: "0000123456-26-000777",
@@ -314,7 +315,7 @@ describe("ChangesSinceLastFilingCard", () => {
         reconciliation_penalty: null,
         reconciliation_disagreement_count: 0,
       },
-    } as const;
+    };
 
     render(React.createElement(ChangesSinceLastFilingCard, { ticker: "AAPL", initialPayload }));
 

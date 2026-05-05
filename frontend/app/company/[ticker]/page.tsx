@@ -203,6 +203,7 @@ export default function CompanyResearchBriefPage() {
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
   const [exportingInvestmentMemo, setExportingInvestmentMemo] = useState(false);
   const [investmentMemoError, setInvestmentMemoError] = useState<string | null>(null);
+  const [investmentMemoStatus, setInvestmentMemoStatus] = useState<string | null>(null);
   const [filingRiskSignals, setFilingRiskSignals] = useState<Awaited<ReturnType<typeof getCompanyFilingRiskSignals>> | null>(null);
   const [filingRiskSignalsLoading, setFilingRiskSignalsLoading] = useState(true);
   const [filingRiskSignalsError, setFilingRiskSignalsError] = useState<string | null>(null);
@@ -527,12 +528,16 @@ export default function CompanyResearchBriefPage() {
     }
   }, [pageCompany, ticker]);
 
-  const handleExportInvestmentMemo = useCallback(() => {
+  const handleExportInvestmentMemo = useCallback(async () => {
     if (exportingInvestmentMemo) return;
 
     try {
       setExportingInvestmentMemo(true);
       setInvestmentMemoError(null);
+      setInvestmentMemoStatus(null);
+
+      // Yield once so the loading state can render before Markdown generation starts.
+      await Promise.resolve();
 
       const memo = buildInvestmentMemo({
         ticker,
@@ -566,14 +571,16 @@ export default function CompanyResearchBriefPage() {
       });
 
       downloadTextFile(
-        `${normalizeExportFileStem(ticker, "company")}-investment-memo.md`,
+        `${normalizeExportFileStem(ticker, "company")}-research-brief-memo.md`,
         memo,
         "text/markdown;charset=utf-8"
       );
+      setInvestmentMemoStatus("Markdown memo exported from cached research brief data.");
       showAppToast({ message: "Investment memo exported as Markdown.", tone: "info" });
     } catch (nextError) {
       const message = nextError instanceof Error ? nextError.message : "Unable to generate investment memo.";
       setInvestmentMemoError(message);
+      setInvestmentMemoStatus(null);
       showAppToast({ message, tone: "danger" });
     } finally {
       setExportingInvestmentMemo(false);
@@ -630,10 +637,12 @@ export default function CompanyResearchBriefPage() {
           secondaryActionDescription="Move from the brief into full model diagnostics, scenarios, and assumption detail."
           extraActions={[
             {
-              label: exportingInvestmentMemo ? "Generating memo..." : "Export Investment Memo",
-              description: investmentMemoError
+              label: exportingInvestmentMemo ? "Generating memo..." : "Export Memo (Markdown)",
+              description: exportingInvestmentMemo
+                ? "Generating a professional Markdown memo from cached research brief data."
+                : investmentMemoError
                 ? `Error: ${investmentMemoError}`
-                : "Download a sober Markdown investment memo from the cached research brief.",
+                : investmentMemoStatus ?? "Download a sober Markdown investment memo from the cached research brief.",
               onClick: handleExportInvestmentMemo,
               disabled: exportingInvestmentMemo || initialCompanyLoad,
             },

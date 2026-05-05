@@ -617,6 +617,15 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
         _patch_benchmark_targets(stack, "get_company_filing_events", lambda *_args, **_kwargs: filing_events)
         _patch_benchmark_targets(stack, "get_company_capital_markets_events", lambda *_args, **_kwargs: capital_markets_events)
         _patch_benchmark_targets(stack, "get_company_earnings_releases", lambda *_args, **_kwargs: earnings_releases)
+        derived_metric_rows = _derived_metric_rows()
+        _patch_benchmark_targets(stack, "get_company_derived_metric_points", lambda *_args, **_kwargs: derived_metric_rows)
+        _patch_benchmark_targets(stack, "get_company_derived_metrics_last_checked", lambda *_args, **_kwargs: datetime(2026, 4, 4, tzinfo=timezone.utc))
+        _patch_benchmark_targets(
+            stack,
+            "get_company_institutional_holdings_cache_status",
+            lambda *_args, **_kwargs: (datetime(2026, 4, 4, tzinfo=timezone.utc), "fresh"),
+        )
+        _patch_benchmark_targets(stack, "get_company_institutional_holdings", lambda *_args, **_kwargs: [])
         stack.enter_context(
             patch.object(
                 main_module.ModelEngine,
@@ -795,6 +804,37 @@ def _capital_markets_events() -> list[SimpleNamespace]:
             registered_shares=None,
             shares_parse_confidence=None,
         )
+    ]
+
+
+def _derived_metric_rows() -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(
+            metric_key="revenue_growth",
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 12, 31),
+            period_type="ttm",
+            filing_type="TTM",
+            metric_value=0.08,
+            metric_date=date(2025, 12, 31),
+            is_proxy=False,
+            provenance={"formula_id": "revenue_growth_v1", "formula_version": "sec_metrics_v1"},
+            quality_flags=[],
+            source_statement_ids=[],
+        ),
+        SimpleNamespace(
+            metric_key="gross_margin",
+            period_start=date(2025, 1, 1),
+            period_end=date(2025, 12, 31),
+            period_type="ttm",
+            filing_type="TTM",
+            metric_value=0.42,
+            metric_date=date(2025, 12, 31),
+            is_proxy=False,
+            provenance={"formula_id": "gross_margin_v1", "formula_version": "sec_metrics_v1"},
+            quality_flags=[],
+            source_statement_ids=[],
+        ),
     ]
 
 

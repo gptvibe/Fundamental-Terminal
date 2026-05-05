@@ -54,6 +54,8 @@ The script runs warm-cache benchmark cases for:
 - filing-events summary
 - capital-markets summary
 - earnings summary
+- metrics summary *(derived metrics mart; added May 2026)*
+- institutional-holdings summary *(SEC institutional holdings cache; added May 2026)*
 
 CI regression gate:
 
@@ -67,7 +69,7 @@ The gate runs deterministic in-process benchmarks against synthetic route fixtur
 - p95 latency
 - average payload size
 
-It covers the warm-cache hot read routes above and the `/api/companies/{ticker}/brief` route under simulated concurrency. This keeps explicit regression budgets on the Research Brief dependency path and the SEC enrichment summaries used by the company workspace UI. The JSON and Markdown outputs are uploaded from CI as build artifacts.
+It covers the warm-cache hot read routes above and the `/api/companies/{ticker}/brief` route under simulated concurrency. This keeps explicit regression budgets on the Research Brief dependency path and the SEC enrichment summaries used by the company workspace UI (12 hot endpoint cases + 1 brief concurrency case). The JSON and Markdown outputs are uploaded from CI as build artifacts.
 
 Model-computation benchmark:
 

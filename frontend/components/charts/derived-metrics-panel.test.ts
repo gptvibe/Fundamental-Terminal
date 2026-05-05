@@ -7,6 +7,37 @@ import { describe, expect, it, vi } from "vitest";
 import { DerivedMetricsPanel } from "@/components/charts/derived-metrics-panel";
 import { getCompanyMetricsTimeseries } from "@/lib/api";
 
+function industrialMetrics(overrides: Record<string, number | null> = {}) {
+  return {
+    revenue_growth: null,
+    gross_margin: null,
+    operating_margin: null,
+    fcf_margin: null,
+    roic_proxy: null,
+    leverage_ratio: null,
+    current_ratio: null,
+    share_dilution: null,
+    sbc_burden: null,
+    buyback_yield: null,
+    dividend_yield: null,
+    working_capital_days: null,
+    accrual_ratio: null,
+    cash_conversion: null,
+    segment_concentration: null,
+    net_interest_margin: null,
+    provision_burden: null,
+    asset_quality_ratio: null,
+    cet1_ratio: null,
+    tier1_capital_ratio: null,
+    total_capital_ratio: null,
+    core_deposit_ratio: null,
+    uninsured_deposit_ratio: null,
+    tangible_book_value_per_share: null,
+    roatce: null,
+    ...overrides,
+  };
+}
+
 vi.mock("@/lib/api", () => ({
   getCompanyMetricsTimeseries: vi.fn(),
   invalidateApiReadCacheForTicker: vi.fn(),
@@ -38,6 +69,9 @@ describe("DerivedMetricsPanel", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Consumer Electronics",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: [],
         strict_official_mode: false,
         last_checked: "2026-03-25T00:00:00Z",
         last_checked_financials: "2026-03-25T00:00:00Z",
@@ -54,7 +88,7 @@ describe("DerivedMetricsPanel", () => {
           period_start: "2025-01-01",
           period_end: "2025-12-31",
           filing_type: "TTM",
-          metrics: {
+          metrics: industrialMetrics({
             revenue_growth: 0.12,
             gross_margin: 0.42,
             operating_margin: 0.31,
@@ -70,7 +104,7 @@ describe("DerivedMetricsPanel", () => {
             accrual_ratio: -0.01,
             cash_conversion: 1.2,
             segment_concentration: 0.83,
-          },
+          }),
           provenance: {
             statement_type: "canonical_xbrl",
             statement_source: "https://data.sec.gov/example",
@@ -139,6 +173,7 @@ describe("DerivedMetricsPanel", () => {
         ticker: "AAPL",
         job_id: null,
       },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
     });
 
     render(React.createElement(DerivedMetricsPanel, { ticker: "AAPL", reloadKey: "k1" }));
@@ -162,6 +197,9 @@ describe("DerivedMetricsPanel", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Semiconductor Equipment",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: [],
         strict_official_mode: false,
         last_checked: "2026-04-16T00:00:00Z",
         last_checked_financials: "2026-04-16T00:00:00Z",
@@ -178,7 +216,7 @@ describe("DerivedMetricsPanel", () => {
           period_start: "2025-10-01",
           period_end: "2025-12-31",
           filing_type: "20-F",
-          metrics: {
+          metrics: industrialMetrics({
             revenue_growth: 0.11,
             gross_margin: 0.51,
             operating_margin: 0.31,
@@ -194,7 +232,7 @@ describe("DerivedMetricsPanel", () => {
             accrual_ratio: 0.01,
             cash_conversion: 1.1,
             segment_concentration: 0.72,
-          },
+          }),
           provenance: {
             statement_type: "canonical_xbrl",
             statement_source: "https://data.sec.gov/example",
@@ -229,6 +267,7 @@ describe("DerivedMetricsPanel", () => {
         ticker: "ASML",
         job_id: null,
       },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
     });
 
     render(React.createElement(DerivedMetricsPanel, {
@@ -255,6 +294,9 @@ describe("DerivedMetricsPanel", () => {
         sector: "Technology",
         market_sector: "Technology",
         market_industry: "Consumer Electronics",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: [],
         strict_official_mode: true,
         last_checked: "2026-03-25T00:00:00Z",
         last_checked_financials: "2026-03-25T00:00:00Z",
@@ -271,7 +313,7 @@ describe("DerivedMetricsPanel", () => {
           period_start: "2025-01-01",
           period_end: "2025-12-31",
           filing_type: "TTM",
-          metrics: {
+          metrics: industrialMetrics({
             revenue_growth: 0.12,
             gross_margin: 0.42,
             operating_margin: 0.31,
@@ -281,13 +323,11 @@ describe("DerivedMetricsPanel", () => {
             current_ratio: 1.5,
             share_dilution: 0.01,
             sbc_burden: 0.04,
-            buyback_yield: null,
-            dividend_yield: null,
             working_capital_days: 54,
             accrual_ratio: -0.01,
             cash_conversion: 1.2,
             segment_concentration: 0.83,
-          },
+          }),
           provenance: {
             statement_type: "canonical_xbrl",
             statement_source: "https://data.sec.gov/example",
@@ -322,6 +362,7 @@ describe("DerivedMetricsPanel", () => {
         ticker: "AAPL",
         job_id: null,
       },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
     });
 
     render(React.createElement(DerivedMetricsPanel, { ticker: "AAPL", reloadKey: "strict" }));
@@ -344,6 +385,9 @@ describe("DerivedMetricsPanel", () => {
         sector: "Financials",
         market_sector: "Financials",
         market_industry: "Banks",
+        oil_exposure_type: "non_oil",
+        oil_support_status: "unsupported",
+        oil_support_reasons: [],
         strict_official_mode: false,
         last_checked: "2026-03-25T00:00:00Z",
         last_checked_financials: "2026-03-25T00:00:00Z",
@@ -366,7 +410,7 @@ describe("DerivedMetricsPanel", () => {
           period_start: "2025-01-01",
           period_end: "2025-12-31",
           filing_type: "TTM",
-          metrics: {
+          metrics: industrialMetrics({
             net_interest_margin: 0.038,
             provision_burden: 0.11,
             asset_quality_ratio: 0.012,
@@ -377,7 +421,7 @@ describe("DerivedMetricsPanel", () => {
             uninsured_deposit_ratio: 0.17,
             tangible_book_value_per_share: 41.2,
             roatce: 0.146,
-          },
+          }),
           provenance: {
             statement_type: "canonical_bank_regulatory",
             statement_source: "https://api.fdic.gov/banks/financials",
@@ -412,6 +456,7 @@ describe("DerivedMetricsPanel", () => {
         ticker: "WFC",
         job_id: null,
       },
+      diagnostics: { coverage_ratio: 1, fallback_ratio: 0, stale_flags: [], parser_confidence: 1, missing_field_flags: [], reconciliation_penalty: null, reconciliation_disagreement_count: 0 },
     });
 
     render(React.createElement(DerivedMetricsPanel, { ticker: "WFC", reloadKey: "bank" }));

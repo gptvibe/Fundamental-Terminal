@@ -248,10 +248,10 @@ export function ResearchBriefStateBlock({
 type PanelErrorBoundaryState = { hasError: boolean; errorMessage: string | null };
 
 export class PanelErrorBoundary extends Component<
-  { kicker: string; title: string; children: ReactNode },
+  { kicker: string; title: string; children?: ReactNode },
   PanelErrorBoundaryState
 > {
-  constructor(props: { kicker: string; title: string; children: ReactNode }) {
+  constructor(props: { kicker: string; title: string; children?: ReactNode }) {
     super(props);
     this.state = { hasError: false, errorMessage: null };
   }

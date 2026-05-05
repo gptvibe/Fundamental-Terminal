@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { investmentMemoFixture } from "@/lib/__fixtures__/investment-memo-fixture";
 import { buildInvestmentMemo } from "@/lib/investment-memo";
 import type { InvestmentMemoInput } from "@/lib/investment-memo";
 
@@ -419,6 +420,16 @@ function buildMinimalInput(overrides: Partial<InvestmentMemoInput> = {}): Invest
 // ---------------------------------------------------------------------------
 
 describe("buildInvestmentMemo", () => {
+  it("renders the persisted research-brief fixture into a readable Markdown memo", () => {
+    const memo = buildInvestmentMemo(investmentMemoFixture);
+
+    expect(memo).toContain("# Investment Memo: Acme Corp");
+    expect(memo).toContain("## Source & Freshness State");
+    expect(memo).toContain("## Source Links & Provenance");
+    expect(memo).toContain("Core Platform contributes 66.1% of reported revenue");
+    expect(memo).toContain("[SEC Company Facts (XBRL)](https://data.sec.gov/api/xbrl/companyfacts/)");
+  });
+
   it("returns a string with the expected top-level heading", () => {
     const memo = buildInvestmentMemo(buildMinimalInput());
     expect(memo).toContain("# Investment Memo: Acme Corp");

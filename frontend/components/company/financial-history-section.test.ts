@@ -130,8 +130,8 @@ describe("FinancialHistorySection", () => {
     const mockGetHistory = vi.mocked(getCompanyFinancialHistory);
     let abortController: AbortController | null = null;
 
-    mockGetHistory.mockImplementation(async (cik: string, options: Record<string, unknown>) => {
-      abortController = (options.signal as AbortSignal)?.constructor === AbortSignal ? new AbortController() : null;
+    mockGetHistory.mockImplementation(async (cik: string, options?: { signal?: AbortSignal }) => {
+      abortController = options?.signal ? new AbortController() : null;
       return new Promise((resolve) => {
         setTimeout(() => resolve([]), 100);
       });

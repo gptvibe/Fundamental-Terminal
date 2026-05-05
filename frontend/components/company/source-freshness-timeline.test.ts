@@ -38,10 +38,12 @@ describe("SourceFreshnessTimeline", () => {
 
     (window as Window & {
       __FT_PERFORMANCE_AUDIT__?: {
-        snapshot: () => { requests: Array<Record<string, unknown>> };
+        snapshot: () => { sessionId: string; phase: string; requests: Array<Record<string, unknown>> };
       };
     }).__FT_PERFORMANCE_AUDIT__ = {
       snapshot: () => ({
+        sessionId: "session-1",
+        phase: "hydrated",
         requests: [
           {
             id: "evt-1",

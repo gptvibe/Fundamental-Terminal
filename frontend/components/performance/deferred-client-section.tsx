@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface DeferredClientSectionProps {
-  children: ReactNode;
+  children?: ReactNode;
   placeholder?: ReactNode;
   rootMargin?: string;
   forceVisible?: boolean;

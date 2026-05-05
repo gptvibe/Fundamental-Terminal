@@ -48,7 +48,7 @@ vi.mock("recharts", () => {
 });
 
 function makePayload(overrides?: Partial<CompanyChartsDashboardResponse>): CompanyChartsDashboardResponse {
-  return {
+  const payload: CompanyChartsDashboardResponse = {
     company: {
       ticker: "ACME",
       cik: "0000001",
@@ -216,6 +216,8 @@ function makePayload(overrides?: Partial<CompanyChartsDashboardResponse>): Compa
       ],
       empty_state: null,
     },
+    projection_studio: null,
+    what_if: null,
     payload_version: "company_charts_dashboard_v8",
     provenance: [],
     as_of: "2026-04-13",
@@ -238,7 +240,13 @@ function makePayload(overrides?: Partial<CompanyChartsDashboardResponse>): Compa
       reconciliation_penalty: null,
       reconciliation_disagreement_count: 0,
     },
+  };
+
+  return {
+    ...payload,
     ...overrides,
+    projection_studio: overrides?.projection_studio ?? payload.projection_studio,
+    what_if: overrides?.what_if ?? payload.what_if,
   };
 }
 

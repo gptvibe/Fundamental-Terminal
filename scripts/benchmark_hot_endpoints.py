@@ -35,6 +35,8 @@ def build_cases(ticker: str) -> list[Case]:
         Case(name="filing_events_summary", path=f"/api/companies/{normalized_ticker}/filing-events/summary", params={}),
         Case(name="capital_markets_summary", path=f"/api/companies/{normalized_ticker}/capital-markets/summary", params={}),
         Case(name="earnings_summary", path=f"/api/companies/{normalized_ticker}/earnings/summary", params={}),
+        Case(name="metrics_summary", path=f"/api/companies/{normalized_ticker}/metrics/summary", params={"period_type": "ttm"}),
+        Case(name="institutional_holdings_summary", path=f"/api/companies/{normalized_ticker}/institutional-holdings/summary", params={}),
     ]
 
 

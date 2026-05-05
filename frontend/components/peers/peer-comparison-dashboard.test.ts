@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { PeerComparisonDashboard } from "@/components/peers/peer-comparison-dashboard";
 import { getCompanyPeers } from "@/lib/api";
+import type { CompanyPeersResponse } from "@/lib/types";
 
 vi.mock("@/lib/api", () => ({
   getCompanyPeers: vi.fn(),
@@ -47,7 +48,7 @@ vi.mock("recharts", () => {
   };
 });
 
-function buildResponse(selectedTickers: string[]) {
+function buildResponse(selectedTickers: string[]): CompanyPeersResponse {
   return {
     company: {
       ticker: "AAPL",
@@ -56,7 +57,16 @@ function buildResponse(selectedTickers: string[]) {
       sector: "Technology",
       market_sector: "Technology",
       market_industry: "Consumer Electronics",
+      oil_exposure_type: "non_oil",
+      oil_support_status: "unsupported",
+      oil_support_reasons: [],
+      strict_official_mode: false,
       last_checked: "2026-03-22T00:00:00Z",
+      last_checked_financials: null,
+      last_checked_prices: null,
+      last_checked_insiders: null,
+      last_checked_institutional: null,
+      last_checked_filings: null,
       cache_state: "fresh",
     },
     peer_basis: "Cached peer universe",
@@ -86,6 +96,11 @@ function buildResponse(selectedTickers: string[]) {
         revenue_growth: 0.08,
         piotroski_score: 8,
         altman_z_score: 4,
+        fair_value_gap: null,
+        roic: null,
+        shareholder_yield: null,
+        implied_growth: null,
+        valuation_band_percentile: null,
         revenue_history: [],
       },
       {
@@ -107,6 +122,11 @@ function buildResponse(selectedTickers: string[]) {
         revenue_growth: 0.12,
         piotroski_score: 8,
         altman_z_score: 5,
+        fair_value_gap: null,
+        roic: null,
+        shareholder_yield: null,
+        implied_growth: null,
+        valuation_band_percentile: null,
         revenue_history: [],
       },
       {
@@ -128,6 +148,11 @@ function buildResponse(selectedTickers: string[]) {
         revenue_growth: 0.11,
         piotroski_score: 7,
         altman_z_score: 4,
+        fair_value_gap: null,
+        roic: null,
+        shareholder_yield: null,
+        implied_growth: null,
+        valuation_band_percentile: null,
         revenue_history: [],
       },
     ],
@@ -188,7 +213,7 @@ function buildResponse(selectedTickers: string[]) {
 describe("PeerComparisonDashboard", () => {
   it("loads default peers, supports explicit selection, and resets to focus defaults", async () => {
     const getCompanyPeersMock = vi.mocked(getCompanyPeers);
-    getCompanyPeersMock.mockImplementation(async (_ticker: string, peers?: string[]) => buildResponse(peers?.length ? peers : ["MSFT"]));
+    getCompanyPeersMock.mockImplementation(async (_ticker: string, peers?: string[], _options?: { asOf?: string | null }) => buildResponse(peers?.length ? peers : ["MSFT"]));
 
     render(React.createElement(PeerComparisonDashboard, { ticker: "AAPL", reloadKey: "key-1" }));
 
