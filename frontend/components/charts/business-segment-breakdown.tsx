@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import {
   Bar,
   BarChart,
@@ -67,6 +67,7 @@ type SegmentPoint = {
   axisLabel: string | null;
   kind: SegmentKind;
   revenue: number;
+  assets: number | null;
   share: number | null;
   operatingIncome: number | null;
   operatingMargin: number | null;
@@ -92,10 +93,19 @@ type SegmentPeriod = {
     axisLabel: string | null;
     kind: SegmentKind;
     revenue: number;
+    assets: number | null;
     share: number | null;
     operatingIncome: number | null;
     operatingMargin: number | null;
   }>;
+};
+
+type GeographicDisclosureRow = {
+  id: string;
+  name: string;
+  revenue: number | null;
+  share: number | null;
+  assets: number | null;
 };
 
 interface BusinessSegmentBreakdownProps {
@@ -114,7 +124,9 @@ export function BusinessSegmentBreakdown({
   reloadKey = null,
 }: BusinessSegmentBreakdownProps) {
   const params = useParams<{ ticker?: string }>();
+  const pathname = usePathname();
   const resolvedTicker = (ticker ?? params?.ticker ?? "").trim().toUpperCase();
+  const showFinancialsDrilldownLink = !pathname?.toLowerCase().endsWith("/financials");
   const noFinancials = financials.length === 0;
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [historyPeriods, setHistoryPeriods] = useState<SegmentHistoryPeriodPayload[]>([]);
@@ -129,8 +141,14 @@ export function BusinessSegmentBreakdown({
     const kinds = new Set<SegmentKind>();
     for (const statement of financials) {
       for (const segment of statement.segment_breakdown) {
-        if ((segment.kind === "business" || segment.kind === "geographic") && typeof segment.revenue === "number" && segment.revenue > 0) {
+        if (segment.kind === "business" && typeof segment.revenue === "number" && segment.revenue > 0) {
           kinds.add(segment.kind);
+        }
+        if (
+          segment.kind === "geographic"
+          && ((typeof segment.revenue === "number" && segment.revenue > 0) || (typeof segment.assets === "number" && segment.assets > 0))
+        ) {
+          kinds.add("geographic");
         }
       }
     }
@@ -197,6 +215,13 @@ export function BusinessSegmentBreakdown({
   const activeLens = activeKind === "business" ? segmentAnalysis?.business ?? null : segmentAnalysis?.geographic ?? null;
 
   const segmentPoints = useMemo(() => buildSegmentPoints(currentPeriod, comparisonPeriod), [comparisonPeriod, currentPeriod]);
+  const geographicDisclosureRows = useMemo(
+    () => buildGeographicDisclosureRows(financials, chartState?.selectedFinancial ?? null),
+    [chartState?.selectedFinancial, financials]
+  );
+  const hasGeographicDisclosure = geographicDisclosureRows.length > 0;
+  const hasGeographicRevenue = geographicDisclosureRows.some((row) => typeof row.revenue === "number" && row.revenue > 0);
+  const hasGeographicAssets = geographicDisclosureRows.some((row) => typeof row.assets === "number" && row.assets > 0);
 
   useEffect(() => {
     if (selectedSegmentId && !segmentPoints.some((segment) => segment.id === selectedSegmentId)) {
@@ -381,6 +406,68 @@ export function BusinessSegmentBreakdown({
     );
   }
 
+  function renderGeographicDisclosure() {
+    return (
+      <div className="segment-chart-card" style={{ display: "grid", gap: 10 }}>
+        <div className="segment-card-header">
+          <div className="segment-card-heading">
+            <div className="segment-section-title">Geographic Disclosure Snapshot</div>
+            <div className="segment-section-subtitle">
+              Reported geography rows from recent SEC XBRL segment facts, including long-lived assets when disclosed.
+            </div>
+          </div>
+        </div>
+
+        {hasGeographicDisclosure ? (
+          <div className="segment-table-shell">
+            <table className="company-data-table" style={{ minWidth: 620 }}>
+              <thead>
+                <tr>
+                  <th align="left">Geography</th>
+                  <th align="right">Revenue</th>
+                  <th align="right">Share of Revenue</th>
+                  <th align="right">Long-lived Assets</th>
+                </tr>
+              </thead>
+              <tbody>
+                {geographicDisclosureRows.map((row) => (
+                  <tr key={`geo-disclosure:${row.id}`}>
+                    <td>{row.name}</td>
+                    <td style={{ textAlign: "right" }}>{formatCompactNumber(row.revenue)}</td>
+                    <td style={{ textAlign: "right" }}>{formatPercent(row.share)}</td>
+                    <td style={{ textAlign: "right" }}>{formatCompactNumber(row.assets)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="grid-empty-state" style={{ minHeight: 140 }}>
+            <div className="grid-empty-kicker">Geography</div>
+            <div className="grid-empty-title">No geographic breakdown found in recent SEC XBRL facts</div>
+            <div className="grid-empty-copy">Company may disclose geography in narrative notes instead</div>
+          </div>
+        )}
+
+        {hasGeographicDisclosure ? (
+          <div className="text-muted" style={{ fontSize: 12 }}>
+            {hasGeographicRevenue && hasGeographicAssets
+              ? "Revenue and long-lived asset rows are shown exactly as reported in cached SEC XBRL filings."
+              : hasGeographicRevenue
+                ? "Revenue rows are shown exactly as reported in cached SEC XBRL filings. Long-lived assets are not present in the same segment facts."
+                : "Long-lived asset rows are shown exactly as reported in cached SEC XBRL filings. Revenue rows are not present in the same segment facts."}
+          </div>
+        ) : null}
+
+        {resolvedTicker && showFinancialsDrilldownLink ? (
+          <div className="text-muted" style={{ fontSize: 12 }}>
+            Full segment detail is available in the Financials workspace: /company/{resolvedTicker}/financials
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   if (noFinancials) {
     return (
       <div className="sparkline-note">
@@ -391,11 +478,14 @@ export function BusinessSegmentBreakdown({
 
   if (!segmentPoints.length || !currentPeriod) {
     return (
-      <div className="grid-empty-state" style={{ minHeight: 320 }}>
-        <div className="grid-empty-kicker">Reported segments</div>
-        <div className="grid-empty-title">No cached segment breakdown yet</div>
-        <div className="grid-empty-copy">
-          Refresh the cache to backfill reported segment revenue from SEC filings. Some issuers may only disclose limited or geographic breakdowns.
+      <div style={{ display: "grid", gap: 12 }}>
+        {renderGeographicDisclosure()}
+        <div className="grid-empty-state" style={{ minHeight: 320 }}>
+          <div className="grid-empty-kicker">Reported segments</div>
+          <div className="grid-empty-title">No cached segment breakdown yet</div>
+          <div className="grid-empty-copy">
+            Refresh the cache to backfill reported segment revenue from SEC filings. Some issuers may only disclose limited or geographic breakdowns.
+          </div>
         </div>
       </div>
     );
@@ -453,6 +543,8 @@ export function BusinessSegmentBreakdown({
       </div>
 
       {activeLens ? <LensSummary lens={activeLens} /> : null}
+
+      {renderGeographicDisclosure()}
 
       <div className="segment-breakdown-top-grid">
         <SegmentChartFrame
@@ -925,6 +1017,7 @@ function buildSegmentPoints(currentPeriod: SegmentPeriod | null, comparisonPerio
         axisLabel: segment.axisLabel,
         kind: segment.kind,
         revenue: segment.revenue,
+        assets: segment.assets,
         share: segment.share,
         operatingIncome: segment.operatingIncome,
         operatingMargin: segment.operatingMargin,
@@ -953,6 +1046,7 @@ function buildPieChartData(segmentPoints: SegmentPoint[], selectedSegment: Segme
       axisLabel: selectedSegment.axisLabel,
       kind: selectedSegment.kind,
       revenue: otherRevenue,
+      assets: null,
       share: otherRevenue / (otherRevenue + selectedSegment.revenue),
       operatingIncome: null,
       operatingMargin: null,
@@ -1353,6 +1447,7 @@ function normalizeSegments(segments: FinancialSegmentPayload[], kind: SegmentKin
         axisLabel: segment.axis_label,
         kind,
         revenue,
+        assets: segment.assets,
         share: segment.share_of_revenue ?? (totalRevenue ? revenue / Math.abs(totalRevenue) : null),
         operatingIncome,
         operatingMargin: operatingIncome != null && revenue !== 0 ? operatingIncome / revenue : null,
@@ -1370,6 +1465,7 @@ function normalizeHistorySegments(period: SegmentHistoryPeriodPayload): SegmentP
       axisLabel: null,
       kind: period.kind,
       revenue: segment.revenue ?? 0,
+      assets: null,
       share: segment.share_of_revenue,
       operatingIncome: segment.operating_income,
       operatingMargin: segment.operating_margin,
@@ -1386,7 +1482,40 @@ function selectSegmentStatements(financials: FinancialPayload[], kind: SegmentKi
 }
 
 function hasKindSegments(statement: FinancialPayload, kind: SegmentKind): boolean {
-  return statement.segment_breakdown.some((segment) => segment.kind === kind && typeof segment.revenue === "number" && segment.revenue > 0);
+  if (kind === "business") {
+    return statement.segment_breakdown.some((segment) => segment.kind === kind && typeof segment.revenue === "number" && segment.revenue > 0);
+  }
+  return statement.segment_breakdown.some(
+    (segment) => segment.kind === kind
+      && (
+        (typeof segment.revenue === "number" && segment.revenue > 0)
+        || (typeof segment.assets === "number" && segment.assets > 0)
+      )
+  );
+}
+
+function buildGeographicDisclosureRows(financials: FinancialPayload[], selectedFinancial: FinancialPayload | null): GeographicDisclosureRow[] {
+  const source = selectedFinancial ?? financials.find((statement) => hasKindSegments(statement, "geographic")) ?? null;
+  if (!source) {
+    return [];
+  }
+
+  return source.segment_breakdown
+    .filter(
+      (segment) => segment.kind === "geographic"
+        && (
+          (typeof segment.revenue === "number" && segment.revenue > 0)
+          || (typeof segment.assets === "number" && segment.assets > 0)
+        )
+    )
+    .sort((left, right) => (right.revenue ?? 0) - (left.revenue ?? 0))
+    .map((segment) => ({
+      id: segment.segment_id || slugifySegmentName(segment.segment_name),
+      name: segment.segment_name,
+      revenue: segment.revenue,
+      share: segment.share_of_revenue,
+      assets: segment.assets,
+    }));
 }
 
 function inferCadence(filingType: string | null): FinancialCadence | "reported" {

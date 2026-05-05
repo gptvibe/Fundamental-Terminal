@@ -511,6 +511,10 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
     financial_statement = _financial_statement()
     price_point = _price_point()
     filing_timeline = [_filing_timeline_item()]
+    beneficial_reports = _beneficial_ownership_reports()
+    filing_events = _filing_events()
+    capital_markets_events = _capital_markets_events()
+    earnings_releases = _earnings_releases()
     brief_payload = _build_brief_payload(snapshot, financial_statement, price_point, filing_timeline)
     model_payload = _model_payload()
 
@@ -583,6 +587,7 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
     ]
 
     with ExitStack() as stack:
+        stack.enter_context(patch("app.middleware.rate_limit.is_rate_limited_public_route", lambda _path: False))
         _patch_benchmark_targets(stack, "get_company_regulated_bank_financials", lambda *_args, **_kwargs: [])
         _patch_benchmark_targets(stack, "search_company_snapshots", lambda *_args, **_kwargs: [snapshot])
         _patch_benchmark_targets(stack, "get_company_snapshot", lambda *_args, **_kwargs: snapshot)
@@ -598,6 +603,20 @@ def _synthetic_benchmark_environment() -> Iterator[None]:
         )
         _patch_benchmark_targets(stack, "_refresh_for_financial_page", _fresh_refresh_for_snapshot)
         _patch_benchmark_targets(stack, "_refresh_for_snapshot", _fresh_refresh_for_snapshot)
+        _patch_benchmark_targets(
+            stack,
+            "get_company_proxy_cache_status",
+            lambda *_args, **_kwargs: (datetime(2026, 4, 4, tzinfo=timezone.utc), "fresh"),
+        )
+        _patch_benchmark_targets(
+            stack,
+            "get_company_earnings_cache_status",
+            lambda *_args, **_kwargs: (datetime(2026, 4, 4, tzinfo=timezone.utc), "fresh"),
+        )
+        _patch_benchmark_targets(stack, "get_company_beneficial_ownership_reports", lambda *_args, **_kwargs: beneficial_reports)
+        _patch_benchmark_targets(stack, "get_company_filing_events", lambda *_args, **_kwargs: filing_events)
+        _patch_benchmark_targets(stack, "get_company_capital_markets_events", lambda *_args, **_kwargs: capital_markets_events)
+        _patch_benchmark_targets(stack, "get_company_earnings_releases", lambda *_args, **_kwargs: earnings_releases)
         stack.enter_context(
             patch.object(
                 main_module.ModelEngine,
@@ -681,6 +700,133 @@ def _filing_timeline_item() -> Any:
     )
 
 
+def _beneficial_ownership_reports() -> list[SimpleNamespace]:
+    base_party = SimpleNamespace(
+        party_name="Example Capital LP",
+        role="Reporting person",
+        filer_cik="0001899999",
+        shares_owned=12_000_000,
+        percent_owned=6.1,
+        event_date=date(2025, 12, 30),
+        purpose="Passive ownership",
+    )
+    amendment_party = SimpleNamespace(
+        party_name="Example Capital LP",
+        role="Reporting person",
+        filer_cik="0001899999",
+        shares_owned=13_100_000,
+        percent_owned=6.7,
+        event_date=date(2026, 2, 10),
+        purpose="Position increase",
+    )
+    return [
+        SimpleNamespace(
+            accession_number="0001899999-26-000001",
+            form="SC 13G",
+            base_form="SC 13G",
+            filing_date=date(2026, 1, 15),
+            report_date=date(2025, 12, 31),
+            is_amendment=False,
+            primary_document="g13g.htm",
+            primary_doc_description="Schedule 13G beneficial ownership report.",
+            source_url="https://www.sec.gov/Archives/example/13g",
+            summary="Initial beneficial ownership filing.",
+            parties=[base_party],
+            previous_accession_number=None,
+            amendment_sequence=1,
+            amendment_chain_size=2,
+        ),
+        SimpleNamespace(
+            accession_number="0001899999-26-000011",
+            form="SC 13G/A",
+            base_form="SC 13G",
+            filing_date=date(2026, 2, 20),
+            report_date=date(2026, 2, 10),
+            is_amendment=True,
+            primary_document="g13ga.htm",
+            primary_doc_description="Schedule 13G amendment.",
+            source_url="https://www.sec.gov/Archives/example/13ga",
+            summary="Amended beneficial ownership filing.",
+            parties=[amendment_party],
+            previous_accession_number="0001899999-26-000001",
+            amendment_sequence=2,
+            amendment_chain_size=2,
+        ),
+    ]
+
+
+def _filing_events() -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(
+            accession_number="0000320193-26-000050",
+            form="8-K",
+            filing_date=date(2026, 3, 2),
+            report_date=date(2026, 3, 1),
+            items="2.02,9.01",
+            item_code="2.02",
+            category="Earnings",
+            primary_document="a8k.htm",
+            primary_doc_description="Current report with earnings exhibit.",
+            source_url="https://www.sec.gov/Archives/example/8k",
+            summary="Current report with event-driven disclosure.",
+            key_amounts=[500_000_000.0],
+            exhibit_references=["EX-99.1"],
+        )
+    ]
+
+
+def _capital_markets_events() -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(
+            accession_number="0000320193-26-000051",
+            form="S-3",
+            filing_date=date(2026, 3, 4),
+            report_date=date(2026, 3, 4),
+            primary_document="s3.htm",
+            primary_doc_description="Shelf registration statement.",
+            source_url="https://www.sec.gov/Archives/example/s3",
+            summary="S-3 Registration; Common Equity; $500,000,000.",
+            event_type="Registration",
+            security_type="Common Equity",
+            offering_amount=500_000_000.0,
+            shelf_size=1_000_000_000.0,
+            is_late_filer=False,
+            plan_name=None,
+            registered_shares=None,
+            shares_parse_confidence=None,
+        )
+    ]
+
+
+def _earnings_releases() -> list[SimpleNamespace]:
+    return [
+        SimpleNamespace(
+            accession_number="0000320193-26-000060",
+            form="8-K",
+            filing_date=date(2026, 2, 1),
+            report_date=date(2025, 12, 31),
+            source_url="https://www.sec.gov/Archives/example/earnings",
+            primary_document="a8kearnings.htm",
+            exhibit_document="ex991.htm",
+            exhibit_type="EX-99.1",
+            reported_period_label="Q1 FY2026",
+            reported_period_end=date(2025, 12, 31),
+            revenue=124_300_000_000.0,
+            operating_income=40_100_000_000.0,
+            net_income=33_900_000_000.0,
+            diluted_eps=2.18,
+            revenue_guidance_low=118_000_000_000.0,
+            revenue_guidance_high=122_000_000_000.0,
+            eps_guidance_low=2.02,
+            eps_guidance_high=2.15,
+            share_repurchase_amount=20_000_000_000.0,
+            dividend_per_share=0.26,
+            highlights=["Services revenue reached a new high."],
+            parse_state="parsed",
+        )
+    ]
+
+
 def _model_payload() -> SimpleNamespace:
     return SimpleNamespace(
         model_name="dcf",
@@ -728,7 +874,16 @@ def _build_brief_payload(
     return response.model_dump(mode="json")
 
 
-def _fresh_trigger(_background_tasks: Any, ticker: str, reason: str) -> Any:
+def _fresh_trigger(*args: Any, **kwargs: Any) -> Any:
+    ticker = str(kwargs.get("ticker") or "AAPL")
+    reason = str(kwargs.get("reason") or "fresh")
+    if args:
+        if len(args) == 1:
+            ticker = str(args[0])
+        elif len(args) >= 2:
+            ticker = str(args[1])
+            if len(args) >= 3:
+                reason = str(args[2])
     return main_module.RefreshState(triggered=False, reason="fresh" if reason == "stale" else reason, ticker=ticker, job_id=None)
 
 

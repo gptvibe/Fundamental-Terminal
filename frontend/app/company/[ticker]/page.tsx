@@ -41,7 +41,8 @@ import {
 } from "@/lib/api";
 import { MODEL_NAMES } from "@/lib/constants";
 import { prefetchCompanyWorkspaceTabs } from "@/lib/company-workspace-prefetch";
-import { downloadJsonFile, normalizeExportFileStem } from "@/lib/export";
+import { buildInvestmentMemo } from "@/lib/investment-memo";
+import { downloadJsonFile, downloadTextFile, normalizeExportFileStem } from "@/lib/export";
 import { formatDate, formatPercent } from "@/lib/format";
 import { ResearchBriefHeroSummary } from "./_components/research-brief-hero-summary";
 import { ResearchBriefSectionNav } from "./_components/research-brief-section-nav";
@@ -65,6 +66,7 @@ import {
   isForeignIssuerAnnualForm,
   mergeBusinessQualitySectionStatus,
 } from "./_lib/research-brief-utils";
+import type { NtFilingSignalSummary } from "./_lib/research-brief-utils";
 import { BRIEF_SECTION_IDS } from "./_lib/research-brief-types";
 import { SnapshotSection } from "./_sections/snapshot-section";
 
@@ -199,6 +201,8 @@ export default function CompanyResearchBriefPage() {
     defaultOverrides: isBeginnerMode ? { monitor: false } : undefined,
   });
   const [exportingResearchPackage, setExportingResearchPackage] = useState(false);
+  const [exportingInvestmentMemo, setExportingInvestmentMemo] = useState(false);
+  const [investmentMemoError, setInvestmentMemoError] = useState<string | null>(null);
   const [filingRiskSignals, setFilingRiskSignals] = useState<Awaited<ReturnType<typeof getCompanyFilingRiskSignals>> | null>(null);
   const [filingRiskSignalsLoading, setFilingRiskSignalsLoading] = useState(true);
   const [filingRiskSignalsError, setFilingRiskSignalsError] = useState<string | null>(null);
@@ -212,6 +216,28 @@ export default function CompanyResearchBriefPage() {
   const topAlerts = useMemo(() => (briefData.activityOverview.data?.alerts ?? []).slice(0, 3), [briefData.activityOverview.data?.alerts]);
   const latestEntries = useMemo(() => (briefData.activityOverview.data?.entries ?? []).slice(0, 4), [briefData.activityOverview.data?.entries]);
   const equityClaimRiskSummary = briefData.brief?.capital_and_risk.equity_claim_risk_summary ?? null;
+  const ntFilingSignals = useMemo<NtFilingSignalSummary | null>(() => {
+    const ntSignals = (filingRiskSignals?.signals ?? []).filter((signal) => signal.signal_category.startsWith("nt_non_timely_"));
+    if (!ntSignals.length) {
+      return null;
+    }
+
+    const noticeSignals = ntSignals.filter((signal) => signal.signal_category !== "nt_non_timely_repeat");
+    const nt10kNotices = noticeSignals.filter((signal) => signal.signal_category === "nt_non_timely_10k").length;
+    const nt10qNotices = noticeSignals.filter((signal) => signal.signal_category === "nt_non_timely_10q").length;
+    const latestFiledDate = noticeSignals
+      .map((signal) => signal.filed_date)
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => (left < right ? 1 : -1))[0] ?? null;
+
+    return {
+      totalNotices: noticeSignals.length,
+      nt10kNotices,
+      nt10qNotices,
+      hasRepeatPattern: ntSignals.some((signal) => signal.signal_category === "nt_non_timely_repeat"),
+      latestFiledDate,
+    };
+  }, [filingRiskSignals?.signals]);
   const capitalSignalRows = useMemo(
     () =>
       buildCapitalSignalRows({
@@ -219,6 +245,7 @@ export default function CompanyResearchBriefPage() {
         governanceSummary: briefData.governanceSummary.data?.summary ?? null,
         ownershipSummary: briefData.ownershipSummary.data?.summary ?? null,
         equityClaimRiskSummary,
+        ntFilingSignals,
         isForeignIssuerLike: foreignIssuerStyleFiling,
       }),
     [
@@ -226,6 +253,7 @@ export default function CompanyResearchBriefPage() {
       briefData.governanceSummary.data?.summary,
       briefData.ownershipSummary.data?.summary,
       equityClaimRiskSummary,
+      ntFilingSignals,
       foreignIssuerStyleFiling,
     ]
   );
@@ -499,6 +527,76 @@ export default function CompanyResearchBriefPage() {
     }
   }, [pageCompany, ticker]);
 
+  const handleExportInvestmentMemo = useCallback(() => {
+    if (exportingInvestmentMemo) return;
+
+    try {
+      setExportingInvestmentMemo(true);
+      setInvestmentMemoError(null);
+
+      const memo = buildInvestmentMemo({
+        ticker,
+        exportedAt: new Date().toISOString(),
+        company: pageCompany,
+        asOf: data?.as_of ?? briefData.brief?.as_of ?? null,
+        lastRefreshedAt: data?.last_refreshed_at ?? null,
+        provenance: data?.provenance ?? null,
+        sourceMix: data?.source_mix ?? null,
+        filingTimeline: briefData.filingTimeline,
+        latestFinancial,
+        annualStatementsCount: annualStatements.length,
+        topSegment,
+        snapshotNarrative,
+        whatChangedNarrative,
+        businessQualityNarrative,
+        capitalRiskNarrative,
+        valuationNarrative,
+        monitorNarrative,
+        capitalSignalRows,
+        monitorChecklist,
+        changes: briefData.changes.data,
+        earningsSummary: briefData.earningsSummary.data,
+        activityOverview: briefData.activityOverview.data,
+        capitalStructure: briefData.capitalStructure.data,
+        capitalMarketsSummary: briefData.capitalMarketsSummary.data,
+        governanceSummary: briefData.governanceSummary.data,
+        ownershipSummary: briefData.ownershipSummary.data,
+        models: briefData.models.data,
+        peers: briefData.peers.data,
+      });
+
+      downloadTextFile(
+        `${normalizeExportFileStem(ticker, "company")}-investment-memo.md`,
+        memo,
+        "text/markdown;charset=utf-8"
+      );
+      showAppToast({ message: "Investment memo exported as Markdown.", tone: "info" });
+    } catch (nextError) {
+      const message = nextError instanceof Error ? nextError.message : "Unable to generate investment memo.";
+      setInvestmentMemoError(message);
+      showAppToast({ message, tone: "danger" });
+    } finally {
+      setExportingInvestmentMemo(false);
+    }
+  }, [
+    exportingInvestmentMemo,
+    ticker,
+    pageCompany,
+    data,
+    briefData,
+    latestFinancial,
+    annualStatements.length,
+    topSegment,
+    snapshotNarrative,
+    whatChangedNarrative,
+    businessQualityNarrative,
+    capitalRiskNarrative,
+    valuationNarrative,
+    monitorNarrative,
+    capitalSignalRows,
+    monitorChecklist,
+  ]);
+
   useEffect(() => {
     function onCommandExportMemo(event: Event) {
       const customEvent = event as CustomEvent<CommandPaletteTickerDetail>;
@@ -506,12 +604,12 @@ export default function CompanyResearchBriefPage() {
         return;
       }
 
-      void handleExportResearchPackage();
+      handleExportInvestmentMemo();
     }
 
     window.addEventListener(COMMAND_PALETTE_EXPORT_MEMO_EVENT, onCommandExportMemo as EventListener);
     return () => window.removeEventListener(COMMAND_PALETTE_EXPORT_MEMO_EVENT, onCommandExportMemo as EventListener);
-  }, [handleExportResearchPackage, ticker]);
+  }, [handleExportInvestmentMemo, ticker]);
 
   return (
     <CompanyWorkspaceShell
@@ -531,6 +629,14 @@ export default function CompanyResearchBriefPage() {
           secondaryActionLabel="Open Valuation Models"
           secondaryActionDescription="Move from the brief into full model diagnostics, scenarios, and assumption detail."
           extraActions={[
+            {
+              label: exportingInvestmentMemo ? "Generating memo..." : "Export Investment Memo",
+              description: investmentMemoError
+                ? `Error: ${investmentMemoError}`
+                : "Download a sober Markdown investment memo from the cached research brief.",
+              onClick: handleExportInvestmentMemo,
+              disabled: exportingInvestmentMemo || initialCompanyLoad,
+            },
             {
               label: exportingResearchPackage ? "Exporting..." : "Export Research Package",
               description: "Download the company financial, model, derived-metric, and brief endpoint responses as JSON.",

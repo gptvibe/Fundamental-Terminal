@@ -27,6 +27,7 @@ from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
 from app.observability import emit_structured_log
 from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, CommentLetter, Company, EarningsRelease, FilingEvent, FilingRiskSignal, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
+from app.services.filing_risk_signals import build_non_timely_filing_signals
 from app.services.filing_parser import FilingParser, ParsedFilingInsight, SUPPORTED_PARSER_FORMS
 from app.services.institutional_holdings import (
     get_company_institutional_holdings_last_checked,
@@ -2198,6 +2199,7 @@ class EdgarIngestionService:
             session=session,
             company=company,
             parsed_insights=parsed_filing_insights,
+            filing_index=filing_index,
             checked_at=checked_at,
             payload_version_hash=payload_version_hash,
         )
@@ -2454,7 +2456,7 @@ class EdgarIngestionService:
         reporter.step("events", "Caching 8-K filing events...")
         from app.services.eight_k_events import collect_filing_events, upsert_filing_events
 
-        filing_events = collect_filing_events(company.cik, filing_index)
+        filing_events = collect_filing_events(company.cik, filing_index, client=self.client)
         return upsert_filing_events(
             session=session,
             company=company,
@@ -5598,12 +5600,13 @@ def _replace_filing_risk_signals(
     session: Session,
     company: Company,
     parsed_insights: list[ParsedFilingInsight],
+    filing_index: dict[str, FilingMetadata] | None,
     checked_at: datetime,
     payload_version_hash: str | None = None,
 ) -> int:
     session.execute(delete(FilingRiskSignal).where(FilingRiskSignal.company_id == company.id))
 
-    payload = _build_filing_risk_signal_payloads(company, parsed_insights, checked_at)
+    payload = _build_filing_risk_signal_payloads(company, parsed_insights, checked_at, filing_index=filing_index)
     if payload:
         session.execute(insert(FilingRiskSignal).values(payload))
 
@@ -5622,6 +5625,8 @@ def _build_filing_risk_signal_payloads(
     company: Company,
     parsed_insights: list[ParsedFilingInsight],
     checked_at: datetime,
+    *,
+    filing_index: dict[str, FilingMetadata] | None = None,
 ) -> list[dict[str, Any]]:
     payloads: list[dict[str, Any]] = []
     for item in parsed_insights:
@@ -5651,6 +5656,32 @@ def _build_filing_risk_signal_payloads(
                     "severity": str(match.get("severity") or "medium"),
                     "source": str(match.get("source") or item.source),
                     "provenance": str(match.get("provenance") or "sec_filing_text"),
+                    "last_updated": checked_at,
+                    "last_checked": checked_at,
+                }
+            )
+
+    if filing_index:
+        for match in build_non_timely_filing_signals(
+            cik=company.cik,
+            ticker=company.ticker,
+            filing_index=filing_index,
+        ):
+            payloads.append(
+                {
+                    "company_id": company.id,
+                    "ticker": str(match.ticker or company.ticker),
+                    "cik": str(match.cik or company.cik),
+                    "accession_number": str(match.accession_number),
+                    "form_type": str(match.form_type),
+                    "filed_date": match.filed_date,
+                    "signal_category": str(match.signal_category),
+                    "matched_phrase": str(match.matched_phrase)[:255],
+                    "context_snippet": str(match.context_snippet)[:1000],
+                    "confidence": str(match.confidence),
+                    "severity": str(match.severity),
+                    "source": str(match.source),
+                    "provenance": str(match.provenance),
                     "last_updated": checked_at,
                     "last_checked": checked_at,
                 }

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 
 SUPPORTED_FILING_RISK_SIGNAL_FORMS = {"10-K", "10-Q", "8-K"}
+SUPPORTED_NT_FILING_FORMS = {"NT 10-K", "NT 10-Q"}
+NT_REPEAT_LOOKBACK_DAYS = 365
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,11 +195,102 @@ def extract_filing_risk_signals(
     return matches
 
 
+def build_non_timely_filing_signals(
+    *,
+    cik: str,
+    filing_index: dict[str, Any],
+    ticker: str | None = None,
+    source: str | None = None,
+    provenance: str = "sec_submissions_index",
+    repeat_lookback_days: int = NT_REPEAT_LOOKBACK_DAYS,
+) -> list[FilingRiskSignalMatch]:
+    nt_rows: list[tuple[str, str, date | None]] = []
+    for filing in filing_index.values():
+        accession_number = str(getattr(filing, "accession_number", "") or "").strip()
+        form_type = _normalized_filing_form(getattr(filing, "form", None))
+        if not accession_number or form_type not in SUPPORTED_NT_FILING_FORMS:
+            continue
+        filed_date = getattr(filing, "filing_date", None) or getattr(filing, "report_date", None)
+        nt_rows.append((accession_number, form_type, filed_date))
+
+    if not nt_rows:
+        return []
+
+    nt_rows.sort(key=lambda item: (item[2] or date.min, item[0]), reverse=True)
+    source_value = str(source or "cached_sec_submissions_index")
+    matches: list[FilingRiskSignalMatch] = []
+
+    for accession_number, form_type, filed_date in nt_rows:
+        signal_category = "nt_non_timely_10k" if form_type == "NT 10-K" else "nt_non_timely_10q"
+        matches.append(
+            FilingRiskSignalMatch(
+                ticker=ticker,
+                cik=cik,
+                accession_number=accession_number,
+                form_type=form_type,
+                filed_date=filed_date,
+                signal_category=signal_category,
+                matched_phrase=form_type,
+                context_snippet=f"{form_type} non-timely filing notice recorded in cached SEC submissions.",
+                confidence="high",
+                severity="medium",
+                source=source_value,
+                provenance=provenance,
+            )
+        )
+
+    repeat_cutoff_base = next((row[2] for row in nt_rows if row[2] is not None), None)
+    if repeat_cutoff_base is None:
+        return matches
+
+    repeat_cutoff = repeat_cutoff_base - timedelta(days=max(repeat_lookback_days, 1))
+    repeat_rows = [row for row in nt_rows if row[2] is not None and row[2] >= repeat_cutoff]
+    if len(repeat_rows) >= 2:
+        nt_10k_count = sum(1 for _, form_type, _ in repeat_rows if form_type == "NT 10-K")
+        nt_10q_count = sum(1 for _, form_type, _ in repeat_rows if form_type == "NT 10-Q")
+        latest_accession, latest_form_type, latest_filed_date = repeat_rows[0]
+        matches.append(
+            FilingRiskSignalMatch(
+                ticker=ticker,
+                cik=cik,
+                accession_number=latest_accession,
+                form_type=latest_form_type,
+                filed_date=latest_filed_date,
+                signal_category="nt_non_timely_repeat",
+                matched_phrase=f"{len(repeat_rows)} NT notices in {repeat_lookback_days} days",
+                context_snippet=(
+                    f"Repeated non-timely filing pattern: {len(repeat_rows)} NT notices within {repeat_lookback_days} days "
+                    f"(NT 10-K: {nt_10k_count}, NT 10-Q: {nt_10q_count})."
+                ),
+                confidence="high",
+                severity="high",
+                source=source_value,
+                provenance=provenance,
+            )
+        )
+
+    return matches
+
+
 def _base_form(value: Any) -> str:
     normalized = str(value or "").strip().upper()
     if not normalized:
         return ""
     return normalized.split("/")[0].split()[0]
+
+
+def _normalized_filing_form(value: Any) -> str:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return ""
+    normalized = normalized.split("/")[0].strip()
+    normalized = re.sub(r"\s+", " ", normalized)
+    if normalized.startswith("NT "):
+        if "10-K" in normalized:
+            return "NT 10-K"
+        if "10-Q" in normalized:
+            return "NT 10-Q"
+    return normalized.split()[0]
 
 
 def _normalize_text(value: str | None) -> str:
@@ -231,4 +324,11 @@ def _severity_for_match(rule: _SignalRule, matched_phrase: str) -> str:
     return rule.severity
 
 
-__all__ = ["FilingRiskSignalMatch", "SUPPORTED_FILING_RISK_SIGNAL_FORMS", "extract_filing_risk_signals"]
+__all__ = [
+    "FilingRiskSignalMatch",
+    "SUPPORTED_FILING_RISK_SIGNAL_FORMS",
+    "SUPPORTED_NT_FILING_FORMS",
+    "NT_REPEAT_LOOKBACK_DAYS",
+    "extract_filing_risk_signals",
+    "build_non_timely_filing_signals",
+]

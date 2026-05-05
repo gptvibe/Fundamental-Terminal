@@ -1679,6 +1679,17 @@ export interface FilingEventPayload {
   summary: string;
   key_amounts: number[];
   exhibit_references: string[];
+  exhibit_previews?: FilingEventExhibitPreviewPayload[];
+}
+
+export interface FilingEventExhibitPreviewPayload {
+  accession_number: string;
+  item_code: string;
+  exhibit_filename: string;
+  exhibit_type: string | null;
+  filing_date: string | null;
+  source_url: string;
+  snippet: string;
 }
 
 export interface CompanyEventsResponse {

@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 import re
-from typing import Iterable
+from typing import Any, Iterable
+
+from bs4 import BeautifulSoup
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -30,6 +32,9 @@ EVENT_ITEM_LABELS: dict[str, str] = {
     "9.01": "Financial Statements and Exhibits",
 }
 FILING_EVENTS_PAYLOAD_VERSION = "filing-events-v1"
+_EARNINGS_ADJACENT_ITEM_CODES = {"2.02", "7.01", "8.01"}
+_TEXT_DOCUMENT_EXTENSIONS = {".htm", ".html", ".txt", ".xml", ".xhtml"}
+_EXHIBIT_PREVIEW_MAX_LENGTH = 600
 
 
 @dataclass(slots=True)
@@ -47,9 +52,15 @@ class NormalizedFilingEvent:
     summary: str
     key_amounts: tuple[float, ...] = ()
     exhibit_references: tuple[str, ...] = ()
+    exhibit_previews: tuple[dict[str, str | None], ...] = ()
 
 
-def collect_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> list[NormalizedFilingEvent]:
+def collect_filing_events(
+    cik: str,
+    filing_index: dict[str, FilingMetadata],
+    *,
+    client: Any | None = None,
+) -> list[NormalizedFilingEvent]:
     rows: list[NormalizedFilingEvent] = []
     for filing in filing_index.values():
         form = (filing.form or "").upper()
@@ -63,6 +74,12 @@ def collect_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> 
 
         key_amounts = _extract_key_amounts(description)
         exhibit_references = _extract_exhibit_references(item_tokens, description)
+        exhibit_previews_by_item = _extract_earnings_adjacent_exhibit_previews(
+            cik,
+            filing,
+            item_tokens,
+            client=client,
+        )
         for item_code in item_tokens:
             category = _classify_event(item_code, description)
             summary = _build_event_summary(item_code, description, key_amounts)
@@ -81,6 +98,7 @@ def collect_filing_events(cik: str, filing_index: dict[str, FilingMetadata]) -> 
                     summary=summary,
                     key_amounts=key_amounts,
                     exhibit_references=exhibit_references,
+                    exhibit_previews=exhibit_previews_by_item.get(item_code, ()),
                 )
             )
 
@@ -118,7 +136,7 @@ def upsert_filing_events(
                 source_url=event.source_url,
                 summary=event.summary,
                 key_amounts=list(event.key_amounts),
-                exhibit_references=list(event.exhibit_references),
+                exhibit_references=_combined_exhibit_payload(event.exhibit_references, event.exhibit_previews),
                 last_checked=checked_at,
             )
             .on_conflict_do_update(
@@ -134,7 +152,7 @@ def upsert_filing_events(
                     "source_url": event.source_url,
                     "summary": event.summary,
                     "key_amounts": list(event.key_amounts),
-                    "exhibit_references": list(event.exhibit_references),
+                    "exhibit_references": _combined_exhibit_payload(event.exhibit_references, event.exhibit_previews),
                     "last_checked": checked_at,
                     "last_updated": checked_at,
                 },
@@ -246,6 +264,139 @@ def _extract_exhibit_references(item_tokens: list[str], description: str | None)
         if len(references) >= 20:
             break
     return tuple(references)
+
+
+def _extract_earnings_adjacent_exhibit_previews(
+    cik: str,
+    filing: FilingMetadata,
+    item_tokens: list[str],
+    *,
+    client: Any | None,
+) -> dict[str, tuple[dict[str, str | None], ...]]:
+    target_items = [item_code for item_code in item_tokens if item_code in _EARNINGS_ADJACENT_ITEM_CODES]
+    if not target_items or client is None:
+        return {}
+
+    directory_items = _filing_directory_items(client, cik, filing.accession_number)
+    exhibit_candidates = _select_exhibit_99_1_documents(directory_items)
+    if not exhibit_candidates:
+        return {}
+
+    previews: list[dict[str, str | None]] = []
+    for exhibit_name in exhibit_candidates:
+        if not _is_supported_text_document(exhibit_name):
+            continue
+        try:
+            source_url, payload = client.get_filing_document_text(cik, filing.accession_number, exhibit_name)
+        except Exception:
+            continue
+        snippet = _extract_exhibit_snippet(payload)
+        if not snippet:
+            continue
+        previews.append(
+            {
+                "accession_number": filing.accession_number,
+                "item_code": None,
+                "exhibit_filename": exhibit_name,
+                "exhibit_type": "99.1",
+                "filing_date": filing.filing_date.isoformat() if filing.filing_date else None,
+                "source_url": source_url,
+                "snippet": snippet,
+            }
+        )
+        break
+
+    if not previews:
+        return {}
+
+    per_item: dict[str, tuple[dict[str, str | None], ...]] = {}
+    for item_code in target_items:
+        per_item[item_code] = tuple({**preview, "item_code": item_code} for preview in previews)
+    return per_item
+
+
+def _filing_directory_items(client: Any, cik: str, accession_number: str) -> list[dict[str, Any]]:
+    try:
+        directory_index = client.get_filing_directory_index(cik, accession_number)
+    except Exception:
+        return []
+
+    if not isinstance(directory_index, dict):
+        return []
+    directory = directory_index.get("directory")
+    if not isinstance(directory, dict):
+        return []
+    items = directory.get("item")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _select_exhibit_99_1_documents(items: list[dict[str, Any]]) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        document_name = str(item.get("name") or item.get("document") or "").strip()
+        if not document_name:
+            continue
+        search_text = " ".join(
+            str(value)
+            for value in (
+                item.get("name"),
+                item.get("document"),
+                item.get("type"),
+                item.get("description"),
+            )
+            if value
+        ).lower()
+        if not any(token in search_text for token in ("99.1", "99-1", "99_1", "ex-99.1", "ex99.1", "ex 99.1")):
+            continue
+        if document_name in seen:
+            continue
+        seen.add(document_name)
+        names.append(document_name)
+    return names
+
+
+def _is_supported_text_document(document_name: str | None) -> bool:
+    if not document_name:
+        return False
+    normalized = document_name.strip().lower()
+    if not normalized:
+        return False
+    if "." not in normalized:
+        return True
+    return any(normalized.endswith(extension) for extension in _TEXT_DOCUMENT_EXTENSIONS)
+
+
+def _extract_exhibit_snippet(payload: str | None) -> str | None:
+    if not payload or "\x00" in payload:
+        return None
+
+    soup = BeautifulSoup(payload, "html.parser")
+    text = _normalize_space(soup.get_text(" ", strip=True))
+    if not text:
+        return None
+    if len(text) > _EXHIBIT_PREVIEW_MAX_LENGTH:
+        return text[: _EXHIBIT_PREVIEW_MAX_LENGTH - 3].rstrip() + "..."
+    return text
+
+
+def _normalize_space(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", value)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized or None
+
+
+def _combined_exhibit_payload(
+    references: tuple[str, ...],
+    previews: tuple[dict[str, str | None], ...],
+) -> list[str | dict[str, str | None]]:
+    combined: list[str | dict[str, str | None]] = list(references)
+    combined.extend(previews)
+    return combined
 
 
 def _normalize_optional_text(value: str | None) -> str | None:

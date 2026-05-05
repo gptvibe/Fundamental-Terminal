@@ -130,6 +130,12 @@ function labelForSignal(category: string): string {
       return "Restatement";
     case "late_filing":
       return "Late filing";
+    case "nt_non_timely_10k":
+      return "NT 10-K non-timely filing";
+    case "nt_non_timely_10q":
+      return "NT 10-Q non-timely filing";
+    case "nt_non_timely_repeat":
+      return "Repeated NT non-timely filing pattern";
     default:
       return category.replace(/_/g, " ");
   }

@@ -94,6 +94,34 @@ export default function CompanyCapitalMarketsPage() {
   const equityPlanFilings = (capitalMarketsData?.filings ?? []).filter(
     (f) => f.form === "S-8" || f.form === "S-8/A"
   );
+  const ntFilings = (capitalMarketsData?.filings ?? []).filter(
+    (f) => f.form === "NT 10-K" || f.form === "NT 10-Q"
+  );
+  const nt10kNotices = ntFilings.filter((f) => f.form === "NT 10-K").length;
+  const nt10qNotices = ntFilings.filter((f) => f.form === "NT 10-Q").length;
+  const repeatedNtNoticePattern = useMemo(() => {
+    const dated = ntFilings
+      .map((filing) => filing.filing_date ?? filing.report_date)
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => (left < right ? 1 : -1));
+    const latest = dated[0];
+    if (!latest) {
+      return false;
+    }
+    const latestMs = Date.parse(latest);
+    if (Number.isNaN(latestMs)) {
+      return false;
+    }
+    const lookbackMs = 365 * 24 * 60 * 60 * 1000;
+    const inWindow = dated.filter((value) => {
+      const valueMs = Date.parse(value);
+      if (Number.isNaN(valueMs)) {
+        return false;
+      }
+      return latestMs - valueMs <= lookbackMs;
+    });
+    return inWindow.length >= 2;
+  }, [ntFilings]);
 
   const summary = riskData?.summary ?? null;
   const shareCountBridge = riskData?.share_count_bridge ?? null;
@@ -330,6 +358,33 @@ export default function CompanyCapitalMarketsPage() {
           </div>
         ) : (
           <div className="text-muted">No S-8 equity plan registrations are cached for this company yet.</div>
+        )}
+      </Panel>
+      </DeferredClientSection>
+
+      <DeferredClientSection placeholder={<div className="text-muted" style={{ minHeight: 200 }}>Loading non-timely filing data...</div>}>
+        <Panel title="Non-timely filing notices (NT 10-K / NT 10-Q)" subtitle="Deterministic signal based on cached SEC submissions; repeated notices can elevate reporting and financing risk.">
+        {capitalMarketsLoading && ntFilings.length === 0 ? (
+          <div className="text-muted">Loading NT filing notices...</div>
+        ) : ntFilings.length > 0 ? (
+          <div className="workspace-card-stack">
+            <CompanyMetricGrid
+              items={[
+                { label: "NT Notices", value: String(ntFilings.length) },
+                { label: "NT 10-K", value: String(nt10kNotices) },
+                { label: "NT 10-Q", value: String(nt10qNotices) },
+                { label: "Pattern", value: repeatedNtNoticePattern ? "Repeated within 12 months" : "One-off / isolated" },
+                { label: "Latest NT", value: formatDate(ntFilings[0]?.filing_date ?? ntFilings[0]?.report_date) },
+              ]}
+            />
+            <div className="text-muted workspace-card-copy">
+              {repeatedNtNoticePattern
+                ? "Repeated NT filing notices in the trailing 12 months indicate elevated non-timely filing risk versus an isolated notice."
+                : "A single NT filing notice is tracked as a watch item and should be monitored for recurrence."}
+            </div>
+          </div>
+        ) : (
+          <div className="text-muted">No NT 10-K or NT 10-Q non-timely notices are cached for this company yet.</div>
         )}
       </Panel>
       </DeferredClientSection>

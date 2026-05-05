@@ -43,6 +43,16 @@ Current gate status: pass, with zero regressions against the repo budget thresho
 - Model evaluation gate against Docker-backed Postgres: passed with zero baseline deltas
 - Docker stack: `docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d` completed successfully and all services reached healthy/running state
 
+## Regression Guardrails
+
+- The performance regression gate now enforces request-count, p50, p95, and average payload budgets for Research Brief-adjacent SEC enrichment summaries:
+	- `/api/companies/{ticker}/beneficial-ownership/summary`
+	- `/api/companies/{ticker}/governance/summary`
+	- `/api/companies/{ticker}/filing-events/summary`
+	- `/api/companies/{ticker}/capital-markets/summary`
+	- `/api/companies/{ticker}/earnings/summary`
+- Company page route handlers continue to return persisted/cache-backed data and queue background refresh work; they do not perform synchronous SEC document fetches during page render.
+
 ## End-to-End Smoke Checks
 
 - Cold missing ticker behavior was checked with CRM on financials, models, and peers pages. The frontend rendered without application errors and the backend returned structured missing-company payloads while queuing a background refresh.

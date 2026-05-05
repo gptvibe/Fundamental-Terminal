@@ -30,6 +30,11 @@ def build_cases(ticker: str) -> list[Case]:
         ),
         Case(name="peers_payload", path=f"/api/companies/{normalized_ticker}/peers", params={}),
         Case(name="metrics_timeseries_payload", path=f"/api/companies/{normalized_ticker}/metrics-timeseries", params={"cadence": "ttm", "max_points": "12"}),
+        Case(name="beneficial_ownership_summary", path=f"/api/companies/{normalized_ticker}/beneficial-ownership/summary", params={}),
+        Case(name="governance_summary", path=f"/api/companies/{normalized_ticker}/governance/summary", params={}),
+        Case(name="filing_events_summary", path=f"/api/companies/{normalized_ticker}/filing-events/summary", params={}),
+        Case(name="capital_markets_summary", path=f"/api/companies/{normalized_ticker}/capital-markets/summary", params={}),
+        Case(name="earnings_summary", path=f"/api/companies/{normalized_ticker}/earnings/summary", params={}),
     ]
 
 

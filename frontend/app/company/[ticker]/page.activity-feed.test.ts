@@ -281,6 +281,8 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByText("Dilution pressure remains elevated because recent financing and reporting signals are still active.")).toBeTruthy();
       expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
       expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
+      expect(screen.getByText("NT filing risk")).toBeTruthy();
+      expect(screen.getByText("S-8 dilution forward look")).toBeTruthy();
     });
     expect(screen.getByText("Peer comparison snapshot")).toBeTruthy();
     expect(screen.getByText("DCF-derived fair value gap")).toBeTruthy();
@@ -1219,8 +1221,10 @@ function buildCapitalMarketsSummaryResponse() {
       late_filer_notices: 0,
       registration_filings: 1,
       prospectus_filings: 1,
+      equity_plan_registrations: 2,
       latest_filing_date: "2026-02-22",
       max_offering_amount: 500,
+      total_registered_equity_plan_shares: 24000000,
     },
     refresh,
     diagnostics: {} as never,
@@ -1434,9 +1438,9 @@ function buildFilingRiskSignalsResponse() {
   return {
     company: null,
     summary: {
-      total_signals: 1,
-      high_severity_count: 1,
-      medium_severity_count: 0,
+      total_signals: 4,
+      high_severity_count: 2,
+      medium_severity_count: 2,
       latest_filed_date: "2026-02-01",
     },
     signals: [
@@ -1453,6 +1457,54 @@ function buildFilingRiskSignalsResponse() {
         severity: "high",
         source: "https://www.sec.gov/Archives/edgar/data/0/1.htm",
         provenance: "sec_filing_text",
+        last_updated: "2026-02-01T00:00:00Z",
+        last_checked: "2026-02-01T00:00:00Z",
+      },
+      {
+        ticker: "ACME",
+        cik: "0000000000",
+        accession_number: "0000000000-26-000002",
+        form_type: "NT 10-K",
+        filed_date: "2026-01-15",
+        signal_category: "nt_non_timely_10k",
+        matched_phrase: "NT 10-K",
+        context_snippet: "NT 10-K non-timely filing notice recorded in cached SEC submissions.",
+        confidence: "high",
+        severity: "medium",
+        source: "cached_sec_submissions_index",
+        provenance: "sec_submissions_index",
+        last_updated: "2026-02-01T00:00:00Z",
+        last_checked: "2026-02-01T00:00:00Z",
+      },
+      {
+        ticker: "ACME",
+        cik: "0000000000",
+        accession_number: "0000000000-26-000003",
+        form_type: "NT 10-Q",
+        filed_date: "2026-01-22",
+        signal_category: "nt_non_timely_10q",
+        matched_phrase: "NT 10-Q",
+        context_snippet: "NT 10-Q non-timely filing notice recorded in cached SEC submissions.",
+        confidence: "high",
+        severity: "medium",
+        source: "cached_sec_submissions_index",
+        provenance: "sec_submissions_index",
+        last_updated: "2026-02-01T00:00:00Z",
+        last_checked: "2026-02-01T00:00:00Z",
+      },
+      {
+        ticker: "ACME",
+        cik: "0000000000",
+        accession_number: "0000000000-26-000003",
+        form_type: "NT 10-Q",
+        filed_date: "2026-01-22",
+        signal_category: "nt_non_timely_repeat",
+        matched_phrase: "2 NT notices in 365 days",
+        context_snippet: "Repeated non-timely filing pattern: 2 NT notices within 365 days (NT 10-K: 1, NT 10-Q: 1).",
+        confidence: "high",
+        severity: "high",
+        source: "cached_sec_submissions_index",
+        provenance: "sec_submissions_index",
         last_updated: "2026-02-01T00:00:00Z",
         last_checked: "2026-02-01T00:00:00Z",
       },

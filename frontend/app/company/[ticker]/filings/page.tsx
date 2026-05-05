@@ -419,34 +419,55 @@ export default function CompanyFilingsPage() {
         ) : filteredEvents.length ? (
           <div style={{ display: "grid", gap: 12 }}>
             {filteredEvents.map((event) => (
-              <a
-                key={event.accession_number ?? `${event.form}-${event.filing_date ?? event.report_date ?? event.source_url}`}
-                href={event.source_url}
-                target="_blank"
-                rel="noreferrer"
-                className="filing-link-card"
-                style={{ display: "grid", gap: 8, textDecoration: "none" }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span className="pill">{event.form}</span>
-                    <span className="pill">{event.category}</span>
-                    {event.item_code && event.item_code !== "UNSPECIFIED" ? <span className="pill">Item {event.item_code}</span> : null}
-                    {event.items ? <span className="pill">Items {event.items}</span> : null}
-                  </div>
-                  <div className="text-muted">{formatDate(event.filing_date ?? event.report_date)}</div>
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{event.summary}</div>
-                {event.key_amounts.length ? (
-                  <div className="text-muted" style={{ fontSize: 13 }}>
-                    Key amounts: {event.key_amounts.slice(0, 3).map((a) => `$${Math.round(a).toLocaleString()}`).join(" · ")}
-                  </div>
-                ) : null}
-                <div className="text-muted" style={{ fontSize: 13 }}>
-                  {event.accession_number ?? "Accession pending"}
-                  {event.primary_document ? ` · ${event.primary_document}` : ""}
-                </div>
-              </a>
+              (() => {
+                const exhibitPreview =
+                  (event.exhibit_previews ?? []).find((preview) => preview.item_code === event.item_code) ??
+                  (event.exhibit_previews ?? [])[0] ??
+                  null;
+
+                return (
+                  <a
+                    key={event.accession_number ?? `${event.form}-${event.filing_date ?? event.report_date ?? event.source_url}`}
+                    href={event.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="filing-link-card"
+                    style={{ display: "grid", gap: 8, textDecoration: "none" }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <span className="pill">{event.form}</span>
+                        <span className="pill">{event.category}</span>
+                        {event.item_code && event.item_code !== "UNSPECIFIED" ? <span className="pill">Item {event.item_code}</span> : null}
+                        {event.items ? <span className="pill">Items {event.items}</span> : null}
+                        {exhibitPreview ? <span className="pill">EX-{exhibitPreview.exhibit_type ?? "99.1"}</span> : null}
+                      </div>
+                      <div className="text-muted">{formatDate(event.filing_date ?? event.report_date)}</div>
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{event.summary}</div>
+                    {event.key_amounts.length ? (
+                      <div className="text-muted" style={{ fontSize: 13 }}>
+                        Key amounts: {event.key_amounts.slice(0, 3).map((a) => `$${Math.round(a).toLocaleString()}`).join(" · ")}
+                      </div>
+                    ) : null}
+                    {exhibitPreview ? (
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <div className="text-muted" style={{ fontSize: 13 }}>
+                          Exhibit preview ({exhibitPreview.exhibit_filename})
+                        </div>
+                        <div style={{ fontSize: 13, color: "var(--text)" }}>{exhibitPreview.snippet}</div>
+                        <div className="text-muted" style={{ fontSize: 12 }}>
+                          {exhibitPreview.accession_number} · {formatDate(exhibitPreview.filing_date)} · {exhibitPreview.source_url}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="text-muted" style={{ fontSize: 13 }}>
+                      {event.accession_number ?? "Accession pending"}
+                      {event.primary_document ? ` · ${event.primary_document}` : ""}
+                    </div>
+                  </a>
+                );
+              })()
             ))}
           </div>
         ) : (

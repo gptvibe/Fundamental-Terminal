@@ -68,6 +68,17 @@ class FilingEventPayload(BaseModel):
     summary: str
     key_amounts: list[float] = Field(default_factory=list)
     exhibit_references: list[str] = Field(default_factory=list)
+    exhibit_previews: list["FilingEventExhibitPreviewPayload"] = Field(default_factory=list)
+
+
+class FilingEventExhibitPreviewPayload(BaseModel):
+    accession_number: str
+    item_code: str
+    exhibit_filename: str
+    exhibit_type: str | None = None
+    filing_date: DateType | None = None
+    source_url: str
+    snippet: str
 
 
 class CompanyEventsResponse(BaseModel):

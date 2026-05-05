@@ -196,6 +196,42 @@ vi.mock("@/lib/api", () => ({
     company: null,
     filings: [
       {
+        accession_number: "0000099-26-000003",
+        form: "NT 10-Q",
+        filing_date: "2026-04-01",
+        report_date: "2026-04-01",
+        primary_document: "nt10q.htm",
+        primary_doc_description: "Notification of inability to timely file quarterly report.",
+        source_url: "https://example.com/nt10q",
+        summary: "Notification of inability to timely file quarterly report.",
+        event_type: "Late Filing Notice",
+        security_type: null,
+        offering_amount: null,
+        shelf_size: null,
+        is_late_filer: true,
+        plan_name: null,
+        registered_shares: null,
+        shares_parse_confidence: null,
+      },
+      {
+        accession_number: "0000099-26-000002",
+        form: "NT 10-K",
+        filing_date: "2026-03-10",
+        report_date: "2026-03-10",
+        primary_document: "nt10k.htm",
+        primary_doc_description: "Notification of inability to timely file annual report.",
+        source_url: "https://example.com/nt10k",
+        summary: "Notification of inability to timely file annual report.",
+        event_type: "Late Filing Notice",
+        security_type: null,
+        offering_amount: null,
+        shelf_size: null,
+        is_late_filer: true,
+        plan_name: null,
+        registered_shares: null,
+        shares_parse_confidence: null,
+      },
+      {
         accession_number: "0000099-26-000001",
         form: "S-8",
         filing_date: "2026-03-15",
@@ -241,6 +277,7 @@ describe("CompanyCapitalMarketsPage", () => {
     expect(screen.getByRole("heading", { name: "Share-count bridge" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Financing capacity and dependency" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Equity plan registrations (S-8)" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Non-timely filing notices (NT 10-K / NT 10-Q)" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Hybrid securities and debt maturity wall" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Covenant, restatement, and control signals" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Provenance and diagnostics" })).toBeTruthy();
@@ -257,5 +294,6 @@ describe("CompanyCapitalMarketsPage", () => {
     });
 
     expect(screen.getByText(/high confidence/i)).toBeTruthy();
+    expect(screen.getByText(/Repeated within 12 months/i)).toBeTruthy();
   });
 });

@@ -357,20 +357,40 @@ export function buildMonitorNarrative({
 // Capital signal row and monitor checklist builders
 // ---------------------------------------------------------------------------
 
+export type NtFilingSignalSummary = {
+  totalNotices: number;
+  nt10kNotices: number;
+  nt10qNotices: number;
+  hasRepeatPattern: boolean;
+  latestFiledDate: string | null;
+};
+
 export function buildCapitalSignalRows({
   capitalMarketsSummary,
   governanceSummary,
   ownershipSummary,
   equityClaimRiskSummary,
+  ntFilingSignals,
   isForeignIssuerLike,
 }: {
   capitalMarketsSummary: CompanyCapitalMarketsSummaryResponse["summary"] | null;
   governanceSummary: CompanyGovernanceSummaryResponse["summary"] | null;
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse["summary"] | null;
   equityClaimRiskSummary: EquityClaimRiskSummaryPayload | null;
+  ntFilingSignals: NtFilingSignalSummary | null;
   isForeignIssuerLike: boolean;
 }): Array<{ signal: string; currentRead: string; latestEvidence: string }> {
   const rows: Array<{ signal: string; currentRead: string; latestEvidence: string }> = [];
+
+  if (ntFilingSignals && ntFilingSignals.totalNotices > 0) {
+    rows.push({
+      signal: "NT filing risk",
+      currentRead: ntFilingSignals.hasRepeatPattern
+        ? `Repeated NT notices (${ntFilingSignals.totalNotices.toLocaleString()}) · NT 10-K ${ntFilingSignals.nt10kNotices.toLocaleString()} / NT 10-Q ${ntFilingSignals.nt10qNotices.toLocaleString()}`
+        : `Single NT notice · NT 10-K ${ntFilingSignals.nt10kNotices.toLocaleString()} / NT 10-Q ${ntFilingSignals.nt10qNotices.toLocaleString()}`,
+      latestEvidence: ntFilingSignals.latestFiledDate ? formatDate(ntFilingSignals.latestFiledDate) : "Pending",
+    });
+  }
 
   if (capitalMarketsSummary) {
     rows.push({
@@ -378,6 +398,17 @@ export function buildCapitalSignalRows({
       currentRead: `${capitalMarketsSummary.total_filings.toLocaleString()} filings · largest offering ${formatCompactCurrency(capitalMarketsSummary.max_offering_amount)}`,
       latestEvidence: capitalMarketsSummary.latest_filing_date ? formatDate(capitalMarketsSummary.latest_filing_date) : "Pending",
     });
+
+    if (capitalMarketsSummary.equity_plan_registrations > 0) {
+      rows.push({
+        signal: "S-8 dilution forward look",
+        currentRead:
+          capitalMarketsSummary.total_registered_equity_plan_shares != null
+            ? `${capitalMarketsSummary.equity_plan_registrations.toLocaleString()} S-8 filing${capitalMarketsSummary.equity_plan_registrations === 1 ? "" : "s"} · ${formatCompactNumber(capitalMarketsSummary.total_registered_equity_plan_shares)} shares authorized`
+            : `${capitalMarketsSummary.equity_plan_registrations.toLocaleString()} S-8 filing${capitalMarketsSummary.equity_plan_registrations === 1 ? "" : "s"} cached`,
+        latestEvidence: capitalMarketsSummary.latest_filing_date ? formatDate(capitalMarketsSummary.latest_filing_date) : "Pending",
+      });
+    }
   }
 
   if (governanceSummary) {

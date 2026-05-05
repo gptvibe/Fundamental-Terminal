@@ -49,6 +49,11 @@ The script runs warm-cache benchmark cases for:
 - models payload
 - peers payload
 - metrics-timeseries payload
+- beneficial-ownership summary
+- governance summary
+- filing-events summary
+- capital-markets summary
+- earnings summary
 
 CI regression gate:
 
@@ -62,7 +67,7 @@ The gate runs deterministic in-process benchmarks against synthetic route fixtur
 - p95 latency
 - average payload size
 
-It covers the warm-cache hot read routes above and the `/api/companies/{ticker}/brief` route under simulated concurrency. The JSON and Markdown outputs are uploaded from CI as build artifacts.
+It covers the warm-cache hot read routes above and the `/api/companies/{ticker}/brief` route under simulated concurrency. This keeps explicit regression budgets on the Research Brief dependency path and the SEC enrichment summaries used by the company workspace UI. The JSON and Markdown outputs are uploaded from CI as build artifacts.
 
 Model-computation benchmark:
 
@@ -87,6 +92,7 @@ Both were captured from local Docker runs against `AAPL` after a warm-up pass.
 ## Operational notes
 - Refresh orchestration remains cache-first and non-blocking:
   stale/missing data returns cached payload immediately and queues a background refresh.
+- Company page render paths stay read-only against persisted/cache-backed rows; no synchronous SEC document fetch is performed in the standard page route handlers.
 - Dataset jobs for statements, prices, insiders, Form 144, institutional holdings, beneficial ownership, earnings, filing events, and capital markets now sit behind a single service orchestrator while preserving the existing SSE event flow.
 - Dataset lock timeout is controlled with `REFRESH_LOCK_TIMEOUT_SECONDS`.
 - Structured logs now emit refresh, model-compute, and SSE job events with a shared traceable `job_id`/`trace_id` path.

@@ -18,6 +18,11 @@ def test_hot_endpoint_benchmark_cases_cover_core_cached_routes() -> None:
         "models_payload",
         "peers_payload",
         "metrics_timeseries_payload",
+        "beneficial_ownership_summary",
+        "governance_summary",
+        "filing_events_summary",
+        "capital_markets_summary",
+        "earnings_summary",
     }.issubset(case_names)
 
 
@@ -171,5 +176,7 @@ def test_performance_regression_benchmarks_include_company_brief_suite() -> None
 
     suites = {suite["suite"]: suite for suite in summary["suites"]}
     assert "company_brief_concurrency" in suites
+    hot_case_names = {result["name"] for result in suites["hot_endpoints"]["results"]}
+    assert "beneficial_ownership_summary" in hot_case_names
     assert suites["company_brief_concurrency"]["results"][0]["name"] == "company_brief_ready"
     assert suites["company_brief_concurrency"]["results"][0]["request_count"] == 4

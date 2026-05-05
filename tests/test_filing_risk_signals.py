@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.services.filing_risk_signals import extract_filing_risk_signals
+from app.services.filing_risk_signals import build_non_timely_filing_signals, extract_filing_risk_signals
 from app.services.sec_edgar import FilingMetadata
 
 
@@ -62,3 +62,65 @@ def test_extract_filing_risk_signals_ignores_unsupported_forms_and_empty_text() 
         filing_metadata=FilingMetadata(accession_number="0000123456-26-000125", form="8-K", filing_date=date(2026, 3, 2)),
         filing_text="   ",
     ) == []
+
+
+def test_build_non_timely_filing_signals_emits_single_nt_notice() -> None:
+    filing_index = {
+        "0000001": FilingMetadata(
+            accession_number="0000123456-26-000201",
+            form="NT 10-Q",
+            filing_date=date(2026, 3, 20),
+            report_date=date(2026, 3, 20),
+        )
+    }
+
+    signals = build_non_timely_filing_signals(
+        cik="0000123456",
+        ticker="ACME",
+        filing_index=filing_index,
+    )
+
+    assert len(signals) == 1
+    signal = signals[0]
+    assert signal.signal_category == "nt_non_timely_10q"
+    assert signal.form_type == "NT 10-Q"
+    assert signal.matched_phrase == "NT 10-Q"
+    assert signal.severity == "medium"
+
+
+def test_build_non_timely_filing_signals_escalates_repeated_notices() -> None:
+    filing_index = {
+        "0000001": FilingMetadata(
+            accession_number="0000123456-26-000201",
+            form="NT 10-Q",
+            filing_date=date(2026, 4, 12),
+            report_date=date(2026, 4, 12),
+        ),
+        "0000002": FilingMetadata(
+            accession_number="0000123456-26-000175",
+            form="NT 10-K",
+            filing_date=date(2025, 12, 15),
+            report_date=date(2025, 12, 15),
+        ),
+        "0000003": FilingMetadata(
+            accession_number="0000123456-25-000100",
+            form="NT 10-Q",
+            filing_date=date(2024, 12, 15),
+            report_date=date(2024, 12, 15),
+        ),
+    }
+
+    signals = build_non_timely_filing_signals(
+        cik="0000123456",
+        ticker="ACME",
+        filing_index=filing_index,
+        repeat_lookback_days=365,
+    )
+
+    categories = {signal.signal_category for signal in signals}
+    assert categories == {"nt_non_timely_10q", "nt_non_timely_10k", "nt_non_timely_repeat"}
+    repeated = next(signal for signal in signals if signal.signal_category == "nt_non_timely_repeat")
+    assert repeated.severity == "high"
+    assert repeated.form_type in {"NT 10-K", "NT 10-Q"}
+    assert "NT 10-K: 1" in repeated.context_snippet
+    assert "NT 10-Q: 1" in repeated.context_snippet

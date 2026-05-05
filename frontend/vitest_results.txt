@@ -1,0 +1,425 @@
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/fungk/Desktop/GitHub/Fundamental-Terminal/frontend[39m
+
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mserves a fresh cache hit for stable financials
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mserves stale financials and triggers background revalidation
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mbypasses read cache for refresh=true query requests
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mbypasses read cache for POST requests
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mclears cached reads when ticker cache is invalidated
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22muses response.json in success path even when performance audit is enabled
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mrecords cache key, policy, source, and payload bytes in performance audit events
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mreturns the same promise for concurrent reads to the same URL
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mretries after an inflight read has gone stale
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mtimes out hung requests instead of waiting forever
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdedupes repeated aggregate overview reads
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mreuses overview financials for later direct financials reads
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdrops cached workspace bootstrap placeholders before reusing them
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdrops cached workspace bootstrap placeholders that only contain company metadata
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdrops cached workspace bootstrap placeholders that are still empty even when marked fresh
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdrops financials cache entries primed from missing bootstrap placeholders
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdrops financials cache entries primed from metadata-only bootstrap placeholders
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mdrops empty financials cache entries that were marked fresh without company coverage
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mclears overview-primed financials when ticker cache is invalidated
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mclears the in-flight entry when a request rejects
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mkeeps refresh endpoint uncached
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mignores legacy localStorage payload entries and does not persist new payloads to localStorage
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mroute-specific market-context policy (20 s ttl) marks data stale before STABLE_SEC_POLICY would
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22mper-request cachePolicy override takes precedence over the route default
+ [32m✓[39m lib/api.cache.test.ts[2m > [22mapi read cache[2m > [22muses DEFAULT_READ_POLICY (45 s ttl) for paths without a route-specific override
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22muses the bootstrap payload for the overview workspace
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mfalls back to overview for expected bootstrap compatibility errors
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22msurfaces an error for 404 on bootstrap instead of silently falling back
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22msurfaces an error for 404 on legacy overview instead of falling back to financials-only
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mdoes not fall back on transient bootstrap backend errors
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mdoes not fall back on bootstrap timeout or network errors
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mfalls back from overview to financials only for expected compatibility errors
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mshows the full forecast track record section
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mdoes not fall back from overview to financials on transient legacy errors
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22minvalidates ticker read cache before reloading after a terminal job event
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mcopies the live studio surface instead of creating a share snapshot image[33m 302[2mms[22m[39m
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mpasses through a compact financials view when requested
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mdoes not subscribe to job events for evaluation run ids when no refresh job exists
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22madds forecast-backed valuation card when handoff params are present and supports reset
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mshows unavailable heuristic signal when forecast deltas cannot be compared
+ [32m✓[39m components/charts/business-segment-breakdown.test.ts[2m > [22mBusinessSegmentBreakdown[2m > [22mrenders summary-led business and geography insights before the charts[33m 469[2mms[22m[39m
+ [32m✓[39m components/charts/business-segment-breakdown.test.ts[2m > [22mBusinessSegmentBreakdown[2m > [22mrespects the selected and comparison periods and exposes trend sections
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22muses the versioned chart spec studio summary when present
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mkeeps workspace data between tab remounts and avoids duplicate fresh-cache requests
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22maborts the prior workspace request bundle when ticker changes
+ [32m✓[39m components/charts/business-segment-breakdown.test.ts[2m > [22mBusinessSegmentBreakdown[2m > [22msurfaces sparse and non-comparable segment history warnings instead of assuming comparability
+ [32m✓[39m components/charts/business-segment-breakdown.test.ts[2m > [22mBusinessSegmentBreakdown[2m > [22mshows geographic disclosure empty-state messaging when no geography facts are present
+ [32m✓[39m components/charts/business-segment-breakdown.test.ts[2m > [22mBusinessSegmentBreakdown[2m > [22mrenders geographic long-lived asset rows when those segment facts are available
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mPartial Failures - Optional Data[2m > [22mhandles insider trades fetch failure while keeping core data
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mPartial Failures - Optional Data[2m > [22mhandles institutional holdings fetch failure while keeping core data
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mrenders the requested dashboard matrix and forecast detail rows[33m 489[2mms[22m[39m
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mprefers the versioned chart spec when it is present
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mlabels tooltip rows as reported or projected
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mrenders event context inside tooltip when event overlays are present
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mshows event overlay toggles and quarter-change panel
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mopens a why-changed dialog from metric cards
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22momits optional forecast cards and keeps the strip graceful when fields are missing
+ [32m✓[39m components/company/charts-dashboard.test.ts[2m > [22mCompanyChartsDashboard[2m > [22mdefines a consistent minimum height for metric chart cards
+ [32m✓[39m hooks/use-company-workspace.test.ts[2m > [22museCompanyWorkspace[2m > [22mPartial Failures - Optional Data[2m > [22mhandles multiple optional data failures independently
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mopens and collapses the what-if sidebar and uses backend-provided limits[33m 368[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mdoes not recycle payload as_of into what-if requests without an explicit page filter
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mforwards an explicit page as_of to what-if and forecast accuracy calls
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mlabels enterprise-value-proxy DCF payloads clearly and withholds proxy fair value in forecast handoff cards
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mincludes forecast source-state and accuracy metadata in JSON exports[33m 707[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mkeeps model surfaces available when market context fails
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mrenders registry-backed source freshness metadata for model outputs
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mdebounces recomputation, updates the impact strip, and renders delta indicators[33m 513[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mexplains strict official mode when commercial price inputs are disabled
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mshows an Oil workspace summary and deep link for supported oil companies
+ [32m✓[39m app/company/[ticker]/models/page.test.ts[2m > [22mCompanyModelsPage[2m > [22mhides the oil scenario overlay panel for unsupported issuers and shows a precise reason
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mrenders the six narrative brief sections with fallback and monitoring cues[33m 1334[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mreuses the overview workspace brief payload without issuing a second brief request
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mwaits for the overview workspace brief before falling back to a standalone brief request[33m 334[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mshows override metadata in formula popovers and reset returns to the base case[33m 660[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mfalls back to a standalone brief request after overview bootstrap resolves without a brief
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mdoes not trigger a standalone brief request while the overview refresh job is still active
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mhydrates collapsed brief sections from localStorage
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mkeeps the brief rendering when localStorage persistence hits quota
+ [32m✓[39m app/page.test.ts[2m > [22mHomePage[2m > [22mrenders the search-first terminal with recent, saved, change, and macro context
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mrenders deterministic empty states when persisted brief slices are unavailable
+ [32m✓[39m app/company/[ticker]/oil/page.test.ts[2m > [22mCompanyOilPage[2m > [22mrenders the dedicated oil workspace for supported companies
+ [32m✓[39m app/company/[ticker]/oil/page.test.ts[2m > [22mCompanyOilPage[2m > [22mshows an unavailable message for unsupported companies
+ [32m✓[39m app/page.test.ts[2m > [22mHomePage[2m > [22mroutes to a searched company and records the launch locally
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mexplains limited proxy coverage for foreign-issuer annual filings
+ [32m✓[39m app/page.test.ts[2m > [22mHomePage[2m > [22mruns an immediate autocomplete lookup before SEC resolve when the user submits before debounce completes
+ [32m✓[39m app/page.test.ts[2m > [22mHomePage[2m > [22mdoes not auto-select a fuzzy autocomplete result on fast submit
+ [32m✓[39m app/page.test.ts[2m > [22mHomePage[2m > [22maborts stale autocomplete requests without letting older results overwrite newer ones
+ [32m✓[39m components/charts/derived-metrics-panel.test.ts[2m > [22mDerivedMetricsPanel[2m > [22mloads and renders latest derived metric cards
+ [32m✓[39m components/charts/derived-metrics-panel.test.ts[2m > [22mDerivedMetricsPanel[2m > [22mdistinguishes latest statement period from a newer earnings-reported quarter
+ [32m✓[39m components/charts/derived-metrics-panel.test.ts[2m > [22mDerivedMetricsPanel[2m > [22mdisables price-derived yield selectors in strict official mode
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mpreserves the current Studio view when recomputation fails[33m 940[2mms[22m[39m
+ [32m✓[39m components/charts/derived-metrics-panel.test.ts[2m > [22mDerivedMetricsPanel[2m > [22mswitches to bank metrics when regulated-bank series are returned
+ [32m✓[39m app/company/[ticker]/financials/page.test.ts[2m > [22mCompanyFinancialsTabPage[2m > [22mrenders registry-backed source freshness metadata for financials[33m 582[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/financials/page.test.ts[2m > [22mCompanyFinancialsTabPage[2m > [22mshows a newer earnings-reported period when filings lag the latest release
+ [32m✓[39m app/company/[ticker]/financials/page.test.ts[2m > [22mCompanyFinancialsTabPage[2m > [22mswitches to the regulated bank workspace for bank issuers
+ [32m✓[39m app/company/[ticker]/financials/page.test.ts[2m > [22mCompanyFinancialsTabPage[2m > [22mkeeps range and selected/comparison state synchronized across financial charts and tables
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mstill exports studio csv rows with schedule metadata
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mshows cold-start bootstrap details before the full brief is ready
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mshows queue depth for cold-start refreshes that are still waiting on the worker
+ [32m✓[39m app/company/[ticker]/page.activity-feed.test.ts[2m > [22mCompanyResearchBriefPage[2m > [22mkeeps stale-data warnings visible while rendering the reorganized layout[33m 353[2mms[22m[39m
+ [32m✓[39m app/screener/page.test.ts[2m > [22mOfficialScreenerPage[2m > [22mrenders ranked results and exposes a Research Brief jump[33m 442[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22msaves, loads, deletes, and compares two local scenarios[33m 1238[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mbuilds a why-changed decomposition for compared scenarios and copies a compact summary
+ [32m✓[39m app/screener/page.test.ts[2m > [22mOfficialScreenerPage[2m > [22msaves presets from the current draft and reruns ranking sort from table headers[33m 520[2mms[22m[39m
+ [32m✓[39m app/screener/page.test.ts[2m > [22mOfficialScreenerPage[2m > [22mexports the visible screener results as CSV
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mdoes not auto-run autocomplete for the current company route ticker
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mruns autocomplete after the user edits the search text
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mreuses autocomplete results on submit without issuing a duplicate search
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mruns an immediate autocomplete lookup before SEC resolve on fast submit
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mdoes not auto-select a fuzzy autocomplete result on fast submit
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mfalls back to resolve only when the latest autocomplete payload has no exact match
+ [32m✓[39m app/watchlist/page.test.ts[2m > [22mWatchlistPage[2m > [22mrenders empty state when no local watchlist tickers exist
+ [32m✓[39m app/watchlist/page.test.ts[2m > [22mWatchlistPage[2m > [22mrenders workflow controls and Research Brief material-change summaries
+ [32m✓[39m components/company/changes-since-last-filing-card.test.ts[2m > [22mChangesSinceLastFilingCard[2m > [22mrenders curated filing signals in brief mode and full detail in full mode
+ [32m✓[39m components/company/changes-since-last-filing-card.test.ts[2m > [22mChangesSinceLastFilingCard[2m > [22mreuses the initial payload without issuing a duplicate read
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mexports scenario compare rows and includes valuation handoff payload[33m 859[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mhydrates saved scenarios without rewriting local storage on mount
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22maborts stale autocomplete requests when the query changes
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mopens and closes the command palette with keyboard
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22msupports fuzzy command search and executes route actions
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22msupports keyboard navigation across command results
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mhandles ticker and filings command routes
+ [32m✓[39m components/layout/app-chrome.test.ts[2m > [22mAppChrome[2m > [22mdispatches refresh events and toggles data source panel
+ [32m✓[39m app/watchlist/page.test.ts[2m > [22mWatchlistPage[2m > [22mfilters the list by review-due and applies saved views[33m 568[2mms[22m[39m
+ [32m✓[39m app/watchlist/page.test.ts[2m > [22mWatchlistPage[2m > [22mpersists rationale edits, review actions, and saved views
+ [32m✓[39m app/watchlist/page.test.ts[2m > [22mWatchlistPage[2m > [22mreloads queued refresh jobs after an SSE terminal event
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mkeeps the studio interactive when scenario persistence hits quota[33m 700[2mms[22m[39m
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mrenders synced scenarios and copies a share link
+ [32m✓[39m components/company/projection-studio.test.tsx[2m > [22mProjectionStudio[2m > [22mloads a requested shared scenario from the URL and reapplies its overrides[33m 440[2mms[22m[39m
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for BalanceSheetChart[33m 606[2mms[22m[39m
+ [32m✓[39m components/models/oil-scenario-overlay-panel.test.ts[2m > [22mOilScenarioOverlayPanel redesigned UX[2m > [22mdefaults to simple mode and can switch to advanced mode[33m 619[2mms[22m[39m
+ [32m✓[39m components/models/oil-scenario-overlay-panel.test.ts[2m > [22mOilScenarioOverlayPanel redesigned UX[2m > [22mapplies scenario presets and supports scenario node editing with live output formatting
+ [32m✓[39m components/models/oil-scenario-overlay-panel.test.ts[2m > [22mOilScenarioOverlayPanel redesigned UX[2m > [22mshows partial support explanatory banner and sensitivity guidance
+ [32m✓[39m components/models/oil-scenario-overlay-panel.test.ts[2m > [22mOilScenarioOverlayPanel redesigned UX[2m > [22mshows sparse official curve guidance while keeping a visual chart
+ [32m✓[39m components/models/oil-scenario-overlay-panel.test.ts[2m > [22mOilScenarioOverlayPanel redesigned UX[2m > [22mkeeps exports in advanced section
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for BeneficialOwnershipFormChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for CapitalMarketsSignalChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for CashFlowWaterfallChart
+ [32m✓[39m app/company/[ticker]/capital-markets/page.test.ts[2m > [22mCompanyCapitalMarketsPage[2m > [22mrenders the equity claim risk pack summary and evidence panels[33m 531[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/capital-markets/page.test.ts[2m > [22mCompanyCapitalMarketsPage[2m > [22mrenders S-8 equity plan filing card with plan name and confidence
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for EarningsTrendChart
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mPanelErrorBoundary with failing children[2m > [22mdisplays error fallback UI when child component throws
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mPanelErrorBoundary with failing children[2m > [22misolates error to the boundary and doesn't crash sibling components
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mPanelErrorBoundary with failing children[2m > [22mrenders successfully when no error is thrown
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mAPI Fetch Failure Scenarios[2m > [22mhandles 404 not found error in API call
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mAPI Fetch Failure Scenarios[2m > [22mhandles 500 server error in API call
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mAPI Fetch Failure Scenarios[2m > [22mhandles network timeout errors
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mMultiple Panels with Selective Error Isolation[2m > [22mallows one failing panel while others succeed
+ [32m✓[39m components/company/panel-error-handling.test.ts[2m > [22mPanel Error Handling Integration[2m > [22mError Boundary with Use-Company-Workspace 404[2m > [22mproperly surfaces 404 error from hook through error boundary
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for FilingEventCategoryChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for GovernanceFilingChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for GrowthWaterfallChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for InsiderActivityTrendChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for InsiderRoleActivityChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for InstitutionalOwnershipTrendChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for LiquidityCapitalChart
+ [32m✓[39m app/company/[ticker]/charts/page.test.ts[2m > [22mCompanyChartsPage server route[2m > [22mpasses an explicit as_of query through to charts loading[33m 452[2mms[22m[39m
+ [32m✓[39m app/company/[ticker]/charts/page.test.ts[2m > [22mCompanyChartsPage server route[2m > [22mrenders the charts dashboard with explicit actual-vs-forecast separation
+ [32m✓[39m components/models/valuation-scenario-workbench.test.ts[2m > [22mValuationScenarioWorkbench[2m > [22mrenders overlap, editable sensitivities, and traceability for valuation models[33m 543[2mms[22m[39m
+ [32m✓[39m components/models/valuation-scenario-workbench.test.ts[2m > [22mValuationScenarioWorkbench[2m > [22msuppresses interactive DCF controls when the backend marks DCF as insufficient data
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for MarginTrendChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for OperatingCostStructureChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for ShareDilutionTrackerChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mexposes shared expansion for SmartMoneyFlowChart
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mdoes not show timeframe controls for snapshot charts
+ [32m✓[39m components/company/capital-structure-intelligence-panel.test.ts[2m > [22mCapitalStructureIntelligencePanel[2m > [22mdoes not refetch when an initial payload is already available
+ [32m✓[39m components/company/capital-structure-intelligence-panel.test.ts[2m > [22mCapitalStructureIntelligencePanel[2m > [22mloads the persisted capital structure route and renders ladder, trend status, and provenance details
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mshows timeframe controls only for charts that support them
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mshows chart type and timeframe controls for margin trend
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mfilters timeframe options for stacked operating cost charts
+ [32m✓[39m components/charts/chart-expansion-rollout.test.ts[2m > [22mchart expansion rollout[2m > [22mkeeps share dilution on timeframe-only controls
+ [32m✓[39m components/peers/peer-comparison-dashboard.test.ts[2m > [22mPeerComparisonDashboard[2m > [22mloads default peers, supports explicit selection, and resets to focus defaults[33m 593[2mms[22m[39m
+ [32m✓[39m components/peers/peer-comparison-dashboard.test.ts[2m > [22mPeerComparisonDashboard[2m > [22mshows a strict official mode note when peer valuation data is disabled
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22mshows primary tabs in desktop nav and marks charts tab active on charts route
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22muses a More dropdown on desktop for specialist sections and keeps primary tabs visible directly
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22msupports arrow-key focus movement across primary tabs and More button on desktop
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22muses a mobile More menu for secondary sections and keeps Ownership & Stakes merged
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22mshows Oil in the More menu for eligible tickers once company state resolves
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22mkeeps the Oil tab hidden in the More menu for unsupported companies
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22mreuses shared company context on the overview route when deciding Oil tab visibility
+ [32m✓[39m components/layout/company-subnav.test.ts[2m > [22mCompanySubnav[2m > [22mtriggers workspace prefetch on hover and focus of tab links
+ [32m✓[39m app/company/[ticker]/earnings/page.test.ts[2m > [22mCompanyEarningsPage[2m > [22mrenders earnings summary, trend, and release detail panels[33m 461[2mms[22m[39m
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22mopens from card click and closes on escape
+ [32m✓[39m components/company/ratio-history-table.test.ts[2m > [22mRatioHistoryTable[2m > [22mrenders annual ratio history from the visible range with tone-coded cells[33m 332[2mms[22m[39m
+ [32m✓[39m components/company/ratio-history-table.test.ts[2m > [22mRatioHistoryTable[2m > [22mmaps quarterly selections into annual ratio math and keeps the visible annual range
+ [32m✓[39m app/company/[ticker]/earnings/page.test.ts[2m > [22mCompanyEarningsPage[2m > [22msupports workspace panel interactions and metadata toggle[33m 1133[2mms[22m[39m
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22mtraps focus and restores focus to the trigger button[33m 375[2mms[22m[39m
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22msuppresses invalid chart type options for time-series datasets
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22msupports headerless inline cards while preserving the inspector title
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22monly shows timeframe controls when the dataset supports them
+ [32m✓[39m app/company/[ticker]/sec-feed/page.interaction.test.ts[2m > [22mCompanySecFeedPage interactions[2m > [22mfilters alerts by severity and preserves feed entry order[33m 672[2mms[22m[39m
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22mshows reset and shared export actions when export state is configured
+ [32m✓[39m components/models/market-context-panel.test.ts[2m > [22mMarketContextPanel[2m > [22mrenders treasury slopes and partial provenance badges
+ [32m✓[39m components/models/market-context-panel.test.ts[2m > [22mMarketContextPanel[2m > [22mtreats missing provenance details as FRED unavailable
+ [32m✓[39m components/charts/interactive-chart-frame.test.ts[2m > [22mInteractiveChartFrame[2m > [22mrenders the shared expanded empty state instead of the chart when requested
+ [32m✓[39m app/company/[ticker]/charts/page.test.tsx[2m > [22mCompanyChartsPage[2m > [22mrenders Growth Outlook by default from server data
+ [32m✓[39m app/company/[ticker]/charts/page.test.tsx[2m > [22mCompanyChartsPage[2m > [22mbuilds route metadata from the cached charts payload
+ [32m✓[39m app/company/[ticker]/charts/page.test.tsx[2m > [22mCompanyChartsPage[2m > [22mrenders Projection Studio when mode is studio and payload includes studio
+ [32m✓[39m app/company/[ticker]/charts/page.test.tsx[2m > [22mCompanyChartsPage[2m > [22mfalls back to Growth Outlook when studio mode is requested without studio payload
+ [32m✓[39m app/company/[ticker]/charts/page.test.tsx[2m > [22mCompanyChartsPage[2m > [22mmaps 404 failures to product copy and never renders raw transport text
+ [32m✓[39m components/company/financial-statements-table.test.ts[2m > [22mfinancial statements tables[2m > [22mshows selected and comparison columns with deltas and exports only the visible statements[33m 435[2mms[22m[39m
+ [32m✓[39m components/company/financial-statements-table.test.ts[2m > [22mfinancial statements tables[2m > [22mshows regulated-bank comparison columns in sync with selected periods
+stderr | components/company/financial-statements-table.test.ts
+Not implemented: navigation to another Document
+
+ [32m✓[39m app/company/[ticker]/ownership/page.reload.test.ts[2m > [22mCompanyOwnershipPage auto refresh[2m > [22mshows ownership data without a full page reload after the refresh job completes
+ [32m✓[39m hooks/use-period-selection.test.ts[2m > [22musePeriodSelection[2m > [22mfalls back from quarterly requests to annual filings and keeps comparison state coherent
+ [32m✓[39m hooks/use-period-selection.test.ts[2m > [22musePeriodSelection[2m > [22mkeeps custom comparison selections distinct when the focused period changes
+ [32m✓[39m components/company/metrics-explorer-panel.test.ts[2m > [22mMetricsExplorerPanel[2m > [22mloads persisted metrics summary
+ [32m✓[39m components/company/metrics-explorer-panel.test.ts[2m > [22mMetricsExplorerPanel[2m > [22mrenders bank metric cards for regulated-bank issuers
+ [32m✓[39m components/company/financial-comparison-panel.test.ts[2m > [22mFinancialComparisonPanel[2m > [22muses shared selected and comparison state with annual fallback and formats missing fields safely[33m 464[2mms[22m[39m
+ [32m✓[39m components/company/financial-comparison-panel.test.ts[2m > [22mFinancialComparisonPanel[2m > [22mlets the user switch the comparison metric while keeping page-level period state
+ [32m✓[39m components/company/financial-comparison-panel.test.ts[2m > [22mFinancialComparisonPanel[2m > [22mdoes not silently fall back to a different annual when custom compare collapses to the same fiscal year
+ [32m✓[39m components/charts/forecast-track-record.test.tsx[2m > [22mForecastTrackRecord[2m > [22mrenders summary strip metrics
+ [32m✓[39m components/charts/forecast-track-record.test.tsx[2m > [22mForecastTrackRecord[2m > [22mswitches metrics from selector
+ [32m✓[39m components/charts/forecast-track-record.test.tsx[2m > [22mForecastTrackRecord[2m > [22msupports sorting and row expansion[33m 398[2mms[22m[39m
+ [32m✓[39m components/charts/forecast-track-record.test.tsx[2m > [22mForecastTrackRecord[2m > [22mshows insufficient-history state without fabricated output
+ [32m✓[39m hooks/use-company-workspace.cache-nav.test.ts[2m > [22museCompanyWorkspace financials cache navigation[2m > [22muses initial workspace seed and skips workspace-bootstrap when the seed is fresh
+ [32m✓[39m hooks/use-company-workspace.cache-nav.test.ts[2m > [22museCompanyWorkspace financials cache navigation[2m > [22mreuses fresh shared layout cache on financials remount without another workspace-bootstrap request
+ [32m✓[39m components/models/investment-summary-panel.test.ts[2m > [22mInvestmentSummaryPanel[2m > [22muses valuation ranges vs latest price and shows net debt separately
+ [32m✓[39m components/models/investment-summary-panel.test.ts[2m > [22mInvestmentSummaryPanel[2m > [22msurfaces unsupported valuation state explicitly
+ [32m✓[39m components/models/investment-summary-panel.test.ts[2m > [22mInvestmentSummaryPanel[2m > [22momits legacy DCF fair value until the current bridge version is recomputed
+ [32m✓[39m components/models/investment-summary-panel.test.ts[2m > [22mInvestmentSummaryPanel[2m > [22msurfaces enterprise value proxy caveats when capital structure inputs are incomplete
+ [32m✓[39m app/company/[ticker]/filings/page.integration.test.ts[2m > [22mCompanyFilingsPage integration[2m > [22mupdates filing viewer when timeline selection changes[33m 617[2mms[22m[39m
+ [32m✓[39m components/charts/growth-waterfall-chart.test.ts[2m > [22mGrowthWaterfallChart[2m > [22mscopes to the shared annual range and switches metrics[33m 312[2mms[22m[39m
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mrenders empty state when cik is null
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mrenders loading state while data is being fetched
+ [32m✓[39m app/company/[ticker]/peers/page.test.ts[2m > [22mCompanyPeersPage[2m > [22mrenders loading state while company context loads
+ [32m✓[39m app/company/[ticker]/peers/page.test.ts[2m > [22mCompanyPeersPage[2m > [22mrenders peer workspace metrics once company context is available
+ [32m✓[39m app/company/[ticker]/peers/page.test.ts[2m > [22mCompanyPeersPage[2m > [22mexplains strict official mode when peer charts are disabled
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mrenders error state when API call fails with a generic error
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mrenders error state when API returns 404
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mrenders error state when API returns 500
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mhandles aborted requests gracefully
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mdisplays success state with data when API returns valid history
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mcancels previous request when cik changes
+ [32m✓[39m components/company/financial-history-section.test.ts[2m > [22mFinancialHistorySection[2m > [22mdoes not display error for a non-Error thrown value
+ [32m✓[39m components/personal/home-saved-companies-panel.test.ts[2m > [22mHomeSavedCompaniesPanel[2m > [22mshows transfer actions and runs export and clear-all handlers
+ [32m✓[39m components/personal/home-saved-companies-panel.test.ts[2m > [22mHomeSavedCompaniesPanel[2m > [22mimports LocalUserData JSON through hidden file input
+ [32m✓[39m components/personal/home-saved-companies-panel.test.ts[2m > [22mHomeSavedCompaniesPanel[2m > [22mimports current local data into server workspace
+ [32m✓[39m components/company/financial-quality-summary.test.ts[2m > [22mFinancialQualitySummary[2m > [22mkeeps summary cards as the default view and expands into annual ratio trends on demand[33m 482[2mms[22m[39m
+ [32m✓[39m components/ui/commercial-fallback-notice.test.ts[2m > [22mCommercialFallbackNotice[2m > [22mrenders a stable labeled fallback notice
+ [32m✓[39m components/ui/commercial-fallback-notice.test.ts[2m > [22mCommercialFallbackNotice[2m > [22mrenders the fallback label in a non-pill presentation
+ [32m✓[39m components/ui/commercial-fallback-notice.test.ts[2m > [22mCommercialFallbackNotice[2m > [22mresolves fallback labels from provenance tiers and source mix ids
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mui-density lib[2m > [22mvalidates known density values
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mui-density lib[2m > [22mreturns the default density when nothing is stored
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mui-density lib[2m > [22mreturns the stored density when it is valid
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mui-density lib[2m > [22mfalls back to default when stored value is invalid
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mui-density lib[2m > [22mpersists the density value to localStorage
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22museUIDensity hook[2m > [22minitialises with the stored density value
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22museUIDensity hook[2m > [22minitialises with the default when nothing is stored
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22museUIDensity hook[2m > [22msetDensity persists the new value and updates state
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22museUIDensity hook[2m > [22mtoggleDensity switches between beginner and pro
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22museUIDensity hook[2m > [22msyncs state when another instance emits the change event
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22museUIDensity hook[2m > [22misBeginnerMode is false when density is pro
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mdensity preference persistence across mounts[2m > [22mpersists the selection between hook unmount and remount
+ [32m✓[39m hooks/use-ui-density.test.ts[2m > [22mdensity preference persistence across mounts[2m > [22mlayout is affected: isBeginnerMode changes after toggling
+ [32m✓[39m app/data-sources/page.test.ts[2m > [22mDataSourcesPage[2m > [22mrenders grouped source cards and health summary
+ [32m✓[39m components/models/sector-context-panel.test.ts[2m > [22mSectorContextPanel[2m > [22mrenders plugin cards, metrics, and charts
+ [32m✓[39m components/company/source-freshness-timeline.test.ts[2m > [22mSourceFreshnessTimeline[2m > [22mrenders graceful placeholders when freshness fields are missing
+ [32m✓[39m components/company/source-freshness-timeline.test.ts[2m > [22mSourceFreshnessTimeline[2m > [22mshows endpoint-level cache status when performance audit data is available
+ [32m✓[39m hooks/use-forecast-accuracy.test.ts[2m > [22museForecastAccuracy[2m > [22mhandles success state
+ [32m✓[39m hooks/use-forecast-accuracy.test.ts[2m > [22museForecastAccuracy[2m > [22mhandles error state
+ [32m✓[39m hooks/use-forecast-accuracy.test.ts[2m > [22museForecastAccuracy[2m > [22msupports disabled mode
+ [32m✓[39m lib/local-user-data.test.ts[2m > [22mlocal user data transfer helpers[2m > [22mexports LocalUserData using the existing watchlist and notes contract
+ [32m✓[39m lib/local-user-data.test.ts[2m > [22mlocal user data transfer helpers[2m > [22mimports LocalUserData JSON and normalizes ticker casing
+ [32m✓[39m lib/local-user-data.test.ts[2m > [22mlocal user data transfer helpers[2m > [22msaves and deletes custom watchlist views
+ [32m✓[39m lib/local-user-data.test.ts[2m > [22mlocal user data transfer helpers[2m > [22mclears all local user data
+ [32m✓[39m lib/local-user-data.test.ts[2m > [22mlocal user data transfer helpers[2m > [22mthrows a clear error on invalid import JSON
+ [32m✓[39m hooks/use-forecast-accuracy.test.ts[2m > [22museForecastAccuracy[2m > [22maborts the prior forecast accuracy request when inputs change
+ [32m✓[39m components/company/financial-statement-change-heatmap.test.ts[2m > [22mFinancialStatementChangeHeatmap[2m > [22mrenders statement toggles, mode toggles, and source-linked heatmap cells[33m 924[2mms[22m[39m
+ [32m✓[39m components/company/financial-statement-change-heatmap.test.ts[2m > [22mFinancialStatementChangeHeatmap[2m > [22mshows an explanatory state when less than two periods are available
+ [32m✓[39m hooks/use-job-stream.test.ts[2m > [22museJobStream[2m > [22mdedupes duplicate subscriptions for the same job id
+ [32m✓[39m hooks/use-job-stream.test.ts[2m > [22museJobStream[2m > [22msurfaces reconnect transitions without creating a second event source
+ [32m✓[39m hooks/use-job-stream.test.ts[2m > [22museJobStream[2m > [22mcloses the shared stream after a terminal event while preserving the final event
+ [32m✓[39m components/company/bank-regulatory-overview.test.ts[2m > [22mBankRegulatoryOverview[2m > [22mshows selected, compare, and trend state for regulated-bank snapshots
+ [32m✓[39m lib/company-workspace-prefetch.test.ts[2m > [22mprefetchCompanyWorkspaceTabs[2m > [22mskips requests when all tab caches are fresh
+ [32m✓[39m lib/company-workspace-prefetch.test.ts[2m > [22mprefetchCompanyWorkspaceTabs[2m > [22mprefetches only stale or missing tab payloads
+ [32m✓[39m lib/company-workspace-prefetch.test.ts[2m > [22mprefetchCompanyWorkspaceTabs[2m > [22mskips prefetch while offline
+ [32m✓[39m app/compare/page.test.tsx[2m > [22mComparePage[2m > [22mrenders an empty state when tickers are missing
+ [32m✓[39m app/compare/page.test.tsx[2m > [22mComparePage[2m > [22mloads and renders compare tables for requested tickers
+ [32m✓[39m components/company/chart-share-actions.test.tsx[2m > [22mChartShareActions[2m > [22mcreates a snapshot and copies the share link
+ [32m✓[39m components/company/chart-share-actions.test.tsx[2m > [22mChartShareActions[2m > [22mcopies a live captured image when a capture target is provided
+ [32m✓[39m components/company/brief-primitives.panel-error-boundary.test.tsx[2m > [22mPanelErrorBoundary[2m > [22mrenders children when no error is thrown
+ [32m✓[39m components/company/brief-primitives.panel-error-boundary.test.tsx[2m > [22mPanelErrorBoundary[2m > [22mrenders a ResearchBriefStateBlock error state when a child throws
+ [32m✓[39m components/company/brief-primitives.panel-error-boundary.test.tsx[2m > [22mPanelErrorBoundary[2m > [22mdoes not propagate the error to the parent tree
+ [32m✓[39m components/company/brief-primitives.panel-error-boundary.test.tsx[2m > [22mPanelErrorBoundary[2m > [22mshows a generic message when the thrown value is not an Error instance
+ [32m✓[39m app/company/[ticker]/insiders/page.reload.test.ts[2m > [22mCompanyInsidersPage Form 144 refresh[2m > [22mrefetches Form 144 filings when workspace reloadKey changes
+ [32m✓[39m lib/local-screener.test.ts[2m > [22mlocal screener persistence[2m > [22mpersists a draft and builds a typed screener request
+ [32m✓[39m lib/local-screener.test.ts[2m > [22mlocal screener persistence[2m > [22mupserts presets by name and stores preset drafts with offset reset
+ [32m✓[39m lib/local-screener.test.ts[2m > [22mlocal screener persistence[2m > [22mcounts active filters across numeric inputs, booleans, quality flags, and universe
+ [32m✓[39m components/ui/source-freshness-summary.test.ts[2m > [22mSourceFreshnessSummary[2m > [22mrenders source registry metadata, freshness, and confidence flags
+ [32m✓[39m components/layout/company-research-header.test.ts[2m > [22mCompanyResearchHeader[2m > [22mrenders company facts, source ribbon items, and summary cards
+ [32m✓[39m components/layout/company-research-header.test.ts[2m > [22mCompanyResearchHeader[2m > [22mrenders freshness details including last checked and background revalidating status
+ [32m✓[39m hooks/use-chart-preferences.test.ts[2m > [22museChartPreferences[2m > [22mhydrates persisted preferences by chart family and filters invalid stored values
+ [32m✓[39m hooks/use-chart-preferences.test.ts[2m > [22museChartPreferences[2m > [22mpersists updates for the active chart family
+ [32m✓[39m components/ui/metric-confidence-badge.test.tsx[2m > [22mMetricConfidenceBadge[2m > [22mrenders key confidence chips when metadata exists
+ [32m✓[39m components/ui/metric-confidence-badge.test.tsx[2m > [22mMetricConfidenceBadge[2m > [22mopens and closes the details popover on click
+ [32m✓[39m components/ui/metric-confidence-badge.test.tsx[2m > [22mMetricConfidenceBadge[2m > [22mreturns null when confidence metadata is not available
+ [32m✓[39m lib/recent-companies.test.ts[2m > [22mrecent company helpers[2m > [22mrecords companies with normalized tickers and newest-first ordering
+ [32m✓[39m lib/recent-companies.test.ts[2m > [22mrecent company helpers[2m > [22mdedupes repeated companies and preserves known metadata
+ [32m✓[39m lib/recent-companies.test.ts[2m > [22mrecent company helpers[2m > [22mclears the recent company store
+ [32m✓[39m components/personal/company-device-panel.test.ts[2m > [22mCompanyDevicePanel[2m > [22msurfaces browser-only storage limitation clearly
+ [32m✓[39m components/personal/company-device-panel.test.ts[2m > [22mCompanyDevicePanel[2m > [22mtoggles watchlist and emits a toast
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps key GET helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps workspace POST helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps research workspace helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps workspace GET helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps source registry helper path unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps internal cache metrics helper path unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mserializes point-in-time query params for research helpers
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mserializes bounded price-history query params for chart-oriented financial helpers
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps charts helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps charts share snapshot helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mkeeps Projection Studio scenario helper paths unchanged
+ [32m✓[39m lib/api.routes.test.ts[2m > [22mapi route stability[2m > [22mserializes model payload expansions only when requested
+ [32m✓[39m components/company/charts-mode-switch.test.tsx[2m > [22mChartsModeSwitch[2m > [22mkeeps as_of when switching to studio
+ [32m✓[39m components/company/charts-mode-switch.test.tsx[2m > [22mChartsModeSwitch[2m > [22mdisables Projection Studio when unavailable
+ [32m✓[39m components/performance/deferred-client-section.test.ts[2m > [22mDeferredClientSection[2m > [22mrenders children immediately when IntersectionObserver is unavailable
+ [32m✓[39m components/performance/deferred-client-section.test.ts[2m > [22mDeferredClientSection[2m > [22mshows placeholder before observer intersection
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mreturns a string with the expected top-level heading
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes all nine required sections
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22membeds company identity fields
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes the snapshot narrative in the business summary section
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes financial metrics table with revenue and FCF
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mshows the correct operating margin in the financial table
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes what-changed narrative and change summary
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes capital signal rows in the capital section
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes the DCF fair value in the valuation section
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes the peer comparison table
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes monitor checklist items
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes provenance source links
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes the filing timeline
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes the export timestamp
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mhandles null company gracefully
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mhandles null latestFinancial gracefully
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mhandles empty provenance and filing timeline gracefully
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mhandles null models gracefully
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mhandles null peers gracefully
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes official-source-only label in freshness section
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes fallback source label when sourceMix has fallbacks
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes the capital structure summary in the capital section
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mincludes activity alert top items when available
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mproduces a memo that starts with a top-level heading
+ [32m✓[39m lib/investment-memo.test.ts[2m > [22mbuildInvestmentMemo[2m > [22mproduces a memo that ends with a generation timestamp footer
+ [32m✓[39m lib/local-compare-set.test.ts[2m > [22mlocal compare set helpers[2m > [22mnormalizes and stores compare companies
+ [32m✓[39m lib/local-compare-set.test.ts[2m > [22mlocal compare set helpers[2m > [22mremoves and clears compare companies
+ [32m✓[39m lib/local-compare-set.test.ts[2m > [22mlocal compare set helpers[2m > [22mbuilds a capped compare href
+ [32m✓[39m app/company/[ticker]/_lib/what-changed-summary.test.ts[2m > [22mbuildWhatChangedHighlights[2m > [22mbuilds ranked highlights for populated data
+ [32m✓[39m app/company/[ticker]/_lib/what-changed-summary.test.ts[2m > [22mbuildWhatChangedHighlights[2m > [22mhandles partial data with a graceful single highlight
+ [32m✓[39m app/company/[ticker]/_lib/what-changed-summary.test.ts[2m > [22mbuildWhatChangedHighlights[2m > [22mreturns an empty list when no source data is available
+ [32m✓[39m components/charts/governance-filing-chart.test.ts[2m > [22mGovernanceFilingChart[2m > [22msurfaces the foreign-issuer proxy-coverage caveat in the empty state
+ [32m✓[39m components/ui/source-state-badge.test.tsx[2m > [22mSourceStateBadge[2m > [22mrenders all supported source states consistently
+ [32m✓[39m lib/chart-spec.test.ts[2m > [22mchart-spec[2m > [22mbuilds a versioned spec from the legacy charts payload
+ [32m✓[39m lib/chart-spec.test.ts[2m > [22mchart-spec[2m > [22mserializes and deserializes a chart spec artifact
+ [32m✓[39m lib/chart-spec.test.ts[2m > [22mchart-spec[2m > [22mreturns null for malformed serialized chart spec payloads
+ [32m✓[39m lib/chart-spec.test.ts[2m > [22mchart-spec[2m > [22mrebuilds from legacy payload when chart_spec is malformed
+ [32m✓[39m lib/chart-share.test.ts[2m > [22mchart share snapshot builders[2m > [22mbuilds an outlook snapshot from the chart spec
+ [32m✓[39m lib/chart-share.test.ts[2m > [22mchart share snapshot builders[2m > [22mbuilds a studio snapshot from the visible studio payload
+ [32m✓[39m lib/chart-share.test.ts[2m > [22mchart share snapshot builders[2m > [22mnormalizes unsupported layouts back to landscape
+ [32m✓[39m components/home/economic-dashboard.test.ts[2m > [22mEconomicDashboard[2m > [22mrenders professional macro sections and current indicators
+ [32m✓[39m components/home/economic-dashboard.test.ts[2m > [22mEconomicDashboard[2m > [22mfalls back when provenance details are missing
+ [32m✓[39m components/company/chart-share-card.test.tsx[2m > [22mChartShareCard[2m > [22mrenders the outlook share card snapshot
+ [32m✓[39m components/company/chart-share-card.test.tsx[2m > [22mChartShareCard[2m > [22mrenders the studio share card snapshot
+ [32m✓[39m lib/chart-windowing.test.ts[2m > [22mchart windowing[2m > [22mfilters a date series to the selected trailing window without mutating the source array
+ [32m✓[39m lib/chart-windowing.test.ts[2m > [22mchart windowing[2m > [22mdownsamples large series while preserving the first and last points
+ [32m✓[39m lib/chart-windowing.test.ts[2m > [22mchart windowing[2m > [22mbuilds derived TTM rows from quarterly filings and preserves period labels
+ [32m✓[39m lib/chart-windowing.test.ts[2m > [22mchart windowing[2m > [22mapplies range filtering before downsampling
+ [32m✓[39m app/company/[ticker]/sec-feed/page.test.ts[2m > [22mCompanySecFeedPage[2m > [22mrenders SEC feed page panels and loading placeholders
+ [32m✓[39m app/company/[ticker]/error.test.tsx[2m > [22mCompanyRouteError[2m > [22mrenders a route-agnostic fallback and retries the current page[33m 315[2mms[22m[39m
+ [32m✓[39m lib/financial-chart-transforms.test.ts[2m > [22mfinancial chart transforms[2m > [22mbuildOperatingCostSeries sorts by period and keeps mapped cost fields
+ [32m✓[39m lib/financial-chart-transforms.test.ts[2m > [22mfinancial chart transforms[2m > [22mbuildCapitalMarketsSignalSeries aligns financing events to annual statement years
+ [32m✓[39m components/filings/filing-parser-insights.test.ts[2m > [22mFilingParserInsights[2m > [22mrenders latest filing metadata and SEC source link
+ [32m✓[39m components/filings/filing-parser-insights.test.ts[2m > [22mFilingParserInsights[2m > [22mrenders refresh-aware empty state when no insights exist
+ [32m✓[39m app/company/[ticker]/governance/page.test.ts[2m > [22mCompanyGovernancePage[2m > [22mrenders the shared governance workspace header and panels
+ [32m✓[39m components/tables/insider-transactions-table.test.ts[2m > [22mInsiderTransactionsTable[2m > [22mrenders filing metadata link when SEC source is present
+ [32m✓[39m components/tables/insider-transactions-table.test.ts[2m > [22mInsiderTransactionsTable[2m > [22mrenders accession text without a link when source is missing
+ [32m✓[39m components/tables/insider-transactions-table.test.ts[2m > [22mInsiderTransactionsTable[2m > [22mlabels planned sales clearly when 10b5-1 plan context is available
+ [32m✓[39m app/company/[ticker]/filings/page.test.ts[2m > [22mCompanyFilingsPage[2m > [22mrenders filing workspace panels and shell without crashing
+ [32m✓[39m components/filings/filing-risk-signals-panel.test.ts[2m > [22mFilingRiskSignalsPanel[2m > [22mrenders recent filing signals with high severity pinned first
+ [32m✓[39m components/filings/filing-risk-signals-panel.test.ts[2m > [22mFilingRiskSignalsPanel[2m > [22mrenders an empty-state message when no cached signals exist yet
+ [32m✓[39m components/tables/form144-filings-table.test.ts[2m > [22mForm144FilingsTable[2m > [22mrenders filer name and planned sale date
+ [32m✓[39m components/tables/form144-filings-table.test.ts[2m > [22mForm144FilingsTable[2m > [22mrenders the SEC source link when source_url is present
+ [32m✓[39m components/tables/form144-filings-table.test.ts[2m > [22mForm144FilingsTable[2m > [22mrenders accession text without a link when source_url is null
+ [32m✓[39m components/tables/form144-filings-table.test.ts[2m > [22mForm144FilingsTable[2m > [22mshows empty state when filings array is empty
+ [32m✓[39m components/tables/form144-filings-table.test.ts[2m > [22mForm144FilingsTable[2m > [22mshows loading state when loading and no filings
+ [32m✓[39m lib/annual-financial-scope.test.ts[2m > [22mresolveAnnualFinancialScope[2m > [22mmaps quarterly custom comparison to the matching annual filing
+ [32m✓[39m lib/annual-financial-scope.test.ts[2m > [22mresolveAnnualFinancialScope[2m > [22mkeeps the full visible annual range instead of truncating it
+ [32m✓[39m lib/annual-financial-scope.test.ts[2m > [22mresolveAnnualFinancialScope[2m > [22mdoes not silently substitute a previous annual when custom compare collapses to the same fiscal year
+ [32m✓[39m components/tables/hedge-fund-activity-table.test.ts[2m > [22mHedgeFundActivityTable[2m > [22mrenders filing form, filing date, accession number, and SEC source link
+ [32m✓[39m components/tables/hedge-fund-activity-table.test.ts[2m > [22mHedgeFundActivityTable[2m > [22mrenders amendment indicator when filing is an amendment
+ [32m✓[39m app/company/[ticker]/ownership-changes/page.test.ts[2m > [22mCompanyOwnershipChangesPage[2m > [22mrenders ownership sections including owner table and activist panel
+ [32m✓[39m app/company/[ticker]/events/page.test.ts[2m > [22mCompanyEventsPage[2m > [22mrenders event page sections and initial loading state
+ [32m✓[39m app/company/[ticker]/financials/page.server-cache.test.ts[2m > [22mfinancials server page caching[2m > [22muses Next revalidate and cache tags instead of no-store
+ [32m✓[39m lib/api.metrics-timeseries.test.ts[2m > [22mgetCompanyMetricsTimeseries[2m > [22msends cadence and max_points query params
+ [32m✓[39m lib/api.metrics-timeseries.test.ts[2m > [22mgetCompanyMetricsTimeseries[2m > [22mappends as_of when provided
+ [32m✓[39m lib/chart-share-server.test.ts[2m > [22mchart share metadata[2m > [22mbuilds OG metadata that points at the server image route
+ [32m✓[39m lib/api.auth.test.ts[2m > [22mapi auth headers provider[2m > [22mapplies provider headers to backend requests
+ [32m✓[39m lib/api.auth.test.ts[2m > [22mapi auth headers provider[2m > [22mclears provider state through the test reset helper
+ [32m✓[39m app/layout.test.ts[2m > [22mroot metadata[2m > [22muses NEXT_PUBLIC_SITE_URL when configured
+ [32m✓[39m app/layout.test.ts[2m > [22mroot metadata[2m > [22mfalls back to localhost when no valid site URL is configured
+ [32m✓[39m components/charts/company-visualization-lab.test.ts[2m > [22mcompany visualization helpers[2m > [22mcomputes margin, growth, and per-share modes
+ [32m✓[39m components/charts/company-visualization-lab.test.ts[2m > [22mcompany visualization helpers[2m > [22mbuilds cross-source annotations in date order
+ [32m✓[39m components/charts/company-visualization-lab.test.ts[2m > [22mcompany visualization helpers[2m > [22mbuilds cadence heatmap rows with average lag
+ [32m✓[39m components/charts/company-visualization-lab.test.ts[2m > [22mcompany visualization helpers[2m > [22mfilters rows by date range
+ [32m✓[39m lib/piotroski.test.ts[2m > [22mresolvePiotroskiScoreState[2m > [22mprefers the explicit comparable 9-point scale when present
+ [32m✓[39m lib/piotroski.test.ts[2m > [22mresolvePiotroskiScoreState[2m > [22mfalls back to scaling the raw score when only partial criteria are available
+ [32m✓[39m lib/export.test.ts[2m > [22mexport helpers[2m > [22mbuilds CSV with escaped values
+ [32m✓[39m lib/export.test.ts[2m > [22mexport helpers[2m > [22mbuilds readable plaintext tables
+ [32m✓[39m lib/export.test.ts[2m > [22mexport helpers[2m > [22mnormalizes export filenames
+ [32m✓[39m next.config.test.ts[2m > [22mnext security headers[2m > [22mkeeps production hardening headers enabled for all routes
+ [32m✓[39m lib/chart-capabilities.test.ts[2m > [22mchart capabilities[2m > [22mfilters invalid pie-family types from time-series datasets
+ [32m✓[39m lib/chart-capabilities.test.ts[2m > [22mchart capabilities[2m > [22mfalls back to the dataset defaults when requested types are all invalid
+ [32m✓[39m lib/chart-capabilities.test.ts[2m > [22mchart capabilities[2m > [22mpreserves pie-family types for composition datasets
+ [32m✓[39m app/company/[ticker]/stakes/page.test.ts[2m > [22mCompanyStakesRedirectPage[2m > [22mredirects the legacy stakes route to ownership-changes
+
+[2m Test Files [22m [1m[32m103 passed[39m[22m[90m (103)[39m
+[2m      Tests [22m [1m[32m412 passed[39m[22m[90m (412)[39m
+[2m   Start at [22m 13:07:49
+[2m   Duration [22m 30.56s[2m (transform 4.98s, setup 23.94s, collect 16.74s, tests 42.51s, environment 93.53s, prepare 10.40s)[22m
+

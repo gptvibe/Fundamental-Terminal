@@ -10,6 +10,7 @@ import type { FinancialPayload, SegmentAnalysisPayload } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
+  usePathname: () => "/company/acme",
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -357,5 +358,39 @@ describe("BusinessSegmentBreakdown", () => {
     expect(screen.getByText("Sparse visible history")).toBeTruthy();
     expect(screen.getByText("No prior comparable disclosure")).toBeTruthy();
     expect(screen.getByText("Partial operating income disclosure")).toBeTruthy();
+  });
+
+  it("shows geographic disclosure empty-state messaging when no geography facts are present", () => {
+    const financials: FinancialPayload[] = [
+      financialPayload("2025-12-31", 1_000, 260, [
+        { segment_id: "cloud", segment_name: "Cloud", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 520, share_of_revenue: 0.52, operating_income: 170, assets: null },
+        { segment_id: "devices", segment_name: "Devices", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 480, share_of_revenue: 0.48, operating_income: 90, assets: null },
+      ]),
+    ];
+
+    render(React.createElement(BusinessSegmentBreakdown, { financials, segmentAnalysis: null }));
+
+    expect(screen.getByText("Geographic Disclosure Snapshot")).toBeTruthy();
+    expect(screen.getByText("No geographic breakdown found in recent SEC XBRL facts")).toBeTruthy();
+    expect(screen.getByText("Company may disclose geography in narrative notes instead")).toBeTruthy();
+  });
+
+  it("renders geographic long-lived asset rows when those segment facts are available", () => {
+    const financials: FinancialPayload[] = [
+      financialPayload("2025-12-31", 1_000, 260, [
+        { segment_id: "cloud", segment_name: "Cloud", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 600, share_of_revenue: 0.6, operating_income: 200, assets: null },
+        { segment_id: "services", segment_name: "Services", axis_key: "StatementBusinessSegmentsAxis", axis_label: "Business Segments", kind: "business", revenue: 400, share_of_revenue: 0.4, operating_income: 60, assets: null },
+        { segment_id: "us", segment_name: "United States", axis_key: "StatementGeographicalAxis", axis_label: "Geographic Segments", kind: "geographic", revenue: null, share_of_revenue: null, operating_income: null, assets: 780 },
+        { segment_id: "emea", segment_name: "EMEA", axis_key: "StatementGeographicalAxis", axis_label: "Geographic Segments", kind: "geographic", revenue: null, share_of_revenue: null, operating_income: null, assets: 220 },
+      ]),
+    ];
+
+    render(React.createElement(BusinessSegmentBreakdown, { financials, segmentAnalysis: null }));
+
+    expect(screen.getByText("Geographic Disclosure Snapshot")).toBeTruthy();
+    expect(screen.getByText("Long-lived Assets")).toBeTruthy();
+    expect(screen.getByText("United States")).toBeTruthy();
+    expect(screen.getByText("EMEA")).toBeTruthy();
+    expect(screen.getByText(/Long-lived asset rows are shown exactly as reported/i)).toBeTruthy();
   });
 });

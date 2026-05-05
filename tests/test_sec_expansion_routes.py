@@ -206,6 +206,53 @@ def test_events_route_classifies_item_codes(monkeypatch):
     assert payload["events"][0]["exhibit_references"] == ["99.1"]
 
 
+def test_events_route_surfaces_structured_exhibit_previews(monkeypatch):
+    _install_common_overrides(monkeypatch, {})
+
+    preview_row = SimpleNamespace(
+        accession_number="0000099999-26-000001",
+        form="8-K",
+        filing_date=date(2026, 5, 1),
+        report_date=date(2026, 3, 31),
+        items="2.02,9.01",
+        item_code="2.02",
+        category="Earnings",
+        primary_document="acme-8k.htm",
+        primary_doc_description="Item 2.02 and Item 9.01 disclosures.",
+        source_url="https://www.sec.gov/Archives/edgar/data/1000000/000009999926000001/acme-8k.htm",
+        summary="Item 2.02 and Item 9.01 disclosures.",
+        key_amounts=[],
+        exhibit_references=[
+            "99.1",
+            {
+                "accession_number": "0000099999-26-000001",
+                "item_code": "2.02",
+                "exhibit_filename": "acme-ex99-1.htm",
+                "exhibit_type": "99.1",
+                "filing_date": "2026-05-01",
+                "source_url": "https://www.sec.gov/Archives/edgar/data/1000000/000009999926000001/acme-ex99-1.htm",
+                "snippet": "Acme reported quarterly earnings and reiterated guidance.",
+            },
+        ],
+    )
+    monkeypatch.setattr(main_module, "get_company_filing_events", lambda *_args, **_kwargs: [preview_row])
+
+    client = TestClient(app)
+    response = client.get("/api/companies/AAPL/events")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["events"]
+    event = payload["events"][0]
+    assert event["exhibit_references"] == ["99.1"]
+    assert event["exhibit_previews"]
+    preview = event["exhibit_previews"][0]
+    assert preview["accession_number"] == "0000099999-26-000001"
+    assert preview["exhibit_filename"] == "acme-ex99-1.htm"
+    assert preview["filing_date"] == "2026-05-01"
+    assert preview["source_url"].endswith("/acme-ex99-1.htm")
+
+
 def test_filing_events_alias_route_returns_events(monkeypatch):
     filings = {
         "0001": FilingMetadata(

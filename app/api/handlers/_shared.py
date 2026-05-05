@@ -137,6 +137,7 @@ from app.api.schemas import (  # noqa: F401
     EarningsSummaryPayload,
     ExecCompRowPayload,
     EquityClaimRiskSummaryPayload,
+    FilingEventExhibitPreviewPayload,
     FilingEventPayload,
     FilingEventsSummaryPayload,
     FilingParserControlsPayload,
@@ -9177,6 +9178,9 @@ def _serialize_filing_event(cik: str, filing: FilingMetadata) -> FilingEventPayl
 
 
 def _serialize_cached_filing_event(event) -> FilingEventPayload:
+    raw_exhibits = list(getattr(event, "exhibit_references", []) or [])
+    exhibit_references = [str(value) for value in raw_exhibits if isinstance(value, str)]
+    exhibit_previews = [_parse_filing_event_exhibit_preview(value) for value in raw_exhibits if isinstance(value, dict)]
     return FilingEventPayload(
         accession_number=event.accession_number,
         form=event.form,
@@ -9190,7 +9194,8 @@ def _serialize_cached_filing_event(event) -> FilingEventPayload:
         source_url=event.source_url,
         summary=event.summary,
         key_amounts=[float(value) for value in (event.key_amounts or [])],
-        exhibit_references=[str(value) for value in (getattr(event, "exhibit_references", []) or [])],
+        exhibit_references=exhibit_references,
+        exhibit_previews=[preview for preview in exhibit_previews if preview is not None],
     )
 
 
@@ -9209,7 +9214,44 @@ def _serialize_normalized_filing_event(event) -> FilingEventPayload:
         summary=event.summary,
         key_amounts=list(event.key_amounts),
         exhibit_references=list(event.exhibit_references),
+        exhibit_previews=[],
     )
+
+
+def _parse_filing_event_exhibit_preview(raw: dict[str, Any]) -> FilingEventExhibitPreviewPayload | None:
+    accession_number = str(raw.get("accession_number") or "").strip()
+    item_code = str(raw.get("item_code") or "").strip()
+    exhibit_filename = str(raw.get("exhibit_filename") or "").strip()
+    source_url = str(raw.get("source_url") or "").strip()
+    snippet = str(raw.get("snippet") or "").strip()
+    if not accession_number or not item_code or not exhibit_filename or not source_url or not snippet:
+        return None
+
+    filing_date = _parse_optional_date(raw.get("filing_date"))
+    exhibit_type = _normalize_optional_text(raw.get("exhibit_type"))
+    return FilingEventExhibitPreviewPayload(
+        accession_number=accession_number,
+        item_code=item_code,
+        exhibit_filename=exhibit_filename,
+        exhibit_type=exhibit_type,
+        filing_date=filing_date,
+        source_url=source_url,
+        snippet=snippet,
+    )
+
+
+def _parse_optional_date(value: Any) -> DateType | None:
+    if value is None:
+        return None
+    if isinstance(value, DateType):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return DateType.fromisoformat(text)
+    except ValueError:
+        return None
 
 
 def _build_filing_events_summary(events: list[FilingEventPayload]) -> FilingEventsSummaryPayload:

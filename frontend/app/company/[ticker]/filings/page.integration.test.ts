@@ -140,7 +140,34 @@ vi.mock("@/lib/api", () => ({
   })),
   getCompanyFilingEvents: vi.fn(async () => ({
     company: null,
-    events: [],
+    events: [
+      {
+        accession_number: "0000002",
+        form: "8-K",
+        filing_date: "2026-03-05",
+        report_date: "2026-03-04",
+        items: "2.02,9.01",
+        item_code: "2.02",
+        category: "Earnings",
+        primary_document: "current.htm",
+        primary_doc_description: "Item 2.02 earnings update",
+        source_url: "https://sec.example/2",
+        summary: "Item 2.02 earnings update",
+        key_amounts: [],
+        exhibit_references: ["99.1"],
+        exhibit_previews: [
+          {
+            accession_number: "0000002",
+            item_code: "2.02",
+            exhibit_filename: "acme-ex99-1.htm",
+            exhibit_type: "99.1",
+            filing_date: "2026-03-05",
+            source_url: "https://sec.example/2/acme-ex99-1.htm",
+            snippet: "Acme reported quarterly earnings and reaffirmed full-year guidance.",
+          },
+        ],
+      },
+    ],
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
     error: null,
   })),
@@ -157,5 +184,10 @@ describe("CompanyFilingsPage integration", () => {
 
     await user.click(screen.getByRole("button", { name: "0000002" }));
     expect(screen.getByText("viewer:0000002")).toBeTruthy();
+
+    await waitFor(() => {
+      expect(screen.getByText(/Exhibit preview/i)).toBeTruthy();
+      expect(screen.getByText(/Acme reported quarterly earnings/i)).toBeTruthy();
+    });
   });
 });

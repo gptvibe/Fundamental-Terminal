@@ -12,7 +12,7 @@ from app.api.handlers import filings as filings_handlers
 from app.db import get_db_session
 from app.main import RefreshState, app
 from app.services.filing_parser import ParsedFilingInsight
-from app.services.sec_edgar import _build_filing_risk_signal_payloads
+from app.services.sec_edgar import FilingMetadata, _build_filing_risk_signal_payloads
 
 
 def _snapshot(ticker: str = "AAPL", cik: str = "0000320193"):
@@ -96,6 +96,41 @@ def test_build_filing_risk_signal_payloads_uses_parser_output() -> None:
             "last_checked": checked_at,
         }
     ]
+
+
+def test_build_filing_risk_signal_payloads_includes_nt_repeat_signal_from_filing_index() -> None:
+    company = SimpleNamespace(id=7, ticker="ACME", cik="0000000007")
+    checked_at = datetime(2026, 5, 3, 9, 30, tzinfo=timezone.utc)
+    filing_index = {
+        "nt-q": FilingMetadata(
+            accession_number="0000000007-26-000090",
+            form="NT 10-Q",
+            filing_date=date(2026, 4, 10),
+            report_date=date(2026, 4, 10),
+            primary_document="nt10q.htm",
+        ),
+        "nt-k": FilingMetadata(
+            accession_number="0000000007-26-000060",
+            form="NT 10-K",
+            filing_date=date(2026, 2, 20),
+            report_date=date(2026, 2, 20),
+            primary_document="nt10k.htm",
+        ),
+    }
+
+    payloads = _build_filing_risk_signal_payloads(
+        company,
+        [],
+        checked_at,
+        filing_index=filing_index,
+    )
+
+    categories = {payload["signal_category"] for payload in payloads}
+    assert "nt_non_timely_10q" in categories
+    assert "nt_non_timely_10k" in categories
+    assert "nt_non_timely_repeat" in categories
+    repeated = next(payload for payload in payloads if payload["signal_category"] == "nt_non_timely_repeat")
+    assert repeated["severity"] == "high"
 
 
 def test_company_filing_risk_signals_route_exposes_recent_cached_signals(monkeypatch) -> None:
