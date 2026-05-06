@@ -1,5 +1,7 @@
 # Release Process
 
+Canonical maintainer runbook: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
+
 ## Why This Exists
 
 Published deploys need the frontend and backend to stay compatible. The frontend company workspace calls `/api/companies/{ticker}/workspace-bootstrap`, and that route only exists from commit `0ec767b` onward. A newer frontend paired with an older backend would hit a real API incompatibility on the company page.

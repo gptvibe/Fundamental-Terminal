@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.handlers import screener as handlers
-from app.api.schemas.screener import OfficialScreenerMetadataResponse, OfficialScreenerSearchResponse
+from app.api.schemas.screener import (
+    OfficialScreenerMetadataResponse,
+    OfficialScreenerSearchResponse,
+    SecFramesScreenerResponse,
+)
 from app.api.source_contracts import add_user_visible_route
 
 
@@ -22,6 +26,13 @@ def build_router() -> APIRouter:
         handlers.official_screener_search,
         methods=["POST"],
         response_model=OfficialScreenerSearchResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/screener/sec-frames",
+        handlers.sec_frames_screener,
+        methods=["GET"],
+        response_model=SecFramesScreenerResponse,
     )
     return router
 

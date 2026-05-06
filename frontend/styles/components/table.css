@@ -1,0 +1,25 @@
+.ag-theme-quartz {
+  --ag-background-color: var(--ag-background);
+  --ag-foreground-color: var(--ag-foreground);
+  --ag-border-color: var(--panel-border);
+  --ag-row-border-color: rgba(255, 255, 255, 0.03);
+  --ag-header-background-color: var(--ag-header-background);
+  --ag-header-foreground-color: var(--ag-header-foreground);
+  --ag-odd-row-background-color: var(--ag-odd-row-background);
+  --ag-row-hover-color: var(--ag-row-hover);
+  --ag-selected-row-background-color: var(--ag-selected-row);
+  --ag-font-family: var(--font-stack);
+  --ag-font-size: var(--text-sm);
+  --ag-cell-horizontal-padding: 8px;
+  --ag-grid-size: 4px;
+  --ag-row-height: 30px;
+  --ag-header-height: 34px;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+:root[data-theme="light"] .ag-theme-quartz {
+  --ag-border-color: rgba(0, 0, 0, 0.08);
+  --ag-row-border-color: rgba(0, 0, 0, 0.04);
+}

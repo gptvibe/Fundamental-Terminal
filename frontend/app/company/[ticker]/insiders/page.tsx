@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import dynamic from "next/dynamic";
 
-import { InsiderActivityTrendChart } from "@/components/charts/insider-activity-trend-chart";
-import { InsiderRoleActivityChart } from "@/components/charts/insider-role-activity-chart";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
@@ -14,10 +13,21 @@ import { Form144FilingsTable } from "@/components/tables/form144-filings-table";
 import { InsiderTransactionsTable } from "@/components/tables/insider-transactions-table";
 import { Panel } from "@/components/ui/panel";
 import { PlainEnglishScorecard } from "@/components/ui/plain-english-scorecard";
+import { ChartSkeleton } from "@/components/ui/skeletons";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyForm144Filings } from "@/lib/api";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 import type { CompanyForm144Response, InsiderActivitySummaryPayload } from "@/lib/types";
+
+const InsiderActivityTrendChart = dynamic(
+  () => import("@/components/charts/insider-activity-trend-chart").then((m) => m.InsiderActivityTrendChart),
+  { ssr: false, loading: () => <ChartSkeleton height={220} /> }
+);
+
+const InsiderRoleActivityChart = dynamic(
+  () => import("@/components/charts/insider-role-activity-chart").then((m) => m.InsiderRoleActivityChart),
+  { ssr: false, loading: () => <ChartSkeleton height={220} /> }
+);
 
 export default function CompanyInsidersPage() {
   const params = useParams<{ ticker: string }>();

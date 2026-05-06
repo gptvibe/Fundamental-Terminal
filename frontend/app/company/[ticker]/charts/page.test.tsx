@@ -226,7 +226,7 @@ describe("CompanyChartsPage", () => {
     });
     render(jsx);
 
-    expect(screen.getByText("Charts for this company are unavailable or not yet prepared.")).toBeTruthy();
+    expect(screen.getAllByText("Charts for this company are unavailable or not yet prepared.").length).toBeGreaterThan(0);
     expect(screen.queryByText(/API request failed:/i)).toBeNull();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });

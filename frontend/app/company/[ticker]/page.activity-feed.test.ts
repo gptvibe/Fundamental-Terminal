@@ -75,22 +75,6 @@ vi.mock("@/lib/export", async () => {
 });
 
 vi.mock("@/components/layout/company-research-header", () => ({
-  CompanyResearchHeader: ({
-    title,
-    freshness,
-    children,
-  }: {
-    title: string;
-    freshness?: { detailLines?: Array<string | null | undefined> };
-    children?: React.ReactNode;
-  }) =>
-    React.createElement(
-      "header",
-      null,
-      React.createElement("h1", null, title),
-      (freshness?.detailLines ?? []).filter(Boolean).map((line) => React.createElement("p", { key: line }, line)),
-      children,
-    ),
   CompanyMetricGrid: ({ items }: { items: Array<{ label: string; value: string | null }> }) =>
     React.createElement(
       "div",
@@ -266,7 +250,11 @@ describe("CompanyResearchBriefPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText("Jane Doe filed Form 144 planned sale").length).toBeGreaterThan(0);
+      expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Form 144 planned sale/i).length).toBeGreaterThan(0);
       expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
     });
 

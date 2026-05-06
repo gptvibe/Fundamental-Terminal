@@ -227,3 +227,37 @@ class OfficialScreenerSearchResponse(ProvenanceEnvelope):
     query: OfficialScreenerQueryPayload
     coverage: ScreenerCoverageSummaryPayload
     results: list[ScreenerResultPayload] = Field(default_factory=list)
+
+
+class SecFrameFactPayload(BaseModel):
+    value: float | None = None
+    end_date: DateType | None = None
+    period_label: str | None = None
+    unit: str = ""
+    label: str = ""
+    missing: bool = False
+    accession_number: str = ""
+
+
+class SecFrameCompanyPayload(BaseModel):
+    cik: str
+    entity_name: str = ""
+    facts: dict[str, SecFrameFactPayload] = Field(default_factory=dict)
+
+
+class SecFramesSnapshotSummaryPayload(BaseModel):
+    concept_key: str
+    label: str = ""
+    period_label: str = ""
+    fiscal_year: int
+    fiscal_quarter: int | None = None
+    pts: int = 0
+    fetched_at: datetime | None = None
+
+
+class SecFramesScreenerResponse(ProvenanceEnvelope):
+    snapshots: list[SecFramesSnapshotSummaryPayload] = Field(default_factory=list)
+    companies: list[SecFrameCompanyPayload] = Field(default_factory=list)
+    total_companies: int = 0
+    covered_concepts: list[str] = Field(default_factory=list)
+    missing_concepts: list[str] = Field(default_factory=list)

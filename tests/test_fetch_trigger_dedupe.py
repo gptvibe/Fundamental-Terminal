@@ -37,6 +37,8 @@ def test_queue_company_refresh_normalizes_and_enqueues(monkeypatch):
         "kind": "refresh",
         "dataset": "company_refresh",
         "force": True,
+        "reason": "manual",
+        "as_of": None,
     }
 
 

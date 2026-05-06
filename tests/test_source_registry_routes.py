@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.api.handlers import source_registry as source_registry_module
 from app.api.schemas.source_registry import SourceRegistryErrorPayload, SourceRegistryHealthPayload
 from app.db import get_db_session
 from app.main import app
@@ -91,6 +92,9 @@ def test_source_registry_endpoint_returns_sources_and_health(monkeypatch):
     assert sources["sec_companyfacts"]["strict_official_mode_state"] == "available"
     assert sources["yahoo_finance"]["strict_official_mode_state"] == "disabled"
     assert "suppressed" in sources["yahoo_finance"]["strict_official_mode_note"].lower()
+    assert "/api/companies/{ticker}/financials" in sources["sec_companyfacts"]["used_by_paths"]
+    assert sources["sec_companyfacts"]["last_success_at"] is None
+    assert sources["sec_companyfacts"]["is_stale"] is False
 
 
 def test_source_registry_endpoint_degrades_when_health_query_fails(monkeypatch):
@@ -174,3 +178,33 @@ def test_build_source_registry_error_payloads_aggregates_by_source():
     assert yahoo_finance.failure_count == 4
     assert yahoo_finance.last_error == "quote timeout"
     assert yahoo_finance.last_error_at == now - timedelta(hours=2)
+
+
+def test_build_source_registry_status_by_source_aggregates_latest_success_and_stale_state():
+    now = datetime(2026, 1, 20, 12, 0, tzinfo=timezone.utc)
+    session = _FakeErrorSession(
+        [
+            ("financials", now - timedelta(hours=5), now - timedelta(hours=1), None, now - timedelta(minutes=20)),
+            ("prices", now - timedelta(minutes=45), now - timedelta(minutes=5), "quote timeout", now - timedelta(minutes=10)),
+            ("earnings_models", now - timedelta(hours=2), now - timedelta(hours=3), "model refresh stalled", now - timedelta(minutes=15)),
+            ("unknown_dataset", now - timedelta(hours=1), now + timedelta(hours=1), "ignore me", now - timedelta(minutes=5)),
+        ]
+    )
+
+    payload = source_registry_module._build_source_registry_status_by_source(session, now=now)
+
+    assert payload["sec_companyfacts"]["last_success_at"] == now - timedelta(hours=5)
+    assert payload["sec_companyfacts"]["is_stale"] is True
+    assert payload["yahoo_finance"]["last_success_at"] == now - timedelta(minutes=45)
+    assert payload["yahoo_finance"]["last_error"] == "quote timeout"
+    assert payload["yahoo_finance"]["last_error_at"] == now - timedelta(minutes=10)
+    assert payload["yahoo_finance"]["is_stale"] is True
+    assert payload["ft_model_engine"]["last_error"] == "model refresh stalled"
+
+
+def test_build_source_registry_usage_paths_maps_sources_to_user_visible_routes():
+    payload = source_registry_module._build_source_registry_usage_paths()
+
+    assert "/api/companies/{ticker}/financials" in payload["sec_companyfacts"]
+    assert "/api/companies/search" in payload["sec_edgar"]
+    assert "/api/source-registry" not in payload["sec_companyfacts"]

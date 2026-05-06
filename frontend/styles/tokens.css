@@ -1,0 +1,287 @@
+:root {
+  /* ── Surfaces ── */
+  --bg: #0a0a0b;
+  --bg-accent: none;
+  --panel: #111214;
+  --panel-alt: #16181b;
+  --panel-border: rgba(255, 255, 255, 0.06);
+
+  /* ── Text ── */
+  --text: #d4d4d8;
+  --text-soft: #adadb6;
+  --text-muted: #9b9ba5;
+  --text-primary: var(--text);
+  --text-secondary: var(--text-soft);
+  --text-tertiary: var(--text-muted);
+
+  /* ── Accent (single) ── */
+  --accent: #7eb8da;
+  --action-accent: #8fa5b6;
+  --accent-cyan: var(--accent);
+  --accent-warning: var(--warning);
+
+  /* ── Semantic ── */
+  --positive: #4ade80;
+  --negative: #f87171;
+  --warning: #fbbf24;
+  --green: #4ade80;
+  --gold: #fbbf24;
+  --cyan: #7eb8da;
+  --danger: #f87171;
+
+  /* ── Shadows (panels have none — only tooltips/dropdowns) ── */
+  --shadow: none;
+  --tooltip-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+  --elevated-shadow: 0 8px 20px rgba(0, 0, 0, 0.24);
+
+  /* ── Surfaces ── */
+  --surface-soft: rgba(17, 18, 20, 0.96);
+  --surface-soft-alt: rgba(22, 24, 27, 0.94);
+  --surface-page: var(--bg);
+  --surface-panel: var(--panel);
+  --surface-panel-alt: var(--panel-alt);
+  --surface-pill-bg: rgba(113, 113, 122, 0.10);
+  --surface-pill-border: rgba(113, 113, 122, 0.18);
+  --surface-pill-text: #b0b0ba;
+  --surface-strong-text: #e4e4e7;
+  --surface-muted-text: #8b8b95;
+
+  /* ── Tooltip ── */
+  --tooltip-bg: #16181b;
+  --tooltip-border: rgba(255, 255, 255, 0.08);
+  --tooltip-text: #e4e4e7;
+  --tooltip-muted: #adadb6;
+
+  /* ── Console ── */
+  --console-bg: #0e0f11;
+  --console-border: rgba(255, 255, 255, 0.06);
+  --console-text: #d4d4d8;
+  --console-muted: #8b8b95;
+
+  /* ── Chart palette ── */
+  --chart-grid: rgba(255, 255, 255, 0.04);
+  --chart-axis: #8a8a94;
+  --chart-legend: #adadb6;
+  --chart-series-1: #7eb8da;
+  --chart-series-2: #4ade80;
+  --chart-series-3: #fbbf24;
+  --chart-series-4: #f87171;
+  --chart-series-5: #a78bfa;
+  --chart-series-6: #94a3b8;
+
+  /* ── Spacing & Shape ── */
+  --radius: 6px;
+  --radius-sm: 5px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+  --space-7: 32px;
+
+  /* ── Focus ── */
+  --focus-ring: 0 0 0 2px rgba(126, 184, 218, 0.3);
+
+  /* ── Layout ── */
+  --workspace-sticky-top: calc(var(--command-height) + var(--mobile-nav-height) + 52px);
+
+  /* ── Card surfaces (flat) ── */
+  --surface-card: var(--panel);
+  --surface-card-strong: var(--panel-alt);
+  --state-loading-bg: var(--panel);
+  --state-empty-bg: var(--panel);
+  --state-success-bg: color-mix(in srgb, var(--positive) 8%, var(--panel));
+  --state-warning-bg: color-mix(in srgb, var(--warning) 8%, var(--panel));
+  --state-danger-bg: color-mix(in srgb, var(--danger) 8%, var(--panel));
+  --state-error-border: var(--danger);
+
+  /* ── Consistent layout primitives ── */
+  --border-subtle: var(--panel-border);
+  --panel-padding: 12px;
+  --panel-padding-tight: 10px;
+  --table-header-height: 36px;
+  --table-row-height: 34px;
+  --table-cell-padding-x: 12px;
+  --table-cell-padding-y: 10px;
+
+  /* ── Shell ── */
+  --command-height: 52px;
+  --mobile-nav-height: 0px;
+
+  /* ── Typography ── */
+  --font-stack: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  /* ── Text scale ── */
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+
+  /* ── AG Grid ── */
+  --ag-background: #111214;
+  --ag-foreground: #d4d4d8;
+  --ag-header-background: #16181b;
+  --ag-header-foreground: #adadb6;
+  --ag-odd-row-background: rgba(255, 255, 255, 0.015);
+  --ag-row-hover: rgba(126, 184, 218, 0.06);
+  --ag-selected-row: rgba(74, 222, 128, 0.08);
+
+  /* ── Charts workspace ── */
+  --charts-surface-border: rgba(255, 255, 255, 0.07);
+  --charts-surface-bg: color-mix(in srgb, var(--panel) 96%, #0d0f12);
+  --charts-hero-bg: color-mix(in srgb, var(--panel) 94%, #0c1118);
+  --charts-highlight-panel-bg: color-mix(in srgb, var(--panel-alt) 92%, #11161d);
+  --charts-hero-card-border: rgba(255, 255, 255, 0.06);
+  --charts-hero-card-bg: rgba(255, 255, 255, 0.025);
+  --charts-pill-border: rgba(255, 255, 255, 0.08);
+  --charts-pill-bg: rgba(255, 255, 255, 0.03);
+  --charts-pill-text: #cbd3dd;
+  --charts-chip-border: rgba(123, 224, 167, 0.18);
+  --charts-chip-bg: rgba(123, 224, 167, 0.06);
+  --charts-chip-text: #a8f0c0;
+  --charts-title-text: #f5f6f8;
+  --charts-body-text: #aab2bc;
+  --charts-label-text: #96a1ad;
+  --charts-status-text: #d7dee7;
+  --charts-caption-text: #8d98a4;
+  --charts-card-text: #f5f6f8;
+  --charts-subcard-border: rgba(255, 255, 255, 0.06);
+  --charts-subcard-bg: rgba(255, 255, 255, 0.025);
+  --charts-accent-border: rgba(255, 177, 95, 0.5);
+  --charts-accent-bg: rgba(255, 177, 95, 0.14);
+  --charts-accent-text: #ffd8ad;
+  --charts-forecast-region: rgba(123, 224, 167, 0.09);
+  --charts-forecast-divider: rgba(242, 239, 230, 0.5);
+  --charts-chart-cursor: rgba(242, 239, 230, 0.28);
+  --charts-event-marker: rgba(255, 177, 95, 0.48);
+  --charts-comparison-series: #7f8a96;
+  --charts-end-label: #d7dee7;
+  --charts-series-reported: #f2efe6;
+  --charts-series-forecast: #7be0a7;
+  --charts-series-context: #8ebbe2;
+  --charts-series-warning: #e9c85d;
+  --charts-series-alert: #f0877f;
+  --charts-series-muted: #c7d0d9;
+  --charts-series-growth: #79e08d;
+  --charts-series-growth-context: #45674f;
+  --charts-series-profit-1: #ffb15f;
+  --charts-series-profit-2: #ffd56c;
+  --charts-series-profit-3: #77d3ff;
+  --charts-series-cash-1: #7a88ff;
+  --charts-series-cash-2: #d87dff;
+  --charts-series-cash-3: #9ba6b2;
+  --charts-series-eps-1: #d6a04a;
+  --charts-series-eps-2: #8f6f33;
+  --charts-mode-switch-bg: rgba(255, 255, 255, 0.03);
+  --charts-mode-switch-hover-bg: rgba(255, 255, 255, 0.05);
+  --charts-mode-switch-active-bg: #f2efe6;
+  --charts-mode-switch-active-text: #0a0a0b;
+  --chart-share-control-bg: rgba(17, 24, 39, 0.82);
+  --chart-share-control-border: rgba(255, 255, 255, 0.12);
+  --chart-share-control-text: #f6f3ed;
+  --chart-share-status-color: #d1dae3;
+}
+
+:root[data-theme="light"] {
+  --bg: #f8f9fa;
+  --bg-accent: none;
+  --panel: #ffffff;
+  --panel-alt: #f4f4f5;
+  --panel-border: rgba(0, 0, 0, 0.08);
+  --text: #27272a;
+  --text-soft: #3f3f46;
+  --text-muted: #71717a;
+  --text-primary: var(--text);
+  --text-secondary: var(--text-soft);
+  --text-tertiary: var(--text-muted);
+  --shadow: none;
+  --elevated-shadow: 0 8px 18px rgba(15, 23, 42, 0.12);
+  --surface-page: var(--bg);
+  --surface-panel: var(--panel);
+  --surface-panel-alt: var(--panel-alt);
+  --surface-soft: rgba(255, 255, 255, 0.98);
+  --surface-soft-alt: rgba(244, 244, 245, 0.97);
+  --surface-pill-bg: rgba(113, 113, 122, 0.08);
+  --surface-pill-border: rgba(113, 113, 122, 0.18);
+  --surface-pill-text: #3f3f46;
+  --surface-strong-text: #18181b;
+  --surface-muted-text: #71717a;
+  --tooltip-bg: #ffffff;
+  --tooltip-border: rgba(0, 0, 0, 0.10);
+  --tooltip-text: #18181b;
+  --tooltip-muted: #3f3f46;
+  --tooltip-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+  --console-bg: #ffffff;
+  --console-border: rgba(0, 0, 0, 0.08);
+  --console-text: #27272a;
+  --console-muted: #71717a;
+  --chart-grid: rgba(0, 0, 0, 0.06);
+  --chart-axis: #71717a;
+  --chart-legend: #3f3f46;
+  --ag-background: #ffffff;
+  --ag-foreground: #27272a;
+  --ag-header-background: #f4f4f5;
+  --ag-header-foreground: #52525b;
+  --ag-odd-row-background: rgba(0, 0, 0, 0.015);
+  --ag-row-hover: rgba(126, 184, 218, 0.08);
+  --ag-selected-row: rgba(74, 222, 128, 0.08);
+  --charts-surface-border: rgba(15, 23, 42, 0.08);
+  --charts-surface-bg: color-mix(in srgb, var(--panel) 94%, #eef0f3);
+  --charts-hero-bg: color-mix(in srgb, var(--panel) 96%, #f3f5f8);
+  --charts-highlight-panel-bg: color-mix(in srgb, var(--panel-alt) 92%, #eef2f7);
+  --charts-hero-card-border: rgba(15, 23, 42, 0.08);
+  --charts-hero-card-bg: rgba(255, 255, 255, 0.72);
+  --charts-pill-border: rgba(15, 23, 42, 0.08);
+  --charts-pill-bg: rgba(15, 23, 42, 0.03);
+  --charts-pill-text: #475569;
+  --charts-chip-border: rgba(34, 197, 94, 0.18);
+  --charts-chip-bg: rgba(34, 197, 94, 0.1);
+  --charts-chip-text: #166534;
+  --charts-title-text: #111827;
+  --charts-body-text: #4b5563;
+  --charts-label-text: #64748b;
+  --charts-status-text: #1f2937;
+  --charts-caption-text: #64748b;
+  --charts-card-text: #111827;
+  --charts-subcard-border: rgba(15, 23, 42, 0.08);
+  --charts-subcard-bg: rgba(15, 23, 42, 0.035);
+  --charts-accent-border: rgba(217, 119, 6, 0.3);
+  --charts-accent-bg: rgba(245, 158, 11, 0.12);
+  --charts-accent-text: #b45309;
+  --charts-forecast-region: rgba(34, 197, 94, 0.11);
+  --charts-forecast-divider: rgba(15, 23, 42, 0.22);
+  --charts-chart-cursor: rgba(15, 23, 42, 0.16);
+  --charts-event-marker: rgba(217, 119, 6, 0.32);
+  --charts-comparison-series: #64748b;
+  --charts-end-label: #334155;
+  --charts-series-reported: #334155;
+  --charts-series-forecast: #16a34a;
+  --charts-series-context: #2563eb;
+  --charts-series-warning: #ca8a04;
+  --charts-series-alert: #dc2626;
+  --charts-series-muted: #94a3b8;
+  --charts-series-growth: #22c55e;
+  --charts-series-growth-context: #166534;
+  --charts-series-profit-1: #ea580c;
+  --charts-series-profit-2: #ca8a04;
+  --charts-series-profit-3: #0284c7;
+  --charts-series-cash-1: #4f46e5;
+  --charts-series-cash-2: #9333ea;
+  --charts-series-cash-3: #64748b;
+  --charts-series-eps-1: #b45309;
+  --charts-series-eps-2: #92400e;
+  --charts-mode-switch-bg: rgba(15, 23, 42, 0.04);
+  --charts-mode-switch-hover-bg: rgba(15, 23, 42, 0.06);
+  --charts-mode-switch-active-bg: #111827;
+  --charts-mode-switch-active-text: #f8fafc;
+  --chart-share-control-bg: rgba(255, 255, 255, 0.82);
+  --chart-share-control-border: rgba(15, 23, 42, 0.12);
+  --chart-share-control-text: #0f172a;
+  --chart-share-status-color: #475569;
+}

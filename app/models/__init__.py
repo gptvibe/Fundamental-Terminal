@@ -35,6 +35,8 @@ from app.models.proxy_vote_result import ProxyVoteResult
 from app.models.refresh_job import RefreshJob
 from app.models.refresh_job_event import RefreshJobEvent
 from app.models.research_workspace import ResearchWorkspace
+from app.models.sec_frame_snapshot import SecFrameSnapshot
+from app.models.sec_frame_company_fact import SecFrameCompanyFact
 
 __all__ = [
     "BeneficialOwnershipParty",
@@ -74,4 +76,6 @@ __all__ = [
     "RefreshJob",
     "RefreshJobEvent",
     "ResearchWorkspace",
+    "SecFrameSnapshot",
+    "SecFrameCompanyFact",
 ]

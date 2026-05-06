@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -61,6 +62,9 @@ def test_shared_status_broker_persists_jobs_and_prevents_duplicates(monkeypatch)
             .where(RefreshJob.job_id == job_id)
             .order_by(RefreshJobEvent.sequence)
         ).scalars().all()
+        job.updated_at = datetime.now(timezone.utc) - timedelta(seconds=180)
+        job.completed_at = datetime.now(timezone.utc) - timedelta(seconds=180)
+        session.commit()
 
     assert job.status == "completed"
     assert [event.stage for event in events] == ["queued", "started", "normalize", "complete"]
@@ -114,3 +118,51 @@ def test_shared_status_broker_formats_jobs_ahead_for_queued_job_events(monkeypat
 
     assert updated_payload["queue_position"] == 2
     assert updated_payload["jobs_ahead"] == 1
+
+
+def test_shared_status_broker_returns_existing_job_for_running_equivalent(monkeypatch) -> None:
+    _configure_sqlite_store(monkeypatch)
+    broker = status_stream.SharedStatusBroker(poll_interval_seconds=0.01)
+
+    job_id = broker.create_job(ticker="AAPL", kind="refresh", dataset="company_refresh", force=False, reason="stale")
+    claimed = broker.claim_next_job(worker_id="worker-1")
+
+    assert claimed is not None
+    assert claimed.job_id == job_id
+
+    duplicate_job_id = broker.create_job(ticker="AAPL", kind="refresh", dataset="company_refresh", force=False, reason="stale")
+
+    assert duplicate_job_id == job_id
+
+
+def test_shared_status_broker_dedupe_ttl_expiry_allows_new_job(monkeypatch) -> None:
+    session_factory = _configure_sqlite_store(monkeypatch)
+    broker = status_stream.SharedStatusBroker(poll_interval_seconds=0.01)
+    broker._dedupe_ttl = timedelta(seconds=60)
+
+    first_job_id = broker.create_job(ticker="MSFT", kind="refresh", dataset="company_refresh", force=False, reason="manual")
+    claimed = broker.claim_next_job(worker_id="worker-1")
+
+    assert claimed is not None
+    assert claimed.job_id == first_job_id
+
+    broker.complete(first_job_id, expected_claim_token=claimed.claim_token)
+
+    immediate_duplicate_job_id = broker.create_job(
+        ticker="MSFT",
+        kind="refresh",
+        dataset="company_refresh",
+        force=False,
+        reason="manual",
+    )
+    assert immediate_duplicate_job_id == first_job_id
+
+    stale_timestamp = datetime.now(timezone.utc) - timedelta(seconds=120)
+    with session_factory() as session:
+        job = session.execute(select(RefreshJob).where(RefreshJob.job_id == first_job_id)).scalar_one()
+        job.updated_at = stale_timestamp
+        job.completed_at = stale_timestamp
+        session.commit()
+
+    new_job_id = broker.create_job(ticker="MSFT", kind="refresh", dataset="company_refresh", force=False, reason="manual")
+    assert new_job_id != first_job_id

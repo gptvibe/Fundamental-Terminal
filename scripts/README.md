@@ -13,6 +13,7 @@ Helper scripts for development, validation, and benchmarking. Run from the repo 
 | `run_charts_validation.py` | Run chart/driver-forecast validation and emit regression + benchmark reports. |
 | `run_model_evaluation.py` | Run model evaluation harness and write results to `artifacts/model_eval/`. |
 | `run_performance_regression_gate.py` | Compare current benchmark numbers against `performance_regression_baseline.json` and fail on regressions. |
+| `smoke_release.sh` | Release smoke check for backend health plus key backend/frontend routes. Exits non-zero on any failure. |
 | `verify_deployment_compat.py` | Pre-flight check before production deploys (env vars, DB connectivity, migration state). |
 
 Run the Docker health-check verifier from the repo root:

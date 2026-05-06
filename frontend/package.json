@@ -9,7 +9,8 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "audit:performance": "node scripts/run-performance-audit.mjs"
+    "audit:performance": "node scripts/run-performance-audit.mjs",
+    "analyze": "cross-env ANALYZE=true next build"
   },
   "dependencies": {
     "ag-grid-community": "^33.3.2",
@@ -21,12 +22,14 @@
     "recharts": "^2.15.3"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^16.2.4",
     "@playwright/test": "^1.54.2",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "cross-env": "^10.1.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.0",
     "jsdom": "^29.0.0",

@@ -8,7 +8,7 @@ import { Panel } from "@/components/ui/panel";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useLocalScreener } from "@/hooks/use-local-screener";
 import { showAppToast } from "@/lib/app-toast";
-import { getOfficialScreenerMetadata, searchOfficialScreener } from "@/lib/api";
+import { getOfficialScreenerMetadata, getSecFramesScreener, searchOfficialScreener } from "@/lib/api";
 import { exportRowsToCsv } from "@/lib/export";
 import {
   DEFAULT_LOCAL_SCREENER_DRAFT,
@@ -22,6 +22,8 @@ import { formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
   OfficialScreenerMetadataResponse,
   OfficialScreenerSearchResponse,
+  SecFrameCompanyPayload,
+  SecFramesScreenerResponse,
   ScreenerFilterDefinitionPayload,
   ScreenerRankingDefinitionPayload,
   ScreenerRankingScoreKey,
@@ -121,6 +123,10 @@ export default function OfficialScreenerPage() {
   const [initialSearchStarted, setInitialSearchStarted] = useState(false);
   const [lastExecutedDraft, setLastExecutedDraft] = useState<LocalScreenerDraft | null>(null);
   const requestIdRef = useRef(0);
+    const [useOfficialOnly, setUseOfficialOnly] = useState(false);
+    const [secFramesData, setSecFramesData] = useState<SecFramesScreenerResponse | null>(null);
+    const [secFramesLoading, setSecFramesLoading] = useState(false);
+    const [secFramesError, setSecFramesError] = useState<string | null>(null);
 
   const filterMap = useMemo(
     () => new Map((metadata?.filters ?? []).map((definition) => [definition.field, definition])),
@@ -197,6 +203,25 @@ export default function OfficialScreenerPage() {
   useEffect(() => {
     void loadMetadata();
   }, [loadMetadata]);
+
+    const loadSecFrames = useCallback(async () => {
+      try {
+        setSecFramesLoading(true);
+        setSecFramesError(null);
+        const payload = await getSecFramesScreener();
+        setSecFramesData(payload);
+      } catch (error) {
+        setSecFramesError(error instanceof Error ? error.message : "Unable to load SEC frames data.");
+      } finally {
+        setSecFramesLoading(false);
+      }
+    }, []);
+
+    useEffect(() => {
+      if (useOfficialOnly) {
+        void loadSecFrames();
+      }
+    }, [useOfficialOnly, loadSecFrames]);
 
   useEffect(() => {
     if (!hydrated || !metadata || initialSearchStarted) {
@@ -507,6 +532,20 @@ export default function OfficialScreenerPage() {
               </div>
 
               <div className="screener-toggle-block">
+                <div className="screener-toggle-title">Data source</div>
+                <div className="screener-toggle-row">
+                  <button
+                    type="button"
+                    className={`ticker-button screener-toggle-pill${useOfficialOnly ? " is-active" : ""}`}
+                    onClick={() => setUseOfficialOnly((prev) => !prev)}
+                    aria-pressed={useOfficialOnly}
+                  >
+                    Official SEC metrics only
+                  </button>
+                </div>
+              </div>
+
+              <div className="screener-toggle-block">
                 <div className="screener-toggle-title">Exclude quality flags</div>
                 <div className="screener-toggle-row">
                   {qualityFlagOptions.length ? (
@@ -785,6 +824,18 @@ export default function OfficialScreenerPage() {
           />
         </Panel>
       ) : null}
+
+      {useOfficialOnly ? (
+        <Panel title="Official SEC Metrics" subtitle="Cross-company XBRL frames from SEC EDGAR. Values are official filings only; missing means no XBRL frame was found for that concept." className="screener-provenance-panel" variant="subtle">
+          {secFramesLoading ? (
+            <div className="screener-muted">Loading official SEC metrics...</div>
+          ) : secFramesError ? (
+            <div className="screener-muted">{secFramesError}</div>
+          ) : secFramesData ? (
+            <SecFramesTable data={secFramesData} />
+          ) : null}
+        </Panel>
+      ) : null}
     </div>
   );
 }
@@ -1027,4 +1078,49 @@ function getScreenerMetricSnapshot(
     return result.filing_quality.filing_lag_days;
   }
   return result.metrics[field];
+}
+
+function SecFramesTable({ data }: { data: SecFramesScreenerResponse }) {
+  const concepts = data.snapshots.map((s) => s.concept_key);
+  if (!data.companies.length) {
+    return (
+      <div className="screener-muted">
+        No company data found. Run an ingest job to populate SEC XBRL frame snapshots.
+      </div>
+    );
+  }
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: "left", padding: "4px 8px", borderBottom: "1px solid var(--color-border, #ddd)" }}>Company</th>
+            {data.snapshots.map((s) => (
+              <th key={s.concept_key} style={{ textAlign: "right", padding: "4px 8px", borderBottom: "1px solid var(--color-border, #ddd)" }}>
+                {s.label}
+                <div style={{ fontWeight: "normal", fontSize: "0.75em", opacity: 0.7 }}>{s.period_label}</div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.companies.map((company) => (
+            <tr key={company.cik}>
+              <td style={{ padding: "4px 8px", borderBottom: "1px solid var(--color-border, #ddd)" }}>
+                {company.entity_name || company.cik}
+              </td>
+              {concepts.map((concept) => {
+                const fact = company.facts[concept];
+                return (
+                  <td key={concept} style={{ textAlign: "right", padding: "4px 8px", borderBottom: "1px solid var(--color-border, #ddd)", opacity: fact?.missing ? 0.4 : 1 }}>
+                    {fact?.missing ? "—" : fact?.value != null ? fact.value.toLocaleString() : "—"}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }

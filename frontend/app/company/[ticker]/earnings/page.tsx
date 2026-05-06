@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { BottomAppendix } from "@/components/company/bottom-appendix";
-import { EarningsTrendChart, type EarningsTrendDatum } from "@/components/charts/earnings-trend-chart";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyMetricGrid, CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -14,12 +13,20 @@ import { DeferredClientSection } from "@/components/performance/deferred-client-
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { MetricLabel } from "@/components/ui/metric-label";
 import { Panel } from "@/components/ui/panel";
+import { ChartSkeleton } from "@/components/ui/skeletons";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyEarningsWorkspace } from "@/lib/api";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyEarningsWorkspaceResponse, EarningsAlertPayload, EarningsReleasePayload, FinancialPayload } from "@/lib/types";
 
 const EARNINGS_POLL_INTERVAL_MS = 3000;
+
+import type { EarningsTrendDatum } from "@/components/charts/earnings-trend-chart";
+
+const EarningsTrendChart = dynamic(
+  () => import("@/components/charts/earnings-trend-chart").then((m) => m.EarningsTrendChart),
+  { ssr: false, loading: () => <ChartSkeleton height={220} /> }
+);
 
 const DeferredSecHeavyModelsPanel = dynamic(
   () => import("@/components/earnings/sec-heavy-models-panel").then((module) => module.SecHeavyModelsPanel),

@@ -65,6 +65,11 @@ export interface SourceRegistryEntryPayload {
   disclosure_note: string;
   strict_official_mode_state: "available" | "disabled";
   strict_official_mode_note: string;
+  last_success_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  is_stale: boolean;
+  used_by_paths: string[];
 }
 
 export interface SourceRegistryErrorPayload {
@@ -2351,6 +2356,40 @@ export interface OfficialScreenerSearchResponse extends ProvenanceEnvelope {
   coverage: ScreenerCoverageSummaryPayload;
   results: ScreenerResultPayload[];
 }
+
+  export interface SecFrameFactPayload {
+    value: number | null;
+    end_date: string | null;
+    period_label: string;
+    unit: string;
+    label: string;
+    missing: boolean;
+    accession_number: string | null;
+  }
+
+  export interface SecFrameCompanyPayload {
+    cik: string;
+    entity_name: string;
+    facts: Record<string, SecFrameFactPayload>;
+  }
+
+  export interface SecFramesSnapshotSummaryPayload {
+    concept_key: string;
+    label: string;
+    period_label: string;
+    fiscal_year: number;
+    fiscal_quarter: number | null;
+    pts: number;
+    fetched_at: string;
+  }
+
+  export interface SecFramesScreenerResponse extends ProvenanceEnvelope {
+    snapshots: SecFramesSnapshotSummaryPayload[];
+    companies: SecFrameCompanyPayload[];
+    total_companies: number;
+    covered_concepts: string[];
+    missing_concepts: string[];
+  }
 
 export interface WatchlistSummaryRequest {
   tickers: string[];

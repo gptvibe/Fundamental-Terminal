@@ -116,7 +116,17 @@ class StatusBroker:
         self._max_events_per_job = max_events_per_job
         self._subscriber_queue_size = subscriber_queue_size
 
-    def create_job(self, *, ticker: str, kind: str) -> str:
+    def create_job(
+        self,
+        *,
+        ticker: str,
+        kind: str,
+        dataset: str = "company_refresh",
+        force: bool = False,
+        reason: str = "manual",
+        as_of: str | None = None,
+        company_id: int | None = None,
+    ) -> str:
         job_id = uuid.uuid4().hex
         record = JobRecord(job_id=job_id, ticker=ticker, kind=kind)
         with self._lock:
@@ -249,11 +259,23 @@ class SharedStatusBroker:
         self._recovery_interval_seconds = max(poll_interval_seconds, recovery_interval_seconds)
         self._recovery_batch_size = recovery_batch_size
         self._lease_duration = timedelta(seconds=settings.refresh_lock_timeout_seconds)
+        self._dedupe_ttl = timedelta(seconds=max(0, getattr(settings, "refresh_queue_dedupe_ttl_seconds", 0)))
         self._redis = self._build_sync_redis_client()
         self._redis_async = self._build_async_redis_client()
         self._queue_key = f"{settings.hot_response_cache_namespace}:refresh-jobs:queue"
         self._event_channel_prefix = f"{settings.hot_response_cache_namespace}:refresh-jobs:events:"
         self._worker_registry_key = f"{settings.hot_response_cache_namespace}:refresh-workers"
+
+    @staticmethod
+    def _normalize_as_of_key(as_of: str | None) -> str:
+        if as_of is None:
+            return "latest"
+        normalized = str(as_of).strip()
+        if not normalized:
+            return "latest"
+        if normalized.lower() == "latest":
+            return "latest"
+        return normalized
 
     @property
     def has_blocking_queue(self) -> bool:
@@ -266,17 +288,59 @@ class SharedStatusBroker:
         kind: str,
         dataset: str = "company_refresh",
         force: bool = False,
+        reason: str = "manual",
+        as_of: str | None = None,
         company_id: int | None = None,
     ) -> str:
         normalized_ticker = ticker.strip().upper()
+        normalized_reason = (reason or "manual").strip().lower() or "manual"
+        normalized_as_of_key = self._normalize_as_of_key(as_of)
         now = datetime.now(timezone.utc)
         pending_job_id = uuid.uuid4().hex
         event: JobEvent | None = None
 
         with self._sync_session_scope() as session:
-            existing_job = self._get_active_job(session, ticker=normalized_ticker, kind=kind, dataset=dataset)
+            existing_job = self._find_equivalent_active_job(
+                session,
+                ticker=normalized_ticker,
+                kind=kind,
+                dataset=dataset,
+                reason=normalized_reason,
+                as_of_key=normalized_as_of_key,
+            )
             if existing_job is not None:
+                self._log_duplicate_job(
+                    existing_job=existing_job,
+                    ticker=normalized_ticker,
+                    kind=kind,
+                    dataset=dataset,
+                    reason=normalized_reason,
+                    as_of_key=normalized_as_of_key,
+                    force=force,
+                )
                 return existing_job.job_id
+
+            if self._dedupe_ttl > timedelta(0):
+                recent_equivalent = self._find_recent_equivalent_terminal_job(
+                    session,
+                    ticker=normalized_ticker,
+                    kind=kind,
+                    dataset=dataset,
+                    reason=normalized_reason,
+                    as_of_key=normalized_as_of_key,
+                    cutoff=now - self._dedupe_ttl,
+                )
+                if recent_equivalent is not None:
+                    self._log_duplicate_job(
+                        existing_job=recent_equivalent,
+                        ticker=normalized_ticker,
+                        kind=kind,
+                        dataset=dataset,
+                        reason=normalized_reason,
+                        as_of_key=normalized_as_of_key,
+                        force=force,
+                    )
+                    return recent_equivalent.job_id
 
             resolved_company_id = company_id
             if resolved_company_id is None:
@@ -297,6 +361,8 @@ class SharedStatusBroker:
                         company_id=resolved_company_id,
                         ticker=normalized_ticker,
                         dataset=dataset,
+                        as_of_key=normalized_as_of_key,
+                        reason=normalized_reason,
                         kind=kind,
                         force=force,
                         status="queued",
@@ -304,7 +370,7 @@ class SharedStatusBroker:
                         updated_at=now,
                     )
                     .on_conflict_do_nothing(
-                        index_elements=[RefreshJob.ticker, RefreshJob.dataset],
+                        index_elements=[RefreshJob.ticker, RefreshJob.dataset, RefreshJob.as_of_key, RefreshJob.reason],
                         index_where=text("status IN ('queued', 'running')"),
                     )
                     .returning(RefreshJob.job_id)
@@ -319,6 +385,8 @@ class SharedStatusBroker:
                     company_id=resolved_company_id,
                     ticker=normalized_ticker,
                     dataset=dataset,
+                    as_of_key=normalized_as_of_key,
+                    reason=normalized_reason,
                     kind=kind,
                     force=force,
                     status="queued",
@@ -331,14 +399,46 @@ class SharedStatusBroker:
                     inserted = True
                 except IntegrityError:
                     session.rollback()
-                    existing_job = self._get_active_job_for_dataset(session, ticker=normalized_ticker, dataset=dataset)
+                    existing_job = self._find_equivalent_active_job(
+                        session,
+                        ticker=normalized_ticker,
+                        kind=kind,
+                        dataset=dataset,
+                        reason=normalized_reason,
+                        as_of_key=normalized_as_of_key,
+                    )
                     if existing_job is not None:
+                        self._log_duplicate_job(
+                            existing_job=existing_job,
+                            ticker=normalized_ticker,
+                            kind=kind,
+                            dataset=dataset,
+                            reason=normalized_reason,
+                            as_of_key=normalized_as_of_key,
+                            force=force,
+                        )
                         return existing_job.job_id
                     raise
 
             if not inserted:
-                existing_job = self._get_active_job_for_dataset(session, ticker=normalized_ticker, dataset=dataset)
+                existing_job = self._find_equivalent_active_job(
+                    session,
+                    ticker=normalized_ticker,
+                    kind=kind,
+                    dataset=dataset,
+                    reason=normalized_reason,
+                    as_of_key=normalized_as_of_key,
+                )
                 if existing_job is not None:
+                    self._log_duplicate_job(
+                        existing_job=existing_job,
+                        ticker=normalized_ticker,
+                        kind=kind,
+                        dataset=dataset,
+                        reason=normalized_reason,
+                        as_of_key=normalized_as_of_key,
+                        force=force,
+                    )
                     return existing_job.job_id
                 raise RuntimeError(f"Unable to enqueue refresh job for {normalized_ticker}")
 
@@ -1096,6 +1196,83 @@ class SharedStatusBroker:
             .limit(1)
         )
         return session.execute(statement).scalar_one_or_none()
+
+    def _find_equivalent_active_job(
+        self,
+        session,
+        *,
+        ticker: str,
+        kind: str,
+        dataset: str,
+        reason: str,
+        as_of_key: str,
+    ) -> RefreshJob | None:
+        statement: Select[tuple[RefreshJob]] = (
+            select(RefreshJob)
+            .where(
+                RefreshJob.ticker == ticker,
+                RefreshJob.kind == kind,
+                RefreshJob.dataset == dataset,
+                RefreshJob.reason == reason,
+                RefreshJob.as_of_key == as_of_key,
+                RefreshJob.status.in_(tuple(ACTIVE_JOB_STATES)),
+            )
+            .order_by(RefreshJob.requested_at.desc(), RefreshJob.id.desc())
+            .limit(1)
+        )
+        return session.execute(statement).scalar_one_or_none()
+
+    def _find_recent_equivalent_terminal_job(
+        self,
+        session,
+        *,
+        ticker: str,
+        kind: str,
+        dataset: str,
+        reason: str,
+        as_of_key: str,
+        cutoff: datetime,
+    ) -> RefreshJob | None:
+        statement: Select[tuple[RefreshJob]] = (
+            select(RefreshJob)
+            .where(
+                RefreshJob.ticker == ticker,
+                RefreshJob.kind == kind,
+                RefreshJob.dataset == dataset,
+                RefreshJob.reason == reason,
+                RefreshJob.as_of_key == as_of_key,
+                RefreshJob.status.in_(tuple(TERMINAL_JOB_STATES)),
+                RefreshJob.updated_at >= cutoff,
+            )
+            .order_by(RefreshJob.updated_at.desc(), RefreshJob.id.desc())
+            .limit(1)
+        )
+        return session.execute(statement).scalar_one_or_none()
+
+    def _log_duplicate_job(
+        self,
+        *,
+        existing_job: RefreshJob,
+        ticker: str,
+        kind: str,
+        dataset: str,
+        reason: str,
+        as_of_key: str,
+        force: bool,
+    ) -> None:
+        emit_structured_log(
+            logger,
+            "refresh.job.duplicate_skipped",
+            ticker=ticker,
+            kind=kind,
+            dataset=dataset,
+            reason=reason,
+            as_of=as_of_key,
+            force=force,
+            existing_job_id=existing_job.job_id,
+            existing_job_status=existing_job.status,
+            trace_id=existing_job.job_id,
+        )
 
     def _get_job(self, session, job_id: str, *, for_update: bool = False) -> RefreshJob | None:
         statement: Select[tuple[RefreshJob]] = select(RefreshJob).where(RefreshJob.job_id == job_id)

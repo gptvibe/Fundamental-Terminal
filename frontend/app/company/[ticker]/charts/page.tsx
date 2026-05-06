@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { CompanyChartsDashboard } from "@/components/company/charts-dashboard";
+import { ErrorState, PageHeader, PageShell } from "@/components/ui/research-primitives";
 
 import { ChartsRetryButton } from "./charts-retry-button";
 import {
@@ -81,14 +82,10 @@ function ChartsErrorState({ failure }: { failure: ChartsLoadFailure }) {
   const copy = getChartsErrorCopy(failure);
 
   return (
-    <div className="charts-page-shell">
-      <section className="charts-error-state" role="status" aria-live="polite">
-        <div className="charts-page-chip">Charts</div>
-        <h1 className="charts-page-title">Growth Outlook</h1>
-        <p className="charts-summary-thesis">{copy.body}</p>
-        <ChartsRetryButton />
-      </section>
-    </div>
+    <PageShell className="charts-page-shell">
+      <PageHeader eyebrow="Charts" title="Growth Outlook" subtitle={copy.body} />
+      <ErrorState title="Unable to load charts" message={copy.body} retryAction={<ChartsRetryButton />} />
+    </PageShell>
   );
 }
 

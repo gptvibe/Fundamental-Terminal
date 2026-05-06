@@ -2,7 +2,24 @@ from __future__ import annotations
 
 from app.api.handlers._common import main_bound
 from app.api.handlers._shared import *  # noqa: F401,F403
+from app.contracts.common import ResponseMetadataPayload
 from app.api.schemas.filings import CompanyFilingRiskSignalsResponse, FilingRiskSignalPayload, FilingRiskSignalSummaryPayload
+
+
+def _filings_response_metadata(*, refresh: RefreshState, source: str) -> ResponseMetadataPayload:
+    if refresh.reason == "fresh" and not refresh.triggered:
+        freshness = "fresh"
+    elif refresh.reason == "missing":
+        freshness = "missing"
+    else:
+        freshness = "stale"
+    return ResponseMetadataPayload(
+        freshness=freshness,
+        source=source,
+        isStale=freshness != "fresh",
+        refreshQueued=bool(refresh.triggered),
+        jobId=refresh.job_id,
+    )
 
 
 @main_bound
@@ -14,11 +31,13 @@ def company_filings(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
+        refresh = _trigger_refresh(normalized_ticker, reason="missing")
         return CompanyFilingsResponse(
             company=None,
             filings=[],
             timeline_source="sec_submissions",
-            refresh=_trigger_refresh(normalized_ticker, reason="missing"),
+            refresh=refresh,
+            response_metadata=_filings_response_metadata(refresh=refresh, source="none"),
             diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
             error=None,
         )
@@ -32,42 +51,26 @@ def company_filings(
             filings=cached_filings,
             timeline_source="sec_submissions",
             refresh=refresh,
+            response_metadata=_filings_response_metadata(refresh=refresh, source="sec_submissions_cache"),
             diagnostics=_diagnostics_for_filings_timeline(cached_filings, refresh, "sec_submissions"),
             error=None,
         )
 
-    client = EdgarClient()
-    try:
-        submissions = client.get_submissions(snapshot.company.cik)
-        filing_index = client.build_filing_index(submissions)
-        filings = _serialize_recent_filings(snapshot.company.cik, filing_index)
-        _store_filings_in_cache(snapshot.company.cik, filings)
-        return CompanyFilingsResponse(
-            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(filings)),
-            filings=filings,
-            timeline_source="sec_submissions",
-            refresh=refresh,
-            diagnostics=_diagnostics_for_filings_timeline(filings, refresh, "sec_submissions"),
-            error=None,
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load SEC filing timeline for '%s'", snapshot.company.ticker)
-        _evict_filings_cache(snapshot.company.cik)
-        fallback_filings = _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
-        return CompanyFilingsResponse(
-            company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(fallback_filings)),
-            filings=fallback_filings,
-            timeline_source="cached_financials",
-            refresh=refresh,
-            diagnostics=_diagnostics_for_filings_timeline(fallback_filings, refresh, "cached_financials"),
-            error=(
-                "SEC submissions are temporarily unavailable. Showing cached annual and quarterly filings only."
-                if fallback_filings
-                else "SEC submissions are temporarily unavailable. Try refreshing again shortly."
-            ),
-        )
-    finally:
-        client.close()
+    fallback_filings = _serialize_cached_statement_filings(get_company_financials(session, snapshot.company.id))
+    stale_refresh = refresh if refresh.triggered else _trigger_refresh(snapshot.company.ticker, reason="missing")
+    return CompanyFilingsResponse(
+        company=_serialize_company(snapshot, last_checked_filings=_filings_cache_last_checked(fallback_filings)),
+        filings=fallback_filings,
+        timeline_source="cached_financials",
+        refresh=stale_refresh,
+        response_metadata=_filings_response_metadata(refresh=stale_refresh, source="cached_financials"),
+        diagnostics=_diagnostics_for_filings_timeline(fallback_filings, stale_refresh, "cached_financials"),
+        error=(
+            "Latest SEC filing timeline is not cached yet. Returning cached filing history while a refresh is queued."
+            if fallback_filings
+            else "No cached filing timeline is available yet. A background refresh has been queued."
+        ),
+    )
 
 
 @main_bound

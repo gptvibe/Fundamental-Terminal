@@ -41,4 +41,51 @@ def official_screener_search(
     )
 
 
-__all__ = ["official_screener_filters", "official_screener_search"]
+@main_bound
+def sec_frames_screener(
+    ciks: str = Query(default="", description="Comma-separated CIK list; omit for all."),
+    fiscal_year: int | None = Query(default=None),
+    fiscal_quarter: int | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> SecFramesScreenerResponse:
+    import datetime as _dt
+    from datetime import timezone
+    from app.services.sec.frames import ALL_SCREENER_CONCEPT_KEYS
+    from app.services.sec_frames_screener import (
+        get_latest_snapshot_summary,
+        query_sec_frames_screener,
+    )
+
+    cik_list = [c.strip().zfill(10) for c in ciks.split(",") if c.strip()] or None
+    raw = query_sec_frames_screener(
+        session,
+        cik_list=cik_list,
+        fiscal_year=fiscal_year,
+        fiscal_quarter=fiscal_quarter,
+    )
+    snapshots = get_latest_snapshot_summary(session)
+    covered = {s["concept_key"] for s in snapshots}
+    companies = [
+        SecFrameCompanyPayload(
+            cik=cik,
+            entity_name=entry.get("entity_name", ""),
+            facts={
+                k: SecFrameFactPayload(**v)
+                for k, v in entry.get("facts", {}).items()
+            },
+        )
+        for cik, entry in raw.items()
+    ]
+    return SecFramesScreenerResponse(
+        snapshots=[SecFramesSnapshotSummaryPayload(**s) for s in snapshots],
+        companies=companies,
+        total_companies=len(companies),
+        covered_concepts=sorted(covered),
+        missing_concepts=sorted(set(ALL_SCREENER_CONCEPT_KEYS) - covered),
+        as_of=_dt.datetime.now(tz=timezone.utc).isoformat(),
+        last_refreshed_at=None,
+        confidence_flags=["sec_xbrl_frames_official_only"],
+    )
+
+
+__all__ = ["official_screener_filters", "official_screener_search", "sec_frames_screener"]

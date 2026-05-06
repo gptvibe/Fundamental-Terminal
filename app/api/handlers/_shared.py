@@ -185,6 +185,10 @@ from app.api.schemas import (  # noqa: F401
     OfficialScreenerMetadataResponse,
     OfficialScreenerSearchRequest,
     OfficialScreenerSearchResponse,
+    SecFrameCompanyPayload,
+    SecFrameFactPayload,
+    SecFramesScreenerResponse,
+    SecFramesSnapshotSummaryPayload,
     OilCurveSeriesPayload,
     OilExposureProfilePayload,
     OilScenarioCasePayload,
@@ -6303,7 +6307,10 @@ def _trigger_refresh(
     reason: Literal["manual", "missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(normalized_ticker, force=(reason == "missing"))
+    queue_kwargs: dict[str, Any] = {"force": reason == "missing"}
+    if "reason" in inspect.signature(queue_company_refresh).parameters:
+        queue_kwargs["reason"] = reason
+    job_id = queue_company_refresh(normalized_ticker, **queue_kwargs)
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 
@@ -6313,7 +6320,10 @@ def _trigger_cached_company_refresh(
     reason: Literal["missing", "stale"],
 ) -> RefreshState:
     normalized_ticker = _normalize_ticker(ticker)
-    job_id = queue_company_refresh(normalized_ticker, force=False)
+    queue_kwargs: dict[str, Any] = {"force": False}
+    if "reason" in inspect.signature(queue_company_refresh).parameters:
+        queue_kwargs["reason"] = reason
+    job_id = queue_company_refresh(normalized_ticker, **queue_kwargs)
     return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
 
 

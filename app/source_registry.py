@@ -62,6 +62,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Official SEC correspondence filings (CORRESP) used to track regulator comment-letter exchanges.",
     ),
+    "sec_xbrl_frames": SourceDefinition(
+        source_id="sec_xbrl_frames",
+        tier="official_regulator",
+        display_label="SEC XBRL Frames (cross-company)",
+        url="https://data.sec.gov/api/xbrl/frames/",
+        default_freshness_ttl_seconds=24 * 60 * 60,
+        disclosure_note="Official SEC EDGAR XBRL frames API providing cross-company financial data for a given concept and period.",
+    ),
     "fdic_bankfind_institutions": SourceDefinition(
         source_id="fdic_bankfind_institutions",
         tier="official_regulator",

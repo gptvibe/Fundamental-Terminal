@@ -1,8 +1,50 @@
 from __future__ import annotations
 
+import base64
+import json
+from typing import Any
+
 from app.api.handlers import _shared as shared_module
 from app.api.handlers._common import main_bound
 from app.api.handlers._shared import *  # noqa: F401,F403
+from app.contracts.common import ResponseMetadataPayload
+from app.services.sec_cache import sec_http_cache
+
+
+def _companyfacts_response_metadata(*, refresh: RefreshState, source: str) -> ResponseMetadataPayload:
+    if refresh.reason == "fresh" and not refresh.triggered:
+        freshness = "fresh"
+    elif refresh.reason == "missing":
+        freshness = "missing"
+    else:
+        freshness = "stale"
+    return ResponseMetadataPayload(
+        freshness=freshness,
+        source=source,
+        isStale=freshness != "fresh",
+        refreshQueued=bool(refresh.triggered),
+        jobId=refresh.job_id,
+    )
+
+
+def _load_stale_companyfacts_payload(cik: str) -> dict[str, Any] | None:
+    normalized_cik = str(cik).strip().zfill(10)
+    url = f"{settings.sec_companyfacts_base_url.rstrip('/')}/CIK{normalized_cik}.json"
+    entry = sec_http_cache.get_stale("GET", url)
+    if entry is None:
+        return None
+    encoded_payload = entry.payload.get("content_b64")
+    if not isinstance(encoded_payload, str) or not encoded_payload:
+        return None
+    try:
+        decoded = base64.b64decode(encoded_payload, validate=True)
+        payload = json.loads(decoded.decode("utf-8"))
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    facts = payload.get("facts")
+    return facts if isinstance(facts, dict) else None
 
 
 @main_bound
@@ -1265,25 +1307,41 @@ def company_financial_history(
     resolved_cik = _normalize_cik_query(normalized)
     if resolved_cik:
         cik = resolved_cik
+        facts = _load_stale_companyfacts_payload(cik)
+        if facts is not None:
+            refresh = RefreshState(triggered=False, reason="stale", ticker=None, job_id=None)
+            return CompanyFactsResponse(
+                facts=facts,
+                refresh=refresh,
+                response_metadata=_companyfacts_response_metadata(refresh=refresh, source="sec_companyfacts_cache"),
+            )
+        refresh = RefreshState(triggered=False, reason="missing", ticker=None, job_id=None)
+        return CompanyFactsResponse(
+            facts={},
+            refresh=refresh,
+            response_metadata=_companyfacts_response_metadata(refresh=refresh, source="none"),
+        )
     else:
         snapshot = _resolve_cached_company_snapshot(session, _normalize_ticker(ticker))
         if snapshot is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown ticker")
         cik = snapshot.company.cik
 
-    client = EdgarClient()
-    try:
-        facts = client.get_companyfacts(cik)
-        if not isinstance(facts, dict):
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unexpected SEC companyfacts payload")
-        return CompanyFactsResponse(facts=facts.get("facts", {}))
-    except HTTPException:
-        raise
-    except Exception:
-        logging.getLogger(__name__).exception("Unable to load SEC companyfacts for '%s'", cik)
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to load SEC companyfacts")
-    finally:
-        client.close()
+    cached_facts = _load_stale_companyfacts_payload(cik)
+    if cached_facts is not None:
+        refresh = _refresh_for_snapshot(snapshot)
+        return CompanyFactsResponse(
+            facts=cached_facts,
+            refresh=refresh,
+            response_metadata=_companyfacts_response_metadata(refresh=refresh, source="sec_companyfacts_cache"),
+        )
+
+    refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
+    return CompanyFactsResponse(
+        facts={},
+        refresh=refresh,
+        response_metadata=_companyfacts_response_metadata(refresh=refresh, source="none"),
+    )
 
 
 __all__ = [

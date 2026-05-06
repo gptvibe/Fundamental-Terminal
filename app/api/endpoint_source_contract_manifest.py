@@ -185,6 +185,13 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
     ),
     (
         "GET",
+        "/api/screener/sec-frames",
+    ): _derived_official_contract(
+        "sec_xbrl_frames",
+        "sec_edgar",
+    ),
+    (
+        "GET",
         "/api/companies/{ticker}/charts",
     ): _derived_official_contract(
         "ft_company_charts_dashboard",

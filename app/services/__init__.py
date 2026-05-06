@@ -39,7 +39,7 @@ from app.services.cache_queries import (
 )
 from app.services.fetch_trigger import queue_company_refresh
 from app.services.filing_changes import build_changes_since_last_filing
-from app.services.sec_edgar import EdgarIngestionService, run_refresh_job
+from app.services.sec.refresh_orchestrator import EdgarIngestionService, run_refresh_job
 from app.services.status_stream import JobReporter, status_broker
 
 

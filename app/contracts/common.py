@@ -17,6 +17,14 @@ class RefreshState(BaseModel):
     job_id: str | None = Field(default=None)
 
 
+class ResponseMetadataPayload(BaseModel):
+    freshness: Literal["fresh", "stale", "missing"]
+    source: str
+    isStale: bool
+    refreshQueued: bool
+    jobId: str | None = None
+
+
 class DataQualityDiagnosticsPayload(BaseModel):
     coverage_ratio: Number = None
     fallback_ratio: Number = None

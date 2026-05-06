@@ -5,12 +5,8 @@ import dynamic from "next/dynamic";
 
 import { BankFinancialStatementsTable } from "@/components/company/bank-financial-statements-table";
 import { BankRegulatoryOverview } from "@/components/company/bank-regulatory-overview";
-import { BusinessSegmentBreakdown } from "@/components/charts/business-segment-breakdown";
-import { CashFlowWaterfallChart } from "@/components/charts/cash-flow-waterfall-chart";
 import { FinancialPeriodToolbar } from "@/components/company/financial-period-toolbar";
 import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
-import { CapitalStructureIntelligencePanel } from "@/components/company/capital-structure-intelligence-panel";
-import { FinancialComparisonPanel } from "@/components/company/financial-comparison-panel";
 import { PanelEmptyState } from "@/components/company/panel-empty-state";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
@@ -19,6 +15,7 @@ import { DeferredClientSection } from "@/components/performance/deferred-client-
 import { CommercialFallbackNotice } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
+import { ChartSkeleton } from "@/components/ui/skeletons";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
 import { useCompanyWorkspace, type LoadCompanyWorkspaceDataResult } from "@/hooks/use-company-workspace";
 import { usePeriodSelection } from "@/hooks/use-period-selection";
@@ -26,6 +23,24 @@ import { resolveFilingChartCadence } from "@/lib/annual-financial-scope";
 import type { SharedFinancialChartState } from "@/lib/financial-chart-state";
 import { formatCompactNumber, formatDate, formatPercent } from "@/lib/format";
 import type { CompanyWorkspaceBootstrapResponse } from "@/lib/types";
+
+const BusinessSegmentBreakdown = dynamic(
+  () => import("@/components/charts/business-segment-breakdown").then((m) => m.BusinessSegmentBreakdown),
+  { ssr: false, loading: () => <ChartSkeleton height={280} /> }
+);
+const CashFlowWaterfallChart = dynamic(
+  () => import("@/components/charts/cash-flow-waterfall-chart").then((m) => m.CashFlowWaterfallChart),
+  { ssr: false, loading: () => <ChartSkeleton height={280} /> }
+);
+const CapitalStructureIntelligencePanel = dynamic(
+  () => import("@/components/company/capital-structure-intelligence-panel").then((m) => m.CapitalStructureIntelligencePanel),
+  { ssr: false, loading: () => <ChartSkeleton height={280} /> }
+);
+const FinancialComparisonPanel = dynamic(
+  () => import("@/components/company/financial-comparison-panel").then((m) => m.FinancialComparisonPanel),
+  { ssr: false, loading: () => <ChartSkeleton height={280} /> }
+);
+
 const GrowthWaterfallChart = dynamic(
   () => import("@/components/charts/growth-waterfall-chart").then((module) => module.GrowthWaterfallChart),
   { ssr: false, loading: () => <div className="text-muted">Loading growth chart...</div> }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 import logging
 import os
 import threading
@@ -65,12 +66,48 @@ def _worker_lifecycle_heartbeat_loop(
             return
 
 
+def _process_refresh_job(job: ClaimedJob) -> None:
+    logger.info("Processing refresh job %s for %s", job.job_id, job.ticker)
+    stop_event = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(job, stop_event),
+        name=f"refresh-heartbeat-{job.job_id[:8]}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        with observe_worker_job(
+            worker_kind="refresh_queue",
+            job_name="refresh_job",
+            trace_id=job.job_id,
+            ticker=job.ticker,
+            count_refresh_failure=True,
+        ):
+            run_refresh_job(
+                job.ticker,
+                force=job.force,
+                job_id=job.job_id,
+                claim_token=job.claim_token,
+                service=None,
+            )
+    except Exception as exc:
+        if _is_expected_refresh_failure(exc):
+            logger.warning("Refresh worker skipped unresolved ticker for job %s (%s): %s", job.job_id, job.ticker, exc)
+        else:
+            logger.exception("Refresh worker failed for job %s (%s)", job.job_id, job.ticker)
+    finally:
+        stop_event.set()
+        heartbeat_thread.join(timeout=1.0)
+
+
 def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once: bool = False) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     effective_poll_interval = poll_interval_seconds or settings.refresh_queue_poll_seconds
     worker_id = f"{threading.current_thread().name}-{uuid.uuid4().hex[:8]}"
     next_recovery_at = 0.0
     service: EdgarIngestionService | None = None
+    max_concurrent_jobs = max(1, int(getattr(settings, "worker_max_concurrent_jobs", 1)))
     worker_state_lock = threading.Lock()
     worker_state: dict[str, str | None] = {"state": "starting", "current_job_id": None, "ticker": None}
     lifecycle_stop_event = threading.Event()
@@ -90,6 +127,57 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
     try:
         lifecycle_thread.start()
         _update_worker_state(state="idle")
+
+        if max_concurrent_jobs > 1:
+            logger.info("Refresh worker concurrency budget set to %s jobs", max_concurrent_jobs)
+            with ThreadPoolExecutor(max_workers=max_concurrent_jobs, thread_name_prefix="refresh-job") as executor:
+                active_jobs: dict[Future[None], ClaimedJob] = {}
+                claimed_once = False
+
+                while True:
+                    now = time.monotonic()
+                    if now >= next_recovery_at:
+                        status_broker.requeue_expired_jobs(limit=10)
+                        next_recovery_at = now + settings.refresh_recovery_interval_seconds
+
+                    while len(active_jobs) < max_concurrent_jobs:
+                        if active_jobs:
+                            job = status_broker.claim_next_job(worker_id=worker_id)
+                        else:
+                            job = status_broker.claim_next_job_blocking(worker_id=worker_id, timeout_seconds=effective_poll_interval)
+                        if job is None:
+                            break
+
+                        claimed_once = True
+                        _update_worker_state(state="busy", current_job_id=job.job_id, ticker=job.ticker)
+                        future = executor.submit(_process_refresh_job, job)
+                        active_jobs[future] = job
+
+                    if not active_jobs:
+                        _update_worker_state(state="idle")
+                        if once and not claimed_once:
+                            return 0
+                        if once and claimed_once:
+                            return 0
+                        if not status_broker.has_blocking_queue:
+                            time.sleep(effective_poll_interval)
+                        continue
+
+                    done, _ = wait(active_jobs.keys(), timeout=effective_poll_interval, return_when=FIRST_COMPLETED)
+                    for future in done:
+                        job = active_jobs.pop(future, None)
+                        try:
+                            future.result()
+                        except Exception:
+                            if job is not None:
+                                logger.exception("Refresh worker unexpectedly failed for job %s (%s)", job.job_id, job.ticker)
+                            else:
+                                logger.exception("Refresh worker unexpectedly failed")
+
+                    if once and claimed_once and not active_jobs:
+                        return 0
+            return 0
+
         while True:
             now = time.monotonic()
             if now >= next_recovery_at:

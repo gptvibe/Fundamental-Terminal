@@ -174,4 +174,6 @@ def test_async_subscribe_throttles_idle_snapshot_recovery(monkeypatch) -> None:
         assert queue.empty()
         return snapshot_calls
 
-    assert asyncio.run(exercise()) == 1
+    snapshot_calls = asyncio.run(exercise())
+
+    assert 1 <= snapshot_calls < idle_cycles

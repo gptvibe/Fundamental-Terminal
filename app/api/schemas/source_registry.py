@@ -17,6 +17,11 @@ class SourceRegistryEntryPayload(BaseModel):
     disclosure_note: str
     strict_official_mode_state: Literal["available", "disabled"]
     strict_official_mode_note: str
+    last_success_at: datetime | None = None
+    last_error: str | None = None
+    last_error_at: datetime | None = None
+    is_stale: bool = False
+    used_by_paths: list[str] = []
 
 
 class SourceRegistryErrorPayload(BaseModel):

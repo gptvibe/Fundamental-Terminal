@@ -44,6 +44,8 @@ function createHookResult(overrides: Record<string, unknown> = {}) {
     notesByTicker: {},
     monitoringByTicker: {},
     savedWatchlistViews: [],
+    isSaved: vi.fn(() => false),
+    toggleWatchlist: vi.fn(() => true),
     saveMonitoringEntry: vi.fn(),
     saveWatchlistView: vi.fn(),
     deleteWatchlistView: vi.fn(),
@@ -84,16 +86,7 @@ function createSummaryItem(overrides: Record<string, unknown> = {}) {
       share_count_change_count: 0,
       capital_structure_change_count: 0,
       comment_letter_count: 0,
-      highlights: [
-        {
-          title: "Demand softening disclosed",
-          summary: "MD&A language added a demand moderation callout.",
-          why_it_matters: "Volume normalization could pressure gross margin assumptions.",
-          importance: "high",
-          category: "mda",
-          signal_tags: ["demand", "margin"],
-        },
-      ],
+      highlights: [],
     },
     ...overrides,
   };
@@ -119,47 +112,25 @@ describe("WatchlistPage", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     cleanup();
   });
 
-  it("renders empty state when no local watchlist tickers exist", async () => {
+  it("renders polished empty state when watchlist has no tickers", async () => {
     mockUseLocalUserData.mockReturnValue(createHookResult());
 
     render(React.createElement(WatchlistPage));
 
     await waitFor(() => {
-      expect(screen.getByText("No companies saved yet")).toBeTruthy();
+      expect(screen.getByText("Watchlist is empty")).toBeTruthy();
     });
+    expect(screen.getByText("Add your first company to start tracking fundamentals.")).toBeTruthy();
     expect(getWatchlistSummary).not.toHaveBeenCalled();
     expect(getWatchlistCalendar).not.toHaveBeenCalled();
   });
 
-  it("renders workflow controls and Research Brief material-change summaries", async () => {
+  it("renders investor table with required columns", async () => {
     mockUseLocalUserData.mockReturnValue(createHookResult({
       watchlist: [{ ticker: "AAPL" }],
-      notesByTicker: {
-        AAPL: {
-          ticker: "AAPL",
-          name: "Apple Inc.",
-          sector: "Technology",
-          note: "Watch services mix and the next gross margin reset.",
-          updatedAt: "2026-04-07T00:00:00Z",
-        },
-      },
-      monitoringByTicker: {
-        AAPL: {
-          ticker: "AAPL",
-          triageState: "reviewing",
-          profileKey: "deep-dive",
-          rationale: "Re-rate candidate if gross margin stabilizes before the next iPhone cycle.",
-          lastReviewedAt: "2026-04-06T00:00:00Z",
-          nextReviewAt: "2026-04-09",
-          snoozedUntil: null,
-          holdUntil: null,
-          updatedAt: "2026-04-06T00:00:00Z",
-        },
-      },
     }));
     getWatchlistSummary.mockResolvedValue({ tickers: ["AAPL"], companies: [createSummaryItem()] });
 
@@ -169,13 +140,19 @@ describe("WatchlistPage", () => {
       expect(screen.getByText("Apple Inc.")).toBeTruthy();
     });
 
-    expect(screen.getByDisplayValue("Re-rate candidate if gross margin stabilizes before the next iPhone cycle.")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Ticker" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Company" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Price" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Revenue growth" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Margin" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "FCF" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Leverage/debt signal" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Last filing" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Alert count" })).toBeTruthy();
     expect(screen.getByText("2 high-signal changes since the last filing")).toBeTruthy();
-    expect(screen.getByText(/Volume normalization could pressure gross margin assumptions/i)).toBeTruthy();
-    expect(screen.getByLabelText(/Triage state for AAPL/i)).toBeTruthy();
   });
 
-  it("filters the list by review-due and applies saved views", async () => {
+  it("filters by selected filter in toolbar", async () => {
     mockUseLocalUserData.mockReturnValue(createHookResult({
       watchlist: [{ ticker: "AAPL" }, { ticker: "MSFT" }],
       monitoringByTicker: {
@@ -194,7 +171,7 @@ describe("WatchlistPage", () => {
           ticker: "MSFT",
           triageState: "monitoring",
           profileKey: "quality-compounder",
-          rationale: "Parked name",
+          rationale: "Parked",
           lastReviewedAt: null,
           nextReviewAt: "2099-12-31",
           snoozedUntil: null,
@@ -202,22 +179,8 @@ describe("WatchlistPage", () => {
           updatedAt: "2026-04-08T00:00:00Z",
         },
       },
-      savedWatchlistViews: [
-        {
-          id: "parked",
-          name: "Parked",
-          criteria: {
-            primaryFilter: "hold",
-            triageStates: [],
-            sortBy: "review",
-            searchText: "",
-            profileKey: null,
-          },
-          createdAt: "2026-04-08T00:00:00Z",
-          updatedAt: "2026-04-08T00:00:00Z",
-        },
-      ],
     }));
+
     getWatchlistSummary.mockResolvedValue({
       tickers: ["AAPL", "MSFT"],
       companies: [
@@ -228,20 +191,6 @@ describe("WatchlistPage", () => {
           alert_summary: { high: 0, medium: 0, low: 0, total: 0 },
           latest_alert: null,
           latest_activity: null,
-          material_change: {
-            status: "warming",
-            headline: "Research Brief change digest warming.",
-            detail: "Material filing deltas will appear after the first Research Brief build completes.",
-            current_filing_type: null,
-            current_period_end: null,
-            previous_period_end: null,
-            high_signal_change_count: 0,
-            new_risk_indicator_count: 0,
-            share_count_change_count: 0,
-            capital_structure_change_count: 0,
-            comment_letter_count: 0,
-            highlights: [],
-          },
         }),
       ],
     });
@@ -253,56 +202,25 @@ describe("WatchlistPage", () => {
       expect(screen.getByText("Microsoft")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Review due" }));
+    fireEvent.change(screen.getByLabelText("Filter watchlist"), { target: { value: "review-due" } });
     expect(screen.getByText("Apple Inc.")).toBeTruthy();
     expect(screen.queryByText("Microsoft")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: /ParkedOn hold/i }));
-    expect(screen.getByText("Microsoft")).toBeTruthy();
-    expect(screen.queryByText("Apple Inc.")).toBeNull();
   });
 
-  it("persists rationale edits, review actions, and saved views", async () => {
-    const saveMonitoringEntry = vi.fn();
-    const saveWatchlistView = vi.fn();
+  it("adds ticker from toolbar", async () => {
+    const toggleWatchlist = vi.fn(() => true);
     mockUseLocalUserData.mockReturnValue(createHookResult({
-      watchlist: [{ ticker: "AAPL" }],
-      saveMonitoringEntry,
-      saveWatchlistView,
+      watchlist: [],
+      isSaved: vi.fn(() => false),
+      toggleWatchlist,
     }));
-    getWatchlistSummary.mockResolvedValue({ tickers: ["AAPL"], companies: [createSummaryItem({ alert_summary: { high: 0, medium: 0, low: 0, total: 0 } })] });
 
     render(React.createElement(WatchlistPage));
 
-    await waitFor(() => {
-      expect(screen.getByText("Apple Inc.")).toBeTruthy();
-    });
+    fireEvent.change(screen.getByLabelText("Add ticker"), { target: { value: "msft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-    const whyInput = screen.getByLabelText("Why AAPL is on the monitor");
-    fireEvent.change(whyInput, { target: { value: "Waiting for margin stabilization and a cleaner China demand setup." } });
-    fireEvent.blur(whyInput);
-
-    await waitFor(() => {
-      expect(saveMonitoringEntry).toHaveBeenCalledWith(expect.objectContaining({
-        ticker: "AAPL",
-        rationale: "Waiting for margin stabilization and a cleaner China demand setup.",
-      }));
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Review AAPL now" }));
-    expect(saveMonitoringEntry).toHaveBeenCalledWith(expect.objectContaining({
-      ticker: "AAPL",
-      lastReviewedAt: expect.any(String),
-      nextReviewAt: expect.any(String),
-    }));
-
-    fireEvent.change(screen.getByLabelText("Saved watchlist view name"), { target: { value: "Morning Sweep" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save View" }));
-
-    expect(saveWatchlistView).toHaveBeenCalledWith(expect.objectContaining({
-      name: "Morning Sweep",
-      criteria: expect.objectContaining({ primaryFilter: "all" }),
-    }));
+    expect(toggleWatchlist).toHaveBeenCalledWith({ ticker: "MSFT", name: null, sector: null });
   });
 
   it("reloads queued refresh jobs after an SSE terminal event", async () => {

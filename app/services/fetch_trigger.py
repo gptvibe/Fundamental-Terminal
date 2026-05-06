@@ -7,6 +7,8 @@ def queue_company_refresh(
     ticker: str,
     *,
     force: bool = False,
+    reason: str = "manual",
+    as_of: str | None = None,
 ) -> str:
     normalized_ticker = ticker.strip().upper()
     return status_broker.create_job(
@@ -14,4 +16,6 @@ def queue_company_refresh(
         kind="refresh",
         dataset="company_refresh",
         force=force,
+        reason=reason,
+        as_of=as_of,
     )

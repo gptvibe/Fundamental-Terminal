@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
+from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState, ResponseMetadataPayload
 from app.api.schemas.models import CompanyModelsResponse
 
 
@@ -754,3 +754,5 @@ class CompanyFinancialRestatementsResponse(ProvenanceEnvelope):
 
 class CompanyFactsResponse(BaseModel):
     facts: dict[str, Any]
+    refresh: RefreshState = Field(default_factory=RefreshState)
+    response_metadata: ResponseMetadataPayload | None = None

@@ -11,13 +11,13 @@ import { PanelErrorBoundary } from "@/components/company/brief-primitives";
 import { CompanyOverviewStatusStrip } from "@/components/company/company-overview-layout-sections";
 import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
 import { FilingRiskSignalsPanel } from "@/components/filings/filing-risk-signals-panel";
-import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
+import { DataFreshnessBadge, KpiCard, KpiStrip, PageHeader, PageShell, SourceBadge } from "@/components/ui/research-primitives";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { useUIDensity } from "@/hooks/use-ui-density";
 import { showAppToast } from "@/lib/app-toast";
@@ -44,7 +44,6 @@ import { prefetchCompanyWorkspaceTabs } from "@/lib/company-workspace-prefetch";
 import { buildInvestmentMemo } from "@/lib/investment-memo";
 import { downloadJsonFile, downloadTextFile, normalizeExportFileStem } from "@/lib/export";
 import { formatDate, formatPercent } from "@/lib/format";
-import { ResearchBriefHeroSummary } from "./_components/research-brief-hero-summary";
 import { ResearchBriefSectionNav } from "./_components/research-brief-section-nav";
 import { ResearchBriefWarmupPanel } from "./_components/research-brief-warmup-panel";
 import { useResearchBriefData } from "./_hooks/use-research-brief-data";
@@ -673,80 +672,100 @@ export default function CompanyResearchBriefPage() {
       mainClassName="company-page-grid research-brief-layout"
       railClassName="research-brief-rail"
     >
-      <CompanyResearchHeader
-        ticker={ticker}
-        title={pageCompany?.name ?? ticker}
-        companyName={`${ticker} · Research Brief`}
-        sector={pageCompany?.sector ?? pageCompany?.market_sector ?? null}
-        freshness={{
-          cacheState: pageCompany?.cache_state ?? null,
-          refreshState,
-          loading,
-          hasData: Boolean(pageCompany || latestFinancial || financials.length || priceHistory.length),
-          lastChecked: pageCompany?.last_checked ?? null,
-          errors: [error, briefData.error],
-          detailLines: [
-            refreshQueueDetailLine,
-            `Annual filings cached: ${annualStatements.length.toLocaleString()}`,
-            `Price history points: ${priceHistory.length.toLocaleString()}`,
-            `Current alerts: ${latestAlertCount.toLocaleString()}`,
-          ],
-        }}
-        freshnessPlacement="title"
-        className="research-brief-header-compact"
-      >
-        <ResearchBriefHeroSummary
-          summary={snapshotNarrative}
-          metrics={[
-            { label: "Revenue", value: latestFinancial ? formatCompactCurrency(latestFinancial.revenue) : bootstrapRevenueValue },
-            { label: "Free Cash Flow", value: latestFinancial ? formatCompactCurrency(latestFinancial.free_cash_flow) : bootstrapFreeCashFlowValue },
-            {
-              label: "Top Segment",
-              value:
-                topSegment && topSegment.share_of_revenue != null
-                  ? `${topSegment.segment_name} · ${formatPercent(topSegment.share_of_revenue)}`
-                  : topSegment?.segment_name ?? bootstrapTopSegmentValue,
-            },
-            {
-              label: "Latest Filing",
-              value: latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : bootstrapLatestFilingValue,
-            },
-          ]}
-          metaItems={[
-            pageCompany?.cik ? `CIK ${pageCompany.cik}` : null,
-            annualStatements.length ? `${annualStatements.length.toLocaleString()} annual filing periods cached` : null,
-            pageCompany?.last_checked ? `Updated ${formatDate(pageCompany.last_checked)}` : null,
-          ]}
-          fallbackLabels={fallbackLabels}
-          loading={initialCompanyLoad}
-          loadingMessage={initialCompanyLoadMessage}
+      <PageShell className="research-brief-page-shell">
+        <PageHeader
+          eyebrow={pageCompany?.sector ?? pageCompany?.market_sector ?? null}
+          title={pageCompany?.name ?? ticker}
+          subtitle={`${ticker} · Research Brief`}
+          actions={
+            <span className="rd-badge-row">
+              <DataFreshnessBadge
+                freshness={
+                  pageCompany?.cache_state === "stale" || Boolean(error || briefData.error)
+                    ? "stale"
+                    : pageCompany?.cache_state === "missing"
+                    ? "unknown"
+                    : loading && !pageCompany
+                    ? "unknown"
+                    : "fresh"
+                }
+                asOf={data?.as_of ?? briefData.brief?.as_of ?? undefined}
+              />
+              {(data?.source_mix?.primary_source_ids ?? []).slice(0, 1).map((src) => (
+                <SourceBadge key={src} source={src} kind="sec" />
+              ))}
+              {(data?.source_mix?.fallback_source_ids ?? []).slice(0, 1).map((src) => (
+                <SourceBadge key={src} source={src} kind="external" />
+              ))}
+            </span>
+          }
         />
-      </CompanyResearchHeader>
 
-      <CompanyOverviewStatusStrip
-        asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
-        lastRefreshedAt={data?.last_refreshed_at ?? null}
-        sourceMix={data?.source_mix ?? null}
-        provenance={data?.provenance ?? null}
-        refreshState={refreshState}
-        cacheState={pageCompany?.cache_state ?? null}
-        hasWarnings={Boolean(error || briefData.error)}
-      />
+        {initialCompanyLoadMessage ? (
+          <div className="research-brief-hero-loading" role="status" aria-live="polite">
+            {initialCompanyLoadMessage}
+          </div>
+        ) : null}
 
-      <SnapshotSection
-        loading={loading}
-        priceHistory={priceHistory}
-        fundamentalsTrendData={fundamentalsTrendData}
-        latestFinancial={latestFinancial}
-        financials={financials}
-        topSegment={topSegment}
-        latestAlertCount={latestAlertCount}
-        segmentAnalysis={data?.segment_analysis}
-        narrative={snapshotNarrative}
-        links={snapshotLinks}
-        expanded={expandedSections.snapshot ?? true}
-        onToggle={() => toggleSection("snapshot")}
-      />
+        {refreshQueueDetailLine ? (
+          <p className="research-brief-refresh-detail" role="status" aria-live="polite">
+            {refreshQueueDetailLine}
+          </p>
+        ) : null}
+
+        {fallbackLabels.length ? (
+          <p className="research-brief-fallback-notice">
+            Price history and market profile context includes a labeled commercial fallback from {fallbackLabels.join(", ")}. Core fundamentals remain sourced from official filings and public datasets.
+          </p>
+        ) : null}
+
+        <KpiStrip aria-label="Key financial metrics">
+          <KpiCard
+            label="Revenue"
+            value={latestFinancial ? formatCompactCurrency(latestFinancial.revenue) : (bootstrapRevenueValue ?? "\u2014")}
+          />
+          <KpiCard
+            label="Free Cash Flow"
+            value={latestFinancial ? formatCompactCurrency(latestFinancial.free_cash_flow) : (bootstrapFreeCashFlowValue ?? "\u2014")}
+          />
+          <KpiCard
+            label="Top Segment"
+            value={
+              topSegment && topSegment.share_of_revenue != null
+                ? `${topSegment.segment_name} · ${formatPercent(topSegment.share_of_revenue)}`
+                : topSegment?.segment_name ?? bootstrapTopSegmentValue ?? "\u2014"
+            }
+          />
+          <KpiCard
+            label="Latest Filing"
+            value={latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : (bootstrapLatestFilingValue ?? "\u2014")}
+          />
+        </KpiStrip>
+
+        <SnapshotSection
+          loading={loading}
+          priceHistory={priceHistory}
+          fundamentalsTrendData={fundamentalsTrendData}
+          latestFinancial={latestFinancial}
+          financials={financials}
+          topSegment={topSegment}
+          latestAlertCount={latestAlertCount}
+          segmentAnalysis={data?.segment_analysis}
+          narrative={snapshotNarrative}
+          links={snapshotLinks}
+          expanded={expandedSections.snapshot ?? true}
+          onToggle={() => toggleSection("snapshot")}
+        />
+
+        <CompanyOverviewStatusStrip
+          asOf={data?.as_of ?? briefData.brief?.as_of ?? null}
+          lastRefreshedAt={data?.last_refreshed_at ?? null}
+          sourceMix={data?.source_mix ?? null}
+          provenance={data?.provenance ?? null}
+          refreshState={refreshState}
+          cacheState={pageCompany?.cache_state ?? null}
+          hasWarnings={Boolean(error || briefData.error)}
+        />
 
       <DeferredClientSection
         forceVisible={eagerDeferredSections}
@@ -1008,6 +1027,7 @@ export default function CompanyResearchBriefPage() {
           ]}
         />
       </DeferredClientSection>
+      </PageShell>
     </CompanyWorkspaceShell>
   );
 }

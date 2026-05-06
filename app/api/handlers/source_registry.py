@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends
+from sqlalchemy import Select
 from sqlalchemy.orm import Session
 
+from app.api.endpoint_source_contract_manifest import USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS
 from app.api.handlers import _shared as shared
 from app.api.schemas.source_registry import (
     SourceRegistryEntryPayload,
@@ -32,6 +34,12 @@ def _current_settings() -> Any:
         return shared.settings
 
 
+def _normalize_utc_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return shared._normalize_utc_datetime(value)
+
+
 async def source_registry(
     session: Any = Depends(get_db_session),
 ) -> SourceRegistryResponse:
@@ -39,9 +47,19 @@ async def source_registry(
 
     def invoke(sync_session: Session) -> SourceRegistryResponse:
         main_module = _main_module()
+        try:
+            status_by_source = _build_source_registry_status_by_source(sync_session, now=generated_at)
+        except Exception:
+            logging.getLogger(__name__).exception("Unable to build source registry status payloads")
+            status_by_source = {}
+        usage_paths_by_source = _build_source_registry_usage_paths()
         sources = [
-            main_module._build_source_registry_entry_payload(source_id)
-            for source_id in main_module._sorted_source_registry_ids()
+            _build_source_registry_entry_payload(
+                source_id,
+                source_status=status_by_source.get(source_id),
+                used_by_paths=usage_paths_by_source.get(source_id, ()),
+            )
+            for source_id in _sorted_source_registry_ids()
         ]
         try:
             health = main_module._build_source_registry_health_payload(sync_session, now=generated_at)
@@ -70,7 +88,78 @@ def _sorted_source_registry_ids() -> list[str]:
     )
 
 
-def _build_source_registry_entry_payload(source_id: str) -> SourceRegistryEntryPayload:
+def _build_source_registry_usage_paths() -> dict[str, list[str]]:
+    usage_paths: dict[str, set[str]] = {}
+    for (_method, path), contract in USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS.items():
+        if path == "/api/source-registry":
+            continue
+        for source_id in contract.allowed_source_ids:
+            usage_paths.setdefault(source_id, set()).add(path)
+
+    return {
+        source_id: sorted(paths)
+        for source_id, paths in usage_paths.items()
+    }
+
+
+def _build_source_registry_status_by_source(
+    session: Session,
+    *,
+    now: datetime,
+) -> dict[str, dict[str, Any]]:
+    statement: Select[Any] = shared.select(
+        shared.DatasetRefreshState.dataset,
+        shared.DatasetRefreshState.last_success,
+        shared.DatasetRefreshState.freshness_deadline,
+        shared.DatasetRefreshState.last_error,
+        shared.DatasetRefreshState.updated_at,
+    )
+    rows = session.execute(statement).all()
+
+    statuses: dict[str, dict[str, Any]] = {}
+    for dataset_id, last_success, freshness_deadline, last_error, updated_at in rows:
+        mapped_source_ids = shared.SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(str(dataset_id), ())
+        if not mapped_source_ids:
+            continue
+
+        normalized_last_success = _normalize_utc_datetime(last_success)
+        normalized_deadline = _normalize_utc_datetime(freshness_deadline)
+        normalized_updated_at = _normalize_utc_datetime(updated_at)
+        is_stale = normalized_deadline is not None and normalized_deadline < now
+
+        for source_id in mapped_source_ids:
+            status = statuses.setdefault(
+                source_id,
+                {
+                    "last_success_at": None,
+                    "last_error": None,
+                    "last_error_at": None,
+                    "is_stale": False,
+                },
+            )
+
+            if normalized_last_success is not None:
+                existing_last_success = status["last_success_at"]
+                if existing_last_success is None or normalized_last_success > existing_last_success:
+                    status["last_success_at"] = normalized_last_success
+
+            status["is_stale"] = bool(status["is_stale"] or is_stale)
+
+            if last_error and normalized_updated_at is not None:
+                existing_last_error_at = status["last_error_at"]
+                if existing_last_error_at is None or normalized_updated_at >= existing_last_error_at:
+                    status["last_error"] = str(last_error)
+                    status["last_error_at"] = normalized_updated_at
+
+    return statuses
+
+
+def _build_source_registry_entry_payload(
+    source_id: str,
+    *,
+    source_status: dict[str, Any] | None = None,
+    used_by_paths: list[str] | tuple[str, ...] = (),
+) -> SourceRegistryEntryPayload:
     definition = shared.SOURCE_REGISTRY[source_id]
     settings = _current_settings()
     disabled_in_current_mode = bool(getattr(settings, "strict_official_mode", False)) and definition.tier in shared.STRICT_OFFICIAL_DISABLED_SOURCE_TIERS
@@ -89,6 +178,11 @@ def _build_source_registry_entry_payload(source_id: str) -> SourceRegistryEntryP
         disclosure_note=definition.disclosure_note,
         strict_official_mode_state="disabled" if disabled_in_current_mode else "available",
         strict_official_mode_note=strict_note,
+        last_success_at=source_status.get("last_success_at") if source_status else None,
+        last_error=source_status.get("last_error") if source_status else None,
+        last_error_at=source_status.get("last_error_at") if source_status else None,
+        is_stale=bool(source_status.get("is_stale")) if source_status else False,
+        used_by_paths=list(used_by_paths),
     )
 
 
@@ -223,6 +317,8 @@ __all__ = [
     "_build_source_registry_entry_payload",
     "_build_source_registry_error_payloads",
     "_build_source_registry_health_payload",
+    "_build_source_registry_status_by_source",
+    "_build_source_registry_usage_paths",
     "_empty_source_registry_health_payload",
     "_sorted_source_registry_ids",
     "_source_registry_latest_checks_subquery",

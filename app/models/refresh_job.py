@@ -23,6 +23,8 @@ class RefreshJob(Base):
             "uq_refresh_jobs_active_ticker_dataset",
             "ticker",
             "dataset",
+            "as_of_key",
+            "reason",
             unique=True,
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
@@ -33,6 +35,8 @@ class RefreshJob(Base):
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
     ticker: Mapped[str] = mapped_column(String(16), nullable=False)
     dataset: Mapped[str] = mapped_column(String(64), nullable=False)
+    as_of_key: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'latest'"))
+    reason: Mapped[str] = mapped_column(String(32), nullable=False, server_default=text("'manual'"))
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     force: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     status: Mapped[str] = mapped_column(String(16), nullable=False)

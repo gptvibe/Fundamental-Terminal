@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import { EvidenceCard, PanelErrorBoundary, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
 import type { SectionLink } from "@/components/company/brief-primitives";
 import { CompanyMetricGrid } from "@/components/layout/company-research-header";
+import { PrimaryChartCard, PrimaryTableCard } from "@/components/ui/research-primitives";
 import { formatPercent } from "@/lib/format";
 import type { FinancialPayload, FundamentalsTrendPoint, PriceHistoryPoint, SegmentAnalysisPayload } from "@/lib/types";
 
@@ -79,9 +80,9 @@ export const SnapshotSection = memo(function SnapshotSection({
       expanded={expanded}
       onToggle={onToggle}
     >
-      <EvidenceCard
+      <PrimaryChartCard
         title="Price vs operating momentum"
-        copy="Operating history stays SEC-first; market context remains explicitly labeled when a commercial fallback is involved."
+        subtitle="Operating history stays SEC-first; market context remains explicitly labeled when a commercial fallback is involved."
         className="is-wide"
       >
         {loading && !priceHistory.length && !fundamentalsTrendData.length ? (
@@ -108,9 +109,9 @@ export const SnapshotSection = memo(function SnapshotSection({
             message="This visual appears once cached price history or annual filing trends are available for the company."
           />
         )}
-      </EvidenceCard>
+      </PrimaryChartCard>
 
-      <EvidenceCard title="Business context" copy="The minimum operating context needed before opening specialist views.">
+      <PrimaryTableCard title="Business context" subtitle="The minimum operating context needed before opening specialist views.">
         {loading && !latestFinancial ? (
           <ResearchBriefStateBlock
             kind="loading"
@@ -141,7 +142,7 @@ export const SnapshotSection = memo(function SnapshotSection({
             message="Queue a refresh to populate the default brief from cached company financials, segments, and activity summaries."
           />
         )}
-      </EvidenceCard>
+      </PrimaryTableCard>
 
       <EvidenceCard
         title="Reported segment mix"

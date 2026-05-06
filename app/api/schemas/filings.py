@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState
+from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, RefreshState, ResponseMetadataPayload
 
 
 class FilingPayload(BaseModel):
@@ -38,6 +38,7 @@ class CompanyFilingsResponse(BaseModel):
     filings: list[FilingPayload]
     timeline_source: Literal["sec_submissions", "cached_financials"]
     refresh: RefreshState
+    response_metadata: ResponseMetadataPayload | None = None
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
     error: str | None = None
 
