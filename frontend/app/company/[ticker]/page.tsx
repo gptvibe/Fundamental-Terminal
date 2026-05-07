@@ -7,7 +7,7 @@ import { useParams } from "next/navigation";
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { BeginnerGuidanceBanner } from "@/components/company/beginner-guidance-banner";
 import { BottomAppendix } from "@/components/company/bottom-appendix";
-import { PanelErrorBoundary } from "@/components/company/brief-primitives";
+import { PanelErrorBoundary, SectionLinks } from "@/components/company/brief-primitives";
 import { CompanyOverviewStatusStrip } from "@/components/company/company-overview-layout-sections";
 import { SourceFreshnessTimeline } from "@/components/company/source-freshness-timeline";
 import { FilingRiskSignalsPanel } from "@/components/filings/filing-risk-signals-panel";
@@ -292,8 +292,16 @@ export default function CompanyResearchBriefPage() {
     ],
     [ticker]
   );
+  const understandBusinessLinks = useMemo(
+    () => [
+      { href: `/company/${encodeURIComponent(ticker)}/financials`, label: "Financials" },
+      { href: `/company/${encodeURIComponent(ticker)}/filings`, label: "Filings" },
+    ],
+    [ticker]
+  );
   const whatChangedLinks = useMemo(
     () => [
+      { href: `/company/${encodeURIComponent(ticker)}/filings`, label: "Filings" },
       { href: `/company/${encodeURIComponent(ticker)}/earnings`, label: "Earnings" },
       { href: `/company/${encodeURIComponent(ticker)}/events`, label: "Events" },
     ],
@@ -310,6 +318,8 @@ export default function CompanyResearchBriefPage() {
     () => [
       { href: `/company/${encodeURIComponent(ticker)}/capital-markets`, label: "Equity Claim Risk Pack" },
       { href: `/company/${encodeURIComponent(ticker)}/governance`, label: "Governance" },
+      { href: `/company/${encodeURIComponent(ticker)}/ownership`, label: "Ownership" },
+      { href: `/company/${encodeURIComponent(ticker)}/insiders`, label: "Insiders" },
     ],
     [ticker]
   );
@@ -317,6 +327,7 @@ export default function CompanyResearchBriefPage() {
     () => [
       { href: `/company/${encodeURIComponent(ticker)}/models`, label: "Models" },
       { href: `/company/${encodeURIComponent(ticker)}/peers`, label: "Peers" },
+      { href: `/compare`, label: "Compare" },
     ],
     [ticker]
   );
@@ -324,6 +335,7 @@ export default function CompanyResearchBriefPage() {
     () => [
       { href: `/company/${encodeURIComponent(ticker)}/sec-feed`, label: "SEC Feed" },
       { href: `/company/${encodeURIComponent(ticker)}/events`, label: "Events" },
+      { href: `/watchlist`, label: "Watchlist" },
     ],
     [ticker]
   );
@@ -788,7 +800,10 @@ export default function CompanyResearchBriefPage() {
 
       <section id="understand-business" data-brief-section className="research-brief-anchor research-brief-understand-section">
         <div className="research-brief-understand-header">
-          <h2 className="research-brief-understand-title">Understand Business</h2>
+          <div className="research-brief-understand-header-row">
+            <h2 className="research-brief-understand-title">Understand Business</h2>
+            <SectionLinks links={understandBusinessLinks} />
+          </div>
           <p className="research-brief-understand-copy">Interpret the filing-backed operating narrative before reviewing deltas and valuation context.</p>
         </div>
         <DeferredClientSection

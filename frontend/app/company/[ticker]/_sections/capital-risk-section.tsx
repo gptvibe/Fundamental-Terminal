@@ -293,7 +293,7 @@ export const CapitalRiskSection = memo(function CapitalRiskSection({
         )}
       </EvidenceCard>
 
-      <EvidenceCard title="Share dilution" copy="Share-count direction keeps the equity-claim read grounded in persisted filing history.">
+      <EvidenceCard title="Share dilution" copy="Share-count direction keeps the equity-claim read grounded in persisted filing history." className="is-wide">
         {error && !financials.length ? (
           <ResearchBriefStateBlock kind="error" kicker="Capital & risk" title="Unable to load dilution history" message={error} />
         ) : loading && !financials.length ? (

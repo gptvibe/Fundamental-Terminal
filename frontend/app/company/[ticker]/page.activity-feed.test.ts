@@ -751,6 +751,65 @@ describe("CompanyResearchBriefPage", () => {
     });
     expect(screen.getByText("Partial data and fallback warnings")).toBeTruthy();
   });
+
+  it("renders drill-down links for every research brief section", async () => {
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+    });
+
+    // Snapshot → Financials, Filings
+    const snapshotFinancials = screen.getAllByRole("link", { name: "Financials" });
+    expect(snapshotFinancials.length).toBeGreaterThanOrEqual(1);
+    expect(snapshotFinancials[0].getAttribute("href")).toBe("/company/ACME/financials");
+    const snapshotFilings = screen.getAllByRole("link", { name: "Filings" });
+    expect(snapshotFilings.length).toBeGreaterThanOrEqual(1);
+    expect(snapshotFilings[0].getAttribute("href")).toBe("/company/ACME/filings");
+
+    // Understand Business → Financials, Filings (shared labels, already verified above)
+
+    // What Changed → Filings, Earnings, Events
+    const earningsLink = screen.getByRole("link", { name: "Earnings" });
+    expect(earningsLink.getAttribute("href")).toBe("/company/ACME/earnings");
+    const eventsLinks = screen.getAllByRole("link", { name: "Events" });
+    expect(eventsLinks.length).toBeGreaterThanOrEqual(1);
+    expect(eventsLinks[0].getAttribute("href")).toBe("/company/ACME/events");
+
+    // Business Quality → Full Financials, Earnings Detail
+    const fullFinancialsLink = screen.getByRole("link", { name: "Full Financials" });
+    expect(fullFinancialsLink.getAttribute("href")).toBe("/company/ACME/financials");
+    const earningsDetailLink = screen.getByRole("link", { name: "Earnings Detail" });
+    expect(earningsDetailLink.getAttribute("href")).toBe("/company/ACME/earnings");
+
+    // Capital & Risk → Equity Claim Risk Pack, Governance, Ownership, Insiders
+    const capitalMarketsLinks = screen.getAllByRole("link", { name: "Equity Claim Risk Pack" });
+    expect(capitalMarketsLinks.length).toBeGreaterThanOrEqual(1);
+    expect(capitalMarketsLinks[0].getAttribute("href")).toBe("/company/ACME/capital-markets");
+    const governanceLinks = screen.getAllByRole("link", { name: "Governance" });
+    expect(governanceLinks.length).toBeGreaterThanOrEqual(1);
+    expect(governanceLinks[0].getAttribute("href")).toBe("/company/ACME/governance");
+    const ownershipLinks = screen.getAllByRole("link", { name: "Ownership" });
+    expect(ownershipLinks.length).toBeGreaterThanOrEqual(1);
+    expect(ownershipLinks[0].getAttribute("href")).toBe("/company/ACME/ownership");
+    const insidersLinks = screen.getAllByRole("link", { name: "Insiders" });
+    expect(insidersLinks.length).toBeGreaterThanOrEqual(1);
+    expect(insidersLinks[0].getAttribute("href")).toBe("/company/ACME/insiders");
+
+    // Compare & Value → Models, Peers, Compare
+    const modelsLink = screen.getByRole("link", { name: "Models" });
+    expect(modelsLink.getAttribute("href")).toBe("/company/ACME/models");
+    const peersLink = screen.getByRole("link", { name: "Peers" });
+    expect(peersLink.getAttribute("href")).toBe("/company/ACME/peers");
+    const compareLink = screen.getByRole("link", { name: "Compare" });
+    expect(compareLink.getAttribute("href")).toBe("/compare");
+
+    // Monitor → SEC Feed, Events, Watchlist
+    const secFeedLink = screen.getByRole("link", { name: "SEC Feed" });
+    expect(secFeedLink.getAttribute("href")).toBe("/company/ACME/sec-feed");
+    const watchlistLink = screen.getByRole("link", { name: "Watchlist" });
+    expect(watchlistLink.getAttribute("href")).toBe("/watchlist");
+  });
 });
 
 function buildWorkspaceMock(overrides: Record<string, unknown> = {}) {

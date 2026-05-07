@@ -156,7 +156,37 @@ export const SnapshotSection = memo(function SnapshotSection({
         )}
       </PrimaryChartCard>
 
-      <PrimaryTableCard title="Business context" subtitle="The minimum operating context needed before opening specialist views.">
+      <EvidenceCard
+        title="Reported segment mix"
+        copy="Segment and geography mix orient the read before deeper statement or filing work."
+        className="is-wide"
+      >
+        {loading && !financials.length ? (
+          <ResearchBriefStateBlock
+            kind="loading"
+            kicker="Snapshot"
+            title="Loading segment disclosures"
+            message="Reading the latest persisted segment and geography disclosures from cached filings."
+          />
+        ) : financials.length ? (
+          <PanelErrorBoundary kicker="Snapshot" title="Unable to render segment breakdown">
+            <BusinessSegmentBreakdown financials={financials} segmentAnalysis={segmentAnalysis ?? null} />
+          </PanelErrorBoundary>
+        ) : (
+          <ResearchBriefStateBlock
+            kind="empty"
+            kicker="Snapshot"
+            title="No reported segment breakdown yet"
+            message="This section fills in once cached filings include segment or geographic disclosure detail."
+          />
+        )}
+      </EvidenceCard>
+
+      <PrimaryTableCard
+        title="Business context"
+        subtitle="The minimum operating context needed before opening specialist views."
+        className="is-wide"
+      >
         {loading && !latestFinancial ? (
           <ResearchBriefStateBlock
             kind="loading"
@@ -188,32 +218,6 @@ export const SnapshotSection = memo(function SnapshotSection({
           />
         )}
       </PrimaryTableCard>
-
-      <EvidenceCard
-        title="Reported segment mix"
-        copy="Segment and geography mix orient the read before deeper statement or filing work."
-        className="is-wide"
-      >
-        {loading && !financials.length ? (
-          <ResearchBriefStateBlock
-            kind="loading"
-            kicker="Snapshot"
-            title="Loading segment disclosures"
-            message="Reading the latest persisted segment and geography disclosures from cached filings."
-          />
-        ) : financials.length ? (
-          <PanelErrorBoundary kicker="Snapshot" title="Unable to render segment breakdown">
-            <BusinessSegmentBreakdown financials={financials} segmentAnalysis={segmentAnalysis ?? null} />
-          </PanelErrorBoundary>
-        ) : (
-          <ResearchBriefStateBlock
-            kind="empty"
-            kicker="Snapshot"
-            title="No reported segment breakdown yet"
-            message="This section fills in once cached filings include segment or geographic disclosure detail."
-          />
-        )}
-      </EvidenceCard>
     </ResearchBriefSection>
   );
 });

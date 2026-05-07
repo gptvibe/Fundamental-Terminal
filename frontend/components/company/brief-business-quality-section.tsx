@@ -130,7 +130,7 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
         )}
       </EvidenceCard>
 
-      <EvidenceCard title="Margin trends" copy="Gross, operating, net, and free-cash-flow margin direction from cached filings.">
+      <EvidenceCard title="Margin trends" copy="Gross, operating, net, and free-cash-flow margin direction from cached filings." className="is-wide">
         {error && !financials.length ? (
           <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load margin trends" message={error} />
         ) : loading && !financials.length ? (
@@ -152,7 +152,7 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
         )}
       </EvidenceCard>
 
-      <EvidenceCard title="Cash flow bridge" copy="How operating cash flow turns into free cash flow and how much room capital allocation still has.">
+      <EvidenceCard title="Cash flow bridge" copy="How operating cash flow turns into free cash flow and how much room capital allocation still has." className="is-wide">
         {error && !financials.length ? (
           <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load cash flow bridge" message={error} />
         ) : loading && !financials.length ? (
