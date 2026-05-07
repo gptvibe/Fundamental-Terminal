@@ -3,7 +3,15 @@
 import { memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 
-import { AlertOrEntryCard, EvidenceCard, PanelErrorBoundary, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import {
+  AlertOrEntryCard,
+  EvidenceCard,
+  PanelErrorBoundary,
+  ResearchBriefSection,
+  ResearchBriefSectionStateBanner,
+  ResearchBriefStateBlock,
+  type ResearchBriefSectionStateKind,
+} from "@/components/company/brief-primitives";
 import type { SectionLink } from "@/components/company/brief-primitives";
 import { CompanyMetricGrid } from "@/components/layout/company-research-header";
 import {
@@ -58,6 +66,7 @@ type WhatChangedSectionProps = {
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
+  onRetry?: (() => void) | null;
 };
 
 export const WhatChangedSection = memo(function WhatChangedSection({
@@ -76,6 +85,7 @@ export const WhatChangedSection = memo(function WhatChangedSection({
   links,
   expanded,
   onToggle,
+  onRetry,
 }: WhatChangedSectionProps) {
   const highlights = useMemo(
     () =>
@@ -101,6 +111,25 @@ export const WhatChangedSection = memo(function WhatChangedSection({
     (changesState.loading && !changesState.data) ||
     (earningsSummaryState.loading && !earningsSummaryState.data) ||
     (activityOverviewState.loading && !activityOverviewState.data);
+  const hasAnyData = Boolean(changesState.data || earningsSummaryState.data || activityOverviewState.data);
+  const hasAnyError = Boolean(changesState.error || earningsSummaryState.error || activityOverviewState.error);
+  const allCoreLoading =
+    changesState.loading && !changesState.data &&
+    earningsSummaryState.loading && !earningsSummaryState.data &&
+    activityOverviewState.loading && !activityOverviewState.data;
+  const allCoreError =
+    Boolean(changesState.error && !changesState.data) &&
+    Boolean(earningsSummaryState.error && !earningsSummaryState.data) &&
+    Boolean(activityOverviewState.error && !activityOverviewState.data);
+  const sectionState: ResearchBriefSectionStateKind = allCoreLoading
+    ? "loading"
+    : allCoreError
+      ? "error"
+      : hasAnyError && hasAnyData
+        ? "partial"
+        : hasAnyData
+          ? "ready"
+          : "empty";
 
   return (
     <ResearchBriefSection
@@ -130,6 +159,24 @@ export const WhatChangedSection = memo(function WhatChangedSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      <ResearchBriefSectionStateBanner
+        section="What changed"
+        state={sectionState}
+        message={
+          sectionState === "loading"
+            ? "Loading filing comparison, earnings summary, and activity overview from persisted caches."
+            : sectionState === "error"
+              ? changesState.error ?? earningsSummaryState.error ?? activityOverviewState.error ?? "What changed data is temporarily unavailable."
+              : sectionState === "partial"
+                ? "Some change-monitoring slices failed to load. Use Earnings and Events drill-down routes while this section retries."
+                : sectionState === "empty"
+                  ? "No filing deltas, earnings summary, or activity overview is cached yet. Open Earnings and Events for detailed coverage checks."
+                  : "What changed section is ready from persisted data."
+        }
+        links={links}
+        onRetry={onRetry}
+      />
+
       <EvidenceCard
         title="What changed now"
         copy="Deterministic highlights ranked by recency first, then severity, with source provenance on every line."

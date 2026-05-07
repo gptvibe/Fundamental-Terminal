@@ -3,7 +3,13 @@
 import { memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 
-import { EvidenceCard, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import {
+  EvidenceCard,
+  ResearchBriefSection,
+  ResearchBriefSectionStateBanner,
+  ResearchBriefStateBlock,
+  type ResearchBriefSectionStateKind,
+} from "@/components/company/brief-primitives";
 import type { AsyncState, ResearchBriefCue, SectionLink } from "@/components/company/brief-primitives";
 import { formatCompactNumber, formatPercent } from "@/lib/format";
 import type { CompanyModelsResponse, CompanyPeersResponse, FinancialPayload, PriceHistoryPoint } from "@/lib/types";
@@ -24,6 +30,7 @@ export const BriefValuationSection = memo(function BriefValuationSection({
   links,
   expanded,
   onToggle,
+  onRetry,
 }: {
   ticker: string;
   modelsState: AsyncState<CompanyModelsResponse>;
@@ -35,6 +42,7 @@ export const BriefValuationSection = memo(function BriefValuationSection({
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
+  onRetry?: (() => void) | null;
 }) {
   const cues: ResearchBriefCue[] = [
     {
@@ -54,6 +62,18 @@ export const BriefValuationSection = memo(function BriefValuationSection({
       confidenceFlags: peersState.data?.confidence_flags,
     },
   ];
+  const hasValuationData = Boolean(modelsState.data || peersState.data);
+  const hasValuationError = Boolean(modelsState.error || peersState.error);
+  const sectionState: ResearchBriefSectionStateKind =
+    modelsState.loading && !modelsState.data && peersState.loading && !peersState.data
+      ? "loading"
+      : modelsState.error && !modelsState.data && peersState.error && !peersState.data
+        ? "error"
+        : hasValuationError && hasValuationData
+          ? "partial"
+          : hasValuationData
+            ? "ready"
+            : "empty";
 
   return (
     <ResearchBriefSection
@@ -66,6 +86,24 @@ export const BriefValuationSection = memo(function BriefValuationSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      <ResearchBriefSectionStateBanner
+        section="Valuation"
+        state={sectionState}
+        message={
+          sectionState === "loading"
+            ? "Loading persisted model outputs and peer snapshots for valuation context."
+            : sectionState === "error"
+              ? modelsState.error ?? peersState.error ?? "Valuation data is temporarily unavailable."
+              : sectionState === "partial"
+                ? "Some valuation slices failed to load. Open Models and Peers routes for full diagnostics while this section retries."
+                : sectionState === "empty"
+                  ? "Cached models or peer comparisons are missing. Open Models and Peers to inspect what has not been persisted yet."
+                  : "Valuation section is ready from persisted data."
+        }
+        links={links}
+        onRetry={onRetry}
+      />
+
       <EvidenceCard
         title="Valuation summary"
         copy="Use the default brief to see the cached underwriting conclusion, then jump into the full Models workspace when you need the full assumption tree."

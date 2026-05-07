@@ -3,7 +3,14 @@
 import { memo } from "react";
 import dynamic from "next/dynamic";
 
-import { EvidenceCard, PanelErrorBoundary, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import {
+  EvidenceCard,
+  PanelErrorBoundary,
+  ResearchBriefSection,
+  ResearchBriefSectionStateBanner,
+  ResearchBriefStateBlock,
+  type ResearchBriefSectionStateKind,
+} from "@/components/company/brief-primitives";
 import type { SectionLink } from "@/components/company/brief-primitives";
 import { CompanyMetricGrid } from "@/components/layout/company-research-header";
 import { PrimaryChartCard, PrimaryTableCard } from "@/components/ui/research-primitives";
@@ -42,6 +49,7 @@ const BusinessSegmentBreakdown = dynamic(
 
 type SnapshotSectionProps = {
   loading: boolean;
+  error: string | null;
   priceHistory: PriceHistoryPoint[];
   fundamentalsTrendData: FundamentalsTrendPoint[];
   latestFinancial: FinancialPayload | null;
@@ -53,10 +61,12 @@ type SnapshotSectionProps = {
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
+  onRetry?: (() => void) | null;
 };
 
 export const SnapshotSection = memo(function SnapshotSection({
   loading,
+  error,
   priceHistory,
   fundamentalsTrendData,
   latestFinancial,
@@ -68,7 +78,24 @@ export const SnapshotSection = memo(function SnapshotSection({
   links,
   expanded,
   onToggle,
+  onRetry,
 }: SnapshotSectionProps) {
+  const hasSnapshotData =
+    priceHistory.length > 0 ||
+    fundamentalsTrendData.length > 0 ||
+    Boolean(latestFinancial) ||
+    financials.length > 0 ||
+    Boolean(topSegment);
+  const sectionState: ResearchBriefSectionStateKind = loading && !hasSnapshotData
+    ? "loading"
+    : error && !hasSnapshotData
+      ? "error"
+      : error && hasSnapshotData
+        ? "partial"
+        : hasSnapshotData
+          ? "ready"
+          : "empty";
+
   return (
     <ResearchBriefSection
       id="snapshot"
@@ -80,6 +107,24 @@ export const SnapshotSection = memo(function SnapshotSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      <ResearchBriefSectionStateBanner
+        section="Snapshot"
+        state={sectionState}
+        message={
+          sectionState === "loading"
+            ? "Loading persisted price history, annual fundamentals trends, and filing-backed context."
+            : sectionState === "error"
+              ? error ?? "Snapshot data is temporarily unavailable."
+              : sectionState === "partial"
+                ? `Some snapshot inputs are unavailable: ${error}. Use drill-down routes for full detail while cached slices recover.`
+                : sectionState === "empty"
+                  ? "Price history, annual trends, or filing-backed context is missing. Open Financials or Filings to inspect source coverage."
+                  : "Snapshot is ready from persisted data."
+        }
+        links={links}
+        onRetry={onRetry}
+      />
+
       <PrimaryChartCard
         title="Price vs operating momentum"
         subtitle="Operating history stays SEC-first; market context remains explicitly labeled when a commercial fallback is involved."

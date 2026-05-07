@@ -3,7 +3,13 @@
 import { memo } from "react";
 import dynamic from "next/dynamic";
 
-import { EvidenceCard, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import {
+  EvidenceCard,
+  ResearchBriefSection,
+  ResearchBriefSectionStateBanner,
+  ResearchBriefStateBlock,
+  type ResearchBriefSectionStateKind,
+} from "@/components/company/brief-primitives";
 import type { ResearchBriefCue, SectionLink } from "@/components/company/brief-primitives";
 import type { FinancialPayload, SourceMixPayload, ProvenanceEntryPayload } from "@/lib/types";
 
@@ -34,6 +40,7 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
   links,
   expanded,
   onToggle,
+  onRetry,
 }: {
   financials: FinancialPayload[];
   loading: boolean;
@@ -48,6 +55,7 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
+  onRetry?: (() => void) | null;
 }) {
   const cues: ResearchBriefCue[] = [
     {
@@ -60,6 +68,16 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
       confidenceFlags,
     },
   ];
+  const hasQualityData = financials.length > 0;
+  const sectionState: ResearchBriefSectionStateKind = loading && !hasQualityData
+    ? "loading"
+    : error && !hasQualityData
+      ? "error"
+      : error && hasQualityData
+        ? "partial"
+        : hasQualityData
+          ? "ready"
+          : "empty";
 
   return (
     <ResearchBriefSection
@@ -72,6 +90,24 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
       expanded={expanded}
       onToggle={onToggle}
     >
+      <ResearchBriefSectionStateBanner
+        section="Business quality"
+        state={sectionState}
+        message={
+          sectionState === "loading"
+            ? "Loading annual profitability, margin, and cash-generation history from persisted filings."
+            : sectionState === "error"
+              ? error ?? "Business quality data is temporarily unavailable."
+              : sectionState === "partial"
+                ? `Some business-quality inputs are unavailable: ${error}. Use Full Financials and Earnings Detail routes for complete context.`
+                : sectionState === "empty"
+                  ? "Annual statement history is missing for this section. Open Full Financials and Earnings Detail to inspect filing coverage."
+                  : "Business quality section is ready from persisted data."
+        }
+        links={links}
+        onRetry={onRetry}
+      />
+
       <EvidenceCard title="Quality summary" copy="A compact read on margins, profitability, leverage, growth, and share-count direction.">
         {error && !financials.length ? (
           <ResearchBriefStateBlock kind="error" kicker="Business quality" title="Unable to load quality summary" message={error} />

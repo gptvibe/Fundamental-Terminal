@@ -209,6 +209,15 @@ vi.mock("@/lib/api", () => ({
         period_end: "2026-04-30",
       },
     ],
+    diagnostics: {
+      coverage_ratio: 0.8,
+      fallback_ratio: 0.25,
+      stale_flags: ["stale_warning"],
+      parser_confidence: 0.92,
+      missing_field_flags: [],
+      reconciliation_penalty: 0.1,
+      reconciliation_disagreement_count: 1,
+    },
     refresh: { triggered: false, reason: "none", ticker: "ACME", job_id: null },
     error: null,
   })),
@@ -251,9 +260,10 @@ describe("CompanyEarningsPage", () => {
     render(React.createElement(CompanyEarningsPage));
 
     await waitFor(() => {
-      expect(screen.getByText(/Coverage ratio/i)).toBeTruthy();
-      expect(screen.getByText(/Fallback ratio/i)).toBeTruthy();
-      expect(screen.getByText(/Stale warning/i)).toBeTruthy();
+      expect(screen.getByText(/^Coverage$/i)).toBeTruthy();
+      expect(screen.getByText(/^Fallback$/i)).toBeTruthy();
+      expect(screen.getByText(/Stale Flags/i)).toBeTruthy();
+      expect(screen.getByText(/stale_warning/i)).toBeTruthy();
       expect(screen.getByText("Quality consistency")).toBeTruthy();
       expect(screen.getByText("EPS windows")).toBeTruthy();
     }, { timeout: 5000 });

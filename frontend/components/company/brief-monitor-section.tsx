@@ -1,7 +1,14 @@
 "use client";
 
 import { memo } from "react";
-import { AlertOrEntryCard, EvidenceCard, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import {
+  AlertOrEntryCard,
+  EvidenceCard,
+  ResearchBriefSection,
+  ResearchBriefSectionStateBanner,
+  ResearchBriefStateBlock,
+  type ResearchBriefSectionStateKind,
+} from "@/components/company/brief-primitives";
 import type { AsyncState, MonitorChecklistItem, ResearchBriefCue, SectionLink } from "@/components/company/brief-primitives";
 import {
   toneForAlertLevel,
@@ -23,6 +30,7 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
   links,
   expanded,
   onToggle,
+  onRetry,
 }: {
   activityOverviewState: AsyncState<CompanyActivityOverviewResponse>;
   topAlerts: AlertPayload[];
@@ -33,6 +41,7 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
+  onRetry?: (() => void) | null;
 }) {
   const cues: ResearchBriefCue[] = [
     {
@@ -45,6 +54,16 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
       confidenceFlags: activityOverviewState.data?.confidence_flags,
     },
   ];
+  const hasMonitorData = Boolean(activityOverviewState.data || topAlerts.length || latestEntries.length || monitorChecklist.length);
+  const sectionState: ResearchBriefSectionStateKind = activityOverviewState.loading && !activityOverviewState.data
+    ? "loading"
+    : activityOverviewState.error && !activityOverviewState.data
+      ? "error"
+      : activityOverviewState.error && hasMonitorData
+        ? "partial"
+        : hasMonitorData
+          ? "ready"
+          : "empty";
 
   return (
     <ResearchBriefSection
@@ -57,6 +76,24 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      <ResearchBriefSectionStateBanner
+        section="Monitor"
+        state={sectionState}
+        message={
+          sectionState === "loading"
+            ? "Loading cached alerts, timeline entries, and monitor checklist context."
+            : sectionState === "error"
+              ? activityOverviewState.error ?? "Monitor data is temporarily unavailable."
+              : sectionState === "partial"
+                ? "Some monitor slices are unavailable. Use SEC Feed and Events routes while this section retries."
+                : sectionState === "empty"
+                  ? "No cached alerts or timeline activity is available yet. Open SEC Feed and Events to inspect the underlying monitors."
+                  : "Monitor section is ready from persisted data."
+        }
+        links={links}
+        onRetry={onRetry}
+      />
+
       <EvidenceCard title="Priority alerts" copy="The monitor starts with the highest-signal items the user is likely to revisit first.">
         {activityOverviewState.error && !activityOverviewState.data ? (
           <ResearchBriefStateBlock kind="error" kicker="Monitor" title="Unable to load alerts" message={activityOverviewState.error} />

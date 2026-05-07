@@ -66,8 +66,17 @@ import {
   mergeBusinessQualitySectionStatus,
 } from "./_lib/research-brief-utils";
 import type { NtFilingSignalSummary } from "./_lib/research-brief-utils";
-import { BRIEF_SECTION_IDS } from "./_lib/research-brief-types";
 import { SnapshotSection } from "./_sections/snapshot-section";
+
+const BRIEF_NAV_SECTION_IDS = [
+  "snapshot",
+  "understand-business",
+  "what-changed",
+  "business-quality",
+  "capital-risk",
+  "compare-value",
+  "monitor",
+];
 
 const WhatChangedSection = dynamic(
   () => import("./_sections/what-changed-section").then((module) => module.WhatChangedSection),
@@ -187,14 +196,16 @@ export default function CompanyResearchBriefPage() {
     };
   }, [activeJobId, data, loading, refreshState?.job_id, ticker]);
 
+  const [briefRetryToken, setBriefRetryToken] = useState(0);
   const briefData = useResearchBriefData(
     ticker,
     reloadKey,
+    briefRetryToken,
     initialBriefData,
     loading,
     activeJobId ?? refreshState?.job_id ?? initialBriefData?.refresh.job_id ?? null
   );
-  const activeSectionId = useActiveBriefSection(BRIEF_SECTION_IDS);
+  const activeSectionId = useActiveBriefSection(BRIEF_NAV_SECTION_IDS);
   const { isBeginnerMode } = useUIDensity();
   const { expandedSections, toggleSection } = useResearchBriefSectionPreferences(ticker, {
     defaultOverrides: isBeginnerMode ? { monitor: false } : undefined,
@@ -470,6 +481,12 @@ export default function CompanyResearchBriefPage() {
   const showWarmupAppendixPanel =
     initialCompanyLoad || Boolean(activeJobId || refreshState?.job_id) || refreshing || briefData.buildState !== "ready";
   const eagerDeferredSections = process.env.NODE_ENV === "test";
+  const handleRetryBriefSlices = useCallback(() => {
+    setBriefRetryToken((current) => current + 1);
+  }, []);
+  const handleRetryWorkspaceSlices = useCallback(() => {
+    queueRefresh();
+  }, [queueRefresh]);
 
   const handleExportResearchPackage = useCallback(async () => {
     try {
@@ -744,6 +761,7 @@ export default function CompanyResearchBriefPage() {
 
         <SnapshotSection
           loading={loading}
+          error={error}
           priceHistory={priceHistory}
           fundamentalsTrendData={fundamentalsTrendData}
           latestFinancial={latestFinancial}
@@ -755,6 +773,7 @@ export default function CompanyResearchBriefPage() {
           links={snapshotLinks}
           expanded={expandedSections.snapshot ?? true}
           onToggle={() => toggleSection("snapshot")}
+          onRetry={handleRetryWorkspaceSlices}
         />
 
         <CompanyOverviewStatusStrip
@@ -767,26 +786,32 @@ export default function CompanyResearchBriefPage() {
           hasWarnings={Boolean(error || briefData.error)}
         />
 
-      <DeferredClientSection
-        forceVisible={eagerDeferredSections}
-        rootMargin="120px 0px"
-        placeholder={<DeferredSectionPlaceholder title="Plain-English analysis" />}
-      >
-        <PanelErrorBoundary kicker="Analysis" title="Unable to render plain-English analysis">
-          <ResearchBriefPlainEnglishPanel
-            ticker={ticker}
-            models={briefData.models.data?.models ?? []}
-            modelsLoading={briefData.models.loading}
-            modelsError={briefData.models.error}
-            latestFinancial={latestFinancial}
-            previousAnnual={previousAnnual}
-            diagnostics={data?.diagnostics ?? null}
-            confidenceFlags={data?.confidence_flags ?? null}
-            strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
-            reloadKey={reloadKey}
-          />
-        </PanelErrorBoundary>
-      </DeferredClientSection>
+      <section id="understand-business" data-brief-section className="research-brief-anchor research-brief-understand-section">
+        <div className="research-brief-understand-header">
+          <h2 className="research-brief-understand-title">Understand Business</h2>
+          <p className="research-brief-understand-copy">Interpret the filing-backed operating narrative before reviewing deltas and valuation context.</p>
+        </div>
+        <DeferredClientSection
+          forceVisible={eagerDeferredSections}
+          rootMargin="120px 0px"
+          placeholder={<DeferredSectionPlaceholder title="Plain-English analysis" />}
+        >
+          <PanelErrorBoundary kicker="Analysis" title="Unable to render plain-English analysis">
+            <ResearchBriefPlainEnglishPanel
+              ticker={ticker}
+              models={briefData.models.data?.models ?? []}
+              modelsLoading={briefData.models.loading}
+              modelsError={briefData.models.error}
+              latestFinancial={latestFinancial}
+              previousAnnual={previousAnnual}
+              diagnostics={data?.diagnostics ?? null}
+              confidenceFlags={data?.confidence_flags ?? null}
+              strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
+              reloadKey={reloadKey}
+            />
+          </PanelErrorBoundary>
+        </DeferredClientSection>
+      </section>
 
       <ResearchBriefSectionNav activeSectionId={activeSectionId} />
 
@@ -811,6 +836,7 @@ export default function CompanyResearchBriefPage() {
           links={whatChangedLinks}
           expanded={expandedSections["what-changed"] ?? true}
           onToggle={() => toggleSection("what-changed")}
+          onRetry={handleRetryBriefSlices}
         />
       </DeferredClientSection>
 
@@ -834,6 +860,7 @@ export default function CompanyResearchBriefPage() {
             links={businessQualityLinks}
             expanded={expandedSections["business-quality"] ?? true}
             onToggle={() => toggleSection("business-quality")}
+            onRetry={handleRetryWorkspaceSlices}
           />
         </PanelErrorBoundary>
       </DeferredClientSection>
@@ -862,30 +889,34 @@ export default function CompanyResearchBriefPage() {
           links={capitalRiskLinks}
           expanded={expandedSections["capital-risk"] ?? true}
           onToggle={() => toggleSection("capital-risk")}
+          onRetry={handleRetryBriefSlices}
           lastCheckedFilings={pageCompany?.last_checked_filings}
         />
       </DeferredClientSection>
 
-      <DeferredClientSection
-        forceVisible={eagerDeferredSections}
-        rootMargin="380px 0px"
-        placeholder={<DeferredSectionPlaceholder title="Valuation" />}
-      >
-        <PanelErrorBoundary kicker="Valuation" title="Unable to render valuation section">
-          <BriefValuationSection
-            ticker={ticker}
-            modelsState={briefData.models}
-            peersState={briefData.peers}
-            financials={financials}
-            priceHistory={priceHistory}
-            strictOfficialMode={Boolean(briefData.models.data?.company?.strict_official_mode ?? pageCompany?.strict_official_mode)}
-            narrative={valuationNarrative}
-            links={valuationLinks}
-            expanded={expandedSections.valuation ?? true}
-            onToggle={() => toggleSection("valuation")}
-          />
-        </PanelErrorBoundary>
-      </DeferredClientSection>
+      <section id="compare-value" data-brief-section className="research-brief-anchor">
+        <DeferredClientSection
+          forceVisible={eagerDeferredSections}
+          rootMargin="380px 0px"
+          placeholder={<DeferredSectionPlaceholder title="Valuation" />}
+        >
+          <PanelErrorBoundary kicker="Valuation" title="Unable to render valuation section">
+            <BriefValuationSection
+              ticker={ticker}
+              modelsState={briefData.models}
+              peersState={briefData.peers}
+              financials={financials}
+              priceHistory={priceHistory}
+              strictOfficialMode={Boolean(briefData.models.data?.company?.strict_official_mode ?? pageCompany?.strict_official_mode)}
+              narrative={valuationNarrative}
+              links={valuationLinks}
+              expanded={expandedSections.valuation ?? true}
+              onToggle={() => toggleSection("valuation")}
+              onRetry={handleRetryBriefSlices}
+            />
+          </PanelErrorBoundary>
+        </DeferredClientSection>
+      </section>
 
       <DeferredClientSection
         forceVisible={eagerDeferredSections}
@@ -903,6 +934,7 @@ export default function CompanyResearchBriefPage() {
             links={monitorLinks}
             expanded={expandedSections.monitor ?? true}
             onToggle={() => toggleSection("monitor")}
+            onRetry={handleRetryBriefSlices}
           />
         </PanelErrorBoundary>
       </DeferredClientSection>

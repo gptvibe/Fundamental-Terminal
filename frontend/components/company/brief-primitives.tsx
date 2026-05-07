@@ -44,6 +44,8 @@ export type MonitorChecklistItem = {
   tone: SemanticTone;
 };
 
+export type ResearchBriefSectionStateKind = "loading" | "ready" | "empty" | "partial" | "error";
+
 // ---------------------------------------------------------------------------
 // ResearchBriefSection
 // ---------------------------------------------------------------------------
@@ -226,7 +228,7 @@ export function ResearchBriefStateBlock({
   message,
   minHeight = 220,
 }: {
-  kind: "loading" | "empty" | "error";
+  kind: "loading" | "empty" | "partial" | "error";
   kicker: string;
   title: string;
   message: string;
@@ -237,6 +239,42 @@ export function ResearchBriefStateBlock({
       <div className="grid-empty-kicker">{kicker}</div>
       <div className="grid-empty-title">{title}</div>
       <div className="grid-empty-copy">{message}</div>
+    </div>
+  );
+}
+
+export function ResearchBriefSectionStateBanner({
+  section,
+  state,
+  message,
+  links,
+  onRetry,
+}: {
+  section: string;
+  state: ResearchBriefSectionStateKind;
+  message: string;
+  links: SectionLink[];
+  onRetry?: (() => void) | null;
+}) {
+  return (
+    <div className={`research-brief-state research-brief-state-${state} is-compact`} role="status" aria-live="polite">
+      <div className="grid-empty-kicker">{section}</div>
+      <div className="grid-empty-title">{formatSectionStateTitle(state)}</div>
+      <div className="grid-empty-copy">{message}</div>
+      {state === "empty" || state === "partial" || state === "error" ? (
+        <div className="research-brief-section-links" aria-label={`${section} drill-down routes`}>
+          {links.map((link) => (
+            <Link key={link.href} href={link.href} className="research-brief-section-link">
+              {link.label}
+            </Link>
+          ))}
+        </div>
+      ) : null}
+      {(state === "partial" || state === "error") && onRetry ? (
+        <button type="button" className="research-brief-section-toggle" onClick={onRetry}>
+          Retry section data
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -384,4 +422,20 @@ export function formatEvidenceFallbackLabel(
 
 function humanizeToken(value: string): string {
   return value.replaceAll("_", " ");
+}
+
+function formatSectionStateTitle(state: ResearchBriefSectionStateKind): string {
+  if (state === "ready") {
+    return "Section ready";
+  }
+  if (state === "partial") {
+    return "Partial data warning";
+  }
+  if (state === "error") {
+    return "Section error";
+  }
+  if (state === "empty") {
+    return "No cached data yet";
+  }
+  return "Loading section";
 }

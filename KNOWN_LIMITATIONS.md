@@ -17,6 +17,7 @@ This document tracks current product and operational constraints for the `v0.1.x
 
 ## Release And Quality
 
-- Frontend typechecking currently runs via `npm run build` (no dedicated `typecheck` script yet).
+- Frontend quality checks now include a dedicated `npm run typecheck`; production builds remain a separate validation step.
+- Backend quality checks include a scoped Ruff pass over `app/main.py`, router/schema/service layers, and the architecture guard.
 - Smoke checks validate key routes but are not a substitute for full exploratory UI testing across all company surfaces.
 - Performance regression gate is benchmark-based and sensitive to environment noise; run it on a stable machine for release decisions.

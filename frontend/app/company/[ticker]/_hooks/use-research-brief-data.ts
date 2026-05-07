@@ -2,17 +2,29 @@
 
 import { useEffect, useState } from "react";
 
-import { getCompanyResearchBrief } from "@/lib/api";
+import {
+  getCompanyActivityOverview,
+  getCompanyBeneficialOwnershipSummary,
+  getCompanyCapitalMarketsSummary,
+  getCompanyCapitalStructure,
+  getCompanyChangesSinceLastFiling,
+  getCompanyEarningsSummary,
+  getCompanyGovernanceSummary,
+  getCompanyModels,
+  getCompanyPeers,
+  getCompanyResearchBrief,
+} from "@/lib/api";
 import { withPerformanceAuditSource } from "@/lib/performance-audit";
 import type { CompanyResearchBriefResponse } from "@/lib/types";
 
 import { INITIAL_RESEARCH_BRIEF_DATA_STATE } from "../_lib/research-brief-types";
 import type { ResearchBriefDataState } from "../_lib/research-brief-types";
-import { mapBriefResponseToAsyncState } from "../_lib/research-brief-utils";
+import { mapBriefResponseToAsyncState, resolveAsyncState } from "../_lib/research-brief-utils";
 
 export function useResearchBriefData(
   ticker: string,
   reloadKey: string,
+  retryToken: number,
   initialBrief: CompanyResearchBriefResponse | null,
   overviewBootstrapLoading: boolean,
   warmupJobId: string | null
@@ -52,19 +64,68 @@ export function useResearchBriefData(
         }
 
         const message = nextError instanceof Error ? nextError.message : "Unable to load research brief";
-        setState({
-          ...INITIAL_RESEARCH_BRIEF_DATA_STATE,
-          error: message,
-          loading: false,
-          activityOverview: { data: null, error: message, loading: false },
-          changes: { data: null, error: message, loading: false },
-          earningsSummary: { data: null, error: message, loading: false },
-          capitalStructure: { data: null, error: message, loading: false },
-          capitalMarketsSummary: { data: null, error: message, loading: false },
-          governanceSummary: { data: null, error: message, loading: false },
-          ownershipSummary: { data: null, error: message, loading: false },
-          models: { data: null, error: message, loading: false },
-          peers: { data: null, error: message, loading: false },
+        const settled = await Promise.allSettled([
+          getCompanyActivityOverview(ticker),
+          getCompanyChangesSinceLastFiling(ticker, { asOf: null }),
+          getCompanyEarningsSummary(ticker),
+          getCompanyCapitalStructure(ticker, { asOf: null }),
+          getCompanyCapitalMarketsSummary(ticker),
+          getCompanyGovernanceSummary(ticker),
+          getCompanyBeneficialOwnershipSummary(ticker),
+          getCompanyModels(ticker, undefined, { asOf: null }),
+          getCompanyPeers(ticker, undefined, { asOf: null }),
+        ] as const);
+
+        if (cancelled) {
+          return;
+        }
+
+        setState((previous) => {
+          const fallbackState: ResearchBriefDataState = {
+            ...INITIAL_RESEARCH_BRIEF_DATA_STATE,
+            loading: false,
+            buildState: "partial",
+            buildStatus: "Brief endpoint unavailable. Loaded persisted section slices independently.",
+            error: message,
+            activityOverview: resolveAsyncState(previous.activityOverview, settled[0], "Unable to load activity overview"),
+            changes: resolveAsyncState(previous.changes, settled[1], "Unable to load filing changes"),
+            earningsSummary: resolveAsyncState(previous.earningsSummary, settled[2], "Unable to load earnings summary"),
+            capitalStructure: resolveAsyncState(previous.capitalStructure, settled[3], "Unable to load capital structure"),
+            capitalMarketsSummary: resolveAsyncState(previous.capitalMarketsSummary, settled[4], "Unable to load capital markets summary"),
+            governanceSummary: resolveAsyncState(previous.governanceSummary, settled[5], "Unable to load governance summary"),
+            ownershipSummary: resolveAsyncState(previous.ownershipSummary, settled[6], "Unable to load ownership summary"),
+            models: resolveAsyncState(previous.models, settled[7], "Unable to load valuation models"),
+            peers: resolveAsyncState(previous.peers, settled[8], "Unable to load peer snapshot"),
+          };
+
+          const hasAnyFallbackData = Boolean(
+            fallbackState.activityOverview.data ||
+              fallbackState.changes.data ||
+              fallbackState.earningsSummary.data ||
+              fallbackState.capitalStructure.data ||
+              fallbackState.capitalMarketsSummary.data ||
+              fallbackState.governanceSummary.data ||
+              fallbackState.ownershipSummary.data ||
+              fallbackState.models.data ||
+              fallbackState.peers.data
+          );
+
+          if (!hasAnyFallbackData) {
+            return {
+              ...fallbackState,
+              activityOverview: { data: null, error: message, loading: false },
+              changes: { data: null, error: message, loading: false },
+              earningsSummary: { data: null, error: message, loading: false },
+              capitalStructure: { data: null, error: message, loading: false },
+              capitalMarketsSummary: { data: null, error: message, loading: false },
+              governanceSummary: { data: null, error: message, loading: false },
+              ownershipSummary: { data: null, error: message, loading: false },
+              models: { data: null, error: message, loading: false },
+              peers: { data: null, error: message, loading: false },
+            };
+          }
+
+          return fallbackState;
         });
       }
     };
@@ -133,7 +194,7 @@ export function useResearchBriefData(
         idleWindow.cancelIdleCallback(idleId);
       }
     };
-  }, [initialBrief, overviewBootstrapLoading, reloadKey, ticker, warmupJobId]);
+  }, [initialBrief, overviewBootstrapLoading, reloadKey, retryToken, ticker, warmupJobId]);
 
   return state;
 }

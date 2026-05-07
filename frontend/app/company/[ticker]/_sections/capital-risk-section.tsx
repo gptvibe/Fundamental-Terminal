@@ -4,7 +4,14 @@ import { memo } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 
-import { EvidenceCard, PanelErrorBoundary, ResearchBriefSection, ResearchBriefStateBlock } from "@/components/company/brief-primitives";
+import {
+  EvidenceCard,
+  PanelErrorBoundary,
+  ResearchBriefSection,
+  ResearchBriefSectionStateBanner,
+  ResearchBriefStateBlock,
+  type ResearchBriefSectionStateKind,
+} from "@/components/company/brief-primitives";
 import type { SectionLink } from "@/components/company/brief-primitives";
 import { formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
@@ -69,6 +76,7 @@ type CapitalRiskSectionProps = {
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
+  onRetry?: (() => void) | null;
   lastCheckedFilings: string | null | undefined;
 };
 
@@ -91,8 +99,51 @@ export const CapitalRiskSection = memo(function CapitalRiskSection({
   links,
   expanded,
   onToggle,
+  onRetry,
   lastCheckedFilings,
 }: CapitalRiskSectionProps) {
+  const hasCapitalData = Boolean(
+    equityClaimRiskSummary ||
+      capitalStructureState.data ||
+      capitalMarketsSummaryState.data ||
+      governanceSummaryState.data ||
+      ownershipSummaryState.data ||
+      capitalSignalRows.length ||
+      financials.length
+  );
+  const hasCapitalError = Boolean(
+    capitalStructureState.error ||
+      capitalMarketsSummaryState.error ||
+      governanceSummaryState.error ||
+      ownershipSummaryState.error ||
+      error
+  );
+  const allCapitalLoading =
+    briefLoading &&
+    !equityClaimRiskSummary &&
+    capitalStructureState.loading && !capitalStructureState.data &&
+    capitalMarketsSummaryState.loading && !capitalMarketsSummaryState.data &&
+    governanceSummaryState.loading && !governanceSummaryState.data &&
+    ownershipSummaryState.loading && !ownershipSummaryState.data &&
+    loading && !financials.length;
+  const allCapitalError = Boolean(
+    !equityClaimRiskSummary &&
+      capitalStructureState.error && !capitalStructureState.data &&
+      capitalMarketsSummaryState.error && !capitalMarketsSummaryState.data &&
+      governanceSummaryState.error && !governanceSummaryState.data &&
+      ownershipSummaryState.error && !ownershipSummaryState.data &&
+      error && !financials.length
+  );
+  const sectionState: ResearchBriefSectionStateKind = allCapitalLoading
+    ? "loading"
+    : allCapitalError
+      ? "error"
+      : hasCapitalError && hasCapitalData
+        ? "partial"
+        : hasCapitalData
+          ? "ready"
+          : "empty";
+
   return (
     <ResearchBriefSection
       id="capital-risk"
@@ -129,6 +180,24 @@ export const CapitalRiskSection = memo(function CapitalRiskSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      <ResearchBriefSectionStateBanner
+        section="Capital & risk"
+        state={sectionState}
+        message={
+          sectionState === "loading"
+            ? "Loading capital structure, financing, governance, ownership, and dilution context from persisted datasets."
+            : sectionState === "error"
+              ? capitalStructureState.error ?? capitalMarketsSummaryState.error ?? governanceSummaryState.error ?? ownershipSummaryState.error ?? error ?? "Capital and risk data is temporarily unavailable."
+              : sectionState === "partial"
+                ? "Some capital or control slices are missing. Use Equity Claim Risk Pack and Governance drill-down routes while this section retries."
+                : sectionState === "empty"
+                  ? "No persisted capital, governance, or ownership summaries are cached yet. Open Equity Claim Risk Pack and Governance to inspect missing evidence."
+                  : "Capital and risk section is ready from persisted data."
+        }
+        links={links}
+        onRetry={onRetry}
+      />
+
       <EvidenceCard
         title="Equity claim risk pack summary"
         copy="A compact underwriting read on dilution, financing dependency, debt pressure, and reporting-control risk pulled from SEC-derived evidence."

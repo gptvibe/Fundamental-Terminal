@@ -7,7 +7,7 @@ Fundamental Terminal helps you move from ticker to evidence quickly, with compan
 ## What You Get
 
 - Fast search and launch for U.S. listed companies.
-- Company overview workspace with snapshot, filings context, and operating signals.
+- Company research brief workspace with snapshot, filings context, and operating signals.
 - Financial charts workspace with reported history and scenario-aware projections.
 - Watchlist workspace for local triage, notes, and follow-up.
 - Data Sources workspace for provenance, freshness, and source health.
@@ -18,9 +18,9 @@ Fundamental Terminal helps you move from ticker to evidence quickly, with compan
 
 ![Home and search workspace](docs/screenshots/home-search.png)
 
-### Company Overview
+### Company Brief
 
-![Company overview workspace](docs/screenshots/company-overview.png)
+![Company research brief workspace](docs/screenshots/company-overview.png)
 
 ### Financial Charts
 

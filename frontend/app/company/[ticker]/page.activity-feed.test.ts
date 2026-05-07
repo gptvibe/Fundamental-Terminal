@@ -266,6 +266,24 @@ describe("CompanyResearchBriefPage", () => {
     expect(screen.getByRole("heading", { name: "Capital & risk" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Valuation" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
+    const sectionNav = screen.getByRole("navigation", { name: "Research brief sections" });
+    expect(sectionNav).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Snapshot" }).getAttribute("href")).toBe("#snapshot");
+    expect(screen.getByRole("link", { name: "Understand Business" }).getAttribute("href")).toBe("#understand-business");
+    expect(screen.getByRole("link", { name: "What Changed" }).getAttribute("href")).toBe("#what-changed");
+    expect(screen.getByRole("link", { name: "Business Quality" }).getAttribute("href")).toBe("#business-quality");
+    expect(screen.getByRole("link", { name: "Capital & Risk" }).getAttribute("href")).toBe("#capital-risk");
+    expect(screen.getByRole("link", { name: "Compare & Value" }).getAttribute("href")).toBe("#compare-value");
+    expect(screen.getByRole("link", { name: "Monitor" }).getAttribute("href")).toBe("#monitor");
+    await waitFor(() => {
+      expect(document.getElementById("snapshot")).toBeTruthy();
+      expect(document.getElementById("understand-business")).toBeTruthy();
+      expect(document.getElementById("what-changed")).toBeTruthy();
+      expect(document.getElementById("business-quality")).toBeTruthy();
+      expect(document.getElementById("capital-risk")).toBeTruthy();
+      expect(document.getElementById("compare-value")).toBeTruthy();
+      expect(document.getElementById("monitor")).toBeTruthy();
+    });
     const snapshotHeading = screen.getByRole("heading", { name: "Snapshot" });
     const whatChangedHeading = screen.getByRole("heading", { name: "What changed" });
     const businessQualityHeading = screen.getByRole("heading", { name: "Business quality" });
@@ -556,6 +574,29 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByText("No cached model outputs yet")).toBeTruthy();
       expect(screen.getByText("No active alerts")).toBeTruthy();
     });
+  });
+
+  it("keeps the route usable and marks a partial-data warning when one page-local summary endpoint fails", async () => {
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
+      briefData: null,
+    }));
+    vi.mocked(getCompanyResearchBrief).mockRejectedValue(new Error("brief endpoint unavailable"));
+    vi.mocked(getCompanyPeers).mockRejectedValue(new Error("peer snapshot unavailable"));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Valuation" })).toBeTruthy();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Partial data warning")).toBeTruthy();
+      expect(screen.getByText(/Some valuation slices failed to load/i)).toBeTruthy();
+    });
+
+    expect(screen.getByText("investment-summary-panel")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry section data" })).toBeTruthy();
   });
 
   it("explains limited proxy coverage for foreign-issuer annual filings", async () => {

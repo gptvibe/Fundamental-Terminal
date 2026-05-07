@@ -11,7 +11,7 @@ describe("CompanyResearchHeader", () => {
     render(
       React.createElement(CompanyResearchHeader, {
         ticker: "AAPL",
-        title: "Overview",
+        title: "Brief",
         companyName: "Apple Inc.",
         sector: "Technology",
         cacheState: "fresh",
@@ -31,7 +31,7 @@ describe("CompanyResearchHeader", () => {
       })
     );
 
-    expect(screen.getByRole("heading", { name: "Overview" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Brief" })).toBeTruthy();
     expect(screen.getByText("Apple Inc.")).toBeTruthy();
     expect(screen.getByText("SEC EDGAR/XBRL")).toBeTruthy();
     expect(screen.getByText("Yahoo Finance")).toBeTruthy();
@@ -43,7 +43,7 @@ describe("CompanyResearchHeader", () => {
     render(
       React.createElement(CompanyResearchHeader, {
         ticker: "AAPL",
-        title: "Overview",
+        title: "Brief",
         companyName: "Apple Inc.",
         freshness: {
           cacheState: "stale",

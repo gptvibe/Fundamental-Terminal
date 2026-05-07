@@ -307,7 +307,7 @@ function extractEndpointLabel(path: string, tickerPath: string): string | null {
     case "financials":
       return "Financials";
     case "overview":
-      return "Overview";
+      return "Brief";
     case "charts":
       return "Charts";
     case "brief":
