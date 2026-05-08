@@ -27,6 +27,7 @@ export function useResearchBriefData(
   retryToken: number,
   initialBrief: CompanyResearchBriefResponse | null,
   overviewBootstrapLoading: boolean,
+  asOf: string | null,
   warmupJobId: string | null
 ): ResearchBriefDataState {
   const [state, setState] = useState<ResearchBriefDataState>(() =>
@@ -50,7 +51,7 @@ export function useResearchBriefData(
             scenario: "company_overview",
             source: "company-overview:research-brief",
           },
-          () => getCompanyResearchBrief(ticker)
+          () => getCompanyResearchBrief(ticker, { asOf })
         );
 
         if (cancelled) {
@@ -66,14 +67,14 @@ export function useResearchBriefData(
         const message = nextError instanceof Error ? nextError.message : "Unable to load research brief";
         const settled = await Promise.allSettled([
           getCompanyActivityOverview(ticker),
-          getCompanyChangesSinceLastFiling(ticker, { asOf: null }),
+          getCompanyChangesSinceLastFiling(ticker, { asOf }),
           getCompanyEarningsSummary(ticker),
-          getCompanyCapitalStructure(ticker, { asOf: null }),
+          getCompanyCapitalStructure(ticker, { asOf }),
           getCompanyCapitalMarketsSummary(ticker),
           getCompanyGovernanceSummary(ticker),
           getCompanyBeneficialOwnershipSummary(ticker),
-          getCompanyModels(ticker, undefined, { asOf: null }),
-          getCompanyPeers(ticker, undefined, { asOf: null }),
+          getCompanyModels(ticker, undefined, { asOf }),
+          getCompanyPeers(ticker, undefined, { asOf }),
         ] as const);
 
         if (cancelled) {
@@ -194,7 +195,7 @@ export function useResearchBriefData(
         idleWindow.cancelIdleCallback(idleId);
       }
     };
-  }, [initialBrief, overviewBootstrapLoading, reloadKey, retryToken, ticker, warmupJobId]);
+  }, [asOf, initialBrief, overviewBootstrapLoading, reloadKey, retryToken, ticker, warmupJobId]);
 
   return state;
 }

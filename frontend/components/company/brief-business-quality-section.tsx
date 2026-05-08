@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import dynamic from "next/dynamic";
 
 import {
@@ -11,7 +11,12 @@ import {
   type ResearchBriefSectionStateKind,
 } from "@/components/company/brief-primitives";
 import type { ResearchBriefCue, SectionLink } from "@/components/company/brief-primitives";
-import type { FinancialPayload, SourceMixPayload, ProvenanceEntryPayload } from "@/lib/types";
+import type {
+  DataQualityDiagnosticsPayload,
+  FinancialPayload,
+  ProvenanceEntryPayload,
+  SourceMixPayload,
+} from "@/lib/types";
 
 const FinancialQualitySummary = dynamic(
   () => import("@/components/company/financial-quality-summary").then((module) => module.FinancialQualitySummary),
@@ -37,6 +42,8 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
   provenance,
   sourceMix,
   confidenceFlags,
+  diagnostics,
+  strictOfficialMode,
   links,
   expanded,
   onToggle,
@@ -52,11 +59,15 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
   provenance: ProvenanceEntryPayload[] | null | undefined;
   sourceMix: SourceMixPayload | null | undefined;
   confidenceFlags: string[] | null | undefined;
+  diagnostics: DataQualityDiagnosticsPayload | null | undefined;
+  strictOfficialMode: boolean;
   links: SectionLink[];
   expanded: boolean;
   onToggle: () => void;
   onRetry?: (() => void) | null;
 }) {
+  const metricEvidence = useMemo(() => buildFinancialMetricEvidence(financials), [financials]);
+
   const cues: ResearchBriefCue[] = [
     {
       label: "Financial quality inputs",
@@ -66,6 +77,9 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
       provenance,
       sourceMix,
       confidenceFlags,
+      diagnostics,
+      strictOfficialMode,
+      metricEvidence,
     },
   ];
   const hasQualityData = financials.length > 0;
@@ -176,3 +190,47 @@ export const BriefBusinessQualitySection = memo(function BriefBusinessQualitySec
     </ResearchBriefSection>
   );
 });
+
+function buildFinancialMetricEvidence(financials: FinancialPayload[]) {
+  const latest = [...financials]
+    .filter((row) => Boolean(row.period_end))
+    .sort((left, right) => (left.period_end < right.period_end ? 1 : -1))[0];
+
+  if (!latest?.reconciliation?.comparisons?.length) {
+    return [];
+  }
+
+  const preferredMetricKeys = ["revenue", "operating_income", "net_income", "free_cash_flow"];
+  const byKey = new Map(latest.reconciliation.comparisons.map((comparison) => [comparison.metric_key, comparison]));
+  const selectedComparisons = preferredMetricKeys
+    .map((key) => byKey.get(key))
+    .filter((comparison): comparison is NonNullable<typeof comparison> => Boolean(comparison));
+  const comparisons = selectedComparisons.length ? selectedComparisons : latest.reconciliation.comparisons.slice(0, 4);
+
+  return comparisons.map((comparison) => {
+    const fact = comparison.companyfacts_fact ?? comparison.filing_parser_fact;
+    return {
+      label: humanizeMetricKey(comparison.metric_key),
+      source_id: fact?.source ?? null,
+      as_of: latest.period_end,
+      accession_number: fact?.accession_number ?? latest.reconciliation?.matched_accession_number ?? null,
+      taxonomy: fact?.taxonomy ?? null,
+      tag: fact?.tag ?? null,
+      confidence_flags:
+        comparison.confidence_penalty != null && comparison.confidence_penalty > 0 ? ["reconciliation_penalty"] : [],
+      diagnostics: comparison.status,
+      formula_note:
+        comparison.status === "match"
+          ? "Companyfacts and parser values match for this metric."
+          : `Reconciliation status: ${comparison.status}`,
+    };
+  });
+}
+
+function humanizeMetricKey(value: string): string {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}

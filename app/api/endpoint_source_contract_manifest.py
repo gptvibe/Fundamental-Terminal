@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+from pydantic import BaseModel, ConfigDict
+
 from app.api.source_contracts import ConfidencePenaltyRule, SourceContract, UIDisclosureRequirement
 from app.source_registry import SOURCE_REGISTRY
 
 
 EndpointKey = tuple[str, str]
+
+
+class DocumentedEndpointSourceContractException(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    method: str
+    path: str
+    reason: str
+    exception_kind: str
 
 _RULE_PERSISTED_DATA_GATING = ConfidencePenaltyRule(
     rule_id="persisted_data_gating",
@@ -633,6 +644,136 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
 }
 
 
+USER_VISIBLE_ENDPOINT_SOURCE_CONTRACT_EXCEPTIONS: dict[EndpointKey, DocumentedEndpointSourceContractException] = {
+    (
+        "GET",
+        "/api/health/pool-status",
+    ): DocumentedEndpointSourceContractException(
+        method="GET",
+        path="/api/health/pool-status",
+        exception_kind="health",
+        reason="Operational pool-health status is a control-plane surface and does not serve research data or metrics.",
+    ),
+    (
+        "GET",
+        "/api/jobs/{job_id}/events",
+    ): DocumentedEndpointSourceContractException(
+        method="GET",
+        path="/api/jobs/{job_id}/events",
+        exception_kind="job_stream",
+        reason="Server-sent job events stream refresh progress and internal status updates rather than persisted research datasets.",
+    ),
+    (
+        "GET",
+        "/api/companies/{ticker}/charts/scenarios",
+    ): DocumentedEndpointSourceContractException(
+        method="GET",
+        path="/api/companies/{ticker}/charts/scenarios",
+        exception_kind="user_workspace_state",
+        reason="Scenario listings are user-authored workspace state and do not represent source-backed research metrics.",
+    ),
+    (
+        "POST",
+        "/api/companies/{ticker}/charts/scenarios",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/companies/{ticker}/charts/scenarios",
+        exception_kind="user_workspace_state",
+        reason="Scenario creation persists user-authored workspace state rather than publishing source-backed research data.",
+    ),
+    (
+        "GET",
+        "/api/companies/{ticker}/charts/scenarios/{scenario_id}",
+    ): DocumentedEndpointSourceContractException(
+        method="GET",
+        path="/api/companies/{ticker}/charts/scenarios/{scenario_id}",
+        exception_kind="user_workspace_state",
+        reason="Scenario detail responses replay saved user workspace state and do not expose upstream research provenance.",
+    ),
+    (
+        "POST",
+        "/api/companies/{ticker}/charts/scenarios/{scenario_id}",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/companies/{ticker}/charts/scenarios/{scenario_id}",
+        exception_kind="user_workspace_state",
+        reason="Scenario updates mutate saved user workspace state rather than returning source-backed research metrics.",
+    ),
+    (
+        "POST",
+        "/api/companies/{ticker}/charts/scenarios/{scenario_id}/clone",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/companies/{ticker}/charts/scenarios/{scenario_id}/clone",
+        exception_kind="user_workspace_state",
+        reason="Scenario cloning duplicates user-authored workspace state and does not change the provenance contract for research data.",
+    ),
+    (
+        "POST",
+        "/api/companies/{ticker}/charts/share-snapshots",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/companies/{ticker}/charts/share-snapshots",
+        exception_kind="user_workspace_state",
+        reason="Share snapshot creation stores a presentation artifact for a chart workspace rather than serving a canonical research dataset.",
+    ),
+    (
+        "GET",
+        "/api/companies/{ticker}/charts/share-snapshots/{snapshot_id}",
+    ): DocumentedEndpointSourceContractException(
+        method="GET",
+        path="/api/companies/{ticker}/charts/share-snapshots/{snapshot_id}",
+        exception_kind="user_workspace_state",
+        reason="Shared snapshot retrieval returns a previously saved presentation artifact rather than recomputing a source-backed research surface.",
+    ),
+    (
+        "POST",
+        "/api/companies/{ticker}/refresh",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/companies/{ticker}/refresh",
+        exception_kind="control_plane_mutation",
+        reason="Refresh requests enqueue background work and return job metadata instead of a research payload with source provenance.",
+    ),
+    (
+        "GET",
+        "/api/research-workspace",
+    ): DocumentedEndpointSourceContractException(
+        method="GET",
+        path="/api/research-workspace",
+        exception_kind="user_workspace_state",
+        reason="Research workspace state is user-curated layout and notes, not a public-data-backed research dataset.",
+    ),
+    (
+        "POST",
+        "/api/research-workspace/save",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/research-workspace/save",
+        exception_kind="user_workspace_state",
+        reason="Workspace saves persist user-curated state and therefore do not publish source-backed research provenance.",
+    ),
+    (
+        "POST",
+        "/api/research-workspace/delete",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/research-workspace/delete",
+        exception_kind="user_workspace_state",
+        reason="Workspace deletion mutates user state only and is not a research-data endpoint.",
+    ),
+    (
+        "POST",
+        "/api/research-workspace/import-local",
+    ): DocumentedEndpointSourceContractException(
+        method="POST",
+        path="/api/research-workspace/import-local",
+        exception_kind="user_workspace_state",
+        reason="Local workspace import hydrates user-authored state from a client artifact rather than exposing a source-backed research payload.",
+    ),
+}
+
+
 def get_user_visible_endpoint_source_contract(method: str, path: str) -> SourceContract:
     key = (method.upper(), path)
     try:
@@ -642,7 +783,9 @@ def get_user_visible_endpoint_source_contract(method: str, path: str) -> SourceC
 
 
 __all__ = [
+    "DocumentedEndpointSourceContractException",
     "EndpointKey",
+    "USER_VISIBLE_ENDPOINT_SOURCE_CONTRACT_EXCEPTIONS",
     "USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS",
     "get_user_visible_endpoint_source_contract",
 ]

@@ -67,6 +67,7 @@ type WhatChangedSectionProps = {
   expanded: boolean;
   onToggle: () => void;
   onRetry?: (() => void) | null;
+  latestOnlyDisclosure?: string | null;
 };
 
 export const WhatChangedSection = memo(function WhatChangedSection({
@@ -86,6 +87,7 @@ export const WhatChangedSection = memo(function WhatChangedSection({
   expanded,
   onToggle,
   onRetry,
+  latestOnlyDisclosure,
 }: WhatChangedSectionProps) {
   const highlights = useMemo(
     () =>
@@ -159,6 +161,7 @@ export const WhatChangedSection = memo(function WhatChangedSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      {latestOnlyDisclosure ? <div className="text-muted">{latestOnlyDisclosure}</div> : null}
       <ResearchBriefSectionStateBanner
         section="What changed"
         state={sectionState}

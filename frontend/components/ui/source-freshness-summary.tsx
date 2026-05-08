@@ -2,10 +2,10 @@
 
 import { useId, useState } from "react";
 
-import { CommercialFallbackNotice, resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
 import { EvidenceMetaBlock } from "@/components/ui/evidence-meta-block";
+import { SourceRibbon } from "@/components/ui/source-ribbon";
 import { formatDate } from "@/lib/format";
-import type { ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
+import type { DataQualityDiagnosticsPayload, ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
 
 interface SourceFreshnessSummaryProps {
   provenance?: ProvenanceEntryPayload[] | null;
@@ -13,6 +13,7 @@ interface SourceFreshnessSummaryProps {
   lastRefreshedAt?: string | null;
   sourceMix?: SourceMixPayload | null;
   confidenceFlags?: string[] | null;
+  diagnostics?: DataQualityDiagnosticsPayload | null;
   emptyMessage?: string;
 }
 
@@ -22,37 +23,27 @@ export function SourceFreshnessSummary({
   lastRefreshedAt,
   sourceMix,
   confidenceFlags,
+  diagnostics,
   emptyMessage = "Source metadata is not available yet."
 }: SourceFreshnessSummaryProps) {
   const entries = provenance ?? [];
-  const flags = confidenceFlags ?? [];
-  const fallbackLabels = resolveCommercialFallbackLabels(entries, sourceMix);
   const drawerId = useId();
   const [drawerOpen, setDrawerOpen] = useState(true);
 
-  if (!entries.length && !asOf && !lastRefreshedAt && !flags.length) {
+  if (!entries.length && !asOf && !lastRefreshedAt && !(confidenceFlags ?? []).length) {
     return <div className="text-muted">{emptyMessage}</div>;
   }
 
   return (
     <div className="source-freshness-summary">
-      <EvidenceMetaBlock
-        className="source-freshness-summary-overview"
-        items={[
-          { label: "Source", value: formatSourceMix(sourceMix, entries), emphasized: true },
-          { label: "As of", value: asOf ? formatDate(asOf) : "Pending" },
-          { label: "Freshness", value: formatFreshness(lastRefreshedAt, null) },
-          { label: "Fallback label", value: fallbackLabels.length ? fallbackLabels.join(", ") : entries.length || sourceMix?.official_only ? "Official only" : "Pending" },
-        ]}
+      <SourceRibbon
+        provenance={entries}
+        sourceMix={sourceMix}
+        asOf={asOf}
+        lastRefreshedAt={lastRefreshedAt}
+        confidenceFlags={confidenceFlags}
+        diagnostics={diagnostics}
       />
-
-      <CommercialFallbackNotice provenance={entries} sourceMix={sourceMix} />
-
-      {flags.length ? (
-        <div className="source-freshness-flags">
-          Confidence flags: {flags.map(humanizeFlag).join(", ")}
-        </div>
-      ) : null}
 
       {entries.length ? (
         <div className="source-freshness-stack">
@@ -114,19 +105,6 @@ export function SourceFreshnessSummary({
       ) : null}
     </div>
   );
-}
-
-function formatSourceMix(sourceMix: SourceMixPayload | null | undefined, entries: ProvenanceEntryPayload[]): string {
-  if (!entries.length) {
-    return "Pending";
-  }
-  if (sourceMix?.official_only) {
-    return "Official/public only";
-  }
-  if ((sourceMix?.fallback_source_ids.length ?? 0) > 0) {
-    return "Official + labeled fallback";
-  }
-  return "Mixed public inputs";
 }
 
 function formatTtl(ttlSeconds: number): string {

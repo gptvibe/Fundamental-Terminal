@@ -128,6 +128,7 @@ export function ChangesSinceLastFilingCard({
         lastRefreshedAt={payload.last_refreshed_at}
         sourceMix={payload.source_mix}
         confidenceFlags={payload.confidence_flags}
+        diagnostics={payload.diagnostics}
       />
 
       <div className="metric-grid">

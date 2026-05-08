@@ -139,3 +139,16 @@ This metadata is for reliability and UX transparency. It does not change the per
 - If a dataset blends official and supplemental sources, keep the official source dominant and label the supplemental input clearly in `provenance[]` and `source_mix`.
 - `commercial_fallback` and `manual_override` entries must always carry a disclosure note and should set a confidence flag when they influence the payload.
 - In strict official mode, payloads should set a `strict_official_mode` confidence flag and should not expose `yahoo_finance` in `provenance[]` or `source_mix`.
+
+## Public Endpoint Exception Policy
+- Public research and metric endpoints must ship with a manifest-backed source contract and should expose `provenance[]` or `source_mix`, unless they are a documented exception.
+- Health, docs, and `/api/internal/*` operational endpoints are outside the public research provenance requirement.
+- Public routes that intentionally do not expose provenance must be listed in `app/api/endpoint_source_contract_manifest.py` under `USER_VISIBLE_ENDPOINT_SOURCE_CONTRACT_EXCEPTIONS` with a reason.
+- Empty control-plane contracts are reserved for operational status, job streams, refresh mutations, and user-workspace persistence endpoints. They are not allowed for new research data surfaces.
+
+Current documented public exceptions:
+- `/api/health/pool-status` for operational pool-health reporting.
+- `/api/jobs/{job_id}/events` for SSE refresh/job progress streaming.
+- `/api/companies/{ticker}/refresh` for background refresh job enqueueing.
+- `/api/companies/{ticker}/charts/scenarios*` and `/api/companies/{ticker}/charts/share-snapshots*` for saved chart-workspace state and presentation artifacts.
+- `/api/research-workspace*` for user-curated research workspace persistence.

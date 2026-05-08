@@ -21,6 +21,12 @@ interface UtilityRailAction {
   tone?: "primary" | "secondary";
 }
 
+interface AsOfControlConfig {
+  value: string | null;
+  onChange: (nextAsOf: string | null) => void;
+  latestOnlyDisclosure?: string | null;
+}
+
 interface CompanyUtilityRailProps {
   ticker: string;
   companyName?: string | null;
@@ -41,6 +47,7 @@ interface CompanyUtilityRailProps {
   connectionState: ConnectionState;
   actionTone?: "green" | "gold";
   presentation?: "default" | "brief";
+  asOfControl?: AsOfControlConfig;
   children?: ReactNode;
 }
 
@@ -63,6 +70,7 @@ export function CompanyUtilityRail({
   consoleEntries,
   connectionState,
   presentation = "default",
+  asOfControl,
   children,
 }: CompanyUtilityRailProps) {
   const [compareDrawerOpen, setCompareDrawerOpen] = useState(false);
@@ -197,6 +205,40 @@ export function CompanyUtilityRail({
                 ) : null}
               </div>
             ))}
+
+            {asOfControl ? (
+              <div className="utility-action-item utility-as-of-control" aria-label="Point-in-time date control">
+                <label className="utility-action-label" htmlFor="company-utility-as-of-input">
+                  Point-in-time as_of date
+                </label>
+                <div className="utility-as-of-row">
+                  <input
+                    id="company-utility-as-of-input"
+                    className="utility-compare-input utility-as-of-input"
+                    type="date"
+                    value={asOfControl.value ?? ""}
+                    onChange={(event) => asOfControl.onChange(event.target.value || null)}
+                    max="9999-12-31"
+                  />
+                  <button
+                    type="button"
+                    className="ticker-button utility-action-button utility-action-button-secondary"
+                    onClick={() => asOfControl.onChange(null)}
+                    disabled={!asOfControl.value}
+                  >
+                    Latest
+                  </button>
+                </div>
+                <span className="utility-action-description">
+                  {asOfControl.value
+                    ? `Using ${asOfControl.value} for supported endpoint reads.`
+                    : "Latest mode. Set a date to apply point-in-time filtering where supported."}
+                </span>
+                {asOfControl.latestOnlyDisclosure ? (
+                  <span className="utility-action-description">{asOfControl.latestOnlyDisclosure}</span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {presentation === "brief" && effectiveStatusLines.length ? (

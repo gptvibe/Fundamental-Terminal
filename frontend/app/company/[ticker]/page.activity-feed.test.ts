@@ -23,8 +23,17 @@ import {
 import { showAppToast } from "@/lib/app-toast";
 import { downloadTextFile } from "@/lib/export";
 
+const navigationFixture = {
+  pathname: "/company/ACME",
+  searchParams: new URLSearchParams(),
+  replace: vi.fn(),
+};
+
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
+  usePathname: () => navigationFixture.pathname,
+  useSearchParams: () => navigationFixture.searchParams,
+  useRouter: () => ({ replace: navigationFixture.replace }),
 }));
 
 vi.mock("@/hooks/use-company-workspace", () => ({
@@ -41,15 +50,37 @@ vi.mock("@/components/layout/company-utility-rail", () => ({
     primaryActionLabel,
     children,
     extraActions,
+    asOfControl,
   }: {
     primaryActionLabel: string;
     children?: React.ReactNode;
     extraActions?: Array<{ label: string; description?: string; onClick: () => void; disabled?: boolean }>;
+    asOfControl?: { value: string | null; onChange: (next: string | null) => void; latestOnlyDisclosure?: string | null };
   }) =>
     React.createElement(
       "aside",
       null,
       React.createElement("button", { type: "button" }, primaryActionLabel),
+      asOfControl
+        ? React.createElement(
+            "div",
+            null,
+            React.createElement("input", {
+              type: "date",
+              "aria-label": "Point-in-time as_of date",
+              value: asOfControl.value ?? "",
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) => asOfControl.onChange(event.target.value || null),
+            }),
+            React.createElement(
+              "button",
+              { type: "button", onClick: () => asOfControl.onChange(null) },
+              "Latest"
+            ),
+            asOfControl.latestOnlyDisclosure
+              ? React.createElement("p", null, asOfControl.latestOnlyDisclosure)
+              : null,
+          )
+        : null,
       (extraActions ?? []).map((action) =>
         React.createElement(
           "div",
@@ -225,6 +256,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navigationFixture.searchParams = new URLSearchParams();
+  navigationFixture.replace.mockReset();
   window.localStorage.clear();
   vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock());
   vi.mocked(getCompanyActivityOverview).mockResolvedValue(buildActivityOverviewResponse());
@@ -389,7 +422,44 @@ describe("CompanyResearchBriefPage", () => {
     render(React.createElement(CompanyResearchBriefPage));
 
     await waitFor(() => {
-      expect(getCompanyResearchBrief).toHaveBeenCalledWith("ACME");
+      expect(getCompanyResearchBrief).toHaveBeenCalledWith("ACME", { asOf: null });
+    });
+  });
+
+  it("stores as_of in URL and supports clearing back to latest mode", async () => {
+    navigationFixture.searchParams = new URLSearchParams("as_of=2025-02-01");
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    const asOfInput = screen.getByLabelText("Point-in-time as_of date") as HTMLInputElement;
+    expect(asOfInput.value).toBe("2025-02-01");
+
+    fireEvent.change(asOfInput, { target: { value: "2025-03-15" } });
+    expect(navigationFixture.replace).toHaveBeenCalledWith("/company/ACME?as_of=2025-03-15", { scroll: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Latest" }));
+    expect(navigationFixture.replace).toHaveBeenCalledWith("/company/ACME", { scroll: false });
+  });
+
+  it("passes as_of into supported brief requests and marks unsupported slices as latest only", async () => {
+    navigationFixture.searchParams = new URLSearchParams("as_of=2025-01-31");
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({ briefData: null }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(useCompanyWorkspace).toHaveBeenCalledWith(
+        "ACME",
+        expect.objectContaining({ workspaceAsOf: "2025-01-31" })
+      );
+    });
+
+    await waitFor(() => {
+      expect(getCompanyResearchBrief).toHaveBeenCalledWith("ACME", { asOf: "2025-01-31" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Latest only:/i).length).toBeGreaterThan(0);
     });
   });
 

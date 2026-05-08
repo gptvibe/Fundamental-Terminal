@@ -7,10 +7,11 @@ import { Component, type ReactNode } from "react";
 import Link from "next/link";
 
 import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fallback-notice";
+import { EvidenceDrawer, type EvidenceMetricReference } from "@/components/ui/evidence-drawer";
 import { EvidenceMetaBlock } from "@/components/ui/evidence-meta-block";
 import { Panel } from "@/components/ui/panel";
 import { formatDate } from "@/lib/format";
-import type { ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
+import type { DataQualityDiagnosticsPayload, ProvenanceEntryPayload, SourceMixPayload } from "@/lib/types";
 import type { SemanticTone } from "@/lib/activity-feed-tone";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,9 @@ export type ResearchBriefCue = {
   provenance?: ProvenanceEntryPayload[] | null;
   sourceMix?: SourceMixPayload | null;
   confidenceFlags?: string[] | null;
+  diagnostics?: DataQualityDiagnosticsPayload | null;
+  metricEvidence?: EvidenceMetricReference[] | null;
+  strictOfficialMode?: boolean;
 };
 
 export type SectionLink = {
@@ -151,7 +155,15 @@ export function SectionLinks({ links }: { links: SectionLink[] }) {
 
 export function ResearchBriefFreshness({ cues }: { cues: ResearchBriefCue[] }) {
   const visibleCues = cues.filter(
-    (cue) => cue.asOf || cue.lastRefreshedAt || cue.lastChecked || cue.provenance?.length || cue.sourceMix || cue.confidenceFlags?.length
+    (cue) =>
+      cue.asOf ||
+      cue.lastRefreshedAt ||
+      cue.lastChecked ||
+      cue.provenance?.length ||
+      cue.sourceMix ||
+      cue.confidenceFlags?.length ||
+      cue.diagnostics ||
+      cue.metricEvidence?.length
   );
 
   if (!visibleCues.length) {
@@ -179,6 +191,20 @@ export function ResearchBriefFreshness({ cues }: { cues: ResearchBriefCue[] }) {
                 { label: "Fallback label", value: fallbackLabel },
               ]}
             />
+            <div className="research-brief-freshness-actions">
+              <EvidenceDrawer
+                title={`${cue.label} evidence`}
+                triggerLabel="Evidence"
+                provenance={cue.provenance}
+                sourceMix={cue.sourceMix}
+                asOf={cue.asOf}
+                lastRefreshedAt={cue.lastRefreshedAt}
+                confidenceFlags={cue.confidenceFlags}
+                diagnostics={cue.diagnostics}
+                metrics={cue.metricEvidence}
+                strictOfficialMode={Boolean(cue.strictOfficialMode)}
+              />
+            </div>
             {cue.provenance?.length ? (
               <div className="research-brief-freshness-note">
                 {cue.provenance.length.toLocaleString()} registry source{cue.provenance.length === 1 ? "" : "s"} backing this section.

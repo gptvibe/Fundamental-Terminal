@@ -215,6 +215,7 @@ export function CapitalStructureIntelligencePanel({
         lastRefreshedAt={payload.last_refreshed_at}
         sourceMix={payload.source_mix}
         confidenceFlags={payload.confidence_flags}
+        diagnostics={payload.diagnostics}
       />
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>

@@ -183,12 +183,25 @@ def get_user_visible_route_keys(app: FastAPI) -> set[tuple[str, str]]:
 
 
 def ensure_user_visible_routes_have_source_contracts(app: FastAPI) -> None:
-    from app.api.endpoint_source_contract_manifest import USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS
+    from app.api.endpoint_source_contract_manifest import (
+        USER_VISIBLE_ENDPOINT_SOURCE_CONTRACT_EXCEPTIONS,
+        USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS,
+    )
 
     registered_route_keys = get_user_visible_route_keys(app)
     missing_manifest_entries = sorted(registered_route_keys - set(USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS))
     orphaned_manifest_entries = sorted(set(USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS) - registered_route_keys)
     missing_route_metadata: list[str] = []
+    undocumented_empty_contract_entries = sorted(
+        key
+        for key, contract in USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS.items()
+        if _is_empty_source_contract(contract) and key not in USER_VISIBLE_ENDPOINT_SOURCE_CONTRACT_EXCEPTIONS
+    )
+    orphaned_empty_contract_exceptions = sorted(
+        key
+        for key in USER_VISIBLE_ENDPOINT_SOURCE_CONTRACT_EXCEPTIONS
+        if not _is_empty_source_contract(USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS.get(key))
+    )
 
     for route in app.routes:
         if not isinstance(route, APIRoute):
@@ -207,7 +220,13 @@ def ensure_user_visible_routes_have_source_contracts(app: FastAPI) -> None:
             if metadata != expected_metadata:
                 missing_route_metadata.append(f"{normalized_method} {route.path}")
 
-    if not missing_manifest_entries and not orphaned_manifest_entries and not missing_route_metadata:
+    if (
+        not missing_manifest_entries
+        and not orphaned_manifest_entries
+        and not missing_route_metadata
+        and not undocumented_empty_contract_entries
+        and not orphaned_empty_contract_exceptions
+    ):
         return
 
     errors: list[str] = []
@@ -225,8 +244,31 @@ def ensure_user_visible_routes_have_source_contracts(app: FastAPI) -> None:
         errors.append(
             "routes missing manifest-backed source contract metadata: " + ", ".join(missing_route_metadata)
         )
+    if undocumented_empty_contract_entries:
+        errors.append(
+            "user-visible endpoints missing documented no-provenance exceptions: "
+            + ", ".join(f"{method} {path}" for method, path in undocumented_empty_contract_entries)
+        )
+    if orphaned_empty_contract_exceptions:
+        errors.append(
+            "documented no-provenance exceptions do not map to empty contracts: "
+            + ", ".join(f"{method} {path}" for method, path in orphaned_empty_contract_exceptions)
+        )
 
     raise RuntimeError("Endpoint source contract validation failed: " + "; ".join(errors))
+
+
+def _is_empty_source_contract(source_contract: SourceContract | None) -> bool:
+    if source_contract is None:
+        return False
+
+    return (
+        not source_contract.allowed_source_ids
+        and not source_contract.fallback_permitted
+        and source_contract.strict_official_behavior == "not_applicable"
+        and not source_contract.confidence_penalty_rules
+        and not source_contract.ui_disclosure_requirements
+    )
 
 
 def validate_source_contract_payload(

@@ -78,6 +78,7 @@ type CapitalRiskSectionProps = {
   onToggle: () => void;
   onRetry?: (() => void) | null;
   lastCheckedFilings: string | null | undefined;
+  latestOnlyDisclosure?: string | null;
 };
 
 export const CapitalRiskSection = memo(function CapitalRiskSection({
@@ -101,6 +102,7 @@ export const CapitalRiskSection = memo(function CapitalRiskSection({
   onToggle,
   onRetry,
   lastCheckedFilings,
+  latestOnlyDisclosure,
 }: CapitalRiskSectionProps) {
   const hasCapitalData = Boolean(
     equityClaimRiskSummary ||
@@ -180,6 +182,7 @@ export const CapitalRiskSection = memo(function CapitalRiskSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      {latestOnlyDisclosure ? <div className="text-muted">{latestOnlyDisclosure}</div> : null}
       <ResearchBriefSectionStateBanner
         section="Capital & risk"
         state={sectionState}

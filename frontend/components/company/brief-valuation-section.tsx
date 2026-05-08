@@ -52,6 +52,28 @@ export const BriefValuationSection = memo(function BriefValuationSection({
       provenance: modelsState.data?.provenance,
       sourceMix: modelsState.data?.source_mix,
       confidenceFlags: modelsState.data?.confidence_flags,
+      diagnostics: modelsState.data?.diagnostics,
+      strictOfficialMode,
+      metricEvidence: (modelsState.data?.models ?? []).slice(0, 3).map((model) => {
+        const derivedEntry = (modelsState.data?.provenance ?? []).find(
+          (entry) => entry.source_tier === "derived_from_official" || entry.role === "derived"
+        ) ?? (modelsState.data?.provenance ?? [])[0];
+
+        return {
+          label: model.model_name,
+          source_id: derivedEntry?.source_id ?? null,
+          source_tier: derivedEntry?.source_tier ?? null,
+          display_label: derivedEntry?.display_label ?? null,
+          canonical_url: derivedEntry?.url ?? null,
+          role: derivedEntry?.role ?? "derived",
+          as_of: modelsState.data?.as_of ?? null,
+          last_refreshed_at: modelsState.data?.last_refreshed_at ?? null,
+          confidence_flags: modelsState.data?.confidence_flags ?? [],
+          formula_note: model.calculation_version
+            ? `Calculation version: ${model.calculation_version}`
+            : `Model version: ${model.model_version}`,
+        };
+      }),
     },
     {
       label: "Peer comparison",
@@ -60,6 +82,7 @@ export const BriefValuationSection = memo(function BriefValuationSection({
       provenance: peersState.data?.provenance,
       sourceMix: peersState.data?.source_mix,
       confidenceFlags: peersState.data?.confidence_flags,
+      strictOfficialMode,
     },
   ];
   const hasValuationData = Boolean(modelsState.data || peersState.data);

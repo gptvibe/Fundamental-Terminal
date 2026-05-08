@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { RiskRedFlagPanel } from "@/components/alerts/risk-red-flag-panel";
 import { BeginnerGuidanceBanner } from "@/components/company/beginner-guidance-banner";
@@ -121,7 +121,38 @@ function DeferredSectionPlaceholder({ title }: { title: string }) {
 
 export default function CompanyResearchBriefPage() {
   const params = useParams<{ ticker: string }>();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
+  const requestedAsOf = useMemo(() => readAsOfSearchParam(searchParams), [searchParams]);
+  const selectedAsOfDate = useMemo(() => toDateOnlyValue(requestedAsOf), [requestedAsOf]);
+  const asOfQueryValue = useMemo(() => normalizeAsOfQueryValue(requestedAsOf), [requestedAsOf]);
+  const hasAsOfSelection = Boolean(asOfQueryValue);
+  const latestOnlyWhatChangedDisclosure = hasAsOfSelection
+    ? "Latest only: activity overview and earnings summary currently do not support as_of."
+    : null;
+  const latestOnlyCapitalRiskDisclosure = hasAsOfSelection
+    ? "Latest only: capital markets, governance, and ownership summaries currently do not support as_of."
+    : null;
+  const latestOnlyMonitorDisclosure = hasAsOfSelection
+    ? "Latest only: monitor feed slices currently do not support as_of."
+    : null;
+
+  const updateAsOfInUrl = useCallback(
+    (nextAsOf: string | null) => {
+      const query = new URLSearchParams(searchParams.toString());
+      query.delete("asOf");
+      if (nextAsOf) {
+        query.set("as_of", nextAsOf);
+      } else {
+        query.delete("as_of");
+      }
+      const suffix = query.toString();
+      router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
   const idlePrefetchTickerRef = useRef<string | null>(null);
   const {
     data,
@@ -146,6 +177,7 @@ export default function CompanyResearchBriefPage() {
     includeInstitutional: false,
     includeOverviewBrief: true,
     includeChartConsole: true,
+    workspaceAsOf: asOfQueryValue,
     auditPageRoute: "/company/[ticker]",
     auditScenario: "company_overview",
   });
@@ -203,6 +235,7 @@ export default function CompanyResearchBriefPage() {
     briefRetryToken,
     initialBriefData,
     loading,
+    asOfQueryValue,
     activeJobId ?? refreshState?.job_id ?? initialBriefData?.refresh.job_id ?? null
   );
   const activeSectionId = useActiveBriefSection(BRIEF_NAV_SECTION_IDS);
@@ -370,7 +403,15 @@ export default function CompanyResearchBriefPage() {
   }, [reloadKey, ticker]);
 
   const filingRiskSignalsPanel = (
-    <Panel title="Filing text signals" subtitle="Investor-relevant filing language already captured from cached SEC text" variant="subtle">
+    <Panel
+      title="Filing text signals"
+      subtitle={
+        hasAsOfSelection
+          ? "Latest only: filing text signals currently do not support as_of and always use the newest cached snapshot."
+          : "Investor-relevant filing language already captured from cached SEC text"
+      }
+      variant="subtle"
+    >
       <FilingRiskSignalsPanel payload={filingRiskSignals} loading={filingRiskSignalsLoading} error={filingRiskSignalsError} maxItems={4} />
     </Panel>
   );
@@ -505,22 +546,22 @@ export default function CompanyResearchBriefPage() {
       setExportingResearchPackage(true);
 
       const exportRequests = [
-        ["financials", () => getCompanyFinancials(ticker)],
+        ["financials", () => getCompanyFinancials(ticker, { asOf: asOfQueryValue })],
         ["insider_trades", () => getCompanyInsiderTrades(ticker)],
         ["institutional_holdings", () => getCompanyInstitutionalHoldings(ticker)],
         ["activity_overview", () => getCompanyActivityOverview(ticker)],
-        ["changes_since_last_filing", () => getCompanyChangesSinceLastFiling(ticker)],
+        ["changes_since_last_filing", () => getCompanyChangesSinceLastFiling(ticker, { asOf: asOfQueryValue })],
         ["earnings_summary", () => getCompanyEarningsSummary(ticker)],
-        ["capital_structure", () => getCompanyCapitalStructure(ticker)],
+        ["capital_structure", () => getCompanyCapitalStructure(ticker, { asOf: asOfQueryValue })],
         ["capital_markets_summary", () => getCompanyCapitalMarketsSummary(ticker)],
-        ["equity_claim_risk", () => getCompanyEquityClaimRisk(ticker)],
+        ["equity_claim_risk", () => getCompanyEquityClaimRisk(ticker, { asOf: asOfQueryValue })],
         ["governance_summary", () => getCompanyGovernanceSummary(ticker)],
         ["beneficial_ownership_summary", () => getCompanyBeneficialOwnershipSummary(ticker)],
-        ["models", () => getCompanyModels(ticker, MODEL_NAMES)],
-        ["peers", () => getCompanyPeers(ticker)],
-        ["derived_metrics_timeseries_quarterly", () => getCompanyMetricsTimeseries(ticker, { cadence: "quarterly", maxPoints: 24 })],
-        ["derived_metrics_timeseries_annual", () => getCompanyMetricsTimeseries(ticker, { cadence: "annual", maxPoints: 24 })],
-        ["derived_metrics_timeseries_ttm", () => getCompanyMetricsTimeseries(ticker, { cadence: "ttm", maxPoints: 24 })],
+        ["models", () => getCompanyModels(ticker, MODEL_NAMES, { asOf: asOfQueryValue })],
+        ["peers", () => getCompanyPeers(ticker, undefined, { asOf: asOfQueryValue })],
+        ["derived_metrics_timeseries_quarterly", () => getCompanyMetricsTimeseries(ticker, { cadence: "quarterly", maxPoints: 24, asOf: asOfQueryValue })],
+        ["derived_metrics_timeseries_annual", () => getCompanyMetricsTimeseries(ticker, { cadence: "annual", maxPoints: 24, asOf: asOfQueryValue })],
+        ["derived_metrics_timeseries_ttm", () => getCompanyMetricsTimeseries(ticker, { cadence: "ttm", maxPoints: 24, asOf: asOfQueryValue })],
       ] as const;
 
       const endpointEntries = await Promise.all(
@@ -554,7 +595,7 @@ export default function CompanyResearchBriefPage() {
     } finally {
       setExportingResearchPackage(false);
     }
-  }, [pageCompany, ticker]);
+  }, [asOfQueryValue, pageCompany, ticker]);
 
   const handleExportInvestmentMemo = useCallback(async () => {
     if (exportingInvestmentMemo) return;
@@ -682,11 +723,19 @@ export default function CompanyResearchBriefPage() {
             },
           ]}
           statusLines={[
+            `Point-in-time mode: ${hasAsOfSelection && asOfQueryValue ? formatDate(asOfQueryValue) : "Latest"}`,
             `Annual filings available: ${annualStatements.length.toLocaleString()}`,
             `Price history points available: ${priceHistory.length.toLocaleString()}`,
             `Current alerts: ${latestAlertCount.toLocaleString()}`,
             `Last checked: ${pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : "Pending"}`,
           ]}
+          asOfControl={{
+            value: selectedAsOfDate,
+            onChange: updateAsOfInUrl,
+            latestOnlyDisclosure: hasAsOfSelection
+              ? "Latest only disclosures are shown in sections whose endpoints do not support as_of."
+              : null,
+          }}
           consoleEntries={consoleEntries}
           connectionState={connectionState}
           presentation="brief"
@@ -852,6 +901,7 @@ export default function CompanyResearchBriefPage() {
           expanded={expandedSections["what-changed"] ?? true}
           onToggle={() => toggleSection("what-changed")}
           onRetry={handleRetryBriefSlices}
+          latestOnlyDisclosure={latestOnlyWhatChangedDisclosure}
         />
       </DeferredClientSection>
 
@@ -872,6 +922,8 @@ export default function CompanyResearchBriefPage() {
             provenance={data?.provenance}
             sourceMix={data?.source_mix}
             confidenceFlags={data?.confidence_flags}
+            diagnostics={data?.diagnostics}
+            strictOfficialMode={Boolean(pageCompany?.strict_official_mode)}
             links={businessQualityLinks}
             expanded={expandedSections["business-quality"] ?? true}
             onToggle={() => toggleSection("business-quality")}
@@ -906,6 +958,7 @@ export default function CompanyResearchBriefPage() {
           onToggle={() => toggleSection("capital-risk")}
           onRetry={handleRetryBriefSlices}
           lastCheckedFilings={pageCompany?.last_checked_filings}
+          latestOnlyDisclosure={latestOnlyCapitalRiskDisclosure}
         />
       </DeferredClientSection>
 
@@ -950,6 +1003,7 @@ export default function CompanyResearchBriefPage() {
             expanded={expandedSections.monitor ?? true}
             onToggle={() => toggleSection("monitor")}
             onRetry={handleRetryBriefSlices}
+            latestOnlyDisclosure={latestOnlyMonitorDisclosure}
           />
         </PanelErrorBoundary>
       </DeferredClientSection>
@@ -1077,5 +1131,34 @@ export default function CompanyResearchBriefPage() {
       </PageShell>
     </CompanyWorkspaceShell>
   );
+}
+
+function readAsOfSearchParam(searchParams: URLSearchParams | { get: (name: string) => string | null }): string | null {
+  const fromSnake = searchParams.get("as_of")?.trim();
+  if (fromSnake) {
+    return fromSnake;
+  }
+  const fromCamel = searchParams.get("asOf")?.trim();
+  return fromCamel || null;
+}
+
+function toDateOnlyValue(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const candidate = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : null;
+}
+
+function normalizeAsOfQueryValue(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const dateOnly = toDateOnlyValue(trimmed);
+  return dateOnly ?? trimmed;
 }
 

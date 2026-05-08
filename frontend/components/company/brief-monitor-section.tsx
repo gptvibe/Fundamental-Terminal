@@ -31,6 +31,7 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
   expanded,
   onToggle,
   onRetry,
+  latestOnlyDisclosure,
 }: {
   activityOverviewState: AsyncState<CompanyActivityOverviewResponse>;
   topAlerts: AlertPayload[];
@@ -42,6 +43,7 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
   expanded: boolean;
   onToggle: () => void;
   onRetry?: (() => void) | null;
+  latestOnlyDisclosure?: string | null;
 }) {
   const cues: ResearchBriefCue[] = [
     {
@@ -76,6 +78,7 @@ export const BriefMonitorSection = memo(function BriefMonitorSection({
       expanded={expanded}
       onToggle={onToggle}
     >
+      {latestOnlyDisclosure ? <div className="text-muted">{latestOnlyDisclosure}</div> : null}
       <ResearchBriefSectionStateBanner
         section="Monitor"
         state={sectionState}
