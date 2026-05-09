@@ -411,6 +411,7 @@ function buildMinimalInput(overrides: Partial<InvestmentMemoInput> = {}): Invest
         },
       ],
     },
+    brief: null,
     ...overrides,
   };
 }
@@ -427,7 +428,7 @@ describe("buildInvestmentMemo", () => {
     expect(memo).toContain("## Source & Freshness State");
     expect(memo).toContain("## Source Links & Provenance");
     expect(memo).toContain("Core Platform contributes 66.1% of reported revenue");
-    expect(memo).toContain("[SEC Company Facts (XBRL)](https://data.sec.gov/api/xbrl/companyfacts/)");
+    expect(memo).toContain("| sec_companyfacts | SEC Company Facts (XBRL) |");
   });
 
   it("returns a string with the expected top-level heading", () => {
@@ -513,6 +514,96 @@ describe("buildInvestmentMemo", () => {
     expect(memo).toContain("official_regulator");
   });
 
+  it("groups appendix sources by section", () => {
+    const memo = buildInvestmentMemo(buildMinimalInput());
+    expect(memo).toContain("### Research Brief Snapshot");
+    expect(memo).toContain("### What Changed");
+    expect(memo).toContain("### Capital, Risk, Dilution & Governance");
+    expect(memo).toContain("### Peer & Valuation Summary");
+  });
+
+  it("includes derived source and input source ids when available", () => {
+    const memo = buildInvestmentMemo(
+      buildMinimalInput({
+        provenance: [
+          {
+            source_id: "ft_derived_metrics_engine",
+            source_tier: "derived_from_official",
+            display_label: "FT Derived Metrics Engine",
+            url: "https://fundamental-terminal.local/sources/ft_derived_metrics_engine",
+            default_freshness_ttl_seconds: 3600,
+            disclosure_note: "Derived metrics from persisted official filings.",
+            role: "derived",
+            as_of: "2025-12-31",
+            last_refreshed_at: "2026-03-10T00:00:00Z",
+          },
+        ],
+        sourceMix: {
+          source_ids: ["ft_derived_metrics_engine", "sec_companyfacts"],
+          source_tiers: ["derived_from_official", "official_regulator"],
+          primary_source_ids: ["ft_derived_metrics_engine"],
+          fallback_source_ids: [],
+          official_only: true,
+        },
+      })
+    );
+
+    expect(memo).toContain("Derived source: ft_derived_metrics_engine");
+    expect(memo).toContain("Input source ids: sec_companyfacts");
+  });
+
+  it("includes fallback disclosure for fallback-backed values", () => {
+    const memo = buildInvestmentMemo(
+      buildMinimalInput({
+        provenance: [
+          {
+            source_id: "yahoo_finance",
+            source_tier: "commercial_fallback",
+            display_label: "Yahoo Finance",
+            url: "https://finance.yahoo.com",
+            default_freshness_ttl_seconds: 900,
+            disclosure_note: "Commercial fallback for market profile and price context.",
+            role: "fallback",
+            as_of: "2026-05-04",
+            last_refreshed_at: "2026-05-04T12:00:00Z",
+          },
+        ],
+        sourceMix: {
+          source_ids: ["sec_companyfacts", "yahoo_finance"],
+          source_tiers: ["official_regulator", "commercial_fallback"],
+          primary_source_ids: ["sec_companyfacts"],
+          fallback_source_ids: ["yahoo_finance"],
+          official_only: false,
+        },
+      })
+    );
+
+    expect(memo).toContain("Fallback disclosure: commercial fallback input present for this section");
+  });
+
+  it("deduplicates identical source rows inside a section", () => {
+    const duplicateEntry = {
+      source_id: "sec_companyfacts",
+      source_tier: "official_regulator" as const,
+      display_label: "SEC Company Facts (XBRL)",
+      url: "https://data.sec.gov/api/xbrl/companyfacts/",
+      default_freshness_ttl_seconds: 21600,
+      disclosure_note: "Official SEC XBRL companyfacts feed normalized into canonical financial statements.",
+      role: "primary" as const,
+      as_of: "2025-12-31",
+      last_refreshed_at: "2026-03-10T00:00:00Z",
+    };
+
+    const memo = buildInvestmentMemo(
+      buildMinimalInput({
+        provenance: [duplicateEntry, duplicateEntry],
+      })
+    );
+
+    const sourceIdMatches = memo.match(/\| sec_companyfacts \|/g) ?? [];
+    expect(sourceIdMatches.length).toBe(1);
+  });
+
   it("includes the filing timeline", () => {
     const memo = buildInvestmentMemo(buildMinimalInput());
     expect(memo).toContain("10-K");
@@ -555,7 +646,7 @@ describe("buildInvestmentMemo", () => {
       })
     );
     expect(memo).toContain("## Source Links & Provenance");
-    expect(memo).toContain("No provenance data is available");
+    expect(memo).toContain("Sources: none provided");
   });
 
   it("handles null models gracefully", () => {

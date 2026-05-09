@@ -18,10 +18,13 @@ import type {
   CompanyGovernanceSummaryResponse,
   CompanyModelsResponse,
   CompanyPeersResponse,
+  CompanyResearchBriefResponse,
   FilingTimelineItemPayload,
   FinancialPayload,
   ProvenanceEntryPayload,
+  SourceRole,
   SourceMixPayload,
+  SourceTier,
 } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -78,6 +81,7 @@ export interface InvestmentMemoInput {
   ownershipSummary: CompanyBeneficialOwnershipSummaryResponse | null;
   models: CompanyModelsResponse | null;
   peers: CompanyPeersResponse | null;
+  brief: CompanyResearchBriefResponse | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +204,8 @@ function buildBusinessSummarySection(input: InvestmentMemoInput): string {
           : "";
       lines.push(`**Top segment:** ${topSegment.segment_name}${shareLabel}`);
     }
+  } else {
+    lines.push("_Financial data is not currently available in the cached workspace._");
   }
 
   return section("Business Summary", lines.join("\n"));
@@ -215,6 +221,8 @@ function buildWhatChangedSection(input: InvestmentMemoInput): string {
     lines.push(`- High-signal changes: ${s.high_signal_change_count.toLocaleString()}`);
     lines.push(`- Total metric deltas: ${s.metric_delta_count.toLocaleString()}`);
     lines.push(`- Comment letters: ${s.comment_letter_count.toLocaleString()}`);
+  } else if (changes) {
+    lines.push("_Changes summary data is not currently available._");
   }
 
   if (earningsSummary?.summary) {
@@ -241,6 +249,9 @@ function buildWhatChangedSection(input: InvestmentMemoInput): string {
       const date = alert.date ? ` (${formatDate(alert.date)})` : "";
       lines.push(`- ${alert.title}${date}`);
     }
+  } else if (activityOverview) {
+    lines.push("");
+    lines.push("_No current alerts._");
   }
 
   return section("What Changed", lines.join("\n"));
@@ -270,6 +281,8 @@ function buildBusinessQualitySection(input: InvestmentMemoInput): string {
     if (latestFinancial.stock_based_compensation != null) {
       lines.push(`| Stock-based compensation | ${compactCurrency(latestFinancial.stock_based_compensation)} |`);
     }
+  } else {
+    lines.push("_Balance sheet data is not currently available._");
   }
 
   return section("Business Quality", lines.join("\n"));
@@ -289,6 +302,8 @@ function buildCapitalRiskSection(input: InvestmentMemoInput): string {
     lines.push("```");
     lines.push(tableText);
     lines.push("```");
+  } else {
+    lines.push("_Capital and governance signals data is not currently available._");
   }
 
   const latest = capitalStructure?.latest;
@@ -305,6 +320,9 @@ function buildCapitalRiskSection(input: InvestmentMemoInput): string {
     if (s.debt_due_next_twelve_months != null) {
       lines.push(`| Debt due next 12 months | ${compactCurrency(s.debt_due_next_twelve_months)} |`);
     }
+  } else if (capitalStructure) {
+    lines.push("");
+    lines.push("_Capital structure data is not currently available._");
   }
 
   return section("Capital, Risk, Dilution & Governance", lines.join("\n"));
@@ -344,6 +362,8 @@ function buildValuationSection(input: InvestmentMemoInput): string {
     if (dcfFairValue == null && residualValue == null) {
       lines.push("| — | No cached model outputs available |");
     }
+  } else {
+    lines.push("_No cached valuation models are currently available._");
   }
 
   if (peers?.peers?.length) {
@@ -364,6 +384,9 @@ function buildValuationSection(input: InvestmentMemoInput): string {
       const focus = peer.is_focus ? "✓" : "";
       lines.push(`| ${peer.ticker} | ${peer.name ?? "—"} | ${pe} | ${evEbit} | ${price} | ${focus} |`);
     }
+  } else {
+    lines.push("");
+    lines.push("_No peer comparison data is currently available._");
   }
 
   return section("Peer & Valuation Summary", lines.join("\n"));
@@ -379,25 +402,289 @@ function buildMonitorSection(input: InvestmentMemoInput): string {
     for (const item of monitorChecklist) {
       lines.push(`- **${item.title}:** ${item.detail}`);
     }
+  } else {
+    lines.push("_No monitor checklist items are currently available._");
   }
 
   return section("Monitor Checklist", lines.join("\n"));
 }
 
 function buildProvenanceSection(input: InvestmentMemoInput): string {
-  const lines: string[] = [];
+  type SectionProvenanceGroup = {
+    section: string;
+    asOf: string | null;
+    lastRefreshedAt: string | null;
+    confidenceFlags: string[];
+    sourceMix: SourceMixPayload | null | undefined;
+    provenance: ProvenanceEntryPayload[] | null | undefined;
+  };
 
-  if (input.provenance?.length) {
-    lines.push("**Data sources:**");
+  type EnvelopeLike = {
+    as_of?: string | null;
+    last_refreshed_at?: string | null;
+    confidence_flags?: string[];
+    source_mix?: SourceMixPayload | null;
+    provenance?: ProvenanceEntryPayload[];
+  };
+
+  const asEnvelope = (value: unknown): EnvelopeLike => {
+    if (!value || typeof value !== "object") {
+      return {};
+    }
+    return value as EnvelopeLike;
+  };
+
+  const normalizeFlags = (flags: string[] | null | undefined): string[] => {
+    if (!flags?.length) {
+      return [];
+    }
+    return Array.from(new Set(flags.filter((flag) => Boolean(flag && flag.trim()))));
+  };
+
+  const dedupeProvenanceRows = (entries: ProvenanceEntryPayload[] | null | undefined): ProvenanceEntryPayload[] => {
+    if (!entries?.length) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const unique: ProvenanceEntryPayload[] = [];
+
+    for (const entry of entries) {
+      const signature = [
+        entry.source_id,
+        entry.source_tier,
+        entry.display_label,
+        entry.role,
+        entry.as_of ?? "",
+        entry.last_refreshed_at ?? "",
+        entry.url ?? "",
+      ].join("|");
+
+      if (seen.has(signature)) {
+        continue;
+      }
+
+      seen.add(signature);
+      unique.push(entry);
+    }
+
+    return unique;
+  };
+
+  const isDerivedSource = (sourceTier: SourceTier, sourceRole: SourceRole, sourceId: string): boolean =>
+    sourceTier === "derived_from_official" || sourceRole === "derived" || sourceId.startsWith("ft_");
+
+  const isFallbackSource = (
+    sourceId: string,
+    sourceTier: SourceTier,
+    sourceRole: SourceRole,
+    sourceMix: SourceMixPayload | null | undefined,
+    confidenceFlags: string[]
+  ): boolean =>
+    sourceTier === "commercial_fallback" ||
+    sourceRole === "fallback" ||
+    (sourceMix?.fallback_source_ids ?? []).includes(sourceId) ||
+    confidenceFlags.includes("commercial_fallback_present");
+
+  const sectionGroups: SectionProvenanceGroup[] = [];
+  sectionGroups.push({
+    section: "Research Brief Snapshot",
+    asOf: input.asOf,
+    lastRefreshedAt: input.lastRefreshedAt,
+    confidenceFlags: [],
+    sourceMix: input.sourceMix,
+    provenance: input.provenance,
+  });
+
+  if (input.brief) {
+    sectionGroups.push(
+      {
+        section: "Snapshot",
+        asOf: input.brief.snapshot.as_of,
+        lastRefreshedAt: input.brief.snapshot.last_refreshed_at,
+        confidenceFlags: normalizeFlags(input.brief.snapshot.confidence_flags),
+        sourceMix: input.brief.snapshot.source_mix,
+        provenance: input.brief.snapshot.provenance,
+      },
+      {
+        section: "What Changed",
+        asOf: input.brief.what_changed.as_of,
+        lastRefreshedAt: input.brief.what_changed.last_refreshed_at,
+        confidenceFlags: normalizeFlags(input.brief.what_changed.confidence_flags),
+        sourceMix: input.brief.what_changed.source_mix,
+        provenance: input.brief.what_changed.provenance,
+      },
+      {
+        section: "Business Quality",
+        asOf: input.brief.business_quality.as_of,
+        lastRefreshedAt: input.brief.business_quality.last_refreshed_at,
+        confidenceFlags: normalizeFlags(input.brief.business_quality.confidence_flags),
+        sourceMix: input.brief.business_quality.source_mix,
+        provenance: input.brief.business_quality.provenance,
+      },
+      {
+        section: "Capital, Risk, Dilution & Governance",
+        asOf: input.brief.capital_and_risk.as_of,
+        lastRefreshedAt: input.brief.capital_and_risk.last_refreshed_at,
+        confidenceFlags: normalizeFlags(input.brief.capital_and_risk.confidence_flags),
+        sourceMix: input.brief.capital_and_risk.source_mix,
+        provenance: input.brief.capital_and_risk.provenance,
+      },
+      {
+        section: "Peer & Valuation Summary",
+        asOf: input.brief.valuation.as_of,
+        lastRefreshedAt: input.brief.valuation.last_refreshed_at,
+        confidenceFlags: normalizeFlags(input.brief.valuation.confidence_flags),
+        sourceMix: input.brief.valuation.source_mix,
+        provenance: input.brief.valuation.provenance,
+      },
+      {
+        section: "Monitor",
+        asOf: input.brief.monitor.as_of,
+        lastRefreshedAt: input.brief.monitor.last_refreshed_at,
+        confidenceFlags: normalizeFlags(input.brief.monitor.confidence_flags),
+        sourceMix: input.brief.monitor.source_mix,
+        provenance: input.brief.monitor.provenance,
+      }
+    );
+  } else {
+    const changesEnvelope = asEnvelope(input.changes);
+    const earningsEnvelope = asEnvelope(input.earningsSummary);
+    const activityEnvelope = asEnvelope(input.activityOverview);
+    const capitalStructureEnvelope = asEnvelope(input.capitalStructure);
+    const capitalMarketsEnvelope = asEnvelope(input.capitalMarketsSummary);
+    const governanceEnvelope = asEnvelope(input.governanceSummary);
+    const ownershipEnvelope = asEnvelope(input.ownershipSummary);
+    const modelsEnvelope = asEnvelope(input.models);
+    const peersEnvelope = asEnvelope(input.peers);
+
+    sectionGroups.push(
+      {
+        section: "What Changed",
+        asOf: changesEnvelope.as_of ?? earningsEnvelope.as_of ?? activityEnvelope.as_of ?? null,
+        lastRefreshedAt:
+          changesEnvelope.last_refreshed_at ?? earningsEnvelope.last_refreshed_at ?? activityEnvelope.last_refreshed_at ?? null,
+        confidenceFlags: normalizeFlags([
+          ...(changesEnvelope.confidence_flags ?? []),
+          ...(earningsEnvelope.confidence_flags ?? []),
+          ...(activityEnvelope.confidence_flags ?? []),
+        ]),
+        sourceMix: changesEnvelope.source_mix ?? earningsEnvelope.source_mix ?? activityEnvelope.source_mix,
+        provenance: [
+          ...(changesEnvelope.provenance ?? []),
+          ...(earningsEnvelope.provenance ?? []),
+          ...(activityEnvelope.provenance ?? []),
+        ],
+      },
+      {
+        section: "Capital, Risk, Dilution & Governance",
+        asOf:
+          capitalStructureEnvelope.as_of ??
+          capitalMarketsEnvelope.as_of ??
+          governanceEnvelope.as_of ??
+          ownershipEnvelope.as_of ??
+          null,
+        lastRefreshedAt:
+          capitalStructureEnvelope.last_refreshed_at ??
+          capitalMarketsEnvelope.last_refreshed_at ??
+          governanceEnvelope.last_refreshed_at ??
+          ownershipEnvelope.last_refreshed_at ??
+          null,
+        confidenceFlags: normalizeFlags([
+          ...(capitalStructureEnvelope.confidence_flags ?? []),
+          ...(capitalMarketsEnvelope.confidence_flags ?? []),
+          ...(governanceEnvelope.confidence_flags ?? []),
+          ...(ownershipEnvelope.confidence_flags ?? []),
+        ]),
+        sourceMix:
+          capitalStructureEnvelope.source_mix ??
+          capitalMarketsEnvelope.source_mix ??
+          governanceEnvelope.source_mix ??
+          ownershipEnvelope.source_mix,
+        provenance: [
+          ...(capitalStructureEnvelope.provenance ?? []),
+          ...(capitalMarketsEnvelope.provenance ?? []),
+          ...(governanceEnvelope.provenance ?? []),
+          ...(ownershipEnvelope.provenance ?? []),
+        ],
+      },
+      {
+        section: "Peer & Valuation Summary",
+        asOf: modelsEnvelope.as_of ?? peersEnvelope.as_of ?? null,
+        lastRefreshedAt: modelsEnvelope.last_refreshed_at ?? peersEnvelope.last_refreshed_at ?? null,
+        confidenceFlags: normalizeFlags([...(modelsEnvelope.confidence_flags ?? []), ...(peersEnvelope.confidence_flags ?? [])]),
+        sourceMix: modelsEnvelope.source_mix ?? peersEnvelope.source_mix,
+        provenance: [...(modelsEnvelope.provenance ?? []), ...(peersEnvelope.provenance ?? [])],
+      },
+      {
+        section: "Monitor",
+        asOf: activityEnvelope.as_of ?? null,
+        lastRefreshedAt: activityEnvelope.last_refreshed_at ?? null,
+        confidenceFlags: normalizeFlags(activityEnvelope.confidence_flags),
+        sourceMix: activityEnvelope.source_mix,
+        provenance: activityEnvelope.provenance,
+      }
+    );
+  }
+
+  const lines: string[] = [];
+  const renderedSections = new Set<string>();
+
+  for (const group of sectionGroups) {
+    if (renderedSections.has(group.section)) {
+      continue;
+    }
+
+    renderedSections.add(group.section);
+    const sectionConfidenceFlags = normalizeFlags(group.confidenceFlags);
+    const uniqueRows = dedupeProvenanceRows(group.provenance);
+
+    lines.push(`### ${group.section}`);
     lines.push("");
-    lines.push("| Source | Tier | Role | As of | Disclosure |");
-    lines.push("|---|---|---|---|---|");
-    for (const entry of input.provenance) {
-      const asOf = entry.as_of ? formatDate(entry.as_of) : "—";
+    lines.push(`- As of: ${group.asOf ? formatDate(group.asOf) : "—"}`);
+    lines.push(`- Last refreshed: ${group.lastRefreshedAt ? formatDate(group.lastRefreshedAt) : "—"}`);
+    lines.push(`- Confidence flags: ${sectionConfidenceFlags.length ? sectionConfidenceFlags.join(", ") : "—"}`);
+
+    if (!uniqueRows.length) {
+      lines.push("- Sources: none provided");
+      lines.push("");
+      continue;
+    }
+
+    lines.push("");
+    lines.push("| Source ID | Source label | Source tier | Role | As of | Last refreshed at | Confidence flags | Canonical URL | Notes |");
+    lines.push("|---|---|---|---|---|---|---|---|---|");
+
+    for (const entry of uniqueRows) {
+      const rowAsOf = entry.as_of ? formatDate(entry.as_of) : "—";
+      const rowLastRefreshedAt = entry.last_refreshed_at ? formatDate(entry.last_refreshed_at) : "—";
+      const hasFallback = isFallbackSource(entry.source_id, entry.source_tier, entry.role, group.sourceMix, sectionConfidenceFlags);
+      const derived = isDerivedSource(entry.source_tier, entry.role, entry.source_id);
+      const inputSourceIds = derived
+        ? (group.sourceMix?.source_ids ?? []).filter((sourceId) => sourceId !== entry.source_id)
+        : [];
+
+      const notes: string[] = [];
+      if (derived) {
+        notes.push(`Derived source: ${entry.source_id}`);
+        if (inputSourceIds.length) {
+          notes.push(`Input source ids: ${inputSourceIds.join(", ")}`);
+        }
+      }
+      if (hasFallback) {
+        notes.push("Fallback disclosure: commercial fallback input present for this section");
+      }
+      if (entry.disclosure_note) {
+        notes.push(entry.disclosure_note);
+      }
+
+      const canonicalUrl = entry.url?.trim() ? `[link](${entry.url})` : "—";
       lines.push(
-        `| [${entry.display_label}](${entry.url}) | ${entry.source_tier} | ${entry.role} | ${asOf} | ${entry.disclosure_note} |`
+        `| ${entry.source_id} | ${entry.display_label} | ${entry.source_tier} | ${entry.role} | ${rowAsOf} | ${rowLastRefreshedAt} | ${sectionConfidenceFlags.length ? sectionConfidenceFlags.join(", ") : "—"} | ${canonicalUrl} | ${notes.join("; ") || "—"} |`
       );
     }
+
+    lines.push("");
   }
 
   if (input.filingTimeline.length) {
@@ -430,7 +717,8 @@ export function buildInvestmentMemo(input: InvestmentMemoInput): string {
     "",
     `> **Ticker:** ${ticker}  `,
     `> **Generated:** ${formatDate(exportedAt)} · ${exportedAt}  `,
-    `> **Source:** Fundamental Terminal — cached data only; no live SEC fetches were made during export.`,
+    `> **Source:** Fundamental Terminal — cached data only; no live SEC fetches were made during export.  `,
+    `> **Disclaimer:** This memo is for research and informational purposes only. It is not investment advice and does not constitute a recommendation to buy, sell, or hold any security.`,
     "",
     "---",
     "",
@@ -453,6 +741,8 @@ export function buildInvestmentMemo(input: InvestmentMemoInput): string {
     "---",
     "",
     `_Memo generated from cached workspace data at ${exportedAt}. All data is sourced from persisted snapshots — refer to the Source & Freshness section for data-as-of dates and provenance disclosures._`,
+    "",
+    "**Disclaimer:** This memo is provided for research and informational purposes only. It is not investment advice and should not be construed as a recommendation to buy, sell, or hold any security. You should conduct your own independent analysis and consult with a qualified financial advisor before making any investment decisions.",
   ].join("\n");
 
   return header + sections.join("\n\n") + footer;

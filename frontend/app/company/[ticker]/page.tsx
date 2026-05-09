@@ -645,6 +645,7 @@ export default function CompanyResearchBriefPage() {
         ownershipSummary: briefData.ownershipSummary.data,
         models: briefData.models.data,
         peers: briefData.peers.data,
+        brief: briefData.brief,
       });
 
       downloadTextFile(

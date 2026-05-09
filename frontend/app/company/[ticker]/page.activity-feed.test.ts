@@ -501,6 +501,19 @@ describe("CompanyResearchBriefPage", () => {
       );
     });
 
+    const memoContent = (downloadTextFile as any).mock.calls[0][1];
+    expect(memoContent).toContain("is not investment advice");
+    expect(memoContent).toContain("research and informational purposes");
+    expect(memoContent).toContain("## Company Identity");
+    expect(memoContent).toContain("## Source & Freshness State");
+    expect(memoContent).toContain("## Business Summary");
+    expect(memoContent).toContain("## What Changed");
+    expect(memoContent).toContain("## Business Quality");
+    expect(memoContent).toContain("## Capital, Risk, Dilution & Governance");
+    expect(memoContent).toContain("## Peer & Valuation Summary");
+    expect(memoContent).toContain("## Monitor Checklist");
+    expect(memoContent).toContain("## Source Links & Provenance");
+
     expect(screen.getByText("Markdown memo exported from cached research brief data.")).toBeTruthy();
     expect(showAppToast).toHaveBeenCalledWith({ message: "Investment memo exported as Markdown.", tone: "info" });
     expect(getCompanyResearchBrief).not.toHaveBeenCalled();
