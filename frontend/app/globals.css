@@ -2366,6 +2366,38 @@
   background: color-mix(in srgb, var(--warning) 5%, transparent);
 }
 
+.screener-table tbody tr.screener-row-detail,
+.screener-table tbody tr.screener-row-detail:hover {
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+}
+
+.screener-match-detail {
+  display: grid;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.screener-match-section {
+  display: grid;
+  gap: 6px;
+}
+
+.screener-match-title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.screener-match-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 5px;
+}
+
 .screener-sort-header {
   display: inline-flex;
   align-items: center;
@@ -2558,6 +2590,42 @@
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 
+.watchlist-monitor-groups {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.watchlist-monitor-group-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--panel-border) 112%, transparent);
+  background: color-mix(in srgb, var(--panel-alt) 90%, transparent);
+}
+
+.watchlist-monitor-group-title {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.watchlist-monitor-group-value {
+  font-family: var(--mono);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--surface-strong-text);
+}
+
+.watchlist-monitor-group-detail {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .watchlist-summary-metric,
 .watchlist-preset-card,
 .watchlist-saved-view-card,
@@ -2727,7 +2795,7 @@
 }
 
 .watchlist-investor-table {
-  min-width: 1120px;
+  min-width: 1420px;
   table-layout: fixed;
 }
 
@@ -2764,7 +2832,11 @@
 }
 
 .watchlist-investor-table th:nth-child(10) {
-  width: 16%;
+  width: 22%;
+}
+
+.watchlist-investor-table th:nth-child(11) {
+  width: 12%;
 }
 
 .watchlist-investor-table .watchlist-number-cell {
@@ -2819,6 +2891,44 @@
 .watchlist-cell-note {
   font-size: var(--text-xs);
   line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.watchlist-monitor-checklist {
+  display: grid;
+  gap: 10px;
+}
+
+.watchlist-monitor-trigger-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.watchlist-monitor-trigger-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.watchlist-monitor-note-field {
+  display: grid;
+  gap: 6px;
+}
+
+.watchlist-monitor-note-label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.watchlist-monitor-trigger-summary {
+  font-size: var(--text-xs);
+  line-height: 1.45;
   color: var(--text-muted);
 }
 
@@ -3015,6 +3125,10 @@
 
   .watchlist-search-field {
     grid-column: auto;
+  }
+
+  .watchlist-monitor-trigger-grid {
+    grid-template-columns: 1fr;
   }
 }
 

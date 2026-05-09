@@ -32,11 +32,27 @@ export interface LocalWatchlistMonitoringEntry {
   triageState: WatchlistTriageState;
   profileKey: WatchlistMonitoringProfileKey | null;
   rationale: string;
+  triggers: WatchlistMonitorTriggers;
   lastReviewedAt: string | null;
   nextReviewAt: string | null;
   snoozedUntil: string | null;
   holdUntil: string | null;
   updatedAt: string;
+}
+
+export interface WatchlistMonitorTriggers {
+  nextFiling: boolean;
+  major8k: boolean;
+  insiderActivity: boolean;
+  ownershipChange: boolean;
+  dilutionOrCapitalMarkets: boolean;
+  valuationReview: boolean;
+  customNote: string;
+}
+
+export interface WatchlistMonitorTriggerDefinition {
+  key: Exclude<keyof WatchlistMonitorTriggers, "customNote">;
+  label: string;
 }
 
 export interface WatchlistSavedViewCriteria {
@@ -101,6 +117,25 @@ export const DEFAULT_WATCHLIST_VIEW_CRITERIA: WatchlistSavedViewCriteria = {
   sortBy: "review",
   searchText: "",
   profileKey: null,
+};
+
+export const WATCHLIST_MONITOR_TRIGGER_DEFINITIONS: WatchlistMonitorTriggerDefinition[] = [
+  { key: "nextFiling", label: "Next filing" },
+  { key: "major8k", label: "Major 8-K" },
+  { key: "insiderActivity", label: "Insider activity" },
+  { key: "ownershipChange", label: "Ownership change" },
+  { key: "dilutionOrCapitalMarkets", label: "Dilution/capital markets" },
+  { key: "valuationReview", label: "Valuation review" },
+];
+
+export const DEFAULT_WATCHLIST_MONITOR_TRIGGERS: WatchlistMonitorTriggers = {
+  nextFiling: false,
+  major8k: false,
+  insiderActivity: false,
+  ownershipChange: false,
+  dilutionOrCapitalMarkets: false,
+  valuationReview: false,
+  customNote: "",
 };
 
 export const WATCHLIST_DESK_PRESETS: WatchlistDeskPreset[] = [
@@ -186,6 +221,7 @@ export function buildDefaultMonitoringEntry(ticker: string): LocalWatchlistMonit
     triageState: "inbox",
     profileKey: null,
     rationale: "",
+    triggers: { ...DEFAULT_WATCHLIST_MONITOR_TRIGGERS },
     lastReviewedAt: null,
     nextReviewAt: null,
     snoozedUntil: null,

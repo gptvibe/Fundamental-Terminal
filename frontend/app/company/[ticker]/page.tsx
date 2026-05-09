@@ -254,6 +254,14 @@ export default function CompanyResearchBriefPage() {
   const topSegment = useMemo(() => extractTopSegment(latestFinancial), [latestFinancial]);
   const hasHighSeverityFilingSignal = (filingRiskSignals?.summary.high_severity_count ?? 0) > 0;
   const fallbackLabels = useMemo(() => resolveCommercialFallbackLabels(data?.provenance, data?.source_mix), [data?.provenance, data?.source_mix]);
+  const demoFixtureActive = useMemo(
+    () =>
+      Boolean(
+        data?.confidence_flags?.includes("demo_fixture_data") ||
+          briefData.brief?.snapshot?.confidence_flags?.includes("demo_fixture_data")
+      ),
+    [briefData.brief?.snapshot?.confidence_flags, data?.confidence_flags]
+  );
   const previousAnnual = annualStatements[1] ?? null;
   const foreignIssuerStyleFiling = isForeignIssuerAnnualForm(latestFinancial?.filing_type);
   const latestAlertCount = briefData.activityOverview.data?.summary.total ?? 0;
@@ -794,6 +802,12 @@ export default function CompanyResearchBriefPage() {
         {fallbackLabels.length ? (
           <p className="research-brief-fallback-notice">
             Price history and market profile context includes a labeled commercial fallback from {fallbackLabels.join(", ")}. Core fundamentals remain sourced from official filings and public datasets.
+          </p>
+        ) : null}
+
+        {demoFixtureActive ? (
+          <p className="research-brief-fallback-notice" role="status" aria-live="polite">
+            Demo mode active: this company brief is populated from deterministic fixture payloads and is explicitly not live source data.
           </p>
         ) : null}
 

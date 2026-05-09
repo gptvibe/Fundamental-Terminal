@@ -133,6 +133,37 @@ The `diagnostics` block still summarizes:
 
 This metadata is for reliability and UX transparency. It does not change the persisted source-of-truth model.
 
+## Source Health Dashboard
+`/data-sources` is the primary source-health and freshness dashboard.
+
+The page now exposes SLO-style cards for:
+- SEC companyfacts freshness
+- SEC submissions freshness
+- macro freshness
+- fallback usage
+- worker and queue health (when telemetry is available)
+
+Status semantics:
+- `healthy`: tracked sources have recent success and no active error signal.
+- `degraded`: one or more tracked sources has an active error, or fallback usage is currently observed.
+- `stale`: freshness deadlines have passed for tracked sources or active queue jobs appear stalled.
+- `unknown`: no source is registered for that card or telemetry is currently unavailable.
+
+The source table remains the detailed drill-down view with:
+- per-source freshness status
+- last successful refresh timestamp
+- recent error timestamp/message
+- stale markers
+- route usage labels
+
+Worker and queue card notes are intentionally aggregated and non-sensitive:
+- active refresh-job count
+- stalled-job count
+- dataset failure counts
+- aggregate failed refresh counters (if observability snapshots are available)
+
+No secrets, queue payload contents, or internal credentials are exposed.
+
 ## Operational Guidance
 - When adding a new dataset, document its provenance before exposing it in product routes.
 - Prefer explicit source fields or source URLs where they already exist in backend models, then map them through the registry.

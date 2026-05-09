@@ -83,11 +83,49 @@ export interface SourceRegistryErrorPayload {
   last_error_at: string;
 }
 
+export type SourceRegistrySloKey =
+  | "sec_companyfacts_freshness"
+  | "sec_submissions_freshness"
+  | "macro_freshness"
+  | "fallback_usage"
+  | "worker_queue_health";
+
+export type SourceRegistrySloStatus = "healthy" | "degraded" | "stale" | "unknown";
+
+export interface SourceRegistrySloPayload {
+  key: SourceRegistrySloKey;
+  label: string;
+  status: SourceRegistrySloStatus;
+  monitored_source_ids: string[];
+  source_count: number;
+  stale_count: number;
+  active_error_count: number;
+  last_success_at: string | null;
+  note: string | null;
+}
+
+export interface SourceRegistryWorkerQueueHealthPayload {
+  available: boolean;
+  status: SourceRegistrySloStatus;
+  active_job_count: number;
+  stalled_job_count: number;
+  datasets_with_failures: number;
+  failed_refresh_count: number | null;
+  recent_failed_jobs: number | null;
+}
+
 export interface SourceRegistryHealthPayload {
   total_companies_cached: number;
   average_data_age_seconds: number | null;
   recent_error_window_hours: number;
   sources_with_recent_errors: SourceRegistryErrorPayload[];
+  stale_source_count: number;
+  sources_with_active_errors_count: number;
+  fallback_source_count: number;
+  fallback_sources_recently_used_count: number;
+  last_successful_refresh_at: string | null;
+  worker_queue: SourceRegistryWorkerQueueHealthPayload | null;
+  slos: SourceRegistrySloPayload[];
 }
 
 export interface SourceRegistryResponse {
@@ -2257,6 +2295,33 @@ export interface ScreenerFilingQualityPayload {
   aggregated_quality_flags: string[];
 }
 
+export interface ScreenerMatchFilterPayload {
+  field: string;
+  label: string;
+  comparator: "min" | "max" | "boolean" | "exclude_any";
+  source_key: string;
+  unit: string | null;
+  threshold_value: number | string | string[] | null;
+  metric_value: number | string | string[] | null;
+  passed: boolean;
+  is_proxy: boolean;
+  quality_flags: string[];
+}
+
+export interface ScreenerMatchFreshnessPayload {
+  cache_state: CacheState;
+  period_end: string | null;
+  last_metrics_check: string | null;
+  last_model_check: string | null;
+}
+
+export interface ScreenerMatchExplanationPayload {
+  matched_filters: ScreenerMatchFilterPayload[];
+  freshness: ScreenerMatchFreshnessPayload;
+  provenance_source_keys: string[];
+  notes: string[];
+}
+
 export interface ScreenerCompanyPayload {
   ticker: string;
   cik: string;
@@ -2277,6 +2342,7 @@ export interface ScreenerResultPayload {
   metrics: ScreenerMetricsPayload;
   filing_quality: ScreenerFilingQualityPayload;
   rankings: ScreenerRankingsPayload;
+  match_explanation?: ScreenerMatchExplanationPayload | null;
 }
 
 export interface ScreenerCoverageSummaryPayload {

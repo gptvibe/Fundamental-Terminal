@@ -22,9 +22,10 @@ import { formatDate, formatPercent, titleCase } from "@/lib/format";
 import type {
   OfficialScreenerMetadataResponse,
   OfficialScreenerSearchResponse,
-  SecFrameCompanyPayload,
   SecFramesScreenerResponse,
   ScreenerFilterDefinitionPayload,
+  ScreenerFilterInputPayload,
+  ScreenerMatchFilterPayload,
   ScreenerRankingDefinitionPayload,
   ScreenerRankingScoreKey,
   ScreenerResultPayload,
@@ -119,6 +120,7 @@ export default function OfficialScreenerPage() {
   const [results, setResults] = useState<OfficialScreenerSearchResponse | null>(null);
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsError, setResultsError] = useState<string | null>(null);
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
   const [presetName, setPresetName] = useState("");
   const [initialSearchStarted, setInitialSearchStarted] = useState(false);
   const [lastExecutedDraft, setLastExecutedDraft] = useState<LocalScreenerDraft | null>(null);
@@ -159,6 +161,7 @@ export default function OfficialScreenerPage() {
   const canPageForward = Boolean(results && results.query.offset + results.query.limit < results.coverage.matched_count);
   const provenancePayload = results ?? metadata;
   const visibleResultRows = useMemo(() => buildScreenerExportRows(results?.results ?? []), [results?.results]);
+  const tableColumnCount = 3 + RANKING_COLUMNS.length + METRIC_COLUMNS.length;
 
   const loadMetadata = useCallback(async () => {
     try {
@@ -362,6 +365,13 @@ export default function OfficialScreenerPage() {
     },
     [draft, runScreen, updateDraft]
   );
+
+  const toggleRowExpanded = useCallback((rowKey: string) => {
+    setExpandedRows((current) => ({
+      ...current,
+      [rowKey]: !current[rowKey],
+    }));
+  }, []);
 
   const qualityFlagOptions = filterMap.get("excluded_quality_flags")?.suggested_values ?? [];
 
@@ -666,8 +676,6 @@ export default function OfficialScreenerPage() {
           ) : null}
         </div>
 
-        {resultsError ? <div className="screener-muted">{resultsError}</div> : null}
-
         {results?.results.length ? (
           <>
             <div className="screener-table-shell">
@@ -712,67 +720,86 @@ export default function OfficialScreenerPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.results.map((result) => (
-                    <tr key={`${result.company.ticker}:${result.period_end ?? "na"}`} className={result.company.cache_state === "stale" ? "is-stale" : undefined}>
-                      <td data-label="Company">
-                        <div className="screener-company-cell">
-                          <Link href={`/company/${encodeURIComponent(result.company.ticker)}`} className="screener-company-link">
-                            <span className="screener-company-ticker">{result.company.ticker}</span>
-                            <span className="screener-company-name">{result.company.name}</span>
-                          </Link>
-                          <div className="screener-company-meta">
-                            {result.company.sector ? <span className="pill">{result.company.sector}</span> : null}
-                            <span className="pill">{titleCase(result.company.cache_state)}</span>
-                            <span className="pill">{result.filing_type ?? result.period_type.toUpperCase()}</span>
-                          </div>
-                          <div className="screener-company-period">Period end {formatDate(result.period_end)}</div>
-                        </div>
-                      </td>
-
-                      {RANKING_COLUMNS.map((column) => {
-                        const ranking = result.rankings[column.key];
-                        return (
-                          <td key={column.key} data-label={column.label}>
-                            <div className="screener-score-cell">
-                              <div className={`screener-score-value${column.tone === "risk" ? " is-risk" : " is-positive"}`}>
-                                {formatScore(ranking.score)}
+                  {results.results.map((result) => {
+                    const rowKey = `${result.company.ticker}:${result.period_end ?? "na"}`;
+                    const expanded = expandedRows[rowKey] === true;
+                    return [
+                      <tr key={rowKey} className={result.company.cache_state === "stale" ? "is-stale" : undefined}>
+                          <td data-label="Company">
+                            <div className="screener-company-cell">
+                              <Link href={`/company/${encodeURIComponent(result.company.ticker)}`} className="screener-company-link">
+                                <span className="screener-company-ticker">{result.company.ticker}</span>
+                                <span className="screener-company-name">{result.company.name}</span>
+                              </Link>
+                              <div className="screener-company-meta">
+                                {result.company.sector ? <span className="pill">{result.company.sector}</span> : null}
+                                <span className="pill">{titleCase(result.company.cache_state)}</span>
+                                <span className="pill">{result.filing_type ?? result.period_type.toUpperCase()}</span>
                               </div>
-                              <div className="screener-cell-note">
-                                {ranking.rank ? `#${ranking.rank}` : "Unranked"}
-                                {ranking.percentile !== null ? ` · ${ranking.percentile.toFixed(0)} pct` : ""}
-                              </div>
+                              <div className="screener-company-period">Period end {formatDate(result.period_end)}</div>
                             </div>
                           </td>
-                        );
-                      })}
 
-                      {METRIC_COLUMNS.map((column) => (
-                        <td key={column.field} data-label={column.label}>
-                          <div className="screener-metric-cell">
-                            <div className="screener-score-value">{formatMetricField(column.field, result)}</div>
-                            <div className="screener-cell-note">{metricCellNote(column.field, result)}</div>
-                            <MetricConfidenceBadge metadata={buildScreenerMetricConfidence(column.field, result)} />
-                          </div>
-                        </td>
-                      ))}
+                          {RANKING_COLUMNS.map((column) => {
+                            const ranking = result.rankings[column.key];
+                            return (
+                              <td key={column.key} data-label={column.label}>
+                                <div className="screener-score-cell">
+                                  <div className={`screener-score-value${column.tone === "risk" ? " is-risk" : " is-positive"}`}>
+                                    {formatScore(ranking.score)}
+                                  </div>
+                                  <div className="screener-cell-note">
+                                    {ranking.rank ? `#${ranking.rank}` : "Unranked"}
+                                    {ranking.percentile !== null ? ` · ${ranking.percentile.toFixed(0)} pct` : ""}
+                                  </div>
+                                </div>
+                              </td>
+                            );
+                          })}
 
-                      <td data-label="Flags" className="screener-flag-cell">
-                        <div className="screener-flag-stack">
-                          {buildVisibleFlags(result).map((flag) => (
-                            <span key={flag} className="pill screener-flag-pill">{flag}</span>
+                          {METRIC_COLUMNS.map((column) => (
+                            <td key={column.field} data-label={column.label}>
+                              <div className="screener-metric-cell">
+                                <div className="screener-score-value">{formatMetricField(column.field, result)}</div>
+                                <div className="screener-cell-note">{metricCellNote(column.field, result)}</div>
+                                <MetricConfidenceBadge metadata={buildScreenerMetricConfidence(column.field, result)} />
+                              </div>
+                            </td>
                           ))}
-                        </div>
-                      </td>
 
-                      <td data-label="Actions">
-                        <div className="screener-row-actions">
-                          <Link href={`/company/${encodeURIComponent(result.company.ticker)}`} className="ticker-button screener-action-link">
-                            Research Brief
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                          <td data-label="Flags" className="screener-flag-cell">
+                            <div className="screener-flag-stack">
+                              {buildVisibleFlags(result).map((flag) => (
+                                <span key={flag} className="pill screener-flag-pill">{flag}</span>
+                              ))}
+                            </div>
+                          </td>
+
+                          <td data-label="Actions">
+                            <div className="screener-row-actions">
+                              <button
+                                type="button"
+                                className="ticker-button"
+                                aria-expanded={expanded}
+                                onClick={() => toggleRowExpanded(rowKey)}
+                              >
+                                {expanded ? "Hide Why Matched" : "Why Matched"}
+                              </button>
+                              <Link href={`/company/${encodeURIComponent(result.company.ticker)}`} className="ticker-button screener-action-link">
+                                Research Brief
+                              </Link>
+                            </div>
+                          </td>
+                        </tr>,
+                      expanded ? (
+                        <tr className="screener-row-detail" key={`${rowKey}:detail`}>
+                          <td colSpan={tableColumnCount}>
+                            <ScreenerMatchDetail result={result} queryFilters={results.query.filters} provenance={results.provenance} />
+                          </td>
+                        </tr>
+                      ) : null,
+                    ];
+                  })}
                 </tbody>
               </table>
             </div>
@@ -792,9 +819,24 @@ export default function OfficialScreenerPage() {
             </div>
           </>
         ) : resultsLoading ? (
-          <div className="screener-muted">Running screener query...</div>
+          <div className="screener-empty-state" data-testid="results-loading-state" role="status" aria-live="polite">
+            <div className="screener-kicker">Results</div>
+            <div className="screener-empty-title">Loading screener results</div>
+            <div className="screener-muted">Running screener query against persisted official-source datasets.</div>
+          </div>
+        ) : resultsError ? (
+          <div className="screener-empty-state" data-testid="results-error-state" role="alert">
+            <div className="screener-kicker">Results</div>
+            <div className="screener-empty-title">Screener query failed</div>
+            <div className="screener-muted">{resultsError}</div>
+            <div>
+              <button type="button" className="ticker-button" onClick={() => void runScreen(draft)}>
+                Retry Query
+              </button>
+            </div>
+          </div>
         ) : results ? (
-          <div className="screener-empty-state">
+          <div className="screener-empty-state" data-testid="results-empty-state">
             <div className="screener-kicker">Results</div>
             <div className="screener-empty-title">No companies matched the current filter stack</div>
             <div className="screener-muted">Loosen one or two thresholds, remove a quality exclusion, or broaden the custom ticker universe.</div>
@@ -805,7 +847,7 @@ export default function OfficialScreenerPage() {
             </div>
           </div>
         ) : (
-          <div className="screener-empty-state">
+          <div className="screener-empty-state" data-testid="results-idle-state">
             <div className="screener-kicker">Results</div>
             <div className="screener-empty-title">Run the screener to load ranked candidates</div>
             <div className="screener-muted">The current draft is already persisted in your browser, so you can leave and come back without losing the filter stack.</div>
@@ -1121,6 +1163,227 @@ function SecFramesTable({ data }: { data: SecFramesScreenerResponse }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function buildMatchedFiltersForDisplay(
+  result: ScreenerResultPayload,
+  queryFilters: ScreenerFilterInputPayload
+): ScreenerMatchFilterPayload[] {
+  if (result.match_explanation?.matched_filters?.length) {
+    return result.match_explanation.matched_filters;
+  }
+
+  const matches: ScreenerMatchFilterPayload[] = [];
+  const pushThreshold = (
+    field: string,
+    label: string,
+    comparator: "min" | "max",
+    thresholdValue: number | null,
+    metricValue: number | null,
+    sourceKey: string,
+    unit: string | null,
+    isProxy: boolean,
+    qualityFlags: string[]
+  ) => {
+    if (thresholdValue === null) {
+      return;
+    }
+    matches.push({
+      field,
+      label,
+      comparator,
+      source_key: sourceKey,
+      unit,
+      threshold_value: thresholdValue,
+      metric_value: metricValue,
+      passed: comparator === "max" ? metricValue !== null && metricValue <= thresholdValue : metricValue !== null && metricValue >= thresholdValue,
+      is_proxy: isProxy,
+      quality_flags: qualityFlags,
+    });
+  };
+
+  pushThreshold(
+    "revenue_growth_min",
+    "Revenue growth",
+    "min",
+    queryFilters.revenue_growth_min,
+    result.metrics.revenue_growth.value,
+    result.metrics.revenue_growth.source_key,
+    result.metrics.revenue_growth.unit,
+    result.metrics.revenue_growth.is_proxy,
+    result.metrics.revenue_growth.quality_flags
+  );
+  pushThreshold(
+    "operating_margin_min",
+    "Operating margin",
+    "min",
+    queryFilters.operating_margin_min,
+    result.metrics.operating_margin.value,
+    result.metrics.operating_margin.source_key,
+    result.metrics.operating_margin.unit,
+    result.metrics.operating_margin.is_proxy,
+    result.metrics.operating_margin.quality_flags
+  );
+  pushThreshold(
+    "fcf_margin_min",
+    "FCF margin",
+    "min",
+    queryFilters.fcf_margin_min,
+    result.metrics.fcf_margin.value,
+    result.metrics.fcf_margin.source_key,
+    result.metrics.fcf_margin.unit,
+    result.metrics.fcf_margin.is_proxy,
+    result.metrics.fcf_margin.quality_flags
+  );
+  pushThreshold(
+    "leverage_ratio_max",
+    "Leverage",
+    "max",
+    queryFilters.leverage_ratio_max,
+    result.metrics.leverage_ratio.value,
+    result.metrics.leverage_ratio.source_key,
+    result.metrics.leverage_ratio.unit,
+    result.metrics.leverage_ratio.is_proxy,
+    result.metrics.leverage_ratio.quality_flags
+  );
+  pushThreshold(
+    "dilution_max",
+    "Dilution",
+    "max",
+    queryFilters.dilution_max,
+    result.metrics.dilution.value,
+    result.metrics.dilution.source_key,
+    result.metrics.dilution.unit,
+    result.metrics.dilution.is_proxy,
+    result.metrics.dilution.quality_flags
+  );
+  pushThreshold(
+    "sbc_burden_max",
+    "SBC burden",
+    "max",
+    queryFilters.sbc_burden_max,
+    result.metrics.sbc_burden.value,
+    result.metrics.sbc_burden.source_key,
+    result.metrics.sbc_burden.unit,
+    result.metrics.sbc_burden.is_proxy,
+    result.metrics.sbc_burden.quality_flags
+  );
+  pushThreshold(
+    "shareholder_yield_min",
+    "Shareholder yield",
+    "min",
+    queryFilters.shareholder_yield_min,
+    result.metrics.shareholder_yield.value,
+    result.metrics.shareholder_yield.source_key,
+    result.metrics.shareholder_yield.unit,
+    result.metrics.shareholder_yield.is_proxy,
+    result.metrics.shareholder_yield.quality_flags
+  );
+  pushThreshold(
+    "max_filing_lag_days",
+    "Filing lag",
+    "max",
+    queryFilters.max_filing_lag_days,
+    result.filing_quality.filing_lag_days.value,
+    result.filing_quality.filing_lag_days.source_key,
+    result.filing_quality.filing_lag_days.unit,
+    result.filing_quality.filing_lag_days.is_proxy,
+    result.filing_quality.filing_lag_days.quality_flags
+  );
+
+  return matches;
+}
+
+function formatMatchValue(value: number | string | string[] | null, unit: string | null): string {
+  if (Array.isArray(value)) {
+    return value.length ? value.join(", ") : "None";
+  }
+  if (typeof value === "number") {
+    if (unit === "ratio") {
+      return formatPercent(value);
+    }
+    if (unit === "days") {
+      return formatDays(value);
+    }
+    if (unit === "flag") {
+      return value > 0 ? "Yes" : "No";
+    }
+    return String(value);
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return "-";
+}
+
+function ScreenerMatchDetail({
+  result,
+  queryFilters,
+  provenance,
+}: {
+  result: ScreenerResultPayload;
+  queryFilters: ScreenerFilterInputPayload;
+  provenance: OfficialScreenerSearchResponse["provenance"];
+}) {
+  const matchedFilters = buildMatchedFiltersForDisplay(result, queryFilters);
+  const rowProvenanceKeys = result.match_explanation?.provenance_source_keys ?? [];
+  const matchingProvenanceEntries = provenance.filter((entry) => rowProvenanceKeys.includes(entry.source_id));
+
+  return (
+    <div className="screener-match-detail" data-testid={`why-matched-${result.company.ticker}`}>
+      <div className="screener-match-section">
+        <h4 className="screener-match-title">Matched filters</h4>
+        {matchedFilters.length ? (
+          <ul className="screener-match-list">
+            {matchedFilters.map((filter) => (
+              <li key={`${result.company.ticker}:${filter.field}`}>
+                <strong>{filter.label}:</strong> {formatMatchValue(filter.metric_value, filter.unit)}
+                <span className="screener-cell-note">
+                  {` ${filter.comparator === "max" ? "<=" : filter.comparator === "min" ? ">=" : "matches"} ${formatMatchValue(filter.threshold_value, filter.unit)} · ${filter.source_key}`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="screener-muted">No explicit thresholds were active for this run.</div>
+        )}
+      </div>
+
+      <div className="screener-match-section">
+        <h4 className="screener-match-title">Freshness</h4>
+        <div className="screener-cell-note">
+          Cache state: {titleCase(result.match_explanation?.freshness.cache_state ?? result.company.cache_state)} · Last metrics check {formatDate(result.match_explanation?.freshness.last_metrics_check ?? result.last_metrics_check)}
+          {result.match_explanation?.freshness.last_model_check || result.last_model_check
+            ? ` · Last model check ${formatDate(result.match_explanation?.freshness.last_model_check ?? result.last_model_check)}`
+            : ""}
+        </div>
+      </div>
+
+      <div className="screener-match-section">
+        <h4 className="screener-match-title">Source and provenance</h4>
+        {matchingProvenanceEntries.length ? (
+          <ul className="screener-match-list">
+            {matchingProvenanceEntries.map((entry) => (
+              <li key={`${result.company.ticker}:${entry.source_id}`}>
+                <strong>{entry.display_label}</strong>
+                <span className="screener-cell-note"> {`(${entry.source_id} · ${titleCase(entry.role)})`}</span>
+              </li>
+            ))}
+          </ul>
+        ) : rowProvenanceKeys.length ? (
+          <div className="screener-muted">Row-level provenance keys: {rowProvenanceKeys.join(", ")}.</div>
+        ) : (
+          <div className="screener-muted">Provenance details unavailable for this row.</div>
+        )}
+      </div>
+
+      <div className="screener-row-actions">
+        <Link href={`/company/${encodeURIComponent(result.company.ticker)}`} className="ticker-button screener-action-link">
+          Open Research Brief
+        </Link>
+      </div>
     </div>
   );
 }

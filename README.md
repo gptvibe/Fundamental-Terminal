@@ -72,6 +72,25 @@ Endpoints:
 - Backend API: http://127.0.0.1:8000
 - API docs: http://127.0.0.1:8000/docs
 
+### 5) Deterministic demo mode (explicit opt-in)
+
+Use demo mode when you need populated home/company/watchlist-like surfaces without relying on live upstream freshness.
+
+```bash
+# In .env
+DEMO_MODE=true
+NEXT_PUBLIC_DEMO_MODE=true
+
+# Build from local source so frontend demo env is baked into the client bundle
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+```
+
+Demo mode behavior:
+
+- Fixture-backed payloads are deterministic and explicitly labeled as demo data.
+- Provenance and source-mix UI remain active; demo payloads carry a labeled manual-override source.
+- Demo mode is off by default and must be enabled explicitly.
+
 ## Not Investment Advice
 
 Fundamental Terminal is software for research workflow support. It does not provide investment advice, recommendations, or portfolio management.

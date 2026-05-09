@@ -15,6 +15,7 @@ import {
   buildDefaultMonitoringEntry,
   DEFAULT_WATCHLIST_VIEW_CRITERIA,
   getWatchlistMonitoringProfile,
+  WATCHLIST_MONITOR_TRIGGER_DEFINITIONS,
   WATCHLIST_DESK_PRESETS,
   WATCHLIST_MONITORING_PROFILES,
   WATCHLIST_TRIAGE_STATES,
@@ -41,6 +42,12 @@ interface WatchlistRow extends WatchlistSummaryItemPayload {
   isStale: boolean;
   monitoring: LocalWatchlistMonitoringEntry;
   reviewState: WatchlistReviewState;
+}
+
+interface WatchlistDashboardGroups {
+  needsReview: number;
+  noNewSignal: number;
+  missingData: number;
 }
 
 const PRIMARY_FILTERS: Array<{ key: WatchlistPrimaryFilter; label: string }> = [
@@ -246,6 +253,23 @@ export default function WatchlistPage() {
   const dueCount = useMemo(() => rows.filter((item) => item.reviewState.kind === "due").length, [rows]);
   const parkedCount = useMemo(() => rows.filter((item) => item.reviewState.kind === "snoozed" || item.reviewState.kind === "hold").length, [rows]);
   const materialChangeCount = useMemo(() => rows.filter((item) => hasMaterialChange(item)).length, [rows]);
+  const dashboardGroups = useMemo<WatchlistDashboardGroups>(() => {
+    return rows.reduce<WatchlistDashboardGroups>((result, item) => {
+      const group = classifyWatchlistDashboardGroup(item);
+      if (group === "missing-data") {
+        result.missingData += 1;
+      } else if (group === "needs-review") {
+        result.needsReview += 1;
+      } else {
+        result.noNewSignal += 1;
+      }
+      return result;
+    }, {
+      needsReview: 0,
+      noNewSignal: 0,
+      missingData: 0,
+    });
+  }, [rows]);
 
   const summaryCounts = useMemo(
     () => ({
@@ -436,6 +460,26 @@ export default function WatchlistPage() {
         </div>
       </Toolbar>
 
+      {watchlistTickers.length ? (
+        <section className="watchlist-monitor-groups" aria-label="Watchlist monitor groups">
+          <article className="watchlist-monitor-group-card">
+            <div className="watchlist-monitor-group-title">Needs review</div>
+            <div className="watchlist-monitor-group-value">{dashboardGroups.needsReview}</div>
+            <div className="watchlist-monitor-group-detail">Due names or fresh filing, alert, and trigger signals.</div>
+          </article>
+          <article className="watchlist-monitor-group-card">
+            <div className="watchlist-monitor-group-title">No new signal</div>
+            <div className="watchlist-monitor-group-value">{dashboardGroups.noNewSignal}</div>
+            <div className="watchlist-monitor-group-detail">Monitored names with no new high-signal change yet.</div>
+          </article>
+          <article className="watchlist-monitor-group-card">
+            <div className="watchlist-monitor-group-title">Missing data</div>
+            <div className="watchlist-monitor-group-value">{dashboardGroups.missingData}</div>
+            <div className="watchlist-monitor-group-detail">Refresh needed before monitor conclusions are reliable.</div>
+          </article>
+        </section>
+      ) : null}
+
       {error ? <ErrorState title="Watchlist summary unavailable" message={error} /> : null}
 
       {!watchlistTickers.length ? (
@@ -466,6 +510,7 @@ export default function WatchlistPage() {
                   <th scope="col">Leverage/debt signal</th>
                   <th scope="col">Last filing</th>
                   <th scope="col">Alert count</th>
+                  <th scope="col">Monitor checklist</th>
                   <th scope="col">Actions</th>
                 </tr>
               </thead>
@@ -498,6 +543,53 @@ export default function WatchlistPage() {
                       <td data-label="Leverage/debt signal" className="watchlist-number-cell">{formatSigned(item.balance_sheet_risk)}</td>
                       <td data-label="Last filing">{lastFiling}</td>
                       <td data-label="Alert count" className="watchlist-number-cell">{item.alert_summary.total}</td>
+                      <td data-label="Monitor checklist">
+                        <div className="watchlist-monitor-checklist">
+                          <div className="watchlist-monitor-trigger-grid">
+                            {WATCHLIST_MONITOR_TRIGGER_DEFINITIONS.map((trigger) => {
+                              const checked = item.monitoring.triggers[trigger.key];
+                              return (
+                                <label key={`${item.ticker}:${trigger.key}`} className="watchlist-monitor-trigger-toggle">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(event) => {
+                                      persistMonitoring(item, {
+                                        triggers: {
+                                          ...item.monitoring.triggers,
+                                          [trigger.key]: event.target.checked,
+                                        },
+                                      });
+                                    }}
+                                  />
+                                  <span>{trigger.label}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <label className="watchlist-monitor-note-field">
+                            <span className="watchlist-monitor-note-label">Custom note</span>
+                            <input
+                              type="text"
+                              className="watchlist-inline-input"
+                              value={item.monitoring.triggers.customNote}
+                              onChange={(event) => {
+                                persistMonitoring(item, {
+                                  triggers: {
+                                    ...item.monitoring.triggers,
+                                    customNote: event.target.value,
+                                  },
+                                });
+                              }}
+                              placeholder="What should you revisit next?"
+                              aria-label={`Custom monitor note for ${item.ticker}`}
+                            />
+                          </label>
+                          <div className="watchlist-monitor-trigger-summary">
+                            {getTriggerSummary(item.monitoring)}
+                          </div>
+                        </div>
+                      </td>
                       <td data-label="Actions">
                         <div className="watchlist-table-actions">
                           <button type="button" className="ticker-button" onClick={() => router.push(`/company/${encodeURIComponent(item.ticker)}`)}>
@@ -966,4 +1058,46 @@ function toDateKey(value: Date): string {
   const month = `${value.getMonth() + 1}`.padStart(2, "0");
   const day = `${value.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function classifyWatchlistDashboardGroup(item: WatchlistRow): "needs-review" | "no-new-signal" | "missing-data" {
+  if (isMissingSignalData(item)) {
+    return "missing-data";
+  }
+
+  if (item.reviewState.kind === "due" || hasNewSignal(item)) {
+    return "needs-review";
+  }
+
+  return "no-new-signal";
+}
+
+function isMissingSignalData(item: WatchlistRow): boolean {
+  return item.refresh.reason === "missing" || !item.material_change || item.material_change.status !== "ready";
+}
+
+function hasNewSignal(item: WatchlistRow): boolean {
+  if (item.alert_summary.total > 0) {
+    return true;
+  }
+  if (hasMaterialChange(item)) {
+    return true;
+  }
+  return countEnabledTriggers(item.monitoring) > 0;
+}
+
+function countEnabledTriggers(monitoring: LocalWatchlistMonitoringEntry): number {
+  return WATCHLIST_MONITOR_TRIGGER_DEFINITIONS.reduce((count, trigger) => (
+    monitoring.triggers[trigger.key] ? count + 1 : count
+  ), 0);
+}
+
+function getTriggerSummary(monitoring: LocalWatchlistMonitoringEntry): string {
+  const enabledCount = countEnabledTriggers(monitoring);
+  if (enabledCount === 0 && !monitoring.triggers.customNote.trim()) {
+    return "No monitor triggers selected.";
+  }
+
+  const noteSuffix = monitoring.triggers.customNote.trim() ? " Custom note saved." : "";
+  return `${enabledCount} trigger${enabledCount === 1 ? "" : "s"} selected.${noteSuffix}`;
 }

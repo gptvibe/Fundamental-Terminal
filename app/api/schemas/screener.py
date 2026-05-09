@@ -92,6 +92,33 @@ class ScreenerFilingQualityPayload(BaseModel):
     aggregated_quality_flags: list[str] = Field(default_factory=list)
 
 
+class ScreenerMatchFilterPayload(BaseModel):
+    field: str
+    label: str
+    comparator: Literal["min", "max", "boolean", "exclude_any"]
+    source_key: str
+    unit: str | None = None
+    threshold_value: Number | str | list[str] | None = None
+    metric_value: Number | str | list[str] | None = None
+    passed: bool = True
+    is_proxy: bool = False
+    quality_flags: list[str] = Field(default_factory=list)
+
+
+class ScreenerMatchFreshnessPayload(BaseModel):
+    cache_state: Literal["fresh", "stale", "missing"] = "missing"
+    period_end: DateType | None = None
+    last_metrics_check: datetime | None = None
+    last_model_check: datetime | None = None
+
+
+class ScreenerMatchExplanationPayload(BaseModel):
+    matched_filters: list[ScreenerMatchFilterPayload] = Field(default_factory=list)
+    freshness: ScreenerMatchFreshnessPayload
+    provenance_source_keys: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
 class ScreenerCompanyPayload(BaseModel):
     ticker: str
     cik: str
@@ -112,6 +139,7 @@ class ScreenerResultPayload(BaseModel):
     metrics: ScreenerMetricsPayload
     filing_quality: ScreenerFilingQualityPayload
     rankings: ScreenerRankingsPayload
+    match_explanation: ScreenerMatchExplanationPayload | None = None
 
 
 class ScreenerCoverageSummaryPayload(BaseModel):

@@ -44,6 +44,16 @@ _SORTABLE_RANKING_FIELDS = {
     "dilution_risk_score": "dilution_risk",
     "filing_risk_score": "filing_risk",
 }
+_MATCHABLE_THRESHOLD_FILTERS: tuple[tuple[str, str], ...] = (
+    ("revenue_growth_min", "revenue_growth"),
+    ("operating_margin_min", "operating_margin"),
+    ("fcf_margin_min", "fcf_margin"),
+    ("leverage_ratio_max", "leverage_ratio"),
+    ("dilution_max", "dilution"),
+    ("sbc_burden_max", "sbc_burden"),
+    ("shareholder_yield_min", "shareholder_yield"),
+    ("max_filing_lag_days", "filing_lag_days"),
+)
 
 _METRIC_FIELD_DEFINITIONS: dict[str, dict[str, Any]] = {
     "revenue_growth": {
@@ -648,7 +658,7 @@ def run_official_screener(session: Session, request_payload: dict[str, Any]) -> 
             "restatement_flagged_count": sum(1 for candidate in candidates if _candidate_is_restatement_flagged(candidate)),
             "stale_period_flagged_count": sum(1 for candidate in candidates if _candidate_is_stale_period(candidate)),
         },
-        "results": [_candidate_for_response(candidate) for candidate in page],
+        "results": [_candidate_for_response(candidate, filters=filters) for candidate in page],
         "as_of": _latest_date(*[candidate.get("period_end") for candidate in summary_source]),
         "last_refreshed_at": last_refreshed_at,
         "source_hints": {
@@ -909,7 +919,7 @@ def _sort_candidates(candidates: list[dict[str, Any]], *, field: str, direction:
     return present + missing
 
 
-def _candidate_for_response(candidate: dict[str, Any]) -> dict[str, Any]:
+def _candidate_for_response(candidate: dict[str, Any], *, filters: dict[str, Any]) -> dict[str, Any]:
     response = dict(candidate)
     response.pop("statement_sources", None)
     response["company"] = dict(candidate.get("company") or {})
@@ -925,7 +935,130 @@ def _candidate_for_response(candidate: dict[str, Any]) -> dict[str, Any]:
         }
         for score_key, ranking in (candidate.get("rankings") or {}).items()
     }
+    response["match_explanation"] = _build_match_explanation(candidate, filters)
     return response
+
+
+def _build_match_explanation(candidate: dict[str, Any], filters: dict[str, Any]) -> dict[str, Any]:
+    matched_filters: list[dict[str, Any]] = []
+    for filter_field, metric_field in _MATCHABLE_THRESHOLD_FILTERS:
+        threshold_value = _coerce_number(filters.get(filter_field))
+        if threshold_value is None:
+            continue
+
+        definition = _METRIC_FIELD_DEFINITIONS.get(metric_field)
+        if not definition:
+            continue
+
+        if metric_field == "filing_lag_days":
+            snapshot = dict((candidate.get("filing_quality") or {}).get("filing_lag_days") or {})
+        else:
+            snapshot = dict((candidate.get("metrics") or {}).get(metric_field) or {})
+
+        metric_value = _coerce_number(snapshot.get("value"))
+        comparator = str(definition.get("comparator") or "min")
+        matched_filters.append(
+            {
+                "field": filter_field,
+                "label": definition["label"],
+                "comparator": comparator,
+                "source_key": str(snapshot.get("source_key") or definition["source_key"]),
+                "unit": definition.get("unit"),
+                "threshold_value": threshold_value,
+                "metric_value": metric_value,
+                "passed": _threshold_match(metric_value, threshold_value, comparator=comparator),
+                "is_proxy": bool(snapshot.get("is_proxy")),
+                "quality_flags": [str(flag) for flag in snapshot.get("quality_flags") or [] if str(flag).strip()],
+            }
+        )
+
+    if bool(filters.get("exclude_restatements")):
+        definition = _METRIC_FIELD_DEFINITIONS["exclude_restatements"]
+        restatement_value = 1.0 if _candidate_is_restatement_flagged(candidate) else 0.0
+        matched_filters.append(
+            {
+                "field": "exclude_restatements",
+                "label": definition["label"],
+                "comparator": "boolean",
+                "source_key": definition["source_key"],
+                "unit": definition.get("unit"),
+                "threshold_value": "exclude_true",
+                "metric_value": restatement_value,
+                "passed": restatement_value <= 0.0,
+                "is_proxy": bool(definition.get("is_proxy")),
+                "quality_flags": [],
+            }
+        )
+
+    if bool(filters.get("exclude_stale_periods")):
+        definition = _METRIC_FIELD_DEFINITIONS["exclude_stale_periods"]
+        stale_value = _coerce_number((candidate.get("filing_quality") or {}).get("stale_period_flag", {}).get("value"))
+        matched_filters.append(
+            {
+                "field": "exclude_stale_periods",
+                "label": definition["label"],
+                "comparator": "boolean",
+                "source_key": definition["source_key"],
+                "unit": definition.get("unit"),
+                "threshold_value": "exclude_true",
+                "metric_value": stale_value,
+                "passed": (stale_value or 0.0) <= 0.0,
+                "is_proxy": bool(definition.get("is_proxy")),
+                "quality_flags": [
+                    str(flag)
+                    for flag in ((candidate.get("filing_quality") or {}).get("stale_period_flag") or {}).get("quality_flags")
+                    or []
+                    if str(flag).strip()
+                ],
+            }
+        )
+
+    excluded_quality_flags = _normalized_flag_list(filters.get("excluded_quality_flags") or [])
+    if excluded_quality_flags:
+        definition = _METRIC_FIELD_DEFINITIONS["excluded_quality_flags"]
+        row_quality_flags = _normalized_flag_list((candidate.get("filing_quality") or {}).get("aggregated_quality_flags") or [])
+        blocked = sorted(set(excluded_quality_flags).intersection(row_quality_flags))
+        matched_filters.append(
+            {
+                "field": "excluded_quality_flags",
+                "label": definition["label"],
+                "comparator": "exclude_any",
+                "source_key": definition["source_key"],
+                "unit": definition.get("unit"),
+                "threshold_value": excluded_quality_flags,
+                "metric_value": row_quality_flags,
+                "passed": not blocked,
+                "is_proxy": bool(definition.get("is_proxy")),
+                "quality_flags": blocked,
+            }
+        )
+
+    provenance_source_keys = _normalized_flag_list(candidate.get("statement_sources") or [])
+    notes: list[str] = []
+    if not matched_filters:
+        notes.append("No explicit filters were active; this row comes from the candidate universe for the selected period.")
+    if not provenance_source_keys:
+        notes.append("No per-row statement source keys were recorded in this result.")
+
+    return {
+        "matched_filters": matched_filters,
+        "freshness": {
+            "cache_state": str((candidate.get("company") or {}).get("cache_state") or "missing"),
+            "period_end": candidate.get("period_end"),
+            "last_metrics_check": candidate.get("last_metrics_check"),
+            "last_model_check": candidate.get("last_model_check"),
+        },
+        "provenance_source_keys": provenance_source_keys,
+        "notes": notes,
+    }
+
+
+def _threshold_match(value: float | None, threshold: float, *, comparator: str) -> bool:
+    if value is None:
+        return False
+    if comparator == "max":
+        return value <= threshold
+    return value >= threshold
 
 
 def _attach_explainable_rankings(candidates: list[dict[str, Any]]) -> None:

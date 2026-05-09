@@ -248,6 +248,10 @@ Each result row also exposes:
 - aggregated filing-quality flags
 - persisted restatement summary metadata
 - explainable ranking payloads for quality, value, capital allocation, dilution risk, and filing risk
+- `match_explanation`
+  - active filter checks that the row passed, including threshold and observed metric values
+  - row freshness summary (`cache_state`, period end, metric/model check times)
+  - row-level provenance source keys when available
 
 ## Ranking Sort Fields
 

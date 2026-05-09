@@ -92,6 +92,19 @@ function createSummaryItem(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function createMonitorTriggers(overrides: Record<string, unknown> = {}) {
+  return {
+    nextFiling: false,
+    major8k: false,
+    insiderActivity: false,
+    ownershipChange: false,
+    dilutionOrCapitalMarkets: false,
+    valuationReview: false,
+    customNote: "",
+    ...overrides,
+  };
+}
+
 describe("WatchlistPage", () => {
   beforeEach(() => {
     push.mockReset();
@@ -149,6 +162,7 @@ describe("WatchlistPage", () => {
     expect(screen.getByRole("columnheader", { name: "Leverage/debt signal" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Last filing" })).toBeTruthy();
     expect(screen.getByRole("columnheader", { name: "Alert count" })).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Monitor checklist" })).toBeTruthy();
     expect(screen.getByText("2 high-signal changes since the last filing")).toBeTruthy();
   });
 
@@ -161,6 +175,7 @@ describe("WatchlistPage", () => {
           triageState: "reviewing",
           profileKey: "deep-dive",
           rationale: "Due today",
+          triggers: createMonitorTriggers(),
           lastReviewedAt: null,
           nextReviewAt: "2026-04-08",
           snoozedUntil: null,
@@ -172,6 +187,7 @@ describe("WatchlistPage", () => {
           triageState: "monitoring",
           profileKey: "quality-compounder",
           rationale: "Parked",
+          triggers: createMonitorTriggers({ valuationReview: true }),
           lastReviewedAt: null,
           nextReviewAt: "2099-12-31",
           snoozedUntil: null,

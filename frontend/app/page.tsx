@@ -112,6 +112,10 @@ export default function HomePage() {
   const macroSnapshot = useMemo(() => buildMacroSnapshot(macroContext), [macroContext]);
   const dataHealthSnapshot = useMemo(() => buildDataHealthSnapshot(sourceRegistry), [sourceRegistry]);
   const liveFeedLabel = useMemo(() => getLiveFeedLabel(connectionState, recentJob), [connectionState, recentJob]);
+  const demoFixtureActive = useMemo(
+    () => Boolean(sourceRegistry?.sources?.some((source) => source.source_id === "ft_demo_fixture_pack")),
+    [sourceRegistry]
+  );
 
   useEffect(() => {
     setRecentJob(readStoredActiveJob());
@@ -406,6 +410,11 @@ export default function HomePage() {
   return (
     <div className="home-shell home-shell-terminal">
       <h1 className="sr-only">Fundamental Terminal Home</h1>
+      {demoFixtureActive ? (
+        <div className="research-brief-fallback-notice" role="status" aria-live="polite">
+          Demo mode active: this workspace is running deterministic fixture payloads (not live source data).
+        </div>
+      ) : null}
       <section className="home-launchpad">
         <div className="home-launchpad-grid">
           <div className="home-launchpad-main">

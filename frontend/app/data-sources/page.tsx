@@ -17,7 +17,14 @@ import {
 } from "@/components/ui/research-primitives";
 import { getCacheMetrics, getSourceRegistry } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CacheMetricsResponse, SourceRegistryEntryPayload, SourceRegistryResponse, SourceTier } from "@/lib/types";
+import type {
+  CacheMetricsResponse,
+  SourceRegistryEntryPayload,
+  SourceRegistryResponse,
+  SourceRegistrySloPayload,
+  SourceRegistrySloStatus,
+  SourceTier,
+} from "@/lib/types";
 
 type SummaryTone = "neutral" | "positive" | "warning" | "danger";
 
@@ -26,6 +33,14 @@ type SummaryCard = {
   value: string;
   detail: string;
   tone: SummaryTone;
+};
+
+const SLO_LABELS: Record<string, string> = {
+  sec_companyfacts_freshness: "SEC companyfacts freshness",
+  sec_submissions_freshness: "SEC submissions freshness",
+  macro_freshness: "Macro freshness",
+  fallback_usage: "Fallback usage",
+  worker_queue_health: "Worker and queue health",
 };
 
 type SourceStatusView = {
@@ -83,10 +98,7 @@ export default function DataSourcesPage() {
   }, [requestVersion]);
 
   const sources = useMemo(() => data?.sources ?? [], [data]);
-  const summaryCards = useMemo(
-    () => buildSummaryCards({ data, cacheMetrics, cacheError, loading }),
-    [cacheError, cacheMetrics, data, loading],
-  );
+  const summaryCards = useMemo(() => buildSloCards({ data, loading }), [data, loading]);
   const latestSuccessAt = useMemo(
     () => pickLatestTimestamp(sources.map((source) => source.last_success_at)),
     [sources],
@@ -257,7 +269,13 @@ export default function DataSourcesPage() {
             <div>Companies cached: {data ? new Intl.NumberFormat("en-US").format(data.health.total_companies_cached) : "—"}</div>
             <div>Average company data age: {data ? formatDurationFromSeconds(data.health.average_data_age_seconds) : "—"}</div>
             <div>Recent error window: {data ? `${data.health.recent_error_window_hours}h` : "—"}</div>
-            <div>Latest tracked success: {latestSuccessAt ? formatDate(latestSuccessAt) : "Not tracked"}</div>
+            <div>Latest tracked success: {data?.health.last_successful_refresh_at ? formatDate(data.health.last_successful_refresh_at) : (latestSuccessAt ? formatDate(latestSuccessAt) : "Not tracked")}</div>
+            <div>Stale sources: {data ? new Intl.NumberFormat("en-US").format(data.health.stale_source_count) : "—"}</div>
+            <div>Sources with active errors: {data ? new Intl.NumberFormat("en-US").format(data.health.sources_with_active_errors_count) : "—"}</div>
+            <div>Fallback sources used recently: {data ? new Intl.NumberFormat("en-US").format(data.health.fallback_sources_recently_used_count) : "—"}</div>
+            <div>
+              Worker queue: {data?.health.worker_queue ? `${humanizeSloStatus(data.health.worker_queue.status)} (${data.health.worker_queue.active_job_count} active, ${data.health.worker_queue.stalled_job_count} stalled)` : "Not available"}
+            </div>
           </div>
           <pre className="data-sources-debug-pre">
 {JSON.stringify(
@@ -285,30 +303,132 @@ export default function DataSourcesPage() {
   );
 }
 
-function buildSummaryCards({
+function buildSloCards({
   data,
-  cacheMetrics,
-  cacheError,
   loading,
 }: {
   data: SourceRegistryResponse | null;
-  cacheMetrics: CacheMetricsResponse | null;
-  cacheError: string | null;
   loading: boolean;
 }): SummaryCard[] {
-  const sources = data?.sources ?? [];
-  const secSources = sources.filter((source) => source.source_id.startsWith("sec_"));
-  const macroSources = sources.filter(
-    (source) => source.source_tier === "official_statistical" || source.source_tier === "official_treasury_or_fed",
-  );
-  const latestSuccessAt = pickLatestTimestamp(sources.map((source) => source.last_success_at));
+  if (loading && !data) {
+    return [
+      { label: SLO_LABELS.sec_companyfacts_freshness, value: "Loading", detail: "Checking SEC companyfacts freshness.", tone: "neutral" },
+      { label: SLO_LABELS.sec_submissions_freshness, value: "Loading", detail: "Checking SEC submissions freshness.", tone: "neutral" },
+      { label: SLO_LABELS.macro_freshness, value: "Loading", detail: "Checking macro source freshness.", tone: "neutral" },
+      { label: SLO_LABELS.fallback_usage, value: "Loading", detail: "Checking fallback usage.", tone: "neutral" },
+      { label: SLO_LABELS.worker_queue_health, value: "Loading", detail: "Checking worker and queue health.", tone: "neutral" },
+    ];
+  }
+
+  if (!data) {
+    return [
+      { label: SLO_LABELS.sec_companyfacts_freshness, value: "Unknown", detail: "Source registry is unavailable.", tone: "danger" },
+      { label: SLO_LABELS.sec_submissions_freshness, value: "Unknown", detail: "Source registry is unavailable.", tone: "danger" },
+      { label: SLO_LABELS.macro_freshness, value: "Unknown", detail: "Source registry is unavailable.", tone: "danger" },
+      { label: SLO_LABELS.fallback_usage, value: "Unknown", detail: "Source registry is unavailable.", tone: "danger" },
+      { label: SLO_LABELS.worker_queue_health, value: "Unknown", detail: "Source registry is unavailable.", tone: "danger" },
+    ];
+  }
+
+  const backendSlos = data.health.slos ?? [];
+  if (backendSlos.length > 0) {
+    return backendSlos.map((slo) => {
+      const detail = slo.note ?? buildSloDetail(slo);
+      return {
+        label: slo.label || SLO_LABELS[slo.key] || slo.key,
+        value: humanizeSloStatus(slo.status),
+        detail,
+        tone: toneFromSloStatus(slo.status),
+      };
+    });
+  }
+
+  const sources = data.sources;
+  const fallbackSources = sources.filter((source) => isFallbackSource(source.source_tier));
+  const staleCount = sources.filter((source) => source.is_stale).length;
+  const activeErrorCount = sources.filter(hasActiveError).length;
+  const fallbackRecentUsage = fallbackSources.filter((source) => Boolean(source.last_success_at)).length;
+  const queueCard = summarizeLegacyWorkerQueue(data);
 
   return [
-    summarizeSourceGroup("SEC status", secSources, loading, "official filing and correspondence feeds"),
-    summarizeSourceGroup("Macro status", macroSources, loading, "macro and rates feeds"),
-    summarizeCacheCard(cacheMetrics, cacheError, loading),
-    summarizeRefreshCard(data?.generated_at ?? null, latestSuccessAt, loading),
+    summarizeSourceGroup("SEC companyfacts freshness", sources.filter((source) => source.source_id === "sec_companyfacts"), false, "SEC companyfacts feeds"),
+    summarizeSourceGroup("SEC submissions freshness", sources.filter((source) => source.source_id === "sec_edgar" || source.source_id === "sec_edgar_corresp"), false, "SEC submissions and correspondence feeds"),
+    summarizeSourceGroup("Macro freshness", sources.filter((source) => source.source_tier === "official_statistical" || source.source_tier === "official_treasury_or_fed"), false, "macro and rates feeds"),
+    {
+      label: "Fallback usage",
+      value: fallbackRecentUsage > 0 || activeErrorCount > 0 || staleCount > 0 ? "Degraded" : "Healthy",
+      detail: `${fallbackRecentUsage} fallback source(s) with successful refresh history.`,
+      tone: fallbackRecentUsage > 0 || activeErrorCount > 0 || staleCount > 0 ? "warning" : "positive",
+    },
+    queueCard,
   ];
+}
+
+function buildSloDetail(slo: SourceRegistrySloPayload): string {
+  if (slo.note) {
+    return slo.note;
+  }
+  const parts: string[] = [];
+  if (slo.source_count > 0) {
+    parts.push(`${slo.source_count} source${slo.source_count === 1 ? "" : "s"} monitored`);
+  }
+  if (slo.stale_count > 0) {
+    parts.push(`${slo.stale_count} stale`);
+  }
+  if (slo.active_error_count > 0) {
+    parts.push(`${slo.active_error_count} with active errors`);
+  }
+  if (slo.last_success_at) {
+    parts.push(`last success ${formatDate(slo.last_success_at)}`);
+  }
+  return parts.length ? `${parts.join(" · ")}.` : "No telemetry available yet.";
+}
+
+function summarizeLegacyWorkerQueue(data: SourceRegistryResponse): SummaryCard {
+  const queue = data.health.worker_queue;
+  if (!queue) {
+    return {
+      label: "Worker and queue health",
+      value: "Unknown",
+      detail: "Worker and queue telemetry is unavailable.",
+      tone: "neutral",
+    };
+  }
+  const failedRefreshCount = queue.failed_refresh_count ?? 0;
+  const recentFailedJobs = queue.recent_failed_jobs ?? 0;
+  const detail = `${queue.active_job_count} active job(s), ${queue.stalled_job_count} stalled, ${queue.datasets_with_failures} dataset(s) with failures, ${failedRefreshCount} failed refreshes tracked.`;
+  return {
+    label: "Worker and queue health",
+    value: humanizeSloStatus(queue.status),
+    detail: recentFailedJobs > 0 ? `${detail} ${recentFailedJobs} recent worker failure(s).` : detail,
+    tone: toneFromSloStatus(queue.status),
+  };
+}
+
+function toneFromSloStatus(status: SourceRegistrySloStatus): SummaryTone {
+  if (status === "healthy") {
+    return "positive";
+  }
+  if (status === "degraded") {
+    return "danger";
+  }
+  if (status === "stale") {
+    return "warning";
+  }
+  return "neutral";
+}
+
+function humanizeSloStatus(status: SourceRegistrySloStatus): string {
+  if (status === "healthy") {
+    return "Healthy";
+  }
+  if (status === "degraded") {
+    return "Degraded";
+  }
+  if (status === "stale") {
+    return "Stale";
+  }
+  return "Unknown";
 }
 
 function summarizeSourceGroup(label: string, sources: SourceRegistryEntryPayload[], loading: boolean, noun: string): SummaryCard {
@@ -355,75 +475,6 @@ function summarizeSourceGroup(label: string, sources: SourceRegistryEntryPayload
   };
 }
 
-function summarizeCacheCard(
-  cacheMetrics: CacheMetricsResponse | null,
-  cacheError: string | null,
-  loading: boolean,
-): SummaryCard {
-  if (loading && !cacheMetrics && !cacheError) {
-    return { label: "Cache status", value: "Loading", detail: "Checking shared cache metrics.", tone: "neutral" };
-  }
-  if (cacheError || !cacheMetrics) {
-    return {
-      label: "Cache status",
-      value: "Unavailable",
-      detail: cacheError ?? "Shared cache metrics are not available.",
-      tone: "danger",
-    };
-  }
-
-  if (!cacheMetrics.hot_cache.shared) {
-    return {
-      label: "Cache status",
-      value: "Watching",
-      detail: `Running local only. Hit rate ${formatPercent(cacheMetrics.hot_cache.overall.hit_rate)}.`,
-      tone: "warning",
-    };
-  }
-  if ((cacheMetrics.hot_cache.overall.hit_rate ?? 0) >= 0.75 && cacheMetrics.hot_cache.overall.stale_served_count === 0) {
-    return {
-      label: "Cache status",
-      value: "Healthy",
-      detail: `${formatPercent(cacheMetrics.hot_cache.overall.hit_rate)} hit rate in ${new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.requests)} requests.`,
-      tone: "positive",
-    };
-  }
-  return {
-    label: "Cache status",
-    value: "Watching",
-    detail: `${formatPercent(cacheMetrics.hot_cache.overall.hit_rate)} hit rate, ${new Intl.NumberFormat("en-US").format(cacheMetrics.hot_cache.overall.stale_served_count)} stale responses served.`,
-    tone: "warning",
-  };
-}
-
-function summarizeRefreshCard(generatedAt: string | null, latestSuccessAt: string | null, loading: boolean): SummaryCard {
-  if (loading && !generatedAt && !latestSuccessAt) {
-    return { label: "Last refresh", value: "Loading", detail: "Waiting for the latest registry snapshot.", tone: "neutral" };
-  }
-  if (generatedAt) {
-    return {
-      label: "Last refresh",
-      value: formatDate(generatedAt),
-      detail: latestSuccessAt ? `Latest tracked source success ${formatDate(latestSuccessAt)}.` : "Registry snapshot time.",
-      tone: "neutral",
-    };
-  }
-  if (latestSuccessAt) {
-    return {
-      label: "Last refresh",
-      value: formatDate(latestSuccessAt),
-      detail: "Latest tracked source success.",
-      tone: "neutral",
-    };
-  }
-  return {
-    label: "Last refresh",
-    value: "Pending",
-    detail: "No tracked refresh timestamp is available yet.",
-    tone: "neutral",
-  };
-}
-
 function getSourceStatus(source: SourceRegistryEntryPayload): SourceStatusView {
   const badges = [isFallbackSource(source.source_tier) ? "Fallback" : "Official"];
   if (source.strict_official_mode_state === "disabled") {
@@ -437,7 +488,7 @@ function getSourceStatus(source: SourceRegistryEntryPayload): SourceStatusView {
     return { title: "Disabled", tone: "warning", badges };
   }
   if (hasActiveError(source)) {
-    return { title: "Needs attention", tone: "danger", badges };
+    return { title: "Degraded", tone: "danger", badges };
   }
   if (source.is_stale) {
     return { title: "Stale", tone: "warning", badges };
@@ -581,13 +632,6 @@ function formatDurationFromSeconds(value: number | null | undefined): string {
 
 function humanizeFlag(value: string): string {
   return value.replaceAll("_", " ");
-}
-
-function formatPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "—";
-  }
-  return `${(value * 100).toFixed(1)}%`;
 }
 
 function isFallbackSource(sourceTier: SourceTier): boolean {

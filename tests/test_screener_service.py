@@ -168,8 +168,47 @@ def test_run_official_screener_filters_and_sorts(monkeypatch) -> None:
     )
     assert leverage_component["directionality"] == "lower_increases_score"
     assert payload["results"][0]["rankings"]["dilution_risk"]["score_directionality"] == "higher_is_worse"
+    assert payload["results"][0]["match_explanation"]["matched_filters"][0]["field"] == "revenue_growth_min"
+    assert payload["results"][0]["match_explanation"]["freshness"]["cache_state"] == "fresh"
     assert payload["source_hints"]["statement_sources"] == ["sec_companyfacts"]
     assert "partial_shareholder_yield_coverage" in payload["confidence_flags"]
+
+
+def test_run_official_screener_returns_empty_results_when_filters_exclude_all(monkeypatch) -> None:
+    monkeypatch.setattr(
+        screener_service,
+        "_load_official_screener_candidates",
+        lambda *_args, **_kwargs: [
+            _candidate(
+                "AAA",
+                revenue_growth=0.12,
+                operating_margin=0.11,
+                fcf_margin=0.09,
+                leverage_ratio=0.8,
+                dilution=0.02,
+                sbc_burden=0.04,
+                shareholder_yield=0.01,
+                filing_lag_days=35.0,
+                restatement_count=0,
+            ),
+        ],
+    )
+
+    payload = screener_service.run_official_screener(
+        object(),
+        {
+            "filters": {
+                "revenue_growth_min": 0.4,
+            },
+            "limit": 10,
+            "offset": 0,
+        },
+    )
+
+    assert payload["coverage"]["candidate_count"] == 1
+    assert payload["coverage"]["matched_count"] == 0
+    assert payload["coverage"]["returned_count"] == 0
+    assert payload["results"] == []
 
 
 def test_run_official_screener_excludes_requested_quality_flags(monkeypatch) -> None:

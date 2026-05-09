@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  LOCAL_USER_DATA_VERSION,
   LOCAL_USER_DATA_STORAGE_KEY,
   clearAllLocalUserData,
   deleteWatchlistSavedView,
@@ -28,6 +29,15 @@ describe("local user data transfer helpers", () => {
       triageState: "reviewing",
       profileKey: "deep-dive",
       rationale: "Supply chain normalization can rerate margins.",
+      triggers: {
+        nextFiling: true,
+        major8k: false,
+        insiderActivity: false,
+        ownershipChange: false,
+        dilutionOrCapitalMarkets: false,
+        valuationReview: true,
+        customNote: "Revisit valuation after next filing.",
+      },
       lastReviewedAt: null,
       nextReviewAt: "2026-04-15",
       snoozedUntil: null,
@@ -38,8 +48,11 @@ describe("local user data transfer helpers", () => {
     const exported = exportLocalUserData();
 
     expect(exported.watchlist[0]?.ticker).toBe("AAPL");
+    expect(exported.version).toBe(LOCAL_USER_DATA_VERSION);
     expect(exported.notes.AAPL?.note).toBe("High-margin business");
     expect(exported.monitoring.AAPL?.triageState).toBe("reviewing");
+    expect(exported.monitoring.AAPL?.triggers.nextFiling).toBe(true);
+    expect(exported.monitoring.AAPL?.triggers.customNote).toBe("Revisit valuation after next filing.");
   });
 
   it("imports LocalUserData JSON and normalizes ticker casing", () => {
@@ -62,6 +75,15 @@ describe("local user data transfer helpers", () => {
           triageState: "monitoring",
           profileKey: "quality-compounder",
           rationale: "Watch Azure bookings and capex efficiency.",
+          triggers: {
+            nextFiling: true,
+            major8k: true,
+            insiderActivity: false,
+            ownershipChange: true,
+            dilutionOrCapitalMarkets: false,
+            valuationReview: false,
+            customNote: "Track stake updates",
+          },
           nextReviewAt: "2026-04-30",
           updatedAt: "2026-04-01T00:00:00.000Z",
         },
@@ -84,10 +106,45 @@ describe("local user data transfer helpers", () => {
     }));
 
     expect(imported.watchlist[0]?.ticker).toBe("MSFT");
+    expect(imported.version).toBe(LOCAL_USER_DATA_VERSION);
     expect(imported.notes.MSFT?.note).toBe("Cloud durability");
     expect(imported.monitoring.MSFT?.profileKey).toBe("quality-compounder");
+    expect(imported.monitoring.MSFT?.triggers.major8k).toBe(true);
+    expect(imported.monitoring.MSFT?.triggers.customNote).toBe("Track stake updates");
     expect(imported.savedWatchlistViews[0]?.criteria.primaryFilter).toBe("review-due");
     expect(readLocalUserData().watchlist[0]?.ticker).toBe("MSFT");
+  });
+
+  it("imports legacy monitoring entries without triggers and keeps names and notes", () => {
+    const imported = importLocalUserData(JSON.stringify({
+      watchlist: [
+        { ticker: "orcl", name: "Oracle", sector: "Technology", savedAt: "2026-03-01T00:00:00.000Z" },
+      ],
+      notes: {
+        orcl: {
+          ticker: "orcl",
+          name: "Oracle",
+          sector: "Technology",
+          note: "Legacy import should keep this note",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+        },
+      },
+      monitoring: {
+        orcl: {
+          ticker: "orcl",
+          triageState: "monitoring",
+          profileKey: "quality-compounder",
+          rationale: "Legacy entry",
+          nextReviewAt: "2026-04-30",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+        },
+      },
+    }));
+
+    expect(imported.watchlist[0]?.name).toBe("Oracle");
+    expect(imported.notes.ORCL?.note).toBe("Legacy import should keep this note");
+    expect(imported.monitoring.ORCL?.triggers.customNote).toBe("");
+    expect(imported.monitoring.ORCL?.triggers.nextFiling).toBe(false);
   });
 
   it("saves and deletes custom watchlist views", () => {
@@ -114,8 +171,8 @@ describe("local user data transfer helpers", () => {
 
     clearAllLocalUserData();
 
-    expect(readLocalUserData()).toEqual({ watchlist: [], notes: {}, monitoring: {}, savedWatchlistViews: [] });
-    expect(window.localStorage.getItem(LOCAL_USER_DATA_STORAGE_KEY)).toBe(JSON.stringify({ watchlist: [], notes: {}, monitoring: {}, savedWatchlistViews: [] }));
+    expect(readLocalUserData()).toEqual({ version: LOCAL_USER_DATA_VERSION, watchlist: [], notes: {}, monitoring: {}, savedWatchlistViews: [] });
+    expect(window.localStorage.getItem(LOCAL_USER_DATA_STORAGE_KEY)).toBe(JSON.stringify({ version: LOCAL_USER_DATA_VERSION, watchlist: [], notes: {}, monitoring: {}, savedWatchlistViews: [] }));
   });
 
   it("throws a clear error on invalid import JSON", () => {

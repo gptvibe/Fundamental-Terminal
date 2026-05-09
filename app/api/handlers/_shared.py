@@ -225,6 +225,8 @@ from app.api.schemas import (  # noqa: F401
     SourceRegistryEntryPayload,
     SourceRegistryErrorPayload,
     SourceRegistryHealthPayload,
+    SourceRegistrySloPayload,
+    SourceRegistryWorkerQueueHealthPayload,
     SourceRegistryResponse,
     TopHolderPayload,
     WatchlistCalendarEventPayload,
@@ -440,6 +442,10 @@ SOURCE_REGISTRY_DATASET_SOURCE_IDS: dict[str, tuple[str, ...]] = {
     "charts_dashboard": ("ft_company_charts_dashboard",),
     "oil_scenario_overlay": ("ft_oil_scenario_overlay",),
     "capital_structure": ("ft_capital_structure_intelligence",),
+}
+SOURCE_REGISTRY_SLO_SOURCE_IDS: dict[str, tuple[str, ...]] = {
+    "sec_companyfacts_freshness": ("sec_companyfacts",),
+    "sec_submissions_freshness": ("sec_edgar", "sec_edgar_corresp"),
 }
 ALLOWED_SEC_EMBED_HOSTS = {"www.sec.gov", "sec.gov", "data.sec.gov"}
 ALLOWED_SEC_EMBED_MIME_PREFIXES = ("text/html", "application/html", "application/xhtml+xml", "text/plain")
@@ -10040,6 +10046,59 @@ def _build_source_registry_entry_payload(source_id: str) -> SourceRegistryEntryP
     )
 
 
+def _build_source_registry_status_by_source(
+    session: Session,
+    *,
+    now: datetime,
+) -> dict[str, dict[str, Any]]:
+    rows = session.execute(
+        select(
+            DatasetRefreshState.dataset,
+            DatasetRefreshState.last_success,
+            DatasetRefreshState.freshness_deadline,
+            DatasetRefreshState.last_error,
+            DatasetRefreshState.updated_at,
+        )
+    ).all()
+
+    statuses: dict[str, dict[str, Any]] = {}
+    for dataset_id, last_success, freshness_deadline, last_error, updated_at in rows:
+        mapped_source_ids = SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(str(dataset_id), ())
+        if not mapped_source_ids:
+            continue
+
+        normalized_last_success = _normalize_utc_datetime(last_success) if last_success is not None else None
+        normalized_deadline = _normalize_utc_datetime(freshness_deadline) if freshness_deadline is not None else None
+        normalized_updated_at = _normalize_utc_datetime(updated_at) if updated_at is not None else None
+        is_stale = normalized_deadline is not None and normalized_deadline < now
+
+        for source_id in mapped_source_ids:
+            status = statuses.setdefault(
+                source_id,
+                {
+                    "last_success_at": None,
+                    "last_error": None,
+                    "last_error_at": None,
+                    "is_stale": False,
+                },
+            )
+
+            if normalized_last_success is not None:
+                existing_last_success = status["last_success_at"]
+                if existing_last_success is None or normalized_last_success > existing_last_success:
+                    status["last_success_at"] = normalized_last_success
+
+            status["is_stale"] = bool(status["is_stale"] or is_stale)
+
+            if last_error and normalized_updated_at is not None:
+                existing_last_error_at = status["last_error_at"]
+                if existing_last_error_at is None or normalized_updated_at >= existing_last_error_at:
+                    status["last_error"] = str(last_error)
+                    status["last_error_at"] = normalized_updated_at
+
+    return statuses
+
+
 def _build_source_registry_health_payload(
     session: Session,
     *,
@@ -10048,12 +10107,33 @@ def _build_source_registry_health_payload(
     cached_company_checks = [last_checked for last_checked in session.execute(select(_source_registry_latest_checks_subquery().c.last_checked)).scalars() if last_checked is not None]
     normalized_checks = [_normalize_utc_datetime(last_checked) for last_checked in cached_company_checks]
     ages = [max((now - last_checked).total_seconds(), 0.0) for last_checked in normalized_checks if last_checked is not None]
+    source_statuses = _build_source_registry_status_by_source(session, now=now)
+    stale_source_count = sum(1 for status in source_statuses.values() if bool(status.get("is_stale")))
+    sources_with_active_errors_count = sum(1 for status in source_statuses.values() if _source_status_has_active_error(status))
+    fallback_source_ids = [
+        source_id
+        for source_id, definition in SOURCE_REGISTRY.items()
+        if definition.tier in STRICT_OFFICIAL_DISABLED_SOURCE_TIERS
+    ]
+    fallback_sources_recently_used_count = sum(
+        1
+        for source_id in fallback_source_ids
+        if _source_status_has_recent_success(source_statuses.get(source_id), now=now)
+    )
+    worker_queue = _build_source_registry_worker_queue_health_payload(session, now=now)
     average_age_seconds = (sum(ages) / len(ages)) if ages else None
     return SourceRegistryHealthPayload(
         total_companies_cached=len(ages),
         average_data_age_seconds=average_age_seconds,
         recent_error_window_hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
         sources_with_recent_errors=_build_source_registry_error_payloads(session, now=now),
+        stale_source_count=stale_source_count,
+        sources_with_active_errors_count=sources_with_active_errors_count,
+        fallback_source_count=len(fallback_source_ids),
+        fallback_sources_recently_used_count=fallback_sources_recently_used_count,
+        last_successful_refresh_at=_pick_latest_source_success(source_statuses),
+        worker_queue=worker_queue,
+        slos=_build_source_registry_slo_payloads(source_statuses, worker_queue=worker_queue, now=now),
     )
 
 
@@ -10063,6 +10143,238 @@ def _empty_source_registry_health_payload() -> SourceRegistryHealthPayload:
         average_data_age_seconds=None,
         recent_error_window_hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
         sources_with_recent_errors=[],
+        stale_source_count=0,
+        sources_with_active_errors_count=0,
+        fallback_source_count=0,
+        fallback_sources_recently_used_count=0,
+        last_successful_refresh_at=None,
+        worker_queue=None,
+        slos=[],
+    )
+
+
+def _build_source_registry_slo_payloads(
+    source_statuses: dict[str, dict[str, Any]],
+    *,
+    worker_queue: SourceRegistryWorkerQueueHealthPayload | None,
+    now: datetime,
+) -> list[SourceRegistrySloPayload]:
+    slos: list[SourceRegistrySloPayload] = []
+
+    for key, source_ids in SOURCE_REGISTRY_SLO_SOURCE_IDS.items():
+        slos.append(
+            _build_source_registry_slo_payload(
+                key=key,
+                label=("SEC companyfacts freshness" if key == "sec_companyfacts_freshness" else "SEC submissions freshness"),
+                source_ids=source_ids,
+                source_statuses=source_statuses,
+            )
+        )
+
+    macro_source_ids = tuple(
+        source_id
+        for source_id, definition in SOURCE_REGISTRY.items()
+        if definition.tier in {"official_statistical", "official_treasury_or_fed"}
+    )
+    slos.append(
+        _build_source_registry_slo_payload(
+            key="macro_freshness",
+            label="Macro freshness",
+            source_ids=macro_source_ids,
+            source_statuses=source_statuses,
+        )
+    )
+
+    fallback_source_ids = tuple(
+        source_id
+        for source_id, definition in SOURCE_REGISTRY.items()
+        if definition.tier in STRICT_OFFICIAL_DISABLED_SOURCE_TIERS
+    )
+    fallback_payload = _build_source_registry_slo_payload(
+        key="fallback_usage",
+        label="Fallback usage",
+        source_ids=fallback_source_ids,
+        source_statuses=source_statuses,
+    )
+    fallback_recent_usage_count = sum(
+        1
+        for source_id in fallback_source_ids
+        if _source_status_has_recent_success(source_statuses.get(source_id), now=now)
+    )
+    fallback_status = fallback_payload.status
+    fallback_note = f"{fallback_recent_usage_count} fallback source(s) with recent successful refresh."
+    if fallback_payload.source_count == 0:
+        fallback_status = "unknown"
+    elif fallback_payload.active_error_count > 0:
+        fallback_status = "degraded"
+    elif fallback_payload.stale_count > 0:
+        fallback_status = "stale"
+    elif fallback_recent_usage_count > 0:
+        fallback_status = "degraded"
+    else:
+        fallback_status = "healthy"
+        fallback_note = "No fallback source has a recent successful refresh."
+    slos.append(
+        fallback_payload.model_copy(
+            update={
+                "status": fallback_status,
+                "note": fallback_note,
+            }
+        )
+    )
+
+    worker_status = worker_queue.status if worker_queue is not None else "unknown"
+    if worker_queue is None:
+        worker_note = "Worker and queue telemetry is unavailable."
+    elif worker_queue.status == "healthy":
+        worker_note = "No queue stalls or failed worker refreshes are currently tracked."
+    elif worker_queue.status == "stale":
+        worker_note = "Queue activity is running, but one or more active refresh jobs appear stalled."
+    else:
+        worker_note = "Worker refresh failures or queue backlogs are currently tracked."
+    slos.append(
+        SourceRegistrySloPayload(
+            key="worker_queue_health",
+            label="Worker and queue health",
+            status=worker_status,
+            monitored_source_ids=[],
+            source_count=0,
+            stale_count=worker_queue.stalled_job_count if worker_queue is not None else 0,
+            active_error_count=worker_queue.datasets_with_failures if worker_queue is not None else 0,
+            last_success_at=None,
+            note=worker_note,
+        )
+    )
+
+    return slos
+
+
+def _build_source_registry_slo_payload(
+    *,
+    key: str,
+    label: str,
+    source_ids: tuple[str, ...],
+    source_statuses: dict[str, dict[str, Any]],
+) -> SourceRegistrySloPayload:
+    statuses = [source_statuses.get(source_id, {}) for source_id in source_ids]
+    active_error_count = sum(1 for status in statuses if _source_status_has_active_error(status))
+    stale_count = sum(1 for status in statuses if bool(status.get("is_stale")))
+    last_success_at = _pick_latest_source_success({source_id: source_statuses.get(source_id, {}) for source_id in source_ids})
+
+    if not source_ids:
+        status = "unknown"
+    elif active_error_count > 0:
+        status = "degraded"
+    elif stale_count > 0:
+        status = "stale"
+    elif last_success_at is not None:
+        status = "healthy"
+    else:
+        status = "unknown"
+
+    return SourceRegistrySloPayload(
+        key=key,
+        label=label,
+        status=status,
+        monitored_source_ids=list(source_ids),
+        source_count=len(source_ids),
+        stale_count=stale_count,
+        active_error_count=active_error_count,
+        last_success_at=last_success_at,
+    )
+
+
+def _source_status_has_active_error(status: dict[str, Any] | None) -> bool:
+    if not status:
+        return False
+    last_error_at = status.get("last_error_at")
+    last_success_at = status.get("last_success_at")
+    if last_error_at is None:
+        return False
+    if last_success_at is None:
+        return True
+    return bool(last_error_at >= last_success_at)
+
+
+def _source_status_has_recent_success(status: dict[str, Any] | None, *, now: datetime) -> bool:
+    if not status:
+        return False
+    last_success_at = _normalize_utc_datetime(status.get("last_success_at")) if status.get("last_success_at") is not None else None
+    if last_success_at is None:
+        return False
+    return (now - last_success_at) <= timedelta(hours=SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS)
+
+
+def _pick_latest_source_success(source_statuses: dict[str, dict[str, Any]]) -> datetime | None:
+    latest: datetime | None = None
+    for status in source_statuses.values():
+        last_success_at = status.get("last_success_at") if isinstance(status, dict) else None
+        if last_success_at is None:
+            continue
+        normalized_success = _normalize_utc_datetime(last_success_at)
+        if latest is None or normalized_success > latest:
+            latest = normalized_success
+    return latest
+
+
+def _build_source_registry_worker_queue_health_payload(
+    session: Session,
+    *,
+    now: datetime,
+) -> SourceRegistryWorkerQueueHealthPayload:
+    rows = session.execute(
+        select(
+            DatasetRefreshState.active_job_id,
+            DatasetRefreshState.last_checked,
+            DatasetRefreshState.failure_count,
+            DatasetRefreshState.last_error,
+        )
+    ).all()
+
+    lock_timeout_seconds = max(int(getattr(settings, "refresh_lock_timeout_seconds", 900) or 900), 1)
+    lock_cutoff = now - timedelta(seconds=lock_timeout_seconds)
+
+    active_job_count = 0
+    stalled_job_count = 0
+    datasets_with_failures = 0
+
+    for active_job_id, last_checked, failure_count, last_error in rows:
+        normalized_last_checked = _normalize_utc_datetime(last_checked) if last_checked is not None else None
+        if active_job_id:
+            active_job_count += 1
+            if normalized_last_checked is not None and normalized_last_checked < lock_cutoff:
+                stalled_job_count += 1
+        if int(failure_count or 0) > 0 or bool(last_error):
+            datasets_with_failures += 1
+
+    failed_refresh_count: int | None = None
+    recent_failed_jobs: int | None = None
+    try:
+        worker_snapshot = snapshot_worker_observations()
+        totals = worker_snapshot.get("totals") if isinstance(worker_snapshot, dict) else None
+        if isinstance(totals, dict):
+            failed_refresh_count = int(totals.get("failed_refresh_count", 0) or 0)
+        records = worker_snapshot.get("records") if isinstance(worker_snapshot, dict) else None
+        if isinstance(records, list):
+            recent_failed_jobs = sum(1 for record in records if str((record or {}).get("status")) == "failed")
+    except Exception:
+        failed_refresh_count = None
+        recent_failed_jobs = None
+
+    status: str = "healthy"
+    if stalled_job_count > 0:
+        status = "stale"
+    elif datasets_with_failures > 0 or (failed_refresh_count or 0) > 0 or (recent_failed_jobs or 0) > 0:
+        status = "degraded"
+
+    return SourceRegistryWorkerQueueHealthPayload(
+        available=True,
+        status=status,
+        active_job_count=active_job_count,
+        stalled_job_count=stalled_job_count,
+        datasets_with_failures=datasets_with_failures,
+        failed_refresh_count=failed_refresh_count,
+        recent_failed_jobs=recent_failed_jobs,
     )
 
 

@@ -39,6 +39,7 @@ services:
       API_HOST: 0.0.0.0
       API_PORT: 8000
       FRED_API_KEY: ${FRED_API_KEY:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
       HOT_RESPONSE_CACHE_TTL_SECONDS: ${HOT_RESPONSE_CACHE_TTL_SECONDS:-120}
       HOT_RESPONSE_CACHE_STALE_TTL_SECONDS: ${HOT_RESPONSE_CACHE_STALE_TTL_SECONDS:-900}
     depends_on:
@@ -66,6 +67,7 @@ services:
       DATABASE_URL: ${DATABASE_URL_OVERRIDE:-${DATABASE_URL:?DATABASE_URL must be set}}
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
+      DEMO_MODE: ${DEMO_MODE:-false}
     healthcheck:
       test: ["CMD", "/bin/sh", "/app/docker/backend/healthcheck-data-fetcher.sh"]
       interval: 20s
@@ -98,8 +100,10 @@ services:
       dockerfile: Dockerfile
       args:
         BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}
+        NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-${DEMO_MODE:-false}}
     environment:
       BACKEND_API_BASE_URL: ${BACKEND_API_BASE_URL:-http://backend:8000}
+      NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-${DEMO_MODE:-false}}
       PORT: 3000
     depends_on:
       backend:

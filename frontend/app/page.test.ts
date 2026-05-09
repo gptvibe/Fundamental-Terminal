@@ -100,6 +100,30 @@ afterEach(() => {
 });
 
 describe("HomePage", () => {
+  it("shows a demo mode label when source registry reports fixture mode", async () => {
+    getSourceRegistry.mockResolvedValue({
+      ...buildSourceRegistry(),
+      sources: [
+        {
+          source_id: "ft_demo_fixture_pack",
+          source_tier: "manual_override",
+          display_label: "Fundamental Terminal Demo Fixture Pack",
+          url: "https://github.com/gptvibe/Fundamental-Terminal",
+          default_freshness_ttl_seconds: 0,
+          disclosure_note: "Deterministic demo fixture payload for local/public walkthroughs. Not live source data.",
+          strict_official_mode_state: "available",
+          strict_official_mode_note: "Demo mode is enabled.",
+        },
+      ],
+    });
+
+    render(React.createElement(HomePage));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Demo mode active: this workspace is running deterministic fixture payloads/i)).toBeTruthy();
+    });
+  });
+
   it("renders the search-first terminal with recent, saved, change, and macro context", async () => {
     window.localStorage.setItem(
       RECENT_COMPANIES_STORAGE_KEY,

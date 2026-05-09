@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  LOCAL_USER_DATA_VERSION,
   clearAllLocalUserData,
   clearCompanyNote,
   deleteWatchlistSavedView,
@@ -61,6 +62,7 @@ interface UseLocalUserDataResult {
 }
 
 const EMPTY_DATA: LocalUserData = {
+  version: LOCAL_USER_DATA_VERSION,
   watchlist: [],
   notes: {},
   monitoring: {},

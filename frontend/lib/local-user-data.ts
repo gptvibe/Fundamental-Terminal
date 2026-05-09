@@ -15,6 +15,7 @@ export interface LocalCompanyNote {
 
 import {
   buildDefaultMonitoringEntry,
+  DEFAULT_WATCHLIST_MONITOR_TRIGGERS,
   DEFAULT_WATCHLIST_VIEW_CRITERIA,
   isWatchlistMonitoringProfileKey,
   isWatchlistPrimaryFilter,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/watchlist-monitoring";
 
 export interface LocalUserData {
+  version?: number;
   watchlist: LocalWatchlistItem[];
   notes: Record<string, LocalCompanyNote>;
   monitoring: Record<string, LocalWatchlistMonitoringEntry>;
@@ -42,8 +44,10 @@ export type LocalImportMode = "merge" | "replace";
 
 export const LOCAL_USER_DATA_STORAGE_KEY = "ft-local-user-data";
 export const LOCAL_USER_DATA_EVENT = "ft:local-user-data";
+export const LOCAL_USER_DATA_VERSION = 2;
 
 const EMPTY_USER_DATA: LocalUserData = {
+  version: LOCAL_USER_DATA_VERSION,
   watchlist: [],
   notes: {},
   monitoring: {},
@@ -164,6 +168,7 @@ function normalizeMonitoring(value: unknown): Record<string, LocalWatchlistMonit
       triageState: isWatchlistTriageState(candidate.triageState) ? candidate.triageState : "inbox",
       profileKey: isWatchlistMonitoringProfileKey(candidate.profileKey) ? candidate.profileKey : null,
       rationale: typeof candidate.rationale === "string" ? candidate.rationale.trim() : "",
+      triggers: normalizeMonitoringTriggers(candidate.triggers),
       lastReviewedAt: sanitizeIsoString(candidate.lastReviewedAt),
       nextReviewAt: sanitizeIsoString(candidate.nextReviewAt),
       snoozedUntil: sanitizeIsoString(candidate.snoozedUntil),
@@ -172,6 +177,23 @@ function normalizeMonitoring(value: unknown): Record<string, LocalWatchlistMonit
     };
     return result;
   }, {});
+}
+
+function normalizeMonitoringTriggers(value: unknown): LocalWatchlistMonitoringEntry["triggers"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...DEFAULT_WATCHLIST_MONITOR_TRIGGERS };
+  }
+
+  const candidate = value as Partial<LocalWatchlistMonitoringEntry["triggers"]>;
+  return {
+    nextFiling: Boolean(candidate.nextFiling),
+    major8k: Boolean(candidate.major8k),
+    insiderActivity: Boolean(candidate.insiderActivity),
+    ownershipChange: Boolean(candidate.ownershipChange),
+    dilutionOrCapitalMarkets: Boolean(candidate.dilutionOrCapitalMarkets),
+    valuationReview: Boolean(candidate.valuationReview),
+    customNote: typeof candidate.customNote === "string" ? candidate.customNote.trim() : "",
+  };
 }
 
 function normalizeSavedViewCriteria(value: unknown): WatchlistSavedViewCriteria {
@@ -246,6 +268,7 @@ function normalizeLocalUserData(value: unknown): LocalUserData {
 
   const candidate = value as Partial<LocalUserData>;
   return {
+    version: LOCAL_USER_DATA_VERSION,
     watchlist: normalizeWatchlist(candidate.watchlist),
     notes: normalizeNotes(candidate.notes),
     monitoring: normalizeMonitoring(candidate.monitoring),

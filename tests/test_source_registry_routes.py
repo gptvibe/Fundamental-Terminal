@@ -8,7 +8,12 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.api.handlers import source_registry as source_registry_module
-from app.api.schemas.source_registry import SourceRegistryErrorPayload, SourceRegistryHealthPayload
+from app.api.schemas.source_registry import (
+    SourceRegistryErrorPayload,
+    SourceRegistryHealthPayload,
+    SourceRegistrySloPayload,
+    SourceRegistryWorkerQueueHealthPayload,
+)
 from app.db import get_db_session
 from app.main import app
 
@@ -30,11 +35,19 @@ class _FakeRowResult:
 
 
 class _FakeHealthSession:
-    def __init__(self, last_checked_values):
+    def __init__(self, last_checked_values, status_rows=None, queue_rows=None):
         self._last_checked_values = last_checked_values
+        self._status_rows = status_rows or []
+        self._queue_rows = queue_rows or []
+        self._execute_call_count = 0
 
     def execute(self, _statement):
-        return _FakeScalarResult(self._last_checked_values)
+        self._execute_call_count += 1
+        if self._execute_call_count == 1:
+            return _FakeScalarResult(self._last_checked_values)
+        if self._execute_call_count == 2:
+            return _FakeRowResult(self._status_rows)
+        return _FakeRowResult(self._queue_rows)
 
 
 class _FakeErrorSession:
@@ -72,6 +85,43 @@ def test_source_registry_endpoint_returns_sources_and_health(monkeypatch):
                 last_error_at=datetime(2026, 1, 20, 12, 0, tzinfo=timezone.utc),
             )
         ],
+        stale_source_count=1,
+        sources_with_active_errors_count=1,
+        fallback_source_count=1,
+        fallback_sources_recently_used_count=1,
+        last_successful_refresh_at=datetime(2026, 1, 20, 11, 30, tzinfo=timezone.utc),
+        worker_queue=SourceRegistryWorkerQueueHealthPayload(
+            available=True,
+            status="degraded",
+            active_job_count=2,
+            stalled_job_count=0,
+            datasets_with_failures=1,
+            failed_refresh_count=2,
+            recent_failed_jobs=1,
+        ),
+        slos=[
+            SourceRegistrySloPayload(
+                key="sec_companyfacts_freshness",
+                label="SEC companyfacts freshness",
+                status="healthy",
+                monitored_source_ids=["sec_companyfacts"],
+                source_count=1,
+                stale_count=0,
+                active_error_count=0,
+                last_success_at=datetime(2026, 1, 20, 11, 30, tzinfo=timezone.utc),
+            ),
+            SourceRegistrySloPayload(
+                key="fallback_usage",
+                label="Fallback usage",
+                status="degraded",
+                monitored_source_ids=["yahoo_finance"],
+                source_count=1,
+                stale_count=0,
+                active_error_count=1,
+                last_success_at=datetime(2026, 1, 20, 11, 0, tzinfo=timezone.utc),
+                note="1 fallback source(s) with recent successful refresh.",
+            ),
+        ],
     )
 
     monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True))
@@ -87,6 +137,10 @@ def test_source_registry_endpoint_returns_sources_and_health(monkeypatch):
     assert payload["health"]["total_companies_cached"] == 42
     assert payload["health"]["average_data_age_seconds"] == 3600.0
     assert payload["health"]["sources_with_recent_errors"][0]["source_id"] == "yahoo_finance"
+    assert payload["health"]["stale_source_count"] == 1
+    assert payload["health"]["sources_with_active_errors_count"] == 1
+    assert payload["health"]["worker_queue"]["status"] == "degraded"
+    assert payload["health"]["slos"][0]["status"] == "healthy"
 
     sources = {entry["source_id"]: entry for entry in payload["sources"]}
     assert sources["sec_companyfacts"]["strict_official_mode_state"] == "available"
@@ -110,12 +164,17 @@ def test_source_registry_endpoint_degrades_when_health_query_fails(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["health"] == {
-        "total_companies_cached": 0,
-        "average_data_age_seconds": None,
-        "recent_error_window_hours": 72,
-        "sources_with_recent_errors": [],
-    }
+    assert payload["health"]["total_companies_cached"] == 0
+    assert payload["health"]["average_data_age_seconds"] is None
+    assert payload["health"]["recent_error_window_hours"] == 72
+    assert payload["health"]["sources_with_recent_errors"] == []
+    assert payload["health"]["stale_source_count"] == 0
+    assert payload["health"]["sources_with_active_errors_count"] == 0
+    assert payload["health"]["fallback_source_count"] == 0
+    assert payload["health"]["fallback_sources_recently_used_count"] == 0
+    assert payload["health"]["last_successful_refresh_at"] is None
+    assert payload["health"]["worker_queue"] is None
+    assert payload["health"]["slos"] == []
 
 
 def test_build_source_registry_health_payload_computes_average_age(monkeypatch):
@@ -125,7 +184,15 @@ def test_build_source_registry_health_payload_computes_average_age(monkeypatch):
             now - timedelta(hours=2),
             now - timedelta(minutes=30),
             None,
-        ]
+        ],
+        status_rows=[
+            ("financials", now - timedelta(hours=2), now + timedelta(hours=2), None, now - timedelta(minutes=30)),
+            ("prices", now - timedelta(hours=6), now - timedelta(hours=1), "quote timeout", now - timedelta(hours=1)),
+        ],
+        queue_rows=[
+            ("job-1", now - timedelta(minutes=5), 0, None),
+            (None, now - timedelta(minutes=20), 1, "quote timeout"),
+        ],
     )
     expected_errors = [
         SourceRegistryErrorPayload(
@@ -148,6 +215,17 @@ def test_build_source_registry_health_payload_computes_average_age(monkeypatch):
     assert payload.average_data_age_seconds == 4500.0
     assert payload.recent_error_window_hours == 72
     assert payload.sources_with_recent_errors == expected_errors
+    assert payload.stale_source_count == 1
+    assert payload.sources_with_active_errors_count == 1
+    assert payload.fallback_source_count >= 1
+    assert payload.fallback_sources_recently_used_count == 1
+    assert payload.last_successful_refresh_at == now - timedelta(hours=2)
+    assert payload.worker_queue is not None
+    assert payload.worker_queue.status == "degraded"
+    assert payload.worker_queue.active_job_count == 1
+    assert payload.worker_queue.datasets_with_failures == 1
+    assert any(slo.key == "sec_companyfacts_freshness" and slo.status == "healthy" for slo in payload.slos)
+    assert any(slo.key == "fallback_usage" and slo.status == "degraded" for slo in payload.slos)
 
 
 def test_build_source_registry_error_payloads_aggregates_by_source():

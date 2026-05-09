@@ -8,6 +8,7 @@ import OfficialScreenerPage from "@/app/screener/page";
 
 const getOfficialScreenerMetadata = vi.fn();
 const searchOfficialScreener = vi.fn();
+const getSecFramesScreener = vi.fn();
 const exportRowsToCsv = vi.fn();
 const showAppToast = vi.fn();
 const mockUseLocalScreener = vi.fn();
@@ -15,6 +16,7 @@ const mockUseLocalScreener = vi.fn();
 vi.mock("@/lib/api", () => ({
   getOfficialScreenerMetadata: (...args: unknown[]) => getOfficialScreenerMetadata(...args),
   searchOfficialScreener: (...args: unknown[]) => searchOfficialScreener(...args),
+  getSecFramesScreener: (...args: unknown[]) => getSecFramesScreener(...args),
 }));
 
 vi.mock("@/lib/app-toast", () => ({
@@ -37,6 +39,7 @@ describe("OfficialScreenerPage", () => {
   beforeEach(() => {
     getOfficialScreenerMetadata.mockReset();
     searchOfficialScreener.mockReset();
+    getSecFramesScreener.mockReset();
     exportRowsToCsv.mockReset();
     showAppToast.mockReset();
     mockUseLocalScreener.mockReset();
@@ -45,13 +48,31 @@ describe("OfficialScreenerPage", () => {
 
     getOfficialScreenerMetadata.mockResolvedValue(buildMetadataPayload());
     searchOfficialScreener.mockResolvedValue(buildSearchPayload());
+    getSecFramesScreener.mockResolvedValue({
+      provenance: [],
+      as_of: null,
+      last_refreshed_at: null,
+      source_mix: {
+        source_ids: ["sec_companyfacts"],
+        source_tiers: ["official_regulator"],
+        primary_source_ids: ["sec_companyfacts"],
+        fallback_source_ids: [],
+        official_only: true,
+      },
+      confidence_flags: ["official_source_only"],
+      snapshots: [],
+      companies: [],
+      total_companies: 0,
+      covered_concepts: [],
+      missing_concepts: [],
+    });
   });
 
   afterEach(() => {
     cleanup();
   });
 
-  it("renders ranked results and exposes a Research Brief jump", async () => {
+  it("renders ranked results and expands why-matched details", async () => {
     render(React.createElement(OfficialScreenerPage));
 
     await waitFor(() => {
@@ -61,7 +82,69 @@ describe("OfficialScreenerPage", () => {
     const link = screen.getByRole("link", { name: "Research Brief" });
     expect(link.getAttribute("href")).toBe("/company/AAPL");
     expect(screen.getByText("Quality Compounders")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Why Matched" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Matched filters")).toBeTruthy();
+    });
+    expect(screen.getByText("Revenue growth:")).toBeTruthy();
+    expect(screen.getByText("Open Research Brief")).toBeTruthy();
     expect(searchOfficialScreener).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows deterministic no-match state", async () => {
+    searchOfficialScreener.mockResolvedValue(
+      buildSearchPayload({
+        coverage: {
+          candidate_count: 2,
+          matched_count: 0,
+          returned_count: 0,
+          fresh_count: 2,
+          stale_count: 0,
+          missing_shareholder_yield_count: 0,
+          restatement_flagged_count: 0,
+          stale_period_flagged_count: 0,
+        },
+        results: [],
+      })
+    );
+
+    render(React.createElement(OfficialScreenerPage));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("results-empty-state")).toBeTruthy();
+    });
+    expect(screen.getByText("No companies matched the current filter stack")).toBeTruthy();
+  });
+
+  it("shows missing-provenance state in expanded why-matched panel", async () => {
+    searchOfficialScreener.mockResolvedValue(
+      buildSearchPayload({
+        provenance: [],
+        results: [
+          {
+            ...buildSearchPayload().results[0],
+            match_explanation: {
+              ...buildSearchPayload().results[0].match_explanation,
+              provenance_source_keys: [],
+            },
+          },
+        ],
+      })
+    );
+
+    render(React.createElement(OfficialScreenerPage));
+
+    await waitFor(() => {
+      expect(screen.getByText("Apple Inc.")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Why Matched" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Provenance details unavailable for this row.")).toBeTruthy();
+    });
   });
 
   it("saves presets from the current draft and reruns ranking sort from table headers", async () => {
@@ -226,7 +309,7 @@ function buildMetadataPayload() {
   };
 }
 
-function buildSearchPayload() {
+function buildSearchPayload(overrides?: Record<string, unknown>) {
   return {
     provenance: [],
     as_of: "2025-12-31",
@@ -311,8 +394,33 @@ function buildSearchPayload() {
           dilution_risk: ranking("dilution_risk", "Dilution Risk", 19, 1, 0, "higher_is_worse"),
           filing_risk: ranking("filing_risk", "Filing Risk", 22, 1, 0, "higher_is_worse"),
         },
+        match_explanation: {
+          matched_filters: [
+            {
+              field: "revenue_growth_min",
+              label: "Revenue growth",
+              comparator: "min",
+              source_key: "revenue_growth",
+              unit: "ratio",
+              threshold_value: 0.1,
+              metric_value: 0.18,
+              passed: true,
+              is_proxy: true,
+              quality_flags: [],
+            },
+          ],
+          freshness: {
+            cache_state: "fresh",
+            period_end: "2025-12-31",
+            last_metrics_check: "2026-03-30T00:00:00Z",
+            last_model_check: "2026-03-29T00:00:00Z",
+          },
+          provenance_source_keys: ["ft_screener_backend"],
+          notes: [],
+        },
       },
     ],
+    ...overrides,
   };
 }
 

@@ -12,6 +12,7 @@ import {
 import type { ApiAuthHeadersProvider, ReadCachePolicy } from "./types";
 import { isReadRequest, resolveReadPolicy, shouldBypassReadCache } from "./cachePolicy";
 import { inflightRequests, INFLIGHT_REQUEST_TIMEOUT_MS } from "./inflight";
+import { getDemoFixtureResponse, isDemoModeEnabled } from "./demo-fixtures";
 import {
   cacheValue,
   invalidateApiReadCache,
@@ -408,6 +409,13 @@ async function revalidateRead<T>(
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit & { signal?: AbortSignal; cachePolicy?: ReadCachePolicy }): Promise<T> {
+  if (isDemoModeEnabled()) {
+    const demoPayload = getDemoFixtureResponse(path, init);
+    if (demoPayload !== null) {
+      return demoPayload as T;
+    }
+  }
+
   const { cachePolicy: policyOverride, ...fetchInit } = init ?? {};
   const readRequest = isReadRequest(fetchInit);
   const auditContext = getCurrentPerformanceAuditContext();
