@@ -240,10 +240,9 @@ def company_workspace_bootstrap(
             # Return minimal financials
             financials = shared.CompanyFinancialsResponse(
                 company=None,
-                ticker=normalized_ticker,
-                latest_statements=[],
-                statements={},
-                refresh=shared.RefreshState(triggered=False, reason=None),
+                financials=[],
+                price_history=[],
+                refresh=shared.RefreshState(triggered=False, reason="none"),
             )
 
     insider_trades: shared.CompanyInsiderTradesResponse | None = None
