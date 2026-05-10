@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -30,8 +31,40 @@ def _http_get(url: str, *, timeout: float, headers: dict[str, str] | None = None
 
 
 def _load_json(url: str, *, timeout: float, headers: dict[str, str] | None = None) -> tuple[int, Any]:
-    status, body, _content_type, _headers = _http_get(url, timeout=timeout, headers=headers)
-    payload = json.loads(body.decode("utf-8"))
+    status, body, content_type, response_headers = _http_get(url, timeout=timeout, headers=headers)
+
+    if not body:
+        raise ValueError(
+            f"{url} returned HTTP {status} with an empty body "
+            f"(content-type={content_type!r})"
+        )
+
+    body_text = body.decode("utf-8", errors="replace").strip()
+    if not body_text:
+        raise ValueError(
+            f"{url} returned HTTP {status} with a blank body "
+            f"(content-type={content_type!r})"
+        )
+
+    normalized_content_type = (content_type or "").lower()
+    if normalized_content_type and "json" not in normalized_content_type:
+        snippet = body_text[:240].replace("\n", " ")
+        location = response_headers.get("Location")
+        location_note = f", location={location!r}" if location else ""
+        raise ValueError(
+            f"{url} returned non-JSON content-type {content_type!r} with HTTP {status}{location_note}. "
+            f"Body snippet: {snippet!r}"
+        )
+
+    try:
+        payload = json.loads(body_text)
+    except json.JSONDecodeError as exc:
+        snippet = body_text[:240].replace("\n", " ")
+        raise ValueError(
+            f"{url} returned invalid JSON with HTTP {status} (content-type={content_type!r}). "
+            f"Body snippet: {snippet!r}"
+        ) from exc
+
     return status, payload
 
 
@@ -148,119 +181,123 @@ def main() -> int:
     ticker = args.ticker.upper().strip()
     headers = _parse_headers(list(args.header))
 
-    _wait_for_json(
-        f"{backend_url}/health",
-        timeout=args.wait_timeout,
-        headers=headers,
-        ready=_health_payload_ready,
-    )
+    try:
+        _wait_for_json(
+            f"{backend_url}/health",
+            timeout=args.wait_timeout,
+            headers=headers,
+            ready=_health_payload_ready,
+        )
 
-    if not args.skip_frontend:
-        _wait_for_frontend(f"{frontend_url}/company/{ticker}", timeout=args.wait_timeout, headers=headers)
+        if not args.skip_frontend:
+            _wait_for_frontend(f"{frontend_url}/company/{ticker}", timeout=args.wait_timeout, headers=headers)
 
-    health_status, health_payload = _load_json(f"{backend_url}/health", timeout=args.timeout, headers=headers)
-    if health_status != 200:
-        raise RuntimeError(f"/health returned HTTP {health_status}")
-    _assert_health_payload(health_payload)
+        health_status, health_payload = _load_json(f"{backend_url}/health", timeout=args.timeout, headers=headers)
+        if health_status != 200:
+            raise RuntimeError(f"/health returned HTTP {health_status}")
+        _assert_health_payload(health_payload)
 
-    backend_health_status, _backend_health_body, _backend_health_content_type, backend_health_headers = _http_get(
-        f"{backend_url}/health",
-        timeout=args.timeout,
-        headers=headers,
-    )
-    if backend_health_status != 200:
-        raise RuntimeError(f"/health headers probe returned HTTP {backend_health_status}")
-    _assert_security_headers(
-        "backend /health",
-        backend_health_headers,
-        ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"),
-    )
-
-    checks = [
-        JsonCheck(
-            label="company overview",
-            url=f"{backend_url}/api/companies/{ticker}/overview",
-            required_keys=("company", "financials", "brief"),
-            nested_required_keys={"financials": ("company", "financials", "price_history", "refresh")},
-        ),
-        JsonCheck(
-            label="workspace bootstrap",
-            url=(
-                f"{backend_url}/api/companies/{ticker}/workspace-bootstrap?"
-                + urlencode(
-                    {
-                        "include_overview_brief": "true",
-                        "include_earnings_summary": "true",
-                        "include_insiders": "true",
-                        "include_institutional": "true",
-                    }
-                )
-            ),
-            required_keys=(
-                "company",
-                "financials",
-                "brief",
-                "earnings_summary",
-                "insider_trades",
-                "institutional_holdings",
-                "errors",
-            ),
-            nested_required_keys={"financials": ("company", "financials", "price_history", "refresh"), "errors": ()},
-        ),
-        JsonCheck(
-            label="research brief",
-            url=f"{backend_url}/api/companies/{ticker}/brief",
-            required_keys=(
-                "company",
-                "refresh",
-                "build_state",
-                "build_status",
-                "snapshot",
-                "what_changed",
-                "business_quality",
-                "capital_and_risk",
-                "valuation",
-                "monitor",
-            ),
-            nested_required_keys={"refresh": ("job_id", "triggered", "reason", "ticker")},
-        ),
-    ]
-
-    for check in checks:
-        status, payload = _load_json(check.url, timeout=args.timeout, headers=headers)
-        if status != 200:
-            raise RuntimeError(f"{check.label} returned HTTP {status}")
-        _assert_keys(check.label, payload, check.required_keys, check.nested_required_keys)
-
-    if not args.skip_frontend:
-        status, _body, content_type, frontend_headers = _http_get(f"{frontend_url}/company/{ticker}", timeout=args.timeout, headers=headers)
-        if status != 200:
-            raise RuntimeError(f"frontend company page returned HTTP {status}")
-        if not (content_type or "").startswith("text/html"):
-            raise RuntimeError(f"frontend company page returned unexpected content type {content_type!r}")
+        backend_health_status, _backend_health_body, _backend_health_content_type, backend_health_headers = _http_get(
+            f"{backend_url}/health",
+            timeout=args.timeout,
+            headers=headers,
+        )
+        if backend_health_status != 200:
+            raise RuntimeError(f"/health headers probe returned HTTP {backend_health_status}")
         _assert_security_headers(
-            "frontend company page",
-            frontend_headers,
-            # Strict-Transport-Security is intentionally omitted here: it is set
-            # by the TLS-terminating reverse proxy / load balancer, not by Next.js
-            # directly (see docs/deployment-runbook.md).
-            ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"),
+            "backend /health",
+            backend_health_headers,
+            ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Content-Security-Policy"),
         )
 
-    print(
-        json.dumps(
-            {
-                "backend_url": backend_url,
-                "frontend_url": None if args.skip_frontend else frontend_url,
-                "ticker": ticker,
-                "status": "ok",
-                "health": health_payload,
-                "verified_routes": [check.url for check in checks],
-            },
-            indent=2,
+        checks = [
+            JsonCheck(
+                label="company overview",
+                url=f"{backend_url}/api/companies/{ticker}/overview",
+                required_keys=("company", "financials", "brief"),
+                nested_required_keys={"financials": ("company", "financials", "price_history", "refresh")},
+            ),
+            JsonCheck(
+                label="workspace bootstrap",
+                url=(
+                    f"{backend_url}/api/companies/{ticker}/workspace-bootstrap?"
+                    + urlencode(
+                        {
+                            "include_overview_brief": "true",
+                            "include_earnings_summary": "true",
+                            "include_insiders": "true",
+                            "include_institutional": "true",
+                        }
+                    )
+                ),
+                required_keys=(
+                    "company",
+                    "financials",
+                    "brief",
+                    "earnings_summary",
+                    "insider_trades",
+                    "institutional_holdings",
+                    "errors",
+                ),
+                nested_required_keys={"financials": ("company", "financials", "price_history", "refresh"), "errors": ()},
+            ),
+            JsonCheck(
+                label="research brief",
+                url=f"{backend_url}/api/companies/{ticker}/brief",
+                required_keys=(
+                    "company",
+                    "refresh",
+                    "build_state",
+                    "build_status",
+                    "snapshot",
+                    "what_changed",
+                    "business_quality",
+                    "capital_and_risk",
+                    "valuation",
+                    "monitor",
+                ),
+                nested_required_keys={"refresh": ("job_id", "triggered", "reason", "ticker")},
+            ),
+        ]
+
+        for check in checks:
+            status, payload = _load_json(check.url, timeout=args.timeout, headers=headers)
+            if status != 200:
+                raise RuntimeError(f"{check.label} returned HTTP {status}")
+            _assert_keys(check.label, payload, check.required_keys, check.nested_required_keys)
+
+        if not args.skip_frontend:
+            status, _body, content_type, frontend_headers = _http_get(f"{frontend_url}/company/{ticker}", timeout=args.timeout, headers=headers)
+            if status != 200:
+                raise RuntimeError(f"frontend company page returned HTTP {status}")
+            if not (content_type or "").startswith("text/html"):
+                raise RuntimeError(f"frontend company page returned unexpected content type {content_type!r}")
+            _assert_security_headers(
+                "frontend company page",
+                frontend_headers,
+                # Strict-Transport-Security is intentionally omitted here: it is set
+                # by the TLS-terminating reverse proxy / load balancer, not by Next.js
+                # directly (see docs/deployment-runbook.md).
+                ("X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"),
+            )
+
+        print(
+            json.dumps(
+                {
+                    "backend_url": backend_url,
+                    "frontend_url": None if args.skip_frontend else frontend_url,
+                    "ticker": ticker,
+                    "status": "ok",
+                    "health": health_payload,
+                    "verified_routes": [check.url for check in checks],
+                },
+                indent=2,
+            )
         )
-    )
-    return 0
+        return 0
+    except (RuntimeError, ValueError, URLError, OSError) as exc:
+        print(f"verify_deployment_compat failed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
