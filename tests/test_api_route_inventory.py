@@ -15,6 +15,8 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/internal/observability"),
         ("GET", "/api/internal/performance-audit"),
         ("POST", "/api/internal/performance-audit/reset"),
+        ("GET", "/api/admin/performance/summary"),
+        ("POST", "/api/admin/performance/reset"),
         ("GET", "/api/jobs/{job_id}/events"),
         ("GET", "/api/companies/search"),
         ("GET", "/api/companies/resolve"),

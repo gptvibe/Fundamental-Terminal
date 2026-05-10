@@ -99,6 +99,8 @@ def company_workspace_bootstrap(
     include_insiders: bool = shared.Query(default=False),
     include_institutional: bool = shared.Query(default=False),
     include_earnings_summary: bool = shared.Query(default=False),
+    sections: str | None = shared.Query(default=None, description="Comma-separated list of sections: company_summary,latest_financials,recent_filings,recent_events,ownership_summary,source_freshness,warnings"),
+    compact: bool = shared.Query(default=False, description="Enable compact mode to reduce payload size"),
     financials_view: str | None = shared.Query(default=None, description="embedded financials shape: full|core_segments|core"),
     price_start_date: str | None = shared.Query(default=None, description="Optional price-history lower bound (YYYY-MM-DD)"),
     price_end_date: str | None = shared.Query(default=None, description="Optional price-history upper bound (YYYY-MM-DD)"),
@@ -110,6 +112,22 @@ def company_workspace_bootstrap(
     normalized_ticker = shared._normalize_ticker(ticker)
     requested_as_of = shared._read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
     requested_financials_view = shared._read_singleton_query_param_or_400(request, "financials_view", fallback=financials_view)
+    requested_sections_str = shared._read_singleton_query_param_or_400(request, "sections", fallback=sections)
+    requested_compact = shared._read_singleton_query_param_or_400(request, "compact", fallback=str(compact).lower())
+    
+    # Parse sections parameter and determine which sections to load
+    requested_sections = _parse_bootstrap_sections(requested_sections_str)
+    is_compact_mode = requested_compact in ("true", "1", "yes")
+    
+    # Legacy behavior: if no sections param, use include_* flags
+    if not requested_sections:
+        requested_sections = _build_sections_from_legacy_flags(
+            include_overview_brief=include_overview_brief,
+            include_insiders=include_insiders,
+            include_institutional=include_institutional,
+            include_earnings_summary=include_earnings_summary,
+        )
+    
     parsed_as_of, normalized_financials_view, normalized_as_of = shared._normalize_company_financials_query_controls(
         requested_as_of=requested_as_of,
         view=requested_financials_view,
@@ -135,6 +153,8 @@ def company_workspace_bootstrap(
         include_institutional=include_institutional,
         include_earnings_summary=include_earnings_summary,
         price_token=price_token,
+        sections=tuple(sorted(requested_sections)),
+        compact=is_compact_mode,
     )
     cached_hot = (
         shared.shared_hot_response_cache.get_sync(hot_key, route="workspace_bootstrap")
@@ -165,20 +185,37 @@ def company_workspace_bootstrap(
         _build_company_research_brief_response,
     )
 
-    if include_overview_brief and not include_insiders and not include_institutional:
+    # Determine which sections to actually load
+    should_load_brief = "company_summary" in requested_sections or "recent_filings" in requested_sections or "recent_events" in requested_sections
+    should_load_financials = "latest_financials" in requested_sections or (not requested_sections)  # financials always loaded if no sections specified
+    should_load_insiders = "ownership_summary" in requested_sections
+    should_load_institutional = "ownership_summary" in requested_sections
+    should_load_earnings = "recent_events" in requested_sections
+
+    if should_load_brief and not should_load_insiders and not should_load_institutional:
         snapshot = resolve_company_brief_snapshot(session, normalized_ticker)
-        financials = build_company_financials_response(
-            session,
-            normalized_ticker,
-            requested_as_of=requested_as_of,
-            parsed_as_of=parsed_as_of,
-            snapshot=snapshot,
-            view=normalized_financials_view,
-            price_start_date=resolved_price_start_date,
-            price_end_date=resolved_price_end_date,
-            price_latest_n=resolved_price_latest_n,
-            price_max_points=resolved_price_max_points,
-        )
+        if should_load_financials:
+            financials = build_company_financials_response(
+                session,
+                normalized_ticker,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
+                snapshot=snapshot,
+                view=normalized_financials_view,
+                price_start_date=resolved_price_start_date,
+                price_end_date=resolved_price_end_date,
+                price_latest_n=resolved_price_latest_n,
+                price_max_points=resolved_price_max_points,
+            )
+        else:
+            financials = build_company_financials_response(
+                session,
+                normalized_ticker,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
+                snapshot=snapshot,
+                view=normalized_financials_view,
+            )
         brief = build_company_research_brief_response(
             session,
             normalized_ticker,
@@ -187,23 +224,33 @@ def company_workspace_bootstrap(
             snapshot=snapshot,
         )
     else:
-        financials = build_company_financials_response(
-            session,
-            normalized_ticker,
-            requested_as_of=requested_as_of,
-            parsed_as_of=parsed_as_of,
-            view=normalized_financials_view,
-            price_start_date=resolved_price_start_date,
-            price_end_date=resolved_price_end_date,
-            price_latest_n=resolved_price_latest_n,
-            price_max_points=resolved_price_max_points,
-        )
+        if should_load_financials:
+            financials = build_company_financials_response(
+                session,
+                normalized_ticker,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
+                view=normalized_financials_view,
+                price_start_date=resolved_price_start_date,
+                price_end_date=resolved_price_end_date,
+                price_latest_n=resolved_price_latest_n,
+                price_max_points=resolved_price_max_points,
+            )
+        else:
+            # Return minimal financials
+            financials = shared.CompanyFinancialsResponse(
+                company=None,
+                ticker=normalized_ticker,
+                latest_statements=[],
+                statements={},
+                refresh=shared.RefreshState(triggered=False, reason=None),
+            )
 
     insider_trades: shared.CompanyInsiderTradesResponse | None = None
     institutional_holdings: shared.CompanyInstitutionalHoldingsResponse | None = None
     earnings_summary: shared.CompanyEarningsSummaryResponse | None = None
 
-    if include_insiders:
+    if should_load_insiders:
         try:
             insider_trades = _sync_route_handler(shared.company_insider_trades)(
                 ticker=normalized_ticker,
@@ -212,7 +259,7 @@ def company_workspace_bootstrap(
         except Exception as exc:
             errors.insider = str(exc) if str(exc) else "Unable to load insider trades"
 
-    if include_institutional:
+    if should_load_institutional:
         try:
             institutional_holdings = _sync_route_handler(shared.company_institutional_holdings)(
                 ticker=normalized_ticker,
@@ -221,7 +268,7 @@ def company_workspace_bootstrap(
         except Exception as exc:
             errors.institutional = str(exc) if str(exc) else "Unable to load institutional holdings"
 
-    if include_earnings_summary:
+    if should_load_earnings:
         try:
             earnings_summary = _sync_route_handler(shared.company_earnings_summary)(
                 ticker=normalized_ticker,
@@ -229,6 +276,14 @@ def company_workspace_bootstrap(
             )
         except Exception as exc:
             errors.earnings_summary = str(exc) if str(exc) else "Unable to load earnings summary"
+
+    # Build source freshness and warnings payloads
+    source_freshness = _build_bootstrap_source_freshness(brief, financials)
+    warnings = _build_bootstrap_warnings(brief, financials)
+    
+    # Apply compact mode if requested
+    if is_compact_mode and brief is not None:
+        brief = _apply_compact_mode_to_brief(brief)
 
     response = shared.CompanyWorkspaceBootstrapResponse(
         company=financials.company or brief.company if brief is not None else financials.company,
@@ -238,6 +293,10 @@ def company_workspace_bootstrap(
         insider_trades=insider_trades,
         institutional_holdings=institutional_holdings,
         errors=errors,
+        source_freshness=source_freshness,
+        warnings=warnings,
+        is_compact=is_compact_mode,
+        requested_sections=requested_sections,
     )
     workspace_datasets = ["financials", "prices"]
     if include_overview_brief:
@@ -454,6 +513,176 @@ def _company_overview_hot_key(
     return f"overview:{normalized_ticker}:view={financials_view}:asof={as_of}:prices={price_token}"
 
 
+def _parse_bootstrap_sections(sections_str: str | None) -> list[str]:
+    """Parse the sections query parameter into a list of section names."""
+    if not sections_str:
+        return []
+    
+    # Split by comma and clean up
+    sections = [s.strip().lower() for s in sections_str.split(",") if s.strip()]
+    
+    # Valid sections
+    valid_sections = {
+        "company_summary",
+        "latest_financials",
+        "recent_filings",
+        "recent_events",
+        "ownership_summary",
+        "source_freshness",
+        "warnings",
+    }
+    
+    # Filter to only valid sections
+    return [s for s in sections if s in valid_sections]
+
+
+def _build_sections_from_legacy_flags(
+    include_overview_brief: bool,
+    include_insiders: bool,
+    include_institutional: bool,
+    include_earnings_summary: bool,
+) -> list[str]:
+    """Build sections list from legacy boolean flags."""
+    sections = []
+    
+    if include_overview_brief:
+        sections.extend(["company_summary", "recent_filings", "recent_events"])
+    
+    if include_insiders or include_institutional:
+        sections.append("ownership_summary")
+    
+    if include_earnings_summary:
+        sections.append("recent_events")
+    
+    return list(dict.fromkeys(sections))  # Remove duplicates while preserving order
+
+
+def _build_bootstrap_source_freshness(
+    brief: shared.CompanyResearchBriefResponse | None,
+    financials: shared.CompanyFinancialsResponse,
+) -> shared.CompanyBootstrapSourceFreshnessPayload:
+    """Build source freshness payload from response data."""
+    freshness = shared.CompanyBootstrapSourceFreshnessPayload()
+    
+    # Check financials freshness
+    if financials.refresh and financials.refresh.triggered:
+        freshness.financials_stale = True
+        freshness.financials_message = f"Refresh triggered: {financials.refresh.reason or 'unknown'}"
+    
+    # Check brief freshness
+    if brief:
+        if brief.refresh and brief.refresh.triggered:
+            freshness.brief_stale = True
+            freshness.brief_message = f"Refresh triggered: {brief.refresh.reason or 'unknown'}"
+        
+        # Check capital and risk section for ownership and governance staleness
+        if brief.capital_and_risk:
+            ownership = brief.capital_and_risk.ownership_summary
+            if ownership and ownership.refresh and ownership.refresh.triggered:
+                freshness.ownership_stale = True
+                freshness.ownership_message = f"Refresh triggered: {ownership.refresh.reason or 'unknown'}"
+            
+            governance = brief.capital_and_risk.governance_summary
+            if governance and governance.refresh and governance.refresh.triggered:
+                freshness.governance_stale = True
+                freshness.governance_message = f"Refresh triggered: {governance.refresh.reason or 'unknown'}"
+        
+        freshness.last_updated = brief.generated_at
+    
+    return freshness
+
+
+def _build_bootstrap_warnings(
+    brief: shared.CompanyResearchBriefResponse | None,
+    financials: shared.CompanyFinancialsResponse,
+) -> list[shared.CompanyBootstrapWarningPayload]:
+    """Build warnings payload from response data."""
+    warnings: list[shared.CompanyBootstrapWarningPayload] = []
+    
+    # Check brief build state
+    if brief:
+        if brief.build_state == "building":
+            warnings.append(
+                shared.CompanyBootstrapWarningPayload(
+                    severity="info",
+                    code="brief_building",
+                    title="Research brief still building",
+                    detail=brief.build_status,
+                    affected_sections=["company_summary", "recent_filings", "recent_events"],
+                )
+            )
+        elif brief.build_state == "partial":
+            warnings.append(
+                shared.CompanyBootstrapWarningPayload(
+                    severity="warning",
+                    code="brief_partial",
+                    title="Research brief incomplete",
+                    detail="Some sections may not be fully available",
+                    affected_sections=["company_summary", "recent_filings", "recent_events"],
+                )
+            )
+        
+        # Check stale summary cards
+        if brief.stale_summary_cards:
+            warnings.append(
+                shared.CompanyBootstrapWarningPayload(
+                    severity="warning",
+                    code="stale_data_detected",
+                    title=f"{len(brief.stale_summary_cards)} stale data card(s)",
+                    detail="Some summary data may be outdated",
+                    affected_sections=["company_summary"],
+                )
+            )
+    
+    # Check financials issues
+    if not financials.financials:
+        warnings.append(
+            shared.CompanyBootstrapWarningPayload(
+                severity="warning",
+                code="no_financial_statements",
+                title="No financial statements available",
+                detail="Latest financial data is not available for this ticker",
+                affected_sections=["latest_financials"],
+            )
+        )
+    
+    return warnings
+
+
+def _apply_compact_mode_to_brief(
+    brief: shared.CompanyResearchBriefResponse,
+) -> shared.CompanyResearchBriefResponse:
+    """Apply compact mode to research brief response to reduce payload size.
+    
+    In compact mode, we suppress large raw facts arrays and verbose details
+    while keeping key summary data.
+    """
+    # Create a modified copy
+    brief_copy = brief.model_copy(deep=True)
+    
+    # Clear large detail fields
+    brief_copy.stale_summary_cards = []
+    
+    # Suppress section details while keeping summary data
+    if brief_copy.what_changed:
+        if brief_copy.what_changed.activity_overview:
+            brief_copy.what_changed.activity_overview.facts = []
+        if brief_copy.what_changed.changes:
+            brief_copy.what_changed.changes.facts = []
+    
+    if brief_copy.capital_and_risk:
+        if brief_copy.capital_and_risk.ownership_summary:
+            brief_copy.capital_and_risk.ownership_summary.facts = []
+        if brief_copy.capital_and_risk.governance_summary:
+            brief_copy.capital_and_risk.governance_summary.facts = []
+    
+    if brief_copy.monitor:
+        if brief_copy.monitor.activity_overview:
+            brief_copy.monitor.activity_overview.facts = []
+    
+    return brief_copy
+
+
 def _company_workspace_bootstrap_hot_key(
     normalized_ticker: str,
     *,
@@ -464,7 +693,10 @@ def _company_workspace_bootstrap_hot_key(
     include_institutional: bool,
     include_earnings_summary: bool,
     price_token: str = "default",
+    sections: tuple[str, ...] = (),
+    compact: bool = False,
 ) -> str:
+    sections_str = ",".join(sections) if sections else "all"
     return (
         f"workspace_bootstrap:{normalized_ticker}:view={financials_view}:asof={as_of}"
         f":overview={1 if include_overview_brief else 0}"
@@ -472,6 +704,8 @@ def _company_workspace_bootstrap_hot_key(
         f":institutional={1 if include_institutional else 0}"
         f":earnings={1 if include_earnings_summary else 0}"
         f":prices={price_token}"
+        f":sections={sections_str}"
+        f":compact={1 if compact else 0}"
     )
 
 

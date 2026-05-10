@@ -135,6 +135,8 @@ export function getCompanyWorkspaceBootstrap(
 		includeInsiders?: boolean;
 		includeInstitutional?: boolean;
 		includeEarningsSummary?: boolean;
+		sections?: string[] | null;
+		compact?: boolean;
 		signal?: AbortSignal;
 	}
 ): Promise<CompanyWorkspaceBootstrapResponse> {
@@ -153,6 +155,12 @@ export function getCompanyWorkspaceBootstrap(
 	}
 	if (options?.priceMaxPoints != null) {
 		params.set("price_max_points", String(options.priceMaxPoints));
+	}
+	if (options?.sections && options.sections.length > 0) {
+		params.set("sections", options.sections.join(","));
+	}
+	if (options?.compact) {
+		params.set("compact", "true");
 	}
 	if (options?.includeOverviewBrief) {
 		params.set("include_overview_brief", "true");

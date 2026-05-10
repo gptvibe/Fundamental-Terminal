@@ -176,6 +176,28 @@ class CompanyWorkspaceBootstrapErrorsPayload(BaseModel):
     earnings_summary: str | None = None
 
 
+class CompanyBootstrapSourceFreshnessPayload(BaseModel):
+    """Source freshness and status for each data component."""
+    financials_stale: bool = False
+    financials_message: str | None = None
+    brief_stale: bool = False
+    brief_message: str | None = None
+    ownership_stale: bool = False
+    ownership_message: str | None = None
+    governance_stale: bool = False
+    governance_message: str | None = None
+    last_updated: datetime | None = None
+
+
+class CompanyBootstrapWarningPayload(BaseModel):
+    """Warning about data quality, completeness, or special circumstances."""
+    severity: Literal["info", "warning", "error"]
+    code: str
+    title: str
+    detail: str | None = None
+    affected_sections: list[str] = Field(default_factory=list)
+
+
 class CompanyWorkspaceBootstrapResponse(BaseModel):
     company: CompanyPayload | None
     financials: CompanyFinancialsResponse
@@ -184,3 +206,16 @@ class CompanyWorkspaceBootstrapResponse(BaseModel):
     insider_trades: CompanyInsiderTradesResponse | None = None
     institutional_holdings: CompanyInstitutionalHoldingsResponse | None = None
     errors: CompanyWorkspaceBootstrapErrorsPayload = Field(default_factory=CompanyWorkspaceBootstrapErrorsPayload)
+    source_freshness: CompanyBootstrapSourceFreshnessPayload = Field(
+        default_factory=CompanyBootstrapSourceFreshnessPayload,
+        description="Indicates which data sources are stale and should trigger a refresh."
+    )
+    warnings: list[CompanyBootstrapWarningPayload] = Field(
+        default_factory=list,
+        description="Warnings about data quality, completeness, or special circumstances."
+    )
+    is_compact: bool = False
+    requested_sections: list[str] = Field(
+        default_factory=list,
+        description="List of sections that were requested and included in this response."
+    )
