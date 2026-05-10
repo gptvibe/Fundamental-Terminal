@@ -85,6 +85,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/{ticker}/alerts"),
         ("GET", "/api/companies/{ticker}/activity-overview"),
         ("POST", "/api/watchlist/summary"),
+        ("POST", "/api/watchlist/alerts"),
         ("GET", "/api/watchlist/calendar"),
         ("GET", "/api/research-workspace"),
         ("POST", "/api/research-workspace/save"),
@@ -95,6 +96,7 @@ def test_public_route_inventory_remains_stable() -> None:
         ("GET", "/api/companies/{ticker}/financial-history"),
         ("GET", "/api/companies/{ticker}/financial-restatements"),
         ("GET", "/api/companies/{ticker}/filings/view"),
+        ("GET", "/api/companies/{ticker}/exhibits"),
     }
 
     actual_routes = []

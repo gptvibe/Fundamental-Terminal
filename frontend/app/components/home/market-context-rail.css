@@ -1,0 +1,54 @@
+.home-market-context-rail {
+  padding: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.home-market-context-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-fg-primary);
+  margin: 0 0 8px 0;
+}
+
+.home-market-context-loading,
+.home-market-context-error {
+  padding: 8px;
+  text-align: center;
+  color: var(--color-fg-tertiary);
+  font-size: 12px;
+}
+
+.home-market-context-error {
+  color: var(--color-fg-error);
+}
+
+.home-market-context-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-market-context-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.home-market-context-metric:last-child {
+  border-bottom: none;
+}
+
+.home-market-context-metric-label {
+  color: var(--color-fg-tertiary);
+  font-size: 11px;
+}
+
+.home-market-context-metric-value {
+  font-weight: 500;
+  color: var(--color-fg-primary);
+}

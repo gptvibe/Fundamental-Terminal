@@ -561,6 +561,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "GET",
         "/api/companies/{ticker}/filings",
     ): _official_fallback_contract("sec_edgar", "sec_companyfacts"),
+    ("GET", "/api/companies/{ticker}/exhibits"): _official_only_contract("sec_edgar"),
     ("GET", "/api/companies/{ticker}/beneficial-ownership"): _official_only_contract("sec_edgar"),
     ("GET", "/api/companies/{ticker}/beneficial-ownership/summary"): _derived_official_contract("sec_edgar"),
     ("GET", "/api/companies/{ticker}/governance"): _official_only_contract("sec_edgar"),
@@ -631,6 +632,14 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "sec_edgar",
         "sec_companyfacts",
         fallback_permitted=True,
+    ),
+    (
+        "POST",
+        "/api/watchlist/alerts",
+    ): _derived_official_contract(
+        "ft_watchlist_alerts",
+        "sec_edgar",
+        "sec_companyfacts",
     ),
     ("GET", "/api/research-workspace"): _control_plane_contract(),
     ("POST", "/api/research-workspace/save"): _control_plane_contract(),

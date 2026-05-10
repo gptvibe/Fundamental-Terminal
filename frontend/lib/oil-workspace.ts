@@ -1,11 +1,20 @@
 import type { CompanyPayload, ModelEvaluationResponse } from "@/lib/types";
 
+/**
+ * Returns true when the oil sector plugin is enabled for this deployment.
+ * Controlled by the NEXT_PUBLIC_ENABLE_OIL_SCENARIOS environment variable.
+ * Defaults to false so the general U.S. equities experience is unchanged.
+ */
+export function isOilScenariosEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_ENABLE_OIL_SCENARIOS === "true";
+}
+
 export function supportsOilWorkspace(status: string | null | undefined): boolean {
   return status === "supported" || status === "partial";
 }
 
 export function companySupportsOilWorkspace(company: CompanyPayload | null | undefined): boolean {
-  return supportsOilWorkspace(company?.oil_support_status);
+  return isOilScenariosEnabled() && supportsOilWorkspace(company?.oil_support_status);
 }
 
 export function describeOilSupportReason(reason: string): string {

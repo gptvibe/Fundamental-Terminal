@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 from app.source_registry import SourceTier
 
 Number = int | float | None
+SourceType = Literal["official_sec", "derived_from_sec", "public_macro", "fallback_market", "unknown"]
+SourceConfidenceLevel = Literal["high", "medium", "low", "experimental"]
 
 
 class RefreshState(BaseModel):
@@ -33,6 +35,15 @@ class DataQualityDiagnosticsPayload(BaseModel):
     missing_field_flags: list[str] = Field(default_factory=list)
     reconciliation_penalty: Number = None
     reconciliation_disagreement_count: int = 0
+
+
+class SourceQualityPayload(BaseModel):
+    source_type: SourceType = "unknown"
+    freshness_time: datetime | None = None
+    stale: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    accession_number: str | None = None
+    confidence_level: SourceConfidenceLevel = "medium"
 
 
 class SourceMixPayload(BaseModel):

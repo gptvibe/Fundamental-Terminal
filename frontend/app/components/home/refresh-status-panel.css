@@ -1,0 +1,193 @@
+.home-refresh-status-panel {
+  padding: 16px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+}
+
+.home-refresh-status-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-fg-primary);
+  margin: 0 0 12px 0;
+}
+
+.home-refresh-connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--color-fg-secondary);
+}
+
+.home-refresh-connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.home-refresh-connection-open {
+  background: var(--color-fg-success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.home-refresh-connection-connecting {
+  background: var(--color-fg-warning);
+  animation: spin 1s linear infinite;
+}
+
+.home-refresh-connection-closed {
+  background: var(--color-fg-tertiary);
+}
+
+.home-refresh-connection-error {
+  background: var(--color-fg-error);
+}
+
+.home-refresh-connection-idle {
+  background: var(--color-fg-tertiary);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.home-refresh-job-summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.home-refresh-job-stat {
+  flex: 1;
+  padding: 8px;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.home-refresh-job-pending {
+  background: var(--color-bg-info-subtle);
+  border: 1px solid var(--color-border-info);
+  color: var(--color-fg-info);
+}
+
+.home-refresh-job-completed {
+  background: var(--color-bg-success-subtle);
+  border: 1px solid var(--color-border-success);
+  color: var(--color-fg-success);
+}
+
+.home-refresh-job-failed {
+  background: var(--color-bg-error-subtle);
+  border: 1px solid var(--color-border-error);
+  color: var(--color-fg-error);
+}
+
+.home-refresh-job-stat-label {
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.home-refresh-job-stat-value {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.home-refresh-watchlist-changes {
+  padding: 12px 0;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+  margin-bottom: 12px;
+}
+
+.home-refresh-watchlist-changes-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-fg-primary);
+  margin: 0 0 8px 0;
+}
+
+.home-refresh-watchlist-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.home-refresh-watchlist-item {
+  display: grid;
+  grid-template-columns: 60px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+.home-refresh-watchlist-ticker {
+  font-weight: 600;
+  color: var(--color-fg-primary);
+}
+
+.home-refresh-watchlist-timestamp {
+  color: var(--color-fg-tertiary);
+  text-align: right;
+}
+
+.home-refresh-watchlist-status {
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.home-refresh-watchlist-status-completed {
+  background: var(--color-bg-success-subtle);
+  color: var(--color-fg-success);
+}
+
+.home-refresh-watchlist-status-pending {
+  background: var(--color-bg-info-subtle);
+  color: var(--color-fg-info);
+}
+
+.home-refresh-watchlist-status-failed {
+  background: var(--color-bg-error-subtle);
+  color: var(--color-fg-error);
+}
+
+.home-refresh-watchlist-more {
+  font-size: 10px;
+  color: var(--color-fg-tertiary);
+  margin: 4px 0 0 0;
+}
+
+.home-refresh-loading,
+.home-refresh-error,
+.home-refresh-empty {
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-fg-tertiary);
+}
+
+.home-refresh-error {
+  color: var(--color-fg-error);
+}

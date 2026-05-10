@@ -149,6 +149,53 @@ def test_financials_route_includes_registry_backed_provenance(monkeypatch):
     assert payload["as_of"] == "2025-12-31"
     assert payload["source_mix"]["fallback_source_ids"] == ["yahoo_finance"]
     assert "commercial_fallback_present" in payload["confidence_flags"]
+    source_quality = payload["financials"][0]["source_quality"]
+    assert source_quality["source_type"] == "official_sec"
+    assert source_quality["stale"] is True
+    assert source_quality["accession_number"] is None
+    assert source_quality["confidence_level"] in {"high", "medium", "low", "experimental"}
+
+
+def test_filing_insights_route_serializes_source_quality(monkeypatch):
+    statement = _financial_statement("https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/form10k.htm")
+    statement.data["segments"] = [{"name": "Services", "revenue": 120_000_000_000}]
+
+    _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot())
+    _patch_handler_namespaces(monkeypatch, "get_company_filing_insights", lambda *_args, **_kwargs: [statement])
+    _patch_handler_namespaces(
+        monkeypatch,
+        "_refresh_for_filing_insights",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/filing-insights")
+
+    assert response.status_code == 200
+    payload = response.json()
+    source_quality = payload["insights"][0]["source_quality"]
+    assert source_quality["source_type"] == "official_sec"
+    assert source_quality["accession_number"] == "0000320193-26-000010"
+    assert source_quality["confidence_level"] == "high"
+
+
+def test_charts_bootstrap_serializes_source_quality(monkeypatch):
+    _patch_handler_namespaces(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: None)
+    _patch_handler_namespaces(
+        monkeypatch,
+        "_trigger_refresh",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="missing", ticker="AAPL", job_id=None),
+    )
+
+    with _client() as client:
+        response = client.get("/api/companies/AAPL/charts")
+
+    assert response.status_code == 200
+    payload = response.json()
+    source_quality = payload["summary"]["source_quality"]
+    assert source_quality["confidence_level"] == "experimental"
+    assert source_quality["source_type"] == "derived_from_sec"
+    assert "forecast_projection_surface" in source_quality["warnings"]
 
 
 def test_model_evaluation_route_includes_registry_backed_provenance(monkeypatch):
@@ -600,6 +647,7 @@ def test_capital_structure_route_includes_registry_backed_provenance(monkeypatch
 
 
 def test_oil_scenario_overlay_route_includes_registry_backed_provenance(monkeypatch):
+    _patch_handler_namespaces(monkeypatch, "_is_oil_scenarios_enabled", lambda: True)
     _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
     _patch_handler_namespaces(
         monkeypatch,
@@ -717,6 +765,7 @@ def test_oil_scenario_overlay_route_includes_registry_backed_provenance(monkeypa
 def test_oil_scenario_route_includes_registry_backed_provenance(monkeypatch):
     import app.services.oil_scenario as oil_scenario_service
 
+    _patch_handler_namespaces(monkeypatch, "_is_oil_scenarios_enabled", lambda: True)
     _patch_handler_namespaces(monkeypatch, "_resolve_cached_company_snapshot", lambda *_args, **_kwargs: _snapshot(ticker="XOM", cik="0000034088"))
     _patch_handler_namespaces(
         monkeypatch,

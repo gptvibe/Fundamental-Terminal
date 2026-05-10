@@ -60,8 +60,8 @@ export function EvidenceDrawer({
 }: EvidenceDrawerProps) {
   const [open, setOpen] = useState(false);
   const drawerId = useMemo(() => `evidence-drawer-${slugify(title)}`, [title]);
-  const entries = provenance ?? [];
-  const metricRows = metrics ?? [];
+  const entries = useMemo(() => provenance ?? [], [provenance]);
+  const metricRows = useMemo(() => metrics ?? [], [metrics]);
   const sourceById = useMemo(() => new Map(entries.map((entry) => [entry.source_id, entry])), [entries]);
   const fallbackLabels = resolveCommercialFallbackLabels(entries, sourceMix);
   const hasEvidence = Boolean(entries.length || metricRows.length || confidenceFlags?.length || diagnostics);

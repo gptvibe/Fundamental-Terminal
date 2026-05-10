@@ -27,6 +27,17 @@ export type SourceTier =
   | "manual_override";
 
 export type SourceRole = "primary" | "supplemental" | "derived" | "fallback";
+export type SourceType = "official_sec" | "derived_from_sec" | "public_macro" | "fallback_market" | "unknown";
+export type SourceConfidenceLevel = "high" | "medium" | "low" | "experimental";
+
+export interface SourceQualityPayload {
+  source_type: SourceType;
+  freshness_time: string | null;
+  stale: boolean;
+  warnings: string[];
+  accession_number: string | null;
+  confidence_level: SourceConfidenceLevel;
+}
 
 export interface SourceMixPayload {
   source_ids: string[];
@@ -265,6 +276,7 @@ export interface FinancialPayload {
   shares_outstanding: number | null;
   stock_based_compensation: number | null;
   weighted_average_diluted_shares: number | null;
+  source_quality: SourceQualityPayload | null;
   regulated_bank?: RegulatedBankFinancialPayload | null;
   segment_breakdown: FinancialSegmentPayload[];
   reconciliation: FinancialReconciliationPayload | null;
@@ -745,6 +757,7 @@ export interface FilingParserInsightPayload {
   revenue: number | null;
   net_income: number | null;
   operating_income: number | null;
+  source_quality: SourceQualityPayload | null;
   segments: FilingParserSegmentPayload[];
   mdna: FilingParserSectionPayload | null;
   footnotes: FilingParserSectionPayload[];
@@ -1584,6 +1597,28 @@ export interface CompanyFilingsResponse {
   timeline_source: "sec_submissions" | "cached_financials";
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;
+  error: string | null;
+}
+
+export interface ExhibitPayload {
+  exhibit_number: string;
+  description: string | null;
+  document: string;
+  accession_number: string;
+  filing_type: string;
+  filing_date: string | null;
+  tag: string | null;
+  tag_label: string | null;
+  source_url: string;
+  filing_index_url: string;
+}
+
+export interface CompanyExhibitsResponse {
+  company: CompanyPayload | null;
+  exhibits: ExhibitPayload[];
+  total: number;
+  provenance: string[];
+  source: string;
   error: string | null;
 }
 
@@ -2575,6 +2610,25 @@ export interface WatchlistCalendarResponse {
   events: WatchlistCalendarEventPayload[];
 }
 
+export interface WatchlistAlertPayload {
+  id: number;
+  ticker: string;
+  alert_type: string;
+  title: string;
+  detail: string;
+  source_filing_accession: string | null;
+  source_filing_form: string | null;
+  created_at: string;
+  dismissed_at: string | null;
+}
+
+export interface WatchlistAlertsResponse {
+  tickers: string[];
+  alerts: WatchlistAlertPayload[];
+  total_count: number;
+  unread_count: number;
+}
+
 export interface ResearchWorkspaceSavedCompanyPayload {
   ticker: string;
   name: string | null;
@@ -2723,6 +2777,7 @@ export interface ResearchBriefSnapshotSummaryPayload {
   top_segment_name: string | null;
   top_segment_share_of_revenue: number | null;
   alert_count: number;
+  source_quality: SourceQualityPayload | null;
 }
 
 export interface ResearchBriefBusinessQualitySummaryPayload {
@@ -2827,6 +2882,7 @@ export interface CompanyChartsSummaryPayload {
   unavailable_notes: string[];
   freshness_badges: string[];
   source_badges: string[];
+  source_quality: SourceQualityPayload | null;
 }
 
 export interface CompanyChartsFactorValuePayload {

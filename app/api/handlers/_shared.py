@@ -191,6 +191,7 @@ from app.api.schemas import (  # noqa: F401
     SecFrameFactPayload,
     SecFramesScreenerResponse,
     SecFramesSnapshotSummaryPayload,
+    SourceQualityPayload,
     OilCurveSeriesPayload,
     OilExposureProfilePayload,
     OilScenarioCasePayload,
@@ -231,6 +232,8 @@ from app.api.schemas import (  # noqa: F401
     SourceRegistryWorkerQueueHealthPayload,
     SourceRegistryResponse,
     TopHolderPayload,
+    WatchlistAlertPayload,
+    WatchlistAlertsResponse,
     WatchlistCalendarEventPayload,
     WatchlistCalendarResponse,
     WatchlistCoveragePayload,
@@ -248,13 +251,13 @@ from app.db import async_session_maker as async_session, bind_request_sync_sessi
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
 from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
 from app.model_engine.models import dupont as dupont_model
-from app.models import EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement, RefreshJob
+from app.models import Company, EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement, RefreshJob
 from app.models.dataset_refresh_state import DatasetRefreshState
 from app.observability import snapshot_request_observations, snapshot_worker_observations
 from app.performance_audit import reset as reset_performance_audit_store
 from app.performance_audit import snapshot as snapshot_performance_audit_store
 from app.query_params import DuplicateSingletonQueryParamError, read_singleton_query_param
-from app.source_registry import SOURCE_REGISTRY, SourceTier, SourceUsage, build_provenance_entries, build_source_mix, get_source_definition, infer_source_id
+from app.source_registry import SOURCE_REGISTRY, SourceTier, SourceUsage, build_provenance_entries, build_source_mix, build_source_quality_metadata, get_source_definition, infer_source_id
 from app.services.insider_analytics import build_insider_analytics
 from app.services.insider_activity import build_insider_activity_summary
 from app.services.institutional_holdings import get_institutional_fund_strategy
@@ -415,6 +418,21 @@ STRICT_OFFICIAL_DISABLED_SOURCE_TIERS = {"commercial_fallback", "manual_override
 WATCHLIST_SUMMARY_ACTIVITY_LIMIT = 80
 WATCHLIST_SUMMARY_PROXY_LIMIT = 40
 WATCHLIST_SUMMARY_MODEL_NAMES = ["dcf", "roic", "reverse_dcf", "capital_allocation", "ratios"]
+
+
+def _is_oil_scenarios_enabled() -> bool:
+    """Return True when the oil sector plugin is active.
+
+    Defaults to False so the general U.S. equities experience is unchanged.
+    Enable by setting ENABLE_OIL_SCENARIOS=true in the environment.
+
+    The function wrapper (rather than a module-level boolean constant) allows
+    tests to patch the flag independently without replacing the entire settings
+    object.
+    """
+    return getattr(settings, "enable_oil_scenarios", False)
+
+
 _watchlist_summary_preload_ctx: ContextVar[dict[str, Any] | None] = ContextVar(
     "watchlist_summary_preload_ctx",
     default=None,
@@ -3904,6 +3922,13 @@ def _empty_company_charts_response(*, refresh: RefreshState, as_of: str | None) 
                 "Forecasts are always labeled and are never blended into reported history.",
                 "Forecast stability is conservative, uses multi-metric walk-forward backtests, and is not a statistical confidence measure.",
             ],
+            source_quality=_build_metric_source_quality(
+                source_hint="ft_company_charts_dashboard",
+                as_of=as_of,
+                stale=refresh.reason in {"stale", "missing"},
+                warnings=["forecast_projection_surface", "charts_dashboard_bootstrap"],
+                confidence_level="experimental",
+            ),
         ),
         factors=CompanyChartsFactorsPayload(),
         legend=legend,
@@ -4084,6 +4109,21 @@ def _augment_company_charts_response(
     refresh: RefreshState,
     as_of: str | None,
 ) -> CompanyChartsDashboardResponse:
+    primary_source_id = None
+    if payload.source_mix.primary_source_ids:
+        primary_source_id = payload.source_mix.primary_source_ids[0]
+    elif payload.provenance:
+        primary_source_id = payload.provenance[0].source_id
+
+    summary_source_quality = payload.summary.source_quality or _build_metric_source_quality(
+        source_hint=primary_source_id,
+        as_of=payload.as_of,
+        last_refreshed_at=payload.last_refreshed_at,
+        stale=refresh.reason == "stale",
+        warnings=["forecast_projection_surface"],
+        confidence_level="experimental",
+    )
+
     updated_payload = payload.model_copy(
         update={
             "company": _serialize_company(snapshot),
@@ -4091,6 +4131,7 @@ def _augment_company_charts_response(
             "build_state": "ready",
             "build_status": "Charts dashboard ready.",
             "payload_version": payload.payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,
+            "summary": payload.summary.model_copy(update={"source_quality": summary_source_quality}),
         }
     )
     return _apply_requested_as_of(updated_payload, as_of)
@@ -4123,6 +4164,13 @@ def _build_company_charts_bootstrap_for_snapshot(
                 ],
                 thesis="Reported history is available, and chart-ready forecast payloads are being precomputed.",
                 unavailable_notes=["Forecast values will remain visually distinct from reported results once available."],
+                source_quality=_build_metric_source_quality(
+                    source_hint="ft_company_charts_dashboard",
+                    as_of=as_of,
+                    stale=refresh.reason in {"stale", "missing"},
+                    warnings=["forecast_projection_surface", "dashboard_build_in_progress"],
+                    confidence_level="experimental",
+                ),
             ),
         }
     )
@@ -4152,6 +4200,13 @@ def _build_company_charts_bootstrap_for_missing_ticker(
                     ),
                 ],
                 thesis=f"No persisted company snapshot exists for {normalized_ticker} yet. The first charts build has been queued.",
+                source_quality=_build_metric_source_quality(
+                    source_hint="ft_company_charts_dashboard",
+                    as_of=as_of,
+                    stale=True,
+                    warnings=["forecast_projection_surface", "charts_payload_missing"],
+                    confidence_level="experimental",
+                ),
             ),
         }
     )
@@ -4577,6 +4632,8 @@ def _build_company_brief_snapshot_summary(
     price_history_points: int,
 ) -> ResearchBriefSnapshotSummaryPayload:
     latest_filing = filing_timeline[0] if filing_timeline else None
+    source_hint = latest_statement.source if latest_statement is not None else (latest_filing.source_url if latest_filing is not None else None)
+    accession_number = _extract_accession_number(source_hint)
     return ResearchBriefSnapshotSummaryPayload(
         latest_filing_type=(latest_statement.filing_type if latest_statement is not None else (latest_filing.form if latest_filing is not None else None)),
         latest_period_end=(latest_statement.period_end if latest_statement is not None else (latest_filing.date if latest_filing is not None else None)),
@@ -4587,6 +4644,14 @@ def _build_company_brief_snapshot_summary(
         top_segment_name=_top_segment_name_from_statement(latest_statement),
         top_segment_share_of_revenue=_top_segment_share_from_statement(latest_statement),
         alert_count=0,
+        source_quality=_build_metric_source_quality(
+            source_hint=source_hint,
+            as_of=(latest_statement.period_end if latest_statement is not None else (latest_filing.date if latest_filing is not None else None)),
+            last_refreshed_at=(latest_statement.last_checked if latest_statement is not None else None),
+            warnings=["summary_from_filing_timeline_only"] if latest_statement is None else None,
+            accession_number=accession_number,
+            confidence_level="medium" if latest_statement is None else "high",
+        ),
     )
 
 
@@ -6569,6 +6634,37 @@ def _latest_as_of(*values: DateType | datetime | str | None) -> str | None:
     return best_text
 
 
+def _build_metric_source_quality(
+    *,
+    source_hint: str | None,
+    as_of: DateType | datetime | str | None = None,
+    last_refreshed_at: datetime | str | None = None,
+    stale: bool | None = None,
+    warnings: list[str] | None = None,
+    accession_number: str | None = None,
+    confidence_level: Literal["high", "medium", "low", "experimental"] | None = None,
+) -> SourceQualityPayload:
+    source_id = infer_source_id(source_hint)
+    payload = build_source_quality_metadata(
+        source_id,
+        as_of=as_of,
+        last_refreshed_at=last_refreshed_at,
+        stale=stale,
+        warnings=warnings,
+        accession_number=accession_number,
+        confidence_level=confidence_level,
+    )
+    return SourceQualityPayload.model_validate(payload)
+
+
+def _attach_source_quality_metadata(payload: BaseModel, source_quality: SourceQualityPayload | None) -> Any:
+    if source_quality is None:
+        return payload
+    if hasattr(payload, "model_copy"):
+        return payload.model_copy(update={"source_quality": source_quality})
+    return payload
+
+
 def _source_usage_from_hint(
     source_hint: str | None,
     *,
@@ -7736,6 +7832,12 @@ def _serialize_financial(
     include_reconciliation: bool = True,
 ) -> FinancialPayload:
     data = statement.data or {}
+    source_quality = _build_metric_source_quality(
+        source_hint=statement.source,
+        as_of=statement.period_end,
+        last_refreshed_at=statement.last_checked,
+        accession_number=_extract_accession_number(statement.source),
+    )
     return FinancialPayload(
         filing_type=statement.filing_type,
         statement_type=statement.statement_type,
@@ -7780,6 +7882,7 @@ def _serialize_financial(
         shares_outstanding=data.get("shares_outstanding"),
         stock_based_compensation=data.get("stock_based_compensation"),
         weighted_average_diluted_shares=data.get("weighted_average_diluted_shares"),
+        source_quality=source_quality,
         regulated_bank=_serialize_regulated_bank_financial(data),
         segment_breakdown=[
             _serialize_financial_segment(item)
@@ -7955,6 +8058,13 @@ def _serialize_filing_parser_insight(statement: FinancialStatement) -> FilingPar
         revenue=data.get("revenue"),
         net_income=data.get("net_income"),
         operating_income=data.get("operating_income"),
+        source_quality=_build_metric_source_quality(
+            source_hint=statement.source,
+            as_of=statement.period_end,
+            last_refreshed_at=statement.last_checked,
+            accession_number=_extract_accession_number(statement.source),
+            confidence_level="high",
+        ),
         segments=[
             _serialize_filing_parser_segment(item)
             for item in data.get("segments", [])
@@ -11085,6 +11195,10 @@ def _extract_accession_number(source_url: str) -> str | None:
     archive_match = re.search(r"/([0-9]{10}-[0-9]{2}-[0-9]{6})/", source_url)
     if archive_match:
         return archive_match.group(1)
+    compact_archive_match = re.search(r"/([0-9]{18})/", source_url)
+    if compact_archive_match:
+        digits = compact_archive_match.group(1)
+        return f"{digits[:10]}-{digits[10:12]}-{digits[12:]}"
     return None
 
 

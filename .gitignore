@@ -41,6 +41,7 @@ build/
 .parcel-cache/
 .turbo/
 coverage/
+*.tsbuildinfo
 
 # Logs / temp
 *.log
@@ -51,7 +52,17 @@ temp/
 .cache/
 review-shots/
 artifacts/temp_*.json
+frontend/playwright-report/
+frontend/test-results/
+frontend/tests/screenshots/
+data/market_cache/
 data/sec_cache/
+
+# Performance artifacts
+artifacts/performance/*
+!artifacts/performance/baselines/
+!artifacts/performance/baselines/*.json
+!artifacts/performance/baselines/*.md
 
 # IDE / OS
 .vscode/

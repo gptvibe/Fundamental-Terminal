@@ -192,9 +192,9 @@ const HOT_ROUTE_CASES = [
 
 async function main() {
   const config = parseArgs(process.argv.slice(2));
-  const docsDir = path.resolve(config.repoRoot, "docs");
-  const jsonOutputPath = path.join(docsDir, "performance-baseline.json");
-  const markdownOutputPath = path.join(docsDir, "performance-baseline.md");
+  const baselineDir = path.resolve(config.repoRoot, "artifacts", "performance", "baselines");
+  const jsonOutputPath = path.join(baselineDir, "performance-baseline.json");
+  const markdownOutputPath = path.join(baselineDir, "performance-baseline.md");
 
   await assertBackendAudit(config.backendUrl);
 
@@ -220,6 +220,7 @@ async function main() {
   await browser.close();
 
   const summary = buildSummary(config, scenarioResults, benchmarkResults);
+  await fs.mkdir(baselineDir, { recursive: true });
   await fs.writeFile(jsonOutputPath, JSON.stringify(summary, null, 2));
   await fs.writeFile(markdownOutputPath, buildMarkdown(summary), "utf8");
 

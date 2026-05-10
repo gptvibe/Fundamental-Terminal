@@ -53,6 +53,7 @@ export {
 } from "./api/financials";
 export {
   getCompanyFilings,
+  getCompanyExhibits,
   getCompanyFilingEvents,
   getCompanyFilingEventsSummary,
   getCompanyFilingInsights,

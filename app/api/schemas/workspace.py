@@ -5,7 +5,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, RefreshState
+from app.api.schemas.common import (
+    CompanyPayload,
+    DataQualityDiagnosticsPayload,
+    Number,
+    ProvenanceEntryPayload,
+    RefreshState,
+    SourceMixPayload,
+)
 from app.api.schemas.events import AlertsSummaryPayload
 
 
@@ -260,6 +267,30 @@ class WatchlistCalendarResponse(BaseModel):
     window_start: DateType
     window_end: DateType
     events: list[WatchlistCalendarEventPayload]
+
+
+class WatchlistAlertPayload(BaseModel):
+    id: int
+    ticker: str
+    alert_type: str  # 10-K, 10-Q, 8-K, proxy, form-4, amendment, late-filing, stale-data
+    title: str
+    detail: str
+    source_filing_accession: str | None = None
+    source_filing_form: str | None = None
+    created_at: datetime
+    dismissed_at: datetime | None = None
+
+
+class WatchlistAlertsResponse(BaseModel):
+    tickers: list[str]
+    alerts: list[WatchlistAlertPayload]
+    total_count: int
+    unread_count: int
+    provenance: list[ProvenanceEntryPayload] = Field(default_factory=list)
+    as_of: str | None = None
+    last_refreshed_at: datetime | None = None
+    source_mix: SourceMixPayload = Field(default_factory=SourceMixPayload)
+    confidence_flags: list[str] = Field(default_factory=list)
 
 
 def _normalize_workspace_ticker(value: str) -> str:

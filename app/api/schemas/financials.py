@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState, ResponseMetadataPayload
+from app.api.schemas.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState, ResponseMetadataPayload, SourceQualityPayload
 from app.api.schemas.models import CompanyModelsResponse
 
 
@@ -152,6 +152,7 @@ class FilingParserInsightPayload(BaseModel):
     revenue: Number = None
     net_income: Number = None
     operating_income: Number = None
+    source_quality: SourceQualityPayload | None = None
     segments: list[FilingParserSegmentPayload] = Field(default_factory=list)
     mdna: FilingParserSectionPayload | None = None
     footnotes: list[FilingParserSectionPayload] = Field(default_factory=list)
@@ -270,6 +271,7 @@ class FinancialPayload(BaseModel):
     shares_outstanding: Number = None
     stock_based_compensation: Number = None
     weighted_average_diluted_shares: Number = None
+    source_quality: SourceQualityPayload | None = None
     regulated_bank: RegulatedBankFinancialPayload | None = None
     segment_breakdown: list[FinancialSegmentPayload] = Field(default_factory=list)
     reconciliation: FinancialReconciliationPayload | None = None

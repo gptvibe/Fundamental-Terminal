@@ -37,6 +37,7 @@ from app.models.refresh_job_event import RefreshJobEvent
 from app.models.research_workspace import ResearchWorkspace
 from app.models.sec_frame_snapshot import SecFrameSnapshot
 from app.models.sec_frame_company_fact import SecFrameCompanyFact
+from app.models.watchlist_alert import WatchlistAlert
 
 __all__ = [
     "BeneficialOwnershipParty",
@@ -78,4 +79,5 @@ __all__ = [
     "ResearchWorkspace",
     "SecFrameSnapshot",
     "SecFrameCompanyFact",
+    "WatchlistAlert",
 ]

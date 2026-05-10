@@ -13,6 +13,7 @@ import {
 } from "recharts";
 
 import { MetricLabel } from "@/components/ui/metric-label";
+import { SourceQualityBadges } from "@/components/ui/source-quality-badges";
 import { CHART_AXIS_COLOR, CHART_GRID_COLOR, CHART_LEGEND_COLOR, RECHARTS_TOOLTIP_PROPS, chartTick } from "@/lib/chart-theme";
 import { formatCompactNumber, formatDate } from "@/lib/format";
 import type { FilingParserInsightPayload, RefreshState } from "@/lib/types";
@@ -129,6 +130,7 @@ export function FilingParserInsights({
           <span className="pill">Updated {latest?.last_updated ? formatDate(latest.last_updated) : "Pending"}</span>
           {latest?.accession_number ? <span className="pill">Accession {latest.accession_number}</span> : null}
         </div>
+        <SourceQualityBadges sourceQuality={latest?.source_quality} />
         {latest?.source ? (
           <a className="filing-link" href={latest.source} target="_blank" rel="noreferrer">
             View SEC source

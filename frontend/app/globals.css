@@ -9,6 +9,7 @@
 @import "../styles/components/toolbar.css";
 @import "../styles/components/chart.css";
 @import "../styles/components/primitives.css";
+@import "../styles/components/loading-states.css";
 
 
 .data-sources-page,

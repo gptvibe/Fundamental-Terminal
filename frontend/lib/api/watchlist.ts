@@ -3,6 +3,7 @@ import type {
   ResearchWorkspaceImportLocalRequest,
   ResearchWorkspacePayload,
   ResearchWorkspaceUpsertRequest,
+  WatchlistAlertsResponse,
   WatchlistCalendarResponse,
   WatchlistSummaryResponse,
 } from "@/lib/types";
@@ -22,6 +23,23 @@ export function getWatchlistCalendar(tickers: string[]): Promise<WatchlistCalend
   }
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return fetchJson(`/watchlist/calendar${suffix}`);
+}
+
+export function getWatchlistAlerts(
+  tickers: string[],
+  alertTypes?: string[]
+): Promise<WatchlistAlertsResponse> {
+  const params = new URLSearchParams();
+  if (alertTypes && alertTypes.length > 0) {
+    for (const type of alertTypes) {
+      params.append("alert_types", type);
+    }
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson(`/watchlist/alerts${suffix}`, {
+    method: "POST",
+    body: JSON.stringify({ tickers }),
+  });
 }
 
 export function getResearchWorkspace(workspaceKey?: string): Promise<ResearchWorkspacePayload> {

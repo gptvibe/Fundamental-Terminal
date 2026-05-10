@@ -214,6 +214,7 @@ class Settings:
     health_sec_check_timeout_seconds: float = field(default_factory=lambda: _float_env("HEALTH_SEC_CHECK_TIMEOUT_SECONDS", 2.5, minimum=0.5))
     health_sec_check_cache_seconds: int = field(default_factory=lambda: _int_env("HEALTH_SEC_CHECK_CACHE_SECONDS", 30, minimum=5))
     security_headers_enabled: bool = field(default_factory=lambda: _bool_env("SECURITY_HEADERS_ENABLED", True))
+    enable_oil_scenarios: bool = field(default_factory=lambda: _bool_env("ENABLE_OIL_SCENARIOS", False))
 
 
 @dataclass(frozen=True, slots=True)

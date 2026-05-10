@@ -12,6 +12,7 @@ from app.api.schemas.workspace import (
     CompanyEarningsWorkspaceResponse,
     ResearchWorkspaceDeleteResponse,
     ResearchWorkspacePayload,
+    WatchlistAlertsResponse,
     WatchlistCalendarResponse,
     WatchlistSummaryResponse,
 )
@@ -53,6 +54,13 @@ def build_router() -> APIRouter:
         workspace_handlers.watchlist_calendar,
         methods=["GET"],
         response_model=WatchlistCalendarResponse,
+    )
+    add_user_visible_route(
+        router,
+        "/api/watchlist/alerts",
+        workspace_handlers.watchlist_alerts,
+        methods=["POST"],
+        response_model=WatchlistAlertsResponse,
     )
     add_user_visible_route(
         router,

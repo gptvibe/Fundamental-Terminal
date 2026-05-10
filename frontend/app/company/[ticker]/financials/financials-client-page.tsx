@@ -17,6 +17,7 @@ import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics
 import { Panel } from "@/components/ui/panel";
 import { ChartSkeleton } from "@/components/ui/skeletons";
 import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary";
+import { SourceQualityBadges } from "@/components/ui/source-quality-badges";
 import { useCompanyWorkspace, type LoadCompanyWorkspaceDataResult } from "@/hooks/use-company-workspace";
 import { usePeriodSelection } from "@/hooks/use-period-selection";
 import { resolveFilingChartCadence } from "@/lib/annual-financial-scope";
@@ -316,6 +317,7 @@ export default function CompanyFinancialsClientPage({ ticker, initialWorkspaceDa
         ribbonItems={ribbonItems}
         summaries={summaryItems}
       >
+        <SourceQualityBadges sourceQuality={activeFinancial?.source_quality ?? latestFinancial?.source_quality ?? null} className="research-brief-partial-errors" />
         <CommercialFallbackNotice
           provenance={data?.provenance}
           sourceMix={data?.source_mix}

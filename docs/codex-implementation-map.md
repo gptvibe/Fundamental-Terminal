@@ -266,7 +266,7 @@ Frontend instrumentation:
 
 Audit runner:
 - `frontend/scripts/run-performance-audit.mjs` drives Playwright page-flow audits and backend hot-route benchmarks.
-- It writes `docs/performance-baseline.md` and `docs/performance-baseline.json`.
+- It writes `artifacts/performance/baselines/performance-baseline.md` and `artifacts/performance/baselines/performance-baseline.json`.
 - Current page flows include home search, top-bar search, `/company/[ticker]`, Models, Financials, and Watchlist.
 - Current hot-route cases include search, financials, insider/institutional, activity overview, changes, earnings summary, capital structure, governance summary, models, peers, market/sector context, source registry, watchlist, and refresh queue.
 

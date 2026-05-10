@@ -4,6 +4,7 @@ import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 import "./globals.css";
+import "@/styles/company-page-redesign.css";
 
 import { AppChrome } from "@/components/layout/app-chrome";
 

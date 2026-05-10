@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from app.models.proxy_statement import ProxyStatement
     from app.models.proxy_vote_result import ProxyVoteResult
     from app.models.refresh_job import RefreshJob
+    from app.models.watchlist_alert import WatchlistAlert
 
 
 class Company(Base):
@@ -176,6 +177,11 @@ class Company(Base):
     )
     refresh_jobs: Mapped[list["RefreshJob"]] = relationship(back_populates="company")
     dataset_refresh_states: Mapped[list["DatasetRefreshState"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    watchlist_alerts: Mapped[list["WatchlistAlert"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

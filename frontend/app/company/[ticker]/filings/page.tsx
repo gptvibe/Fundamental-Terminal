@@ -11,15 +11,16 @@ import { FilingDocumentViewer } from "@/components/filings/filing-document-viewe
 import { FilingParserInsights } from "@/components/filings/filing-parser-insights";
 import { FilingRiskSignalsPanel } from "@/components/filings/filing-risk-signals-panel";
 import { CompanyFilingsTimeline } from "@/components/filings/company-filings-timeline";
+import { CompanyExhibitsPanel } from "@/components/filings/company-exhibits-panel";
 import { CompanyResearchHeader } from "@/components/layout/company-research-header";
 import { CompanyUtilityRail } from "@/components/layout/company-utility-rail";
 import { CompanyWorkspaceShell } from "@/components/layout/company-workspace-shell";
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
-import { getCompanyChangesSinceLastFiling, getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilingRiskSignals, getCompanyFilings } from "@/lib/api";
+import { getCompanyChangesSinceLastFiling, getCompanyExhibits, getCompanyFilingEvents, getCompanyFilingInsights, getCompanyFilingRiskSignals, getCompanyFilings } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyChangesSinceLastFilingResponse, CompanyEventsResponse, CompanyFilingInsightsResponse, CompanyFilingRiskSignalsResponse, CompanyFilingsResponse } from "@/lib/types";
+import type { CompanyChangesSinceLastFilingResponse, CompanyEventsResponse, CompanyExhibitsResponse, CompanyFilingInsightsResponse, CompanyFilingRiskSignalsResponse, CompanyFilingsResponse } from "@/lib/types";
 
 function describeFilingSummary(filing: CompanyFilingsResponse["filings"][number]): string {
   if (filing.primary_doc_description) {
@@ -67,6 +68,11 @@ export default function CompanyFilingsPage() {
   const [filingRiskSignalsData, setFilingRiskSignalsData] = useState<CompanyFilingRiskSignalsResponse | null>(null);
   const [filingRiskSignalsLoading, setFilingRiskSignalsLoading] = useState(true);
   const [filingRiskSignalsError, setFilingRiskSignalsError] = useState<string | null>(null);
+  const [exhibitsData, setExhibitsData] = useState<CompanyExhibitsResponse | null>(null);
+  const [exhibitsLoading, setExhibitsLoading] = useState(true);
+  const [exhibitsError, setExhibitsError] = useState<string | null>(null);
+  const [exhibitTypeFilter, setExhibitTypeFilter] = useState("");
+  const [filingTypeFilter, setFilingTypeFilter] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +132,38 @@ export default function CompanyFilingsPage() {
       cancelled = true;
     };
   }, [reloadKey, ticker]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadExhibits() {
+      try {
+        setExhibitsLoading(true);
+        setExhibitsError(null);
+        setExhibitsData(null);
+        const response = await getCompanyExhibits(ticker, {
+          exhibitType: exhibitTypeFilter || undefined,
+          filingType: filingTypeFilter || undefined,
+        });
+        if (!cancelled) {
+          setExhibitsData(response);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setExhibitsError(nextError instanceof Error ? nextError.message : "Unable to load exhibits");
+        }
+      } finally {
+        if (!cancelled) {
+          setExhibitsLoading(false);
+        }
+      }
+    }
+
+    void loadExhibits();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey, ticker, exhibitTypeFilter, filingTypeFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -366,6 +404,23 @@ export default function CompanyFilingsPage() {
 
       <Panel title="Filing Viewer" subtitle="Open the selected SEC document inside the workspace without leaving the terminal">
         <FilingDocumentViewer ticker={ticker} filing={selectedFiling} />
+      </Panel>
+
+      <Panel
+        title="Exhibits"
+        subtitle="Official exhibit documents indexed from SEC EDGAR filing directories — filter by exhibit type or form"
+      >
+        <CompanyExhibitsPanel
+          payload={exhibitsData}
+          loading={exhibitsLoading}
+          error={exhibitsError}
+          exhibitTypeFilter={exhibitTypeFilter}
+          filingTypeFilter={filingTypeFilter}
+          onFilterChange={({ exhibitType, filingType }) => {
+            setExhibitTypeFilter(exhibitType);
+            setFilingTypeFilter(filingType);
+          }}
+        />
       </Panel>
 
       <Panel title="Form Coverage" subtitle="See which report types are most active in the current filing window">

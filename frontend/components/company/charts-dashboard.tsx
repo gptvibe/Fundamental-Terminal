@@ -21,6 +21,7 @@ import { ChartShareActions } from "@/components/company/chart-share-actions";
 import { DeferredClientSection } from "@/components/performance/deferred-client-section";
 import { Dialog } from "@/components/ui/dialog";
 import { ForecastTrustCue } from "@/components/ui/forecast-trust-cue";
+import { SourceQualityBadges } from "@/components/ui/source-quality-badges";
 import { useForecastAccuracy } from "@/hooks/use-forecast-accuracy";
 import { buildOutlookChartShareSnapshot } from "@/lib/chart-share";
 import { getCompanyChartsOutlookSpec, getOrderedOutlookComparisonCards, getOrderedOutlookDetailCards, getOrderedOutlookMetricCards } from "@/lib/chart-spec";
@@ -194,6 +195,7 @@ export function CompanyChartsDashboard({
               <span className="charts-page-meta-pill">{outlookSpec.methodology.confidence_label}</span>
             ) : null}
           </div>
+          <SourceQualityBadges sourceQuality={outlookSpec.summary.source_quality} />
           <p className="charts-page-hero-thesis">{outlookSpec.summary.thesis ?? "Forecast values stay clearly labeled and visually separated from reported results."}</p>
         </div>
         <div className="charts-page-hero-side charts-page-hero-summary-card">

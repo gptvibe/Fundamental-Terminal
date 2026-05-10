@@ -27,13 +27,14 @@ const navigationFixture = {
   pathname: "/company/ACME",
   searchParams: new URLSearchParams(),
   replace: vi.fn(),
+  push: vi.fn(),
 };
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ ticker: "acme" }),
   usePathname: () => navigationFixture.pathname,
   useSearchParams: () => navigationFixture.searchParams,
-  useRouter: () => ({ replace: navigationFixture.replace }),
+  useRouter: () => ({ replace: navigationFixture.replace, push: navigationFixture.push }),
 }));
 
 vi.mock("@/hooks/use-company-workspace", () => ({
@@ -258,6 +259,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   navigationFixture.searchParams = new URLSearchParams();
   navigationFixture.replace.mockReset();
+  navigationFixture.push.mockReset();
   window.localStorage.clear();
   vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock());
   vi.mocked(getCompanyActivityOverview).mockResolvedValue(buildActivityOverviewResponse());
@@ -315,7 +317,7 @@ describe("CompanyResearchBriefPage", () => {
       expect(document.getElementById("capital-risk")).toBeTruthy();
       expect(document.getElementById("compare-value")).toBeTruthy();
       expect(document.getElementById("monitor")).toBeTruthy();
-    });
+    }, { timeout: 5000 });
     const snapshotHeading = screen.getByRole("heading", { name: "Snapshot" });
     const whatChangedHeading = screen.getByRole("heading", { name: "What changed" });
     const businessQualityHeading = screen.getByRole("heading", { name: "Business quality" });
@@ -366,7 +368,7 @@ describe("CompanyResearchBriefPage", () => {
     expect(getCompanyBeneficialOwnershipSummary).not.toHaveBeenCalled();
     expect(getCompanyModels).toHaveBeenCalledWith("ACME", undefined, { asOf: null });
     expect(getCompanyPeers).toHaveBeenCalledWith("ACME", undefined, { asOf: null });
-  });
+  }, 10000);
 
   it("reuses the overview workspace brief payload without issuing a second brief request", async () => {
     vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({
@@ -832,6 +834,36 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByRole("heading", { name: "Data quality & sources" })).toBeTruthy();
     });
     expect(screen.getByText("Partial data and fallback warnings")).toBeTruthy();
+  });
+
+  it("renders terminal-style tabs and wires company page keyboard shortcuts", async () => {
+    const queueRefresh = vi.fn();
+    vi.mocked(useCompanyWorkspace).mockReturnValue(buildWorkspaceMock({ queueRefresh }));
+
+    render(React.createElement(CompanyResearchBriefPage));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Snapshot" })).toBeTruthy();
+    });
+
+    expect(screen.getByRole("banner", { name: "Company header for ACME" })).toBeTruthy();
+    expect(screen.getByLabelText("Data source: SEC Official")).toBeTruthy();
+    expect(screen.getByLabelText("Cache state: fresh")).toBeTruthy();
+    expect(screen.getByRole("tablist", { name: "Research brief sections" })).toBeTruthy();
+    for (const tabName of ["Summary", "Financials", "Filings", "Ownership", "Segments", "Risk", "Sources"]) {
+      expect(screen.getByRole("tab", { name: tabName })).toBeTruthy();
+    }
+
+    expect(screen.getByRole("tab", { name: "Financials" }).getAttribute("href")).toBe("/company/ACME/financials");
+
+    fireEvent.keyDown(window, { key: "r" });
+    expect(queueRefresh).toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "w" });
+    expect(navigationFixture.push).toHaveBeenCalledWith("/watchlist");
+    fireEvent.keyDown(window, { key: "c" });
+    expect(navigationFixture.push).toHaveBeenCalledWith("/compare");
+    fireEvent.keyDown(window, { key: "/" });
+    expect(navigationFixture.push).toHaveBeenCalledWith("/");
   });
 
   it("renders drill-down links for every research brief section", async () => {

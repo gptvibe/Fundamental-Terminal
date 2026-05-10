@@ -73,3 +73,25 @@ class CompanyFilingRiskSignalsResponse(BaseModel):
     signals: list[FilingRiskSignalPayload]
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
+
+
+class ExhibitPayload(BaseModel):
+    exhibit_number: str
+    description: str | None = None
+    document: str
+    accession_number: str
+    filing_type: str
+    filing_date: DateType | None = None
+    tag: str | None = None
+    tag_label: str | None = None
+    source_url: str
+    filing_index_url: str
+
+
+class CompanyExhibitsResponse(BaseModel):
+    company: CompanyPayload | None
+    exhibits: list[ExhibitPayload]
+    total: int
+    provenance: list[str] = Field(default_factory=list)
+    source: str = "sec_edgar"
+    error: str | None = None

@@ -1,0 +1,104 @@
+.home-source-status-card {
+  padding: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.home-source-status-banner {
+  padding: 6px 8px;
+  margin: -12px -12px 8px -12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.home-source-status-demo {
+  background: var(--color-bg-warning-subtle);
+  border-bottom: 1px solid var(--color-border-warning);
+  color: var(--color-fg-warning);
+}
+
+.home-source-status-badge {
+  display: inline-block;
+  padding: 2px 4px;
+  background: var(--color-fg-warning);
+  color: var(--color-bg-warning-subtle);
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.home-source-status-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-source-status-loading,
+.home-source-status-error {
+  padding: 6px;
+  text-align: center;
+  color: var(--color-fg-tertiary);
+}
+
+.home-source-status-error {
+  color: var(--color-fg-error);
+}
+
+.home-source-status-health {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.home-source-status-health-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-fg-primary);
+  margin: 0;
+}
+
+.home-source-status-health-stats {
+  display: flex;
+  gap: 8px;
+}
+
+.home-source-status-health-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.home-source-status-health-label {
+  font-size: 10px;
+  color: var(--color-fg-tertiary);
+}
+
+.home-source-status-health-value {
+  font-weight: 600;
+  color: var(--color-fg-primary);
+}
+
+.home-source-status-updated {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 10px;
+}
+
+.home-source-status-updated-label {
+  color: var(--color-fg-tertiary);
+}
+
+.home-source-status-updated-value {
+  color: var(--color-fg-secondary);
+  font-weight: 500;
+}

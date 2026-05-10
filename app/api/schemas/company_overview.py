@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.api.schemas.common import CompanyPayload, Number, ProvenanceEnvelope, RefreshState
+from app.api.schemas.common import CompanyPayload, Number, ProvenanceEnvelope, RefreshState, SourceQualityPayload
 from app.api.schemas.equity_claim_risk import EquityClaimRiskSummaryPayload
 from app.api.schemas.events import CompanyActivityOverviewResponse, CompanyCapitalMarketsSummaryResponse
 from app.api.schemas.filings import FilingTimelineItemPayload
@@ -86,6 +86,7 @@ class ResearchBriefSnapshotSummaryPayload(BaseModel):
     top_segment_name: str | None = None
     top_segment_share_of_revenue: Number = None
     alert_count: int = 0
+    source_quality: SourceQualityPayload | None = None
 
 
 class ResearchBriefBusinessQualitySummaryPayload(BaseModel):

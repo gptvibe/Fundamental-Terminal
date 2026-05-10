@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.contracts.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState
+from app.contracts.common import CompanyPayload, DataQualityDiagnosticsPayload, Number, ProvenanceEnvelope, RefreshState, SourceQualityPayload
 
 
 class CompanyChartsScoreBadgePayload(BaseModel):
@@ -26,6 +26,7 @@ class CompanyChartsSummaryPayload(BaseModel):
     unavailable_notes: list[str] = Field(default_factory=list)
     freshness_badges: list[str] = Field(default_factory=list)
     source_badges: list[str] = Field(default_factory=list)
+    source_quality: SourceQualityPayload | None = None
 
 
 class CompanyChartsFactorValuePayload(BaseModel):

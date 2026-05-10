@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Iterable, Literal
 
 
@@ -15,6 +15,8 @@ SourceTier = Literal[
 ]
 
 SourceRole = Literal["primary", "supplemental", "derived", "fallback"]
+SourceType = Literal["official_sec", "derived_from_sec", "public_macro", "fallback_market", "unknown"]
+SourceConfidenceLevel = Literal["high", "medium", "low", "experimental"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +312,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Unified activity feed assembled from official SEC disclosures and official macro status signals.",
     ),
+    "ft_watchlist_alerts": SourceDefinition(
+        source_id="ft_watchlist_alerts",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Watchlist Alerts",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Watchlist alert state derived from cached SEC filings, ownership, governance, and filing freshness checks.",
+    ),
     "ft_changes_since_last_filing": SourceDefinition(
         source_id="ft_changes_since_last_filing",
         tier="derived_from_official",
@@ -539,6 +549,74 @@ def build_source_mix(entries: Iterable[dict[str, object]]) -> dict[str, object]:
         "fallback_source_ids": fallback_source_ids,
         "official_only": official_only,
     }
+
+
+def map_source_tier_to_source_type(source_tier: SourceTier | None, *, source_id: str | None = None) -> SourceType:
+    if source_tier == "official_regulator":
+        if isinstance(source_id, str) and source_id.startswith("sec_"):
+            return "official_sec"
+        return "unknown"
+    if source_tier == "derived_from_official":
+        return "derived_from_sec"
+    if source_tier in {"official_statistical", "official_treasury_or_fed"}:
+        return "public_macro"
+    if source_tier == "commercial_fallback":
+        return "fallback_market"
+    return "unknown"
+
+
+def build_source_quality_metadata(
+    source_id: str | None,
+    *,
+    as_of: date | datetime | str | None = None,
+    last_refreshed_at: datetime | str | None = None,
+    stale: bool | None = None,
+    warnings: Iterable[str] | None = None,
+    accession_number: str | None = None,
+    confidence_level: SourceConfidenceLevel | None = None,
+) -> dict[str, object]:
+    definition = SOURCE_REGISTRY.get(source_id or "") if source_id else None
+    source_type = map_source_tier_to_source_type(definition.tier if definition is not None else None, source_id=source_id)
+    freshness_time = _normalize_datetime(last_refreshed_at)
+    if freshness_time is None:
+        parsed_as_of = _normalize_as_of(as_of)
+        if parsed_as_of:
+            freshness_time = _parse_as_of(parsed_as_of)
+
+    warning_set = {str(flag).strip() for flag in (warnings or []) if str(flag).strip()}
+    if source_type == "unknown":
+        warning_set.add("unknown_source_type")
+    if source_type == "fallback_market":
+        warning_set.add("fallback_market_source")
+    if freshness_time is None:
+        warning_set.add("freshness_time_missing")
+
+    is_stale = bool(stale)
+    if stale is None and freshness_time is not None and definition is not None and definition.default_freshness_ttl_seconds > 0:
+        now = datetime.now(timezone.utc)
+        is_stale = freshness_time < (now - timedelta(seconds=definition.default_freshness_ttl_seconds))
+    if is_stale:
+        warning_set.add("stale_source_data")
+
+    resolved_confidence = confidence_level or _default_confidence_level(source_type)
+    return {
+        "source_type": source_type,
+        "freshness_time": freshness_time,
+        "stale": is_stale,
+        "warnings": sorted(warning_set),
+        "accession_number": accession_number,
+        "confidence_level": resolved_confidence,
+    }
+
+
+def _default_confidence_level(source_type: SourceType) -> SourceConfidenceLevel:
+    if source_type == "official_sec":
+        return "high"
+    if source_type in {"derived_from_sec", "public_macro"}:
+        return "medium"
+    if source_type in {"fallback_market", "unknown"}:
+        return "low"
+    return "medium"
 
 
 def _normalize_as_of(value: date | datetime | str | None) -> str | None:

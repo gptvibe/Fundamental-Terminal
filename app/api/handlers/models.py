@@ -229,6 +229,11 @@ async def company_oil_scenario_overlay(
     ticker: str,
     background_tasks: BackgroundTasks,
 ) -> CompanyOilScenarioOverlayResponse:
+    if not _is_oil_scenarios_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The oil sector plugin is not enabled on this instance. Set ENABLE_OIL_SCENARIOS=true to activate it.",
+        )
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario_overlay:{normalized_ticker}"
     hot_tags = _build_hot_cache_tags(
@@ -331,6 +336,11 @@ async def company_oil_scenario(
     ticker: str,
     background_tasks: BackgroundTasks,
 ) -> CompanyOilScenarioResponse:
+    if not _is_oil_scenarios_enabled():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The oil sector plugin is not enabled on this instance. Set ENABLE_OIL_SCENARIOS=true to activate it.",
+        )
     normalized_ticker = _normalize_ticker(ticker)
     hot_key = f"oil_scenario:{normalized_ticker}"
     hot_tags = _build_hot_cache_tags(

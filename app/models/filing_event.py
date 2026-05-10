@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,8 +49,8 @@ class FilingEvent(Base):
     primary_doc_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     source_url: Mapped[str] = mapped_column(String(500), nullable=False)
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
-    key_amounts: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
-    exhibit_references: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    key_amounts: Mapped[list[Any]] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list)
+    exhibit_references: Mapped[list[Any]] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=False, default=list)
     is_amendment: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_late_filing: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_updated: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

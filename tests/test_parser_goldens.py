@@ -280,6 +280,14 @@ def test_filing_parser_insight_serialization_regression() -> None:
             "source": None,
             "excerpt": None,
         },
+        "source_quality": {
+            "source_type": "official_sec",
+            "freshness_time": "2026-03-22T08:30:00Z",
+            "stale": True,
+            "warnings": ["stale_source_data"],
+            "accession_number": None,
+            "confidence_level": "high",
+        },
     }
 
 

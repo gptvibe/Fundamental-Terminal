@@ -18,10 +18,17 @@ import { resolveCommercialFallbackLabels } from "@/components/ui/commercial-fall
 import { DataQualityDiagnostics } from "@/components/ui/data-quality-diagnostics";
 import { Panel } from "@/components/ui/panel";
 import { DataFreshnessBadge, KpiCard, KpiStrip, PageHeader, PageShell, SourceBadge } from "@/components/ui/research-primitives";
+import { SourceQualityBadges } from "@/components/ui/source-quality-badges";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { useUIDensity } from "@/hooks/use-ui-density";
 import { showAppToast } from "@/lib/app-toast";
 import { COMMAND_PALETTE_EXPORT_MEMO_EVENT, type CommandPaletteTickerDetail } from "@/lib/command-palette-events";
+import { useCompanyPageKeyboardShortcuts } from "./_hooks/use-keyboard-shortcuts";
+import { LoadingStateIndicator, EmptyState } from "@/components/company/loading-states";
+import { StickyCompanyHeader } from "@/components/company/sticky-company-header";
+import { ResearchBriefTabs, type TabDefinition } from "@/components/company/research-brief-tabs";
+import { KeyboardShortcutsDialog } from "@/components/company/keyboard-shortcuts-dialog";
+import { ImportantChangesPanel, type Change } from "@/components/company/important-changes-panel";
 import {
   getCompanyActivityOverview,
   getCompanyBeneficialOwnershipSummary,
@@ -76,6 +83,7 @@ const BRIEF_NAV_SECTION_IDS = [
   "capital-risk",
   "compare-value",
   "monitor",
+  "data-quality",
 ];
 
 const WhatChangedSection = dynamic(
@@ -125,6 +133,32 @@ export default function CompanyResearchBriefPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
+
+  // Initialize keyboard shortcuts.
+  useCompanyPageKeyboardShortcuts({
+    ticker,
+    onRefresh: () => {
+      queueRefresh();
+    },
+    onSearch: () => {
+      const topSearch = document.querySelector<HTMLInputElement>("input[aria-label='Search ticker']");
+      if (topSearch) {
+        topSearch.focus();
+        topSearch.select();
+        return;
+      }
+      router.push("/");
+    },
+    onWatchlist: () => {
+      router.push("/watchlist");
+    },
+    onCompare: () => {
+      router.push("/compare");
+    },
+    onShowHelp: () => {
+      setShowKeyboardShortcutsHelp(true);
+    },
+  });
   const requestedAsOf = useMemo(() => readAsOfSearchParam(searchParams), [searchParams]);
   const selectedAsOfDate = useMemo(() => toDateOnlyValue(requestedAsOf), [requestedAsOf]);
   const asOfQueryValue = useMemo(() => normalizeAsOfQueryValue(requestedAsOf), [requestedAsOf]);
@@ -229,6 +263,8 @@ export default function CompanyResearchBriefPage() {
   }, [activeJobId, data, loading, refreshState?.job_id, ticker]);
 
   const [briefRetryToken, setBriefRetryToken] = useState(0);
+  const [showKeyboardShortcutsHelp, setShowKeyboardShortcutsHelp] = useState(false);
+  const [activeResearchTab, setActiveResearchTab] = useState("summary");
   const briefData = useResearchBriefData(
     ticker,
     reloadKey,
@@ -263,10 +299,56 @@ export default function CompanyResearchBriefPage() {
     [briefData.brief?.snapshot?.confidence_flags, data?.confidence_flags]
   );
   const previousAnnual = annualStatements[1] ?? null;
+  const summarySourceQuality =
+    briefData.brief?.snapshot?.summary.source_quality ??
+    latestFinancial?.source_quality ??
+    null;
+  const primarySourceIds = data?.source_mix?.primary_source_ids ?? [];
+  const hasOfficialSecPrimary = primarySourceIds.some((sourceId) => sourceId.toLowerCase().startsWith("sec"));
   const foreignIssuerStyleFiling = isForeignIssuerAnnualForm(latestFinancial?.filing_type);
   const latestAlertCount = briefData.activityOverview.data?.summary.total ?? 0;
   const topAlerts = useMemo(() => (briefData.activityOverview.data?.alerts ?? []).slice(0, 3), [briefData.activityOverview.data?.alerts]);
   const latestEntries = useMemo(() => (briefData.activityOverview.data?.entries ?? []).slice(0, 4), [briefData.activityOverview.data?.entries]);
+  const importantChanges = useMemo(
+    () =>
+      topAlerts.map((alert, index) => ({
+        id: `${alert.id ?? `alert-${index}`}`,
+        title: alert.title,
+        description: alert.detail,
+        severity: (alert.level === "high" ? "high" : alert.level === "low" ? "low" : "medium") as "high" | "medium" | "low",
+        timestamp: alert.date ?? undefined,
+        actionLabel: alert.href ? "Open source" : "Open filings",
+        actionUrl: alert.href ?? `/company/${encodeURIComponent(ticker)}/filings`,
+      })),
+    [ticker, topAlerts]
+  );
+  const researchTabs: TabDefinition[] = useMemo(
+    () => [
+      { id: "summary", label: "Summary", panelId: "snapshot", description: "Jump to the research brief summary" },
+      {
+        id: "financials",
+        label: "Financials",
+        href: `/company/${encodeURIComponent(ticker)}/financials`,
+        description: "Open the detailed financial statements route",
+      },
+      {
+        id: "filings",
+        label: "Filings",
+        href: `/company/${encodeURIComponent(ticker)}/filings`,
+        description: "Open the SEC filings route",
+      },
+      {
+        id: "ownership",
+        label: "Ownership",
+        href: `/company/${encodeURIComponent(ticker)}/ownership`,
+        description: "Open ownership and holder disclosures",
+      },
+      { id: "segments", label: "Segments", panelId: "understand-business", description: "Jump to segment and business narrative" },
+      { id: "risk", label: "Risk", panelId: "capital-risk", description: "Jump to capital and risk signals" },
+      { id: "sources", label: "Sources", panelId: "data-quality", description: "Jump to source freshness and provenance" },
+    ],
+    [ticker]
+  );
   const equityClaimRiskSummary = briefData.brief?.capital_and_risk.equity_claim_risk_summary ?? null;
   const ntFilingSignals = useMemo<NtFilingSignalSummary | null>(() => {
     const ntSignals = (filingRiskSignals?.signals ?? []).filter((signal) => signal.signal_category.startsWith("nt_non_timely_"));
@@ -541,6 +623,68 @@ export default function CompanyResearchBriefPage() {
   );
   const showWarmupAppendixPanel =
     initialCompanyLoad || Boolean(activeJobId || refreshState?.job_id) || refreshing || briefData.buildState !== "ready";
+  const refreshQueued = Boolean(refreshing && !refreshState?.job_id);
+  const showingCachedData = !loading && pageCompany?.cache_state === "stale";
+  const missingCoreData = !loading && !error && !latestFinancial;
+
+  useEffect(() => {
+    if (activeSectionId === "capital-risk") {
+      setActiveResearchTab("risk");
+      return;
+    }
+    if (activeSectionId === "understand-business") {
+      setActiveResearchTab("segments");
+      return;
+    }
+    if (activeSectionId === "snapshot") {
+      setActiveResearchTab("summary");
+      return;
+    }
+    if (activeSectionId === "data-quality") {
+      setActiveResearchTab("sources");
+      return;
+    }
+    setActiveResearchTab("summary");
+  }, [activeSectionId]);
+
+  const handleImportantChangeAction = useCallback(
+    (change: Change) => {
+      router.push(change.actionUrl ?? `/company/${encodeURIComponent(ticker)}/filings`);
+    },
+    [router, ticker]
+  );
+
+  const handleResearchTabChange = useCallback(
+    (tabId: string) => {
+      setActiveResearchTab(tabId);
+      if (tabId === "summary") {
+        document.getElementById("snapshot")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (tabId === "segments") {
+        document.getElementById("understand-business")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (tabId === "risk") {
+        document.getElementById("capital-risk")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (tabId === "sources") {
+        document.getElementById("data-quality")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      const routeByTab: Record<string, string> = {
+        financials: `/company/${encodeURIComponent(ticker)}/financials`,
+        filings: `/company/${encodeURIComponent(ticker)}/filings`,
+        ownership: `/company/${encodeURIComponent(ticker)}/ownership`,
+      };
+      const destination = routeByTab[tabId];
+      if (destination) {
+        router.push(destination);
+      }
+    },
+    [router, ticker]
+  );
   const eagerDeferredSections = process.env.NODE_ENV === "test";
   const handleRetryBriefSlices = useCallback(() => {
     setBriefRetryToken((current) => current + 1);
@@ -788,10 +932,125 @@ export default function CompanyResearchBriefPage() {
           }
         />
 
+        <StickyCompanyHeader
+          ticker={ticker}
+          companyName={pageCompany?.name}
+          lastUpdated={pageCompany?.last_checked ? formatDate(pageCompany.last_checked) : undefined}
+          dataSource={hasOfficialSecPrimary ? "sec" : "cached"}
+          cacheState={pageCompany?.cache_state ?? null}
+          refreshState={refreshState?.job_id ? "refreshing" : refreshQueued ? "queued" : loading ? "loading" : "idle"}
+          onRefresh={() => queueRefresh()}
+        >
+          <nav className="company-shortcut-strip" aria-label="Company page keyboard shortcuts">
+            <span><kbd>/</kbd> Search</span>
+            <span><kbd>R</kbd> Refresh</span>
+            <span><kbd>W</kbd> Watchlist</span>
+            <span><kbd>C</kbd> Compare</span>
+          </nav>
+        </StickyCompanyHeader>
+
+        <ResearchBriefTabs tabs={researchTabs} activeTabId={activeResearchTab} onTabChange={handleResearchTabChange} />
+
         {initialCompanyLoadMessage ? (
           <div className="research-brief-hero-loading" role="status" aria-live="polite">
             {initialCompanyLoadMessage}
           </div>
+        ) : null}
+
+        {initialCompanyLoad && (
+          <LoadingStateIndicator
+            title="Loading official SEC data"
+            subtitle={`Building the company research brief and market context for ${ticker}`}
+            details={[
+              "Pulling company fundamentals from SEC filings",
+              "Gathering market and valuation context",
+              "Building research narrative",
+            ]}
+            type="loading"
+            action={
+              activeRefreshEntry ? undefined : {
+                label: "Manual refresh",
+                onClick: () => queueRefresh(),
+              }
+            }
+          />
+        )}
+
+        {refreshState?.job_id && !initialCompanyLoad && (
+          <LoadingStateIndicator
+            title="Refreshing data"
+            subtitle="Rebuilding cached surfaces and checking for updates"
+            details={[
+              `Refresh job: ${refreshState.job_id}`,
+              `Reason: ${refreshState.reason}`,
+              "Check progress in the data source panel",
+            ]}
+            type="refreshing"
+            action={{
+              label: "Cancel refresh",
+              onClick: () => {
+                showAppToast({ message: "Refresh will complete in the background", tone: "info" });
+              },
+            }}
+          />
+        )}
+
+        {refreshQueued && !initialCompanyLoad && !refreshState?.job_id && (
+          <LoadingStateIndicator
+            title="Refresh queued"
+            subtitle="A refresh request is queued and will run as soon as the current work completes"
+            details={["You can continue reviewing cached data while refresh is pending"]}
+            type="queued"
+          />
+        )}
+
+        {showingCachedData && !initialCompanyLoad && (
+          <LoadingStateIndicator
+            title="Showing cached data"
+            subtitle="Official SEC-backed refresh is pending; values shown are from the latest persisted snapshot"
+            details={["Source transparency and freshness badges remain visible for each section"]}
+            type="cached"
+            action={{
+              label: "Queue refresh",
+              onClick: () => queueRefresh(),
+            }}
+          />
+        )}
+
+        {!loading && !pageCompany && error && (
+          <EmptyState
+            title="Unable to load company data"
+            description={error}
+            icon="⚠"
+            actions={[
+              {
+                label: "Retry",
+                onClick: () => queueRefresh(),
+                variant: "primary",
+              },
+              {
+                label: "Back to companies",
+                href: "/",
+                variant: "secondary",
+              },
+            ]}
+          />
+        )}
+
+        {missingCoreData && pageCompany ? (
+          <LoadingStateIndicator
+            title="Missing data"
+            subtitle="Some filing-backed financial fields are not available for this ticker yet"
+            details={[
+              "Try refreshing to rebuild company snapshots",
+              "Review filings to confirm source availability",
+            ]}
+            type="missing"
+            action={{
+              label: "Open filings",
+              onClick: () => router.push(`/company/${encodeURIComponent(ticker)}/filings`),
+            }}
+          />
         ) : null}
 
         {refreshQueueDetailLine ? (
@@ -834,6 +1093,18 @@ export default function CompanyResearchBriefPage() {
             value={latestFinancial ? `${latestFinancial.filing_type} · ${formatDate(latestFinancial.period_end)}` : (bootstrapLatestFilingValue ?? "\u2014")}
           />
         </KpiStrip>
+
+        <SourceQualityBadges sourceQuality={summarySourceQuality} className="research-brief-partial-errors" />
+
+        <ImportantChangesPanel
+          changes={importantChanges}
+          title="Important changes"
+          subtitle="Highest-signal updates from filings and activity feeds"
+          emptyActionLabel="Open SEC feed"
+          loading={briefData.changes.loading || briefData.activityOverview.loading}
+          onActionClick={handleImportantChangeAction}
+          onEmptyActionClick={() => router.push(`/company/${encodeURIComponent(ticker)}/sec-feed`)}
+        />
 
         <SnapshotSection
           loading={loading}
@@ -1144,6 +1415,38 @@ export default function CompanyResearchBriefPage() {
         />
       </DeferredClientSection>
       </PageShell>
+
+      <KeyboardShortcutsDialog
+        isOpen={showKeyboardShortcutsHelp}
+        onClose={() => setShowKeyboardShortcutsHelp(false)}
+        shortcuts={[
+          {
+            key: "/",
+            description: "Open search",
+            category: "Navigation",
+          },
+          {
+            key: "r",
+            description: "Refresh data",
+            category: "Data",
+          },
+          {
+            key: "w",
+            description: "Open watchlist",
+            category: "Navigation",
+          },
+          {
+            key: "c",
+            description: "Open compare",
+            category: "Navigation",
+          },
+          {
+            key: "?",
+            description: "Show keyboard shortcuts help",
+            category: "Help",
+          },
+        ]}
+      />
     </CompanyWorkspaceShell>
   );
 }

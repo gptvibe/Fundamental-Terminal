@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import app.main as main_module
 from app.api.handlers import _shared as _shared_handlers
+from app.api.handlers import models as model_handlers
 import app.services.oil_scenario_overlay as overlay_service
 from app.db import get_db_session
 from app.main import app
@@ -18,6 +19,13 @@ def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
     monkeypatch.setattr(main_module, name, value)
     if hasattr(_shared_handlers, name):
         monkeypatch.setattr(_shared_handlers, name, value)
+    if hasattr(model_handlers, name):
+        monkeypatch.setattr(model_handlers, name, value)
+
+
+@pytest.fixture(autouse=True)
+def _enable_oil_scenarios(monkeypatch) -> None:
+    _patch_main_and_shared(monkeypatch, "_is_oil_scenarios_enabled", lambda: True)
 
 
 def _snapshot(ticker: str = "XOM"):
