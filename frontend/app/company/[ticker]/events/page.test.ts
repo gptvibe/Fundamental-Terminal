@@ -68,9 +68,9 @@ describe("CompanyEventsPage", () => {
     const html = renderToStaticMarkup(React.createElement(CompanyEventsPage));
 
     expect(html).toContain("Events");
-    expect(html).toContain("Current-report intelligence stays anchored to SEC 8-K filings");
+    expect(html).toContain("Chronological timeline of SEC filings");
     expect(html).toContain("Event Categories");
-    expect(html).toContain("Recent 8-K Timeline");
+    expect(html).toContain("Filing Timeline");
     expect(html).toContain("Loading filing events...");
     expect(html).toContain("event-chart");
   });

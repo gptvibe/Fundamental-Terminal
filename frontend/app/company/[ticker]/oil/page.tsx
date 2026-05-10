@@ -14,7 +14,7 @@ import { SourceFreshnessSummary } from "@/components/ui/source-freshness-summary
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyModels, getCompanyOilScenarioOverlay, getLatestModelEvaluation } from "@/lib/api";
 import { formatPercent, titleCase } from "@/lib/format";
-import { describeOilOverlayAvailability, describeOilSupportReason, resolveOilOverlayEvaluationSummary, supportsOilWorkspace } from "@/lib/oil-workspace";
+import { describeOilOverlayAvailability, describeOilSupportReason, isOilScenariosEnabled, resolveOilOverlayEvaluationSummary, supportsOilWorkspace } from "@/lib/oil-workspace";
 import type { CompanyModelsResponse, CompanyOilScenarioResponse, ModelEvaluationResponse } from "@/lib/types";
 
 const OIL_OVERLAY_EVALUATION_SUITE_KEY = "oil_overlay_point_in_time_v1";
@@ -36,6 +36,28 @@ const SECTION_OPTIONS = [
 export default function CompanyOilPage() {
   const params = useParams<{ ticker: string }>();
   const ticker = decodeURIComponent(params.ticker).toUpperCase();
+  const oilScenariosEnabled = isOilScenariosEnabled();
+
+  if (!oilScenariosEnabled) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4 p-8 text-center">
+        <h2 className="text-lg font-semibold text-neutral-200">Oil Sector Plugin Not Enabled</h2>
+        <p className="text-sm text-neutral-400 max-w-md">
+          The oil scenario workspace is an optional sector plugin. To enable it, set{" "}
+          <code className="text-xs bg-neutral-800 px-1 py-0.5 rounded">ENABLE_OIL_SCENARIOS=true</code> (backend) and{" "}
+          <code className="text-xs bg-neutral-800 px-1 py-0.5 rounded">NEXT_PUBLIC_ENABLE_OIL_SCENARIOS=true</code> (frontend) in your deployment environment.
+        </p>
+        <Link href={`/company/${encodeURIComponent(ticker)}`} className="text-sm text-blue-400 hover:underline">
+          Return to Company Overview
+        </Link>
+      </div>
+    );
+  }
+
+  return <CompanyOilWorkspace ticker={ticker} />;
+}
+
+function CompanyOilWorkspace({ ticker }: { ticker: string }) {
   const {
     company,
     financials = [],

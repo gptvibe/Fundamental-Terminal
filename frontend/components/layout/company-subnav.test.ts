@@ -39,6 +39,7 @@ vi.mock("next/link", () => ({
 
 describe("CompanySubnav", () => {
   beforeEach(() => {
+    process.env.NEXT_PUBLIC_ENABLE_OIL_SCENARIOS = "true";
     mockUsePathname.mockReset();
     mockRouterPrefetch.mockReset();
     mockUseCompanyLayoutContext.mockReset();

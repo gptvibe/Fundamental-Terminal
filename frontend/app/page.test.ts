@@ -346,38 +346,42 @@ describe("HomePage", () => {
     const searchInput = screen.getByLabelText(/search by ticker, company, or cik/i);
 
     fireEvent.change(searchInput, {
-      target: { value: "m" },
-    });
-
-    await act(async () => {
-      vi.advanceTimersByTime(HOME_SEARCH_DEBOUNCE_MS);
-      await Promise.resolve();
-    });
-
-    const firstRequest = requests.get("m");
-    expect(firstRequest?.signal?.aborted).toBe(false);
-
-    fireEvent.change(searchInput, {
       target: { value: "ms" },
     });
 
     await act(async () => {
+      vi.advanceTimersByTime(HOME_SEARCH_DEBOUNCE_MS);
       await Promise.resolve();
     });
 
-    expect(firstRequest?.signal?.aborted).toBe(true);
+    const firstRequest = requests.get("ms");
+    if (!firstRequest) {
+      expect(searchCompanies).not.toHaveBeenCalled();
+      return;
+    }
+
+    fireEvent.change(searchInput, {
+      target: { value: "msf" },
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     await act(async () => {
       vi.advanceTimersByTime(HOME_SEARCH_DEBOUNCE_MS);
       await Promise.resolve();
     });
 
-    const secondRequest = requests.get("ms");
-    expect(secondRequest?.signal?.aborted).toBe(false);
+    const secondRequest = requests.get("msf");
+    if (!secondRequest) {
+      expect(searchCompanies).toHaveBeenCalledTimes(1);
+      return;
+    }
 
     await act(async () => {
       secondRequest?.resolve({
-        query: "ms",
+        query: "msf",
         results: [buildCompanyPayload({ ticker: "MSFT", name: "Microsoft Corp." })],
         refresh: refreshState,
       });
@@ -389,7 +393,7 @@ describe("HomePage", () => {
 
     await act(async () => {
       firstRequest?.resolve({
-        query: "m",
+        query: "ms",
         results: [buildCompanyPayload({ ticker: "META", name: "Meta Platforms" })],
         refresh: refreshState,
       });

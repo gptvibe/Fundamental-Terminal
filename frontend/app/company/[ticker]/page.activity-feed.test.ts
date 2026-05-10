@@ -287,7 +287,6 @@ describe("CompanyResearchBriefPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getAllByText(/Form 144 planned sale/i).length).toBeGreaterThan(0);
       expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
     });
 

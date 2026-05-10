@@ -56,7 +56,13 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("CompanyOilPage", () => {
+  it("enables oil scenarios in test runtime", () => {
+    process.env.NEXT_PUBLIC_ENABLE_OIL_SCENARIOS = "true";
+    expect(process.env.NEXT_PUBLIC_ENABLE_OIL_SCENARIOS).toBe("true");
+  });
+
   it("renders the dedicated oil workspace for supported companies", async () => {
+    process.env.NEXT_PUBLIC_ENABLE_OIL_SCENARIOS = "true";
     useCompanyWorkspace.mockReturnValue({
       company: {
         ticker: "ACME",
@@ -160,6 +166,7 @@ describe("CompanyOilPage", () => {
   });
 
   it("shows an unavailable message for unsupported companies", async () => {
+    process.env.NEXT_PUBLIC_ENABLE_OIL_SCENARIOS = "true";
     useCompanyWorkspace.mockReturnValue({
       company: {
         ticker: "ACME",
