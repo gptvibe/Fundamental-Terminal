@@ -5027,9 +5027,25 @@ def company_capital_markets_summary(
 @app.get("/api/companies/{ticker}/events", response_model=CompanyEventsResponse)
 def company_events(
     ticker: str,
+    request: Request = None,
+    form_types: str | None = Query(default=None, description="Comma-separated form types to include (e.g. '10-K,10-Q,8-K')"),
+    categories: str | None = Query(default=None, description="Comma-separated categories to include (e.g. 'Earnings,Deal')"),
+    amendments_only: bool = Query(default=False, description="When true, only return amendment filings"),
     session: Session = Depends(get_db_session),
 ) -> CompanyEventsResponse:
     normalized_ticker = _normalize_ticker(ticker)
+    resolved_form_types = _read_singleton_query_param_or_400(request, "form_types", fallback=form_types)
+    resolved_categories = _read_singleton_query_param_or_400(request, "categories", fallback=categories)
+    form_type_filter: set[str] | None = (
+        {f.strip().upper() for f in resolved_form_types.split(",") if f.strip()}
+        if resolved_form_types
+        else None
+    )
+    category_filter: set[str] | None = (
+        {c.strip() for c in resolved_categories.split(",") if c.strip()}
+        if resolved_categories
+        else None
+    )
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     if snapshot is None:
         return CompanyEventsResponse(
@@ -5041,7 +5057,8 @@ def company_events(
         )
 
     refresh = _refresh_for_snapshot(snapshot)
-    events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    all_events = [_serialize_cached_filing_event(event) for event in get_company_filing_events(session, snapshot.company.id)]
+    events = _filter_filing_events(all_events, form_types=form_type_filter, categories=category_filter, amendments_only=amendments_only)
     return CompanyEventsResponse(
         company=_serialize_company(snapshot),
         events=events,
@@ -5054,9 +5071,13 @@ def company_events(
 @app.get("/api/companies/{ticker}/filing-events", response_model=CompanyEventsResponse)
 def company_filing_events(
     ticker: str,
+    request: Request = None,
+    form_types: str | None = Query(default=None, description="Comma-separated form types to include (e.g. '10-K,10-Q,8-K')"),
+    categories: str | None = Query(default=None, description="Comma-separated categories to include"),
+    amendments_only: bool = Query(default=False, description="When true, only return amendment filings"),
     session: Session = Depends(get_db_session),
 ) -> CompanyEventsResponse:
-    return company_events(ticker=ticker, session=session)
+    return company_events(ticker=ticker, request=request, form_types=form_types, categories=categories, amendments_only=amendments_only, session=session)
 
 
 @app.get("/api/companies/{ticker}/filing-events/summary", response_model=CompanyFilingEventsSummaryResponse)
@@ -9195,6 +9216,27 @@ def _serialize_filing_event(cik: str, filing: FilingMetadata) -> FilingEventPayl
     )
 
 
+def _filter_filing_events(
+    events: list[FilingEventPayload],
+    *,
+    form_types: set[str] | None,
+    categories: set[str] | None,
+    amendments_only: bool,
+) -> list[FilingEventPayload]:
+    if not form_types and not categories and not amendments_only:
+        return events
+    result: list[FilingEventPayload] = []
+    for event in events:
+        if form_types and event.form.upper() not in form_types:
+            continue
+        if categories and event.category not in categories:
+            continue
+        if amendments_only and not event.is_amendment:
+            continue
+        result.append(event)
+    return result
+
+
 def _serialize_cached_filing_event(event) -> FilingEventPayload:
     raw_exhibits = list(getattr(event, "exhibit_references", []) or [])
     exhibit_references = [str(value) for value in raw_exhibits if isinstance(value, str)]
@@ -9214,6 +9256,8 @@ def _serialize_cached_filing_event(event) -> FilingEventPayload:
         key_amounts=[float(value) for value in (event.key_amounts or [])],
         exhibit_references=exhibit_references,
         exhibit_previews=[preview for preview in exhibit_previews if preview is not None],
+        is_amendment=bool(getattr(event, "is_amendment", False)),
+        is_late_filing=bool(getattr(event, "is_late_filing", False)),
     )
 
 
@@ -9233,6 +9277,8 @@ def _serialize_normalized_filing_event(event) -> FilingEventPayload:
         key_amounts=list(event.key_amounts),
         exhibit_references=list(event.exhibit_references),
         exhibit_previews=[],
+        is_amendment=bool(getattr(event, "is_amendment", False)),
+        is_late_filing=bool(getattr(event, "is_late_filing", False)),
     )
 
 

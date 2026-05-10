@@ -18,8 +18,40 @@ _METRIC_DEFINITIONS: tuple[tuple[str, str, str], ...] = (
     ("net_income", "Net Income", "usd"),
     ("operating_cash_flow", "Operating Cash Flow", "usd"),
     ("free_cash_flow", "Free Cash Flow", "usd"),
+    ("capex", "Capital Expenditures", "usd"),
     ("eps", "EPS", "usd_per_share"),
 )
+
+_AMENDED_FILING_FORMS = {"10-K/A", "10-Q/A", "8-K/A", "20-F/A", "40-F/A"}
+_NT_FILING_FORMS = {"NT 10-K", "NT 10-Q", "NT 20-F"}
+
+# Canonical XBRL source concepts for each metric key (primary US-GAAP tag first)
+_METRIC_SOURCE_CONCEPTS: dict[str, list[str]] = {
+    "revenue": ["us-gaap:Revenues", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", "ifrs-full:Revenue"],
+    "gross_profit": ["us-gaap:GrossProfit", "ifrs-full:GrossProfit"],
+    "operating_income": ["us-gaap:OperatingIncomeLoss", "ifrs-full:ProfitLossFromOperatingActivities"],
+    "net_income": ["us-gaap:NetIncomeLoss", "us-gaap:ProfitLoss", "ifrs-full:ProfitLoss"],
+    "operating_cash_flow": ["us-gaap:NetCashProvidedByUsedInOperatingActivities", "ifrs-full:CashFlowsFromUsedInOperatingActivities"],
+    "free_cash_flow": ["us-gaap:NetCashProvidedByUsedInOperatingActivities", "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment"],
+    "capex": [
+        "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+        "us-gaap:PaymentsForCapitalImprovements",
+        "ifrs-full:PurchaseOfPropertyPlantAndEquipmentIntangibleAssetsAndOtherLongTermAssets",
+    ],
+    "eps": ["us-gaap:EarningsPerShareDiluted", "us-gaap:EarningsPerShareBasic"],
+    "shares_outstanding": ["us-gaap:CommonStockSharesOutstanding", "ifrs-full:NumberOfSharesOutstanding"],
+    "weighted_average_diluted_shares": ["us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding"],
+    "cash_and_short_term_investments": [
+        "us-gaap:CashAndCashEquivalentsAtCarryingValue",
+        "us-gaap:CashCashEquivalentsAndShortTermInvestments",
+    ],
+    "current_debt": ["us-gaap:DebtCurrent", "us-gaap:LongTermDebtCurrent"],
+    "long_term_debt": ["us-gaap:LongTermDebtNoncurrent", "us-gaap:LongTermDebt"],
+    "lease_liabilities": ["us-gaap:OperatingLeaseLiability", "us-gaap:FinanceLeaseLiability"],
+    "stockholders_equity": ["us-gaap:StockholdersEquity", "ifrs-full:Equity"],
+    "net_debt": ["us-gaap:LongTermDebt", "us-gaap:DebtCurrent", "us-gaap:CashAndCashEquivalentsAtCarryingValue"],
+    "debt_to_equity": ["us-gaap:LongTermDebt", "us-gaap:DebtCurrent", "us-gaap:StockholdersEquity"],
+}
 
 _SHARE_COUNT_DEFINITIONS: tuple[tuple[str, str, str], ...] = (
     ("shares_outstanding", "Shares Outstanding", "shares"),
@@ -95,7 +127,14 @@ def build_changes_since_last_filing(
     *,
     parsed_filings: list[FinancialStatement] | None = None,
     comment_letters: list[Any] | None = None,
+    capital_markets_events: list[Any] | None = None,
 ) -> dict[str, Any]:
+    """Build a structured diff of key financial facts between the latest filing and the prior comparable period.
+
+    Pass ``capital_markets_events`` (a list of CapitalMarketsEvent-like objects with
+    ``form`` and ``filing_date`` attributes) to enable late-filing and amended-filing
+    notice detection in the ``filing_notices`` output section.
+    """
     comparable = [
         statement
         for statement in financials
@@ -118,6 +157,7 @@ def build_changes_since_last_filing(
             "amended_prior_values": [],
             "high_signal_changes": [],
             "comment_letter_history": _empty_comment_letter_history(),
+            "filing_notices": _build_filing_notices(capital_markets_events or []),
             "confidence_flags": ["current_filing_missing"],
         }
 
@@ -142,6 +182,7 @@ def build_changes_since_last_filing(
     ]
 
     amended_prior_values = _build_amended_prior_values(previous, restatements)
+    filing_notices = _build_filing_notices(capital_markets_events or [], current=current)
     parser_current, parser_previous = _select_parser_pair(parsed_filings or [], current, previous)
     high_signal_changes, parser_flags = _build_high_signal_changes(
         parser_current=parser_current,
@@ -153,6 +194,10 @@ def build_changes_since_last_filing(
     comment_letter_history = _build_comment_letter_history(comment_letters or [], current, previous)
 
     confidence_flags: set[str] = set()
+    if any(n.get("notice_kind") == "nt_filing" for n in filing_notices):
+        confidence_flags.add("late_filing_notice_detected")
+    if any(n.get("notice_kind") == "amended_filing" for n in filing_notices):
+        confidence_flags.add("amended_filing_detected")
     if previous is None:
         confidence_flags.add("previous_comparable_filing_missing")
     if not metric_deltas:
@@ -186,6 +231,7 @@ def build_changes_since_last_filing(
             "amended_prior_value_count": len(amended_prior_values),
             "high_signal_change_count": len(high_signal_changes),
             "comment_letter_count": int(comment_letter_history.get("letters_since_previous_filing") or 0),
+            "filing_notice_count": len(filing_notices),
         },
         "metric_deltas": metric_deltas,
         "new_risk_indicators": new_risk_indicators,
@@ -195,8 +241,108 @@ def build_changes_since_last_filing(
         "amended_prior_values": amended_prior_values,
         "high_signal_changes": high_signal_changes,
         "comment_letter_history": comment_letter_history,
+        "filing_notices": filing_notices,
         "confidence_flags": sorted(confidence_flags),
     }
+
+
+
+def _missing_data_warning(current_value: float | None, previous_value: float | None) -> str | None:
+    """Return a warning string if one or both values are missing."""
+    if current_value is None and previous_value is None:
+        return "Both current and prior period values are unavailable for this metric."
+    if current_value is None:
+        return "Current period value is unavailable; comparison is not possible."
+    if previous_value is None:
+        return "Prior period value is unavailable; change direction cannot be determined."
+    return None
+
+
+def _build_filing_notices(
+    capital_markets_events: list[Any],
+    *,
+    current: Any = None,
+) -> list[dict[str, Any]]:
+    """Detect NT (non-timely) and /A (amended) filing notices from capital markets events.
+
+    NT 10-K / NT 10-Q indicate that the company filed a notice of late filing.
+    10-K/A, 10-Q/A, 8-K/A indicate that a previously filed report was amended.
+    """
+    notices: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    # Determine a lookback anchor: 18 months before the current filing period end
+    current_period_end: date | None = getattr(current, "period_end", None) if current is not None else None
+
+    for event in capital_markets_events:
+        form = str(getattr(event, "form", None) or "").strip()
+        if not form:
+            continue
+        filing_date: date | None = getattr(event, "filing_date", None)
+        accession_number: str | None = str(getattr(event, "accession_number", None) or "").strip() or None
+        source_url: str | None = str(getattr(event, "source_url", None) or "").strip() or None
+        summary: str = str(getattr(event, "summary", None) or "").strip()
+
+        dedup_key = f"{form}:{accession_number or filing_date}"
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+
+        if form in _NT_FILING_FORMS:
+            notices.append(
+                {
+                    "notice_kind": "nt_filing",
+                    "form": form,
+                    "label": _nt_label(form),
+                    "description": f"A non-timely filing notice ({form}) was submitted, indicating the annual or quarterly report could not be filed on schedule.",
+                    "filing_date": filing_date,
+                    "accession_number": accession_number,
+                    "source_url": source_url,
+                    "severity": "high",
+                    "warning": f"Late filing notice detected ({form}). The regular report may be delayed or contain restatements.",
+                }
+            )
+        elif form in _AMENDED_FILING_FORMS:
+            notices.append(
+                {
+                    "notice_kind": "amended_filing",
+                    "form": form,
+                    "label": _amended_label(form),
+                    "description": f"An amended filing ({form}) was submitted, which may revise previously reported financial data.",
+                    "filing_date": filing_date,
+                    "accession_number": accession_number,
+                    "source_url": source_url,
+                    "severity": "medium",
+                    "warning": f"Amended filing detected ({form}). Prior-period values in this comparison may reflect pre-amendment figures.",
+                }
+            )
+
+    # Sort: NT filings first (high severity), then amended filings, newest first within each group
+    notices.sort(key=lambda n: (0 if n["severity"] == "high" else 1, _notice_date_sort(n)), reverse=False)
+    return notices
+
+
+def _nt_label(form: str) -> str:
+    labels = {"NT 10-K": "Non-Timely Annual Report", "NT 10-Q": "Non-Timely Quarterly Report", "NT 20-F": "Non-Timely Annual Report (20-F)"}
+    return labels.get(form, f"Non-Timely Filing ({form})")
+
+
+def _amended_label(form: str) -> str:
+    labels = {
+        "10-K/A": "Amended Annual Report (10-K/A)",
+        "10-Q/A": "Amended Quarterly Report (10-Q/A)",
+        "8-K/A": "Amended Current Report (8-K/A)",
+        "20-F/A": "Amended Annual Report (20-F/A)",
+        "40-F/A": "Amended Annual Report (40-F/A)",
+    }
+    return labels.get(form, f"Amended Filing ({form})")
+
+
+def _notice_date_sort(notice: dict[str, Any]) -> tuple[int, int]:
+    filing_date = notice.get("filing_date")
+    if isinstance(filing_date, date):
+        return (-filing_date.year, -filing_date.timetuple().tm_yday)
+    return (0, 0)
 
 
 def _empty_summary() -> dict[str, Any]:
@@ -214,6 +360,7 @@ def _empty_summary() -> dict[str, Any]:
         "amended_prior_value_count": 0,
         "high_signal_change_count": 0,
         "comment_letter_count": 0,
+        "filing_notice_count": 0,
     }
 
 
@@ -271,6 +418,8 @@ def _build_metric_delta_group(
                 "delta": _numeric_delta(previous_value, current_value),
                 "relative_change": _relative_change(previous_value, current_value),
                 "direction": _change_direction(previous_value, current_value),
+                "source_concepts": _METRIC_SOURCE_CONCEPTS.get(metric_key, []),
+                "missing_data_warning": _missing_data_warning(current_value, previous_value),
             }
         )
 

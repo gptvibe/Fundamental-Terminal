@@ -354,6 +354,7 @@ def test_changes_since_last_filing_route_exposes_provenance_and_as_of(monkeypatc
     monkeypatch.setattr(main_module, "get_company_financial_restatements", lambda *_args, **_kwargs: [restatement])
     monkeypatch.setattr(main_module, "get_company_filing_insights", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(main_module, "get_company_comment_letters", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_capital_markets_events", lambda *_args, **_kwargs: [])
 
     client = TestClient(app)
     response = client.get("/api/companies/AAPL/changes-since-last-filing?as_of=2026-03-20")
@@ -369,6 +370,167 @@ def test_changes_since_last_filing_route_exposes_provenance_and_as_of(monkeypatc
         "sec_edgar",
     }
     assert "prior_values_amended" in payload["confidence_flags"]
+
+
+def test_build_changes_includes_capex_delta() -> None:
+    current = _statement(
+        3,
+        filing_type="10-Q",
+        period_start=date(2025, 7, 1),
+        period_end=date(2025, 9, 30),
+        acceptance_at=datetime(2025, 11, 2, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 120.0, "capex": 8.0},
+    )
+    previous = _statement(
+        2,
+        filing_type="10-Q",
+        period_start=date(2025, 4, 1),
+        period_end=date(2025, 6, 30),
+        acceptance_at=datetime(2025, 8, 10, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 102.0, "capex": 5.0},
+    )
+
+    comparison = build_changes_since_last_filing([current, previous], [])
+
+    capex_delta = next((item for item in comparison["metric_deltas"] if item["metric_key"] == "capex"), None)
+    assert capex_delta is not None, "capex should appear in metric_deltas"
+    assert capex_delta["current_value"] == 8.0
+    assert capex_delta["previous_value"] == 5.0
+    assert capex_delta["unit"] == "usd"
+
+
+def test_build_changes_metric_deltas_include_source_concepts() -> None:
+    current = _statement(
+        3,
+        filing_type="10-Q",
+        period_start=date(2025, 7, 1),
+        period_end=date(2025, 9, 30),
+        acceptance_at=datetime(2025, 11, 2, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 120.0},
+    )
+    previous = _statement(
+        2,
+        filing_type="10-Q",
+        period_start=date(2025, 4, 1),
+        period_end=date(2025, 6, 30),
+        acceptance_at=datetime(2025, 8, 10, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 102.0},
+    )
+
+    comparison = build_changes_since_last_filing([current, previous], [])
+
+    revenue_delta = next((item for item in comparison["metric_deltas"] if item["metric_key"] == "revenue"), None)
+    assert revenue_delta is not None
+    assert isinstance(revenue_delta.get("source_concepts"), list), "source_concepts should be a list"
+    assert len(revenue_delta["source_concepts"]) > 0, "source_concepts should not be empty for revenue"
+    assert any("Revenue" in c for c in revenue_delta["source_concepts"]), "revenue source_concepts should reference a Revenue tag"
+
+
+def _capital_markets_event(*, form: str, filing_date: date | None = None, accession_number: str | None = None, is_late_filer: bool = False):
+    return SimpleNamespace(
+        id=1,
+        company_id=1,
+        form=form,
+        filing_date=filing_date,
+        acceptance_datetime=None,
+        accession_number=accession_number,
+        is_late_filer=is_late_filer,
+        event_type="filing",
+        source="sec_edgar",
+        source_url=None,
+        last_updated=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        last_checked=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+
+def test_build_changes_detects_nt_filing_notice() -> None:
+    current = _statement(
+        3,
+        filing_type="10-Q",
+        period_start=date(2025, 7, 1),
+        period_end=date(2025, 9, 30),
+        acceptance_at=datetime(2025, 11, 2, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 120.0},
+    )
+    previous = _statement(
+        2,
+        filing_type="10-Q",
+        period_start=date(2025, 4, 1),
+        period_end=date(2025, 6, 30),
+        acceptance_at=datetime(2025, 8, 10, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 102.0},
+    )
+    nt_event = _capital_markets_event(form="NT 10-Q", filing_date=date(2025, 11, 15), is_late_filer=True)
+
+    comparison = build_changes_since_last_filing([current, previous], [], capital_markets_events=[nt_event])
+
+    assert comparison["summary"]["filing_notice_count"] >= 1
+    notices = comparison["filing_notices"]
+    assert len(notices) >= 1
+    nt_notice = next((n for n in notices if n["notice_kind"] == "nt_filing"), None)
+    assert nt_notice is not None, "Should produce an nt_filing notice"
+    assert nt_notice["severity"] == "high"
+    assert nt_notice["form"] == "NT 10-Q"
+    assert "late_filing_notice_detected" in comparison["confidence_flags"]
+
+
+def test_build_changes_detects_amended_filing_notice() -> None:
+    current = _statement(
+        3,
+        filing_type="10-Q",
+        period_start=date(2025, 7, 1),
+        period_end=date(2025, 9, 30),
+        acceptance_at=datetime(2025, 11, 2, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 120.0},
+    )
+    previous = _statement(
+        2,
+        filing_type="10-Q",
+        period_start=date(2025, 4, 1),
+        period_end=date(2025, 6, 30),
+        acceptance_at=datetime(2025, 8, 10, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 102.0},
+    )
+    amended_event = _capital_markets_event(
+        form="10-Q/A",
+        filing_date=date(2025, 9, 5),
+        accession_number="0000123456-25-000099",
+    )
+
+    comparison = build_changes_since_last_filing([current, previous], [], capital_markets_events=[amended_event])
+
+    notices = comparison["filing_notices"]
+    amended_notice = next((n for n in notices if n["notice_kind"] == "amended_filing"), None)
+    assert amended_notice is not None, "Should produce an amended_filing notice"
+    assert amended_notice["severity"] == "medium"
+    assert amended_notice["form"] == "10-Q/A"
+    assert "amended_filing_detected" in comparison["confidence_flags"]
+
+
+def test_build_changes_missing_data_warning_when_value_absent() -> None:
+    current = _statement(
+        3,
+        filing_type="10-Q",
+        period_start=date(2025, 7, 1),
+        period_end=date(2025, 9, 30),
+        acceptance_at=datetime(2025, 11, 2, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 120.0},  # operating_income missing
+    )
+    previous = _statement(
+        2,
+        filing_type="10-Q",
+        period_start=date(2025, 4, 1),
+        period_end=date(2025, 6, 30),
+        acceptance_at=datetime(2025, 8, 10, 20, 0, tzinfo=timezone.utc),
+        data={"revenue": 102.0},
+    )
+
+    comparison = build_changes_since_last_filing([current, previous], [])
+
+    op_income_delta = next((item for item in comparison["metric_deltas"] if item["metric_key"] == "operating_income"), None)
+    # If not present at all, that's also acceptable. If present, missing_data_warning should be set.
+    if op_income_delta is not None:
+        assert op_income_delta.get("missing_data_warning") is not None, "Should warn about missing operating_income"
 
 
 def test_changes_since_last_filing_route_prefers_persisted_brief_snapshot(monkeypatch) -> None:

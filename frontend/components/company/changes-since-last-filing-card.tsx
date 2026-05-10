@@ -14,6 +14,7 @@ import type {
   FilingComparisonSegmentShiftPayload,
   FilingCommentLetterItemPayload,
   FilingHighSignalChangePayload,
+  FilingNoticePayload,
 } from "@/lib/types";
 
 interface ChangesSinceLastFilingCardProps {
@@ -86,6 +87,7 @@ export function ChangesSinceLastFilingCard({
     [payload?.capital_structure_changes, payload?.share_count_changes]
   );
   const amendedPriorValues = useMemo(() => (payload?.amended_prior_values ?? []).slice(0, 3), [payload?.amended_prior_values]);
+  const filingNotices = useMemo(() => (payload?.filing_notices ?? []), [payload?.filing_notices]);
   const highSignalChanges = useMemo(
     () => (payload?.high_signal_changes ?? []).slice(0, detailMode === "brief" ? 4 : 8),
     [detailMode, payload?.high_signal_changes]
@@ -138,6 +140,14 @@ export function ChangesSinceLastFilingCard({
         <MetricCard label="New Risk Indicators" value={String(summary.new_risk_indicator_count)} />
       </div>
 
+      {filingNotices.length > 0 ? (
+        <Section title="Filing Notices" emptyMessage="">
+          {filingNotices.map((notice) => (
+            <FilingNoticeRow key={`${notice.notice_kind}-${notice.accession_number ?? notice.filing_date ?? notice.form}`} item={notice} />
+          ))}
+        </Section>
+      ) : null}
+
       <Section title="High-Signal Filing Intelligence" emptyMessage="No high-signal filing changes were detected between the latest and prior comparable filings.">
         {highSignalChanges.map((item) => (
           <HighSignalChangeRow key={item.change_key} item={item} />
@@ -185,6 +195,29 @@ export function ChangesSinceLastFilingCard({
       ) : null}
     </div>
   );
+}
+
+function FilingNoticeRow({ item }: { item: FilingNoticePayload }) {
+  const href = item.source_url ?? (item.accession_number ? `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&filenum=&type=${encodeURIComponent(item.form)}&dateb=&owner=include&count=10` : undefined);
+  const inner = (
+    <div className="filing-link-card" style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <strong>{item.label}</strong>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span className="pill">{item.form}</span>
+          <span className="pill" style={{ background: item.severity === "high" ? "var(--red-muted, #fee2e2)" : "var(--yellow-muted, #fef9c3)", color: "var(--text)" }}>{item.severity}</span>
+        </div>
+      </div>
+      <div style={{ fontSize: 14, color: "var(--text)" }}>{item.description}</div>
+      <div className="text-muted" style={{ fontSize: 13 }}>
+        {item.warning}
+        {item.filing_date ? ` Filed ${formatDate(item.filing_date)}.` : ""}
+      </div>
+    </div>
+  );
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "block" }}>{inner}</a>
+  ) : inner;
 }
 
 function Section({ title, emptyMessage, children }: { title: string; emptyMessage: string; children: ReactNode }) {

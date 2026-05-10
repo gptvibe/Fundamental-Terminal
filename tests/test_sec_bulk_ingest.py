@@ -18,7 +18,7 @@ from app.services.sec.bulk_ingest import BulkArchiveIngester, bulk_ingest_main
 
 def _create_test_db_session() -> Session:
     """Create an in-memory SQLite test database session."""
-    from sqlalchemy import MetaData, Table, Column, Integer, String, Date, DateTime, ForeignKey, Text
+    from sqlalchemy import MetaData, Table, Column, Integer, String, Date, DateTime, ForeignKey, Text, Boolean
     
     # Use SQLite in-memory database for fast tests
     engine = create_engine("sqlite:///:memory:")
@@ -56,6 +56,8 @@ def _create_test_db_session() -> Session:
         Column('summary', String(500), nullable=False),
         Column('key_amounts', String(512), nullable=False, default='[]'),  # JSON as string
         Column('exhibit_references', String(512), nullable=False, default='[]'),  # JSON as string
+        Column('is_amendment', Boolean, nullable=False, default=False),
+        Column('is_late_filing', Boolean, nullable=False, default=False),
         Column('last_updated', DateTime, nullable=False),
         Column('last_checked', DateTime, nullable=False),
     )

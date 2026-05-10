@@ -31,10 +31,22 @@ EVENT_ITEM_LABELS: dict[str, str] = {
     "8.01": "Other Events",
     "9.01": "Financial Statements and Exhibits",
 }
-FILING_EVENTS_PAYLOAD_VERSION = "filing-events-v1"
+FILING_EVENTS_PAYLOAD_VERSION = "filing-events-v2"
 _EARNINGS_ADJACENT_ITEM_CODES = {"2.02", "7.01", "8.01"}
 _TEXT_DOCUMENT_EXTENSIONS = {".htm", ".html", ".txt", ".xml", ".xhtml"}
 _EXHIBIT_PREVIEW_MAX_LENGTH = 600
+
+
+_AMENDMENT_FORM_SUFFIX = "/A"
+_LATE_FILING_FORM_PREFIX = "NT "
+
+# Forms included in the timeline beyond 8-K
+_ANNUAL_FORMS = {"10-K", "20-F", "40-F"}
+_QUARTERLY_FORMS = {"10-Q", "6-K"}
+_PROXY_FORMS = {"DEF 14A", "DEFA14A", "PRE 14A", "DEF 14C"}
+_INSIDER_FORMS = {"4", "5"}
+_LATE_FILING_FORMS = {"NT 10-K", "NT 10-Q", "NT 20-F"}
+_AMENDMENT_BASE_FORMS = {"10-K", "10-Q", "20-F", "40-F", "8-K"}
 
 
 @dataclass(slots=True)
@@ -53,6 +65,54 @@ class NormalizedFilingEvent:
     key_amounts: tuple[float, ...] = ()
     exhibit_references: tuple[str, ...] = ()
     exhibit_previews: tuple[dict[str, str | None], ...] = ()
+    is_amendment: bool = False
+    is_late_filing: bool = False
+
+
+def _is_amendment_form(form: str) -> bool:
+    """Return True for /A amendments (e.g. 10-K/A, 8-K/A)."""
+    return form.endswith(_AMENDMENT_FORM_SUFFIX)
+
+
+def _base_form(form: str) -> str:
+    """Strip /A suffix to get the base form name."""
+    return form[:-2] if _is_amendment_form(form) else form
+
+
+def _classify_non_8k_event(form: str) -> str:
+    """Return a category label for non-8-K form types."""
+    base = _base_form(form)
+    if base in _ANNUAL_FORMS:
+        return "Annual Filing"
+    if base in _QUARTERLY_FORMS:
+        return "Quarterly Filing"
+    if form in _PROXY_FORMS or base in {"DEF 14A", "DEFA14A", "PRE 14A", "DEF 14C"}:
+        return "Proxy"
+    if form in _INSIDER_FORMS:
+        return "Insider"
+    if form in _LATE_FILING_FORMS:
+        return "Late Filing Notice"
+    return "Other"
+
+
+def _build_non_8k_summary(form: str, description: str | None) -> str:
+    if description:
+        return description
+    base = _base_form(form)
+    is_amend = _is_amendment_form(form)
+    amend_label = " (Amendment)" if is_amend else ""
+    if base in _ANNUAL_FORMS:
+        return f"{base} Annual Report{amend_label}."
+    if base in _QUARTERLY_FORMS:
+        return f"{base} Quarterly Report{amend_label}."
+    if form in _PROXY_FORMS or base in {"DEF 14A", "DEFA14A", "PRE 14A", "DEF 14C"}:
+        return "Definitive proxy statement filed with the SEC."
+    if form in _INSIDER_FORMS:
+        label = "Form 4" if form == "4" else "Form 5"
+        return f"{label} insider ownership report."
+    if form in _LATE_FILING_FORMS:
+        return f"{form} notification of late filing."
+    return f"{form} SEC filing."
 
 
 def collect_filing_events(
@@ -64,46 +124,96 @@ def collect_filing_events(
     rows: list[NormalizedFilingEvent] = []
     for filing in filing_index.values():
         form = (filing.form or "").upper()
-        if form != "8-K":
+
+        if form == "8-K" or form == "8-K/A":
+            rows.extend(_collect_8k_events(cik, filing, form, client=client))
             continue
 
-        description = _normalize_optional_text(filing.primary_doc_description)
-        item_tokens = _item_tokens(filing.items)
-        if not item_tokens:
-            item_tokens = ["UNSPECIFIED"]
+        # Non-8-K forms included in the broad timeline
+        base = _base_form(form)
+        is_amendment = _is_amendment_form(form)
+        is_late = form in _LATE_FILING_FORMS
 
-        key_amounts = _extract_key_amounts(description)
-        exhibit_references = _extract_exhibit_references(item_tokens, description)
-        exhibit_previews_by_item = _extract_earnings_adjacent_exhibit_previews(
-            cik,
-            filing,
-            item_tokens,
-            client=client,
-        )
-        for item_code in item_tokens:
-            category = _classify_event(item_code, description)
-            summary = _build_event_summary(item_code, description, key_amounts)
+        if (
+            base in _ANNUAL_FORMS
+            or base in _QUARTERLY_FORMS
+            or form in _PROXY_FORMS
+            or form in _INSIDER_FORMS
+            or form in _LATE_FILING_FORMS
+            or (is_amendment and base in _AMENDMENT_BASE_FORMS)
+        ):
+            description = _normalize_optional_text(filing.primary_doc_description)
+            category = _classify_non_8k_event(form)
+            summary = _build_non_8k_summary(form, description)
             rows.append(
                 NormalizedFilingEvent(
                     accession_number=filing.accession_number,
                     form=form,
                     filing_date=filing.filing_date,
                     report_date=filing.report_date,
-                    items=_normalize_optional_text(filing.items),
-                    item_code=item_code,
+                    items=None,
+                    item_code=form,
                     category=category,
                     primary_document=_normalize_optional_text(filing.primary_document),
                     primary_doc_description=description,
                     source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
                     summary=summary,
-                    key_amounts=key_amounts,
-                    exhibit_references=exhibit_references,
-                    exhibit_previews=exhibit_previews_by_item.get(item_code, ()),
+                    is_amendment=is_amendment,
+                    is_late_filing=is_late,
                 )
             )
 
     rows.sort(key=lambda row: (row.filing_date or row.report_date or datetime.min.date(), row.accession_number, row.item_code), reverse=True)
     return rows
+
+
+def _collect_8k_events(
+    cik: str,
+    filing: FilingMetadata,
+    form: str,
+    *,
+    client: Any | None = None,
+) -> list[NormalizedFilingEvent]:
+    """Normalize one 8-K or 8-K/A filing into per-item NormalizedFilingEvent rows."""
+    is_amendment = _is_amendment_form(form)
+    description = _normalize_optional_text(filing.primary_doc_description)
+    item_tokens = _item_tokens(filing.items)
+    if not item_tokens:
+        item_tokens = ["UNSPECIFIED"]
+
+    key_amounts = _extract_key_amounts(description)
+    exhibit_references = _extract_exhibit_references(item_tokens, description)
+    exhibit_previews_by_item = _extract_earnings_adjacent_exhibit_previews(
+        cik,
+        filing,
+        item_tokens,
+        client=client,
+    )
+    out: list[NormalizedFilingEvent] = []
+    for item_code in item_tokens:
+        category = _classify_event(item_code, description)
+        summary = _build_event_summary(item_code, description, key_amounts)
+        out.append(
+            NormalizedFilingEvent(
+                accession_number=filing.accession_number,
+                form=form,
+                filing_date=filing.filing_date,
+                report_date=filing.report_date,
+                items=_normalize_optional_text(filing.items),
+                item_code=item_code,
+                category=category,
+                primary_document=_normalize_optional_text(filing.primary_document),
+                primary_doc_description=description,
+                source_url=_build_filing_document_url(cik, filing.accession_number, filing.primary_document),
+                summary=summary,
+                key_amounts=key_amounts,
+                exhibit_references=exhibit_references,
+                exhibit_previews=exhibit_previews_by_item.get(item_code, ()),
+                is_amendment=is_amendment,
+                is_late_filing=False,
+            )
+        )
+    return out
 
 
 def upsert_filing_events(
@@ -137,6 +247,8 @@ def upsert_filing_events(
                 summary=event.summary,
                 key_amounts=list(event.key_amounts),
                 exhibit_references=_combined_exhibit_payload(event.exhibit_references, event.exhibit_previews),
+                is_amendment=event.is_amendment,
+                is_late_filing=event.is_late_filing,
                 last_checked=checked_at,
             )
             .on_conflict_do_update(
@@ -153,6 +265,8 @@ def upsert_filing_events(
                     "summary": event.summary,
                     "key_amounts": list(event.key_amounts),
                     "exhibit_references": _combined_exhibit_payload(event.exhibit_references, event.exhibit_previews),
+                    "is_amendment": event.is_amendment,
+                    "is_late_filing": event.is_late_filing,
                     "last_checked": checked_at,
                     "last_updated": checked_at,
                 },

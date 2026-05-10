@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from app.services.eight_k_events import collect_filing_events
+from app.services.eight_k_events import (
+    collect_filing_events,
+    _classify_non_8k_event,
+    _build_non_8k_summary,
+    _is_amendment_form,
+)
 from app.services.sec_edgar import FilingMetadata
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -151,3 +156,189 @@ def test_collect_filing_events_extracts_exhibit_preview_for_earnings_adjacent_it
         assert "Omega Corporation" in (preview["snippet"] or "")
 
     assert by_item["9.01"].exhibit_previews == ()
+
+
+# --- new multi-form-type tests ---
+
+
+def test_collect_filing_events_includes_annual_10k():
+    filing_index = {
+        "0000010": FilingMetadata(
+            accession_number="0000010",
+            form="10-K",
+            filing_date=date(2026, 2, 15),
+            report_date=date(2025, 12, 31),
+            primary_document="10k.htm",
+            primary_doc_description="Annual report on Form 10-K.",
+            items=None,
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "10-K"
+    assert row.category == "Annual Filing"
+    assert row.is_amendment is False
+    assert row.is_late_filing is False
+    assert row.item_code == "10-K"
+
+
+def test_collect_filing_events_flags_10k_amendment():
+    filing_index = {
+        "0000011": FilingMetadata(
+            accession_number="0000011",
+            form="10-K/A",
+            filing_date=date(2026, 3, 1),
+            report_date=date(2025, 12, 31),
+            primary_document="10ka.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "10-K/A"
+    assert row.is_amendment is True
+    assert row.is_late_filing is False
+    assert row.category == "Annual Filing"
+
+
+def test_collect_filing_events_includes_quarterly_10q():
+    filing_index = {
+        "0000012": FilingMetadata(
+            accession_number="0000012",
+            form="10-Q",
+            filing_date=date(2026, 5, 10),
+            report_date=date(2026, 3, 31),
+            primary_document="10q.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "10-Q"
+    assert row.category == "Quarterly Filing"
+    assert row.is_amendment is False
+
+
+def test_collect_filing_events_includes_proxy_def14a():
+    filing_index = {
+        "0000013": FilingMetadata(
+            accession_number="0000013",
+            form="DEF 14A",
+            filing_date=date(2026, 4, 1),
+            report_date=None,
+            primary_document="proxy.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "DEF 14A"
+    assert row.category == "Proxy"
+    assert row.is_amendment is False
+    assert row.is_late_filing is False
+
+
+def test_collect_filing_events_includes_form4_insider():
+    filing_index = {
+        "0000014": FilingMetadata(
+            accession_number="0000014",
+            form="4",
+            filing_date=date(2026, 4, 15),
+            report_date=None,
+            primary_document="form4.xml",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "4"
+    assert row.category == "Insider"
+    assert row.is_amendment is False
+    assert row.is_late_filing is False
+
+
+def test_collect_filing_events_includes_nt10k_as_late_filing():
+    filing_index = {
+        "0000015": FilingMetadata(
+            accession_number="0000015",
+            form="NT 10-K",
+            filing_date=date(2026, 3, 16),
+            report_date=date(2025, 12, 31),
+            primary_document="nt10k.htm",
+            primary_doc_description=None,
+            items=None,
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "NT 10-K"
+    assert row.category == "Late Filing Notice"
+    assert row.is_late_filing is True
+    assert row.is_amendment is False
+
+
+def test_collect_filing_events_flags_8k_amendment():
+    filing_index = {
+        "0000016": FilingMetadata(
+            accession_number="0000016",
+            form="8-K/A",
+            filing_date=date(2026, 4, 5),
+            report_date=date(2026, 4, 1),
+            primary_document="8ka.htm",
+            primary_doc_description="Amendment to prior 8-K.",
+            items="2.02",
+        )
+    }
+    rows = collect_filing_events("0001000000", filing_index)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.form == "8-K/A"
+    assert row.is_amendment is True
+    assert row.is_late_filing is False
+
+
+def test_is_amendment_form():
+    assert _is_amendment_form("10-K/A") is True
+    assert _is_amendment_form("8-K/A") is True
+    assert _is_amendment_form("10-K") is False
+    assert _is_amendment_form("8-K") is False
+
+
+def test_classify_non_8k_event():
+    assert _classify_non_8k_event("10-K") == "Annual Filing"
+    assert _classify_non_8k_event("10-K/A") == "Annual Filing"
+    assert _classify_non_8k_event("20-F") == "Annual Filing"
+    assert _classify_non_8k_event("10-Q") == "Quarterly Filing"
+    assert _classify_non_8k_event("10-Q/A") == "Quarterly Filing"
+    assert _classify_non_8k_event("DEF 14A") == "Proxy"
+    assert _classify_non_8k_event("4") == "Insider"
+    assert _classify_non_8k_event("5") == "Insider"
+    assert _classify_non_8k_event("NT 10-K") == "Late Filing Notice"
+    assert _classify_non_8k_event("NT 10-Q") == "Late Filing Notice"
+
+
+def test_build_non_8k_summary_uses_description_when_present():
+    summary = _build_non_8k_summary("10-K", "Custom description text.")
+    assert summary == "Custom description text."
+
+
+def test_build_non_8k_summary_generates_default_for_10k():
+    summary = _build_non_8k_summary("10-K", None)
+    assert "10-K" in summary
+    assert "Annual Report" in summary
+
+
+def test_build_non_8k_summary_generates_amendment_suffix():
+    summary = _build_non_8k_summary("10-K/A", None)
+    assert "Amendment" in summary
+

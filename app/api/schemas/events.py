@@ -69,6 +69,8 @@ class FilingEventPayload(BaseModel):
     key_amounts: list[float] = Field(default_factory=list)
     exhibit_references: list[str] = Field(default_factory=list)
     exhibit_previews: list["FilingEventExhibitPreviewPayload"] = Field(default_factory=list)
+    is_amendment: bool = False
+    is_late_filing: bool = False
 
 
 class FilingEventExhibitPreviewPayload(BaseModel):

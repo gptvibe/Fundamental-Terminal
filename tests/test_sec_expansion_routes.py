@@ -710,6 +710,10 @@ def test_company_workspace_bootstrap_route_keeps_schema_compatible_when_served_f
         "insider_trades",
         "institutional_holdings",
         "errors",
+        "source_freshness",
+        "warnings",
+        "is_compact",
+        "requested_sections",
     ]
 
 

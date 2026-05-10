@@ -446,12 +446,19 @@ def company_changes_since_last_filing(
     comment_letters = get_company_comment_letters(session, snapshot.company.id, limit=24)
     if parsed_as_of is not None:
         comment_letters = [letter for letter in comment_letters if _effective_at(letter.filing_date) <= parsed_as_of]
+    capital_markets_events = get_company_capital_markets_events(session, snapshot.company.id, limit=48)
+    if parsed_as_of is not None:
+        capital_markets_events = [
+            event for event in capital_markets_events
+            if event.filing_date is None or _effective_at(event.filing_date) <= parsed_as_of
+        ]
 
     comparison = build_changes_since_last_filing(
         financials,
         restatements,
         parsed_filings=parsed_filings,
         comment_letters=comment_letters,
+        capital_markets_events=capital_markets_events,
     )
     diagnostics = _diagnostics_for_changes_since_last_filing(comparison, refresh)
     comparison_as_of = requested_as_of or _latest_as_of(

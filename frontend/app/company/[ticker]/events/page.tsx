@@ -11,7 +11,26 @@ import { Panel } from "@/components/ui/panel";
 import { useCompanyWorkspace } from "@/hooks/use-company-workspace";
 import { getCompanyFilingEvents, getCompanyFilingEventsSummary } from "@/lib/api";
 import { formatDate } from "@/lib/format";
-import type { CompanyEventsResponse, CompanyFilingEventsSummaryResponse } from "@/lib/types";
+import type { CompanyEventsResponse, CompanyFilingEventsSummaryResponse, FilingEventPayload } from "@/lib/types";
+
+// ---------- filter definitions ----------
+const FILTER_OPTIONS = [
+  { key: "annual", label: "Annual (10-K)", forms: ["10-K", "10-K/A", "20-F", "20-F/A", "40-F"] },
+  { key: "quarterly", label: "Quarterly (10-Q)", forms: ["10-Q", "10-Q/A"] },
+  { key: "current", label: "Current (8-K)", forms: ["8-K", "8-K/A"] },
+  { key: "proxy", label: "Proxy", forms: ["DEF 14A", "DEFA14A", "PRE 14A", "DEF 14C"] },
+  { key: "insider", label: "Insider", forms: ["4", "5"] },
+  { key: "late", label: "Late Notices", forms: ["NT 10-K", "NT 10-Q", "NT 20-F"] },
+];
+
+function matchesFilter(event: FilingEventPayload, activeKeys: Set<string>): boolean {
+  if (activeKeys.size === 0) return true;
+  const upperForm = event.form.toUpperCase();
+  return [...activeKeys].some((key) => {
+    const option = FILTER_OPTIONS.find((o) => o.key === key);
+    return option?.forms.some((f) => f.toUpperCase() === upperForm);
+  });
+}
 
 export default function CompanyEventsPage() {
   const params = useParams<{ ticker: string }>();
@@ -30,6 +49,8 @@ export default function CompanyEventsPage() {
   const [summaryData, setSummaryData] = useState<CompanyFilingEventsSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  const [amendmentsOnly, setAmendmentsOnly] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,14 +84,26 @@ export default function CompanyEventsPage() {
     };
   }, [reloadKey, ticker]);
 
-  const events = useMemo(() => data?.events ?? [], [data?.events]);
+  const allEvents = useMemo(() => data?.events ?? [], [data?.events]);
+  const events = useMemo(() => {
+    let filtered = allEvents;
+    if (activeFilters.size > 0) {
+      filtered = filtered.filter((e) => matchesFilter(e, activeFilters));
+    }
+    if (amendmentsOnly) {
+      filtered = filtered.filter((e) => e.is_amendment);
+    }
+    return filtered;
+  }, [allEvents, activeFilters, amendmentsOnly]);
+
   const summary = summaryData?.summary ?? null;
   const pageCompany = company ?? data?.company ?? null;
   const effectiveRefreshState = data?.refresh ?? refreshState;
-  const latestEventDate = events[0]?.filing_date ?? events[0]?.report_date ?? null;
+  const latestEventDate = allEvents[0]?.filing_date ?? allEvents[0]?.report_date ?? null;
+
   const categorySummary = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const event of events) {
+    for (const event of allEvents) {
       counts.set(event.category, (counts.get(event.category) ?? 0) + 1);
     }
     return [...counts.entries()]
@@ -78,7 +111,24 @@ export default function CompanyEventsPage() {
       .slice(0, 3)
       .map(([category, count]) => `${category}: ${count.toLocaleString()}`)
       .join(" · ");
-  }, [events]);
+  }, [allEvents]);
+
+  const formCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of allEvents) {
+      counts[e.form] = (counts[e.form] ?? 0) + 1;
+    }
+    return counts;
+  }, [allEvents]);
+
+  function toggleFilter(key: string) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   return (
     <CompanyWorkspaceShell
@@ -91,14 +141,14 @@ export default function CompanyEventsPage() {
           refreshing={refreshing}
           onRefresh={() => queueRefresh()}
           actionTitle="Next Steps"
-          actionSubtitle="Refresh current reports or jump to the filings workspace for broader SEC coverage."
-          primaryActionLabel="Refresh Event Feed"
-          primaryActionDescription="Queues a company refresh so the latest 8-K current reports are reloaded from SEC submissions."
+          actionSubtitle="Refresh the filing feed or jump to the filings workspace for broader SEC coverage."
+          primaryActionLabel="Refresh Filing Feed"
+          primaryActionDescription="Queues a company refresh so the latest SEC filings are reloaded from SEC submissions."
           secondaryActionHref={`/company/${encodeURIComponent(ticker)}/filings`}
           secondaryActionLabel="Open Filings Workspace"
-          secondaryActionDescription="Move from event intelligence back to the full SEC filing timeline and filing viewer."
+          secondaryActionDescription="Move from the event timeline back to the full SEC filing viewer."
           statusLines={[
-            `8-K events: ${(summary?.total_events ?? events.length).toLocaleString()}`,
+            `Total events: ${(summary?.total_events ?? allEvents.length).toLocaleString()}`,
             `Latest event date: ${summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
             categorySummary || "Event categories pending"
           ]}
@@ -110,34 +160,34 @@ export default function CompanyEventsPage() {
     >
       <CompanyResearchHeader
         ticker={ticker}
-        title="Events"
+        title="Filing Events"
         companyName={pageCompany?.name ?? ticker}
         sector={pageCompany?.sector}
-        description="Current-report intelligence stays anchored to SEC 8-K filings, with categorized event cards and aggregate summaries served from cache before any background refresh completes."
+        description="Chronological timeline of SEC filings — annual reports, quarterly reports, 8-K current reports, proxy statements, insider filings, and late-filing notices — sourced from official SEC submissions."
         freshness={{
           cacheState: pageCompany?.cache_state ?? null,
           refreshState: effectiveRefreshState,
           loading: loading || workspaceLoading,
-          hasData: Boolean(pageCompany || summary || events.length),
+          hasData: Boolean(pageCompany || summary || allEvents.length),
           lastChecked: pageCompany?.last_checked ?? null,
           errors: [error, data?.error],
           detailLines: [
-            `8-K events: ${(summary?.total_events ?? events.length).toLocaleString()}`,
+            `Total events: ${(summary?.total_events ?? allEvents.length).toLocaleString()}`,
             `Latest event: ${summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending"}`,
             categorySummary || "Event categories pending",
           ],
         }}
         freshnessPlacement="subtitle"
-        factsLoading={(loading || workspaceLoading) && !pageCompany && !summary && !events.length}
-        summariesLoading={(loading || workspaceLoading) && !pageCompany && !summary && !events.length}
+        factsLoading={(loading || workspaceLoading) && !pageCompany && !summary && !allEvents.length}
+        summariesLoading={(loading || workspaceLoading) && !pageCompany && !summary && !allEvents.length}
         facts={[
           { label: "Ticker", value: ticker },
-          { label: "Current Reports", value: (summary?.total_events ?? events.length).toLocaleString() },
+          { label: "Total Events", value: (summary?.total_events ?? allEvents.length).toLocaleString() },
           { label: "Unique Filings", value: (summary?.unique_accessions ?? 0).toLocaleString() },
           { label: "Latest Event", value: summary?.latest_event_date ? formatDate(summary.latest_event_date) : latestEventDate ? formatDate(latestEventDate) : "Pending" }
         ]}
         ribbonItems={[
-          { label: "Event Source", value: "SEC 8-K current reports", tone: "green" },
+          { label: "Event Source", value: "SEC EDGAR submissions", tone: "green" },
           { label: "Largest Amount", value: summary?.max_key_amount != null ? `$${Math.round(summary.max_key_amount).toLocaleString()}` : "Pending", tone: "gold" },
           { label: "Category Mix", value: categorySummary || "Pending", tone: "cyan" },
           { label: "Refresh", value: effectiveRefreshState?.job_id ? "Queued" : "Background-first", tone: effectiveRefreshState?.job_id ? "cyan" : "green" }
@@ -150,11 +200,72 @@ export default function CompanyEventsPage() {
         ]}
       />
 
-      <Panel title="Event Categories" subtitle="Item-based classification of current reports so the filing stream is easier to scan">
-        <FilingEventCategoryChart events={events} />
+      <Panel title="Event Categories" subtitle="Filing category breakdown across the full timeline">
+        <FilingEventCategoryChart events={allEvents} />
       </Panel>
 
-      <Panel title="Recent 8-K Timeline" subtitle="Current reports classified into earnings, leadership, financing, and other event buckets">
+      <Panel
+        title="Filing Timeline"
+        subtitle="Chronological view of all SEC filings — use the filters to narrow by form type"
+      >
+        {/* Filter bar */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+          {FILTER_OPTIONS.map((option) => {
+            const count = option.forms.reduce((sum, f) => sum + (formCounts[f] ?? 0), 0);
+            const isActive = activeFilters.has(option.key);
+            return (
+              <button
+                key={option.key}
+                onClick={() => toggleFilter(option.key)}
+                className={`pill${isActive ? " pill--active" : ""}`}
+                style={{
+                  cursor: "pointer",
+                  border: "1px solid var(--border)",
+                  background: isActive ? "var(--accent-cyan)" : "var(--surface-2)",
+                  color: isActive ? "var(--background)" : "var(--text-muted)",
+                  padding: "4px 10px",
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                {option.label}{count > 0 ? ` (${count})` : ""}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => setAmendmentsOnly((prev) => !prev)}
+            style={{
+              cursor: "pointer",
+              border: "1px solid var(--border)",
+              background: amendmentsOnly ? "var(--accent-gold)" : "var(--surface-2)",
+              color: amendmentsOnly ? "var(--background)" : "var(--text-muted)",
+              padding: "4px 10px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 500,
+            }}
+          >
+            Amendments only
+          </button>
+          {(activeFilters.size > 0 || amendmentsOnly) && (
+            <button
+              onClick={() => { setActiveFilters(new Set()); setAmendmentsOnly(false); }}
+              style={{
+                cursor: "pointer",
+                border: "1px solid var(--border)",
+                background: "transparent",
+                color: "var(--text-muted)",
+                padding: "4px 10px",
+                borderRadius: 4,
+                fontSize: 12,
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {error || data?.error ? (
           <div className="text-muted">{error ?? data?.error}</div>
         ) : loading || workspaceLoading ? (
@@ -163,7 +274,7 @@ export default function CompanyEventsPage() {
           <div style={{ display: "grid", gap: 12 }}>
             {events.map((event) => (
               <a
-                key={event.accession_number ?? `${event.form}-${event.filing_date ?? event.report_date ?? event.source_url}`}
+                key={`${event.accession_number ?? event.source_url}-${event.item_code ?? event.form}`}
                 href={event.source_url}
                 target="_blank"
                 rel="noreferrer"
@@ -174,8 +285,11 @@ export default function CompanyEventsPage() {
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span className="pill">{event.form}</span>
                     <span className="pill">{event.category}</span>
-                    {event.item_code && event.item_code !== "UNSPECIFIED" ? <span className="pill">Item {event.item_code}</span> : null}
-                    {event.items ? <span className="pill">Items {event.items}</span> : null}
+                    {event.is_amendment && <span className="pill" style={{ color: "var(--accent-gold)" }}>Amendment</span>}
+                    {event.is_late_filing && <span className="pill" style={{ color: "var(--accent-red, #e35)" }}>Late Notice</span>}
+                    {event.item_code && event.item_code !== "UNSPECIFIED" && event.item_code !== event.form
+                      ? <span className="pill">Item {event.item_code}</span>
+                      : null}
                   </div>
                   <div className="text-muted">{formatDate(event.filing_date ?? event.report_date)}</div>
                 </div>
@@ -192,11 +306,13 @@ export default function CompanyEventsPage() {
               </a>
             ))}
           </div>
+        ) : allEvents.length ? (
+          <div className="text-muted">No events match the active filters.</div>
         ) : (
           <div className="grid-empty-state" style={{ minHeight: 220 }}>
-            <div className="grid-empty-kicker">Event intelligence</div>
-            <div className="grid-empty-title">No 8-K events yet</div>
-            <div className="grid-empty-copy">This page fills in once SEC submissions include current reports for the selected company.</div>
+            <div className="grid-empty-kicker">Filing timeline</div>
+            <div className="grid-empty-title">No filing events yet</div>
+            <div className="grid-empty-copy">This page fills in once SEC submissions have been ingested for the selected company.</div>
           </div>
         )}
       </Panel>

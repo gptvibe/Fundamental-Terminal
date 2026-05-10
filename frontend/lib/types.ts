@@ -813,6 +813,8 @@ export interface FilingComparisonMetricDeltaPayload {
   delta: number | null;
   relative_change: number | null;
   direction: "added" | "removed" | "increase" | "decrease" | "changed";
+  source_concepts?: string[];
+  missing_data_warning?: string | null;
 }
 
 export interface FilingComparisonRiskIndicatorPayload {
@@ -914,6 +916,19 @@ export interface ChangesSinceLastFilingSummaryPayload {
   amended_prior_value_count: number;
   high_signal_change_count: number;
   comment_letter_count: number;
+  filing_notice_count?: number;
+}
+
+export interface FilingNoticePayload {
+  notice_kind: "nt_filing" | "amended_filing";
+  form: string;
+  label: string;
+  description: string;
+  filing_date: string | null;
+  accession_number: string | null;
+  source_url: string | null;
+  severity: "medium" | "high";
+  warning: string;
 }
 
 export interface CompanyChangesSinceLastFilingResponse extends ProvenanceEnvelope {
@@ -929,6 +944,7 @@ export interface CompanyChangesSinceLastFilingResponse extends ProvenanceEnvelop
   amended_prior_values: FilingComparisonAmendedValuePayload[];
   high_signal_changes: FilingHighSignalChangePayload[];
   comment_letter_history: FilingCommentLetterHistoryPayload;
+  filing_notices?: FilingNoticePayload[];
   refresh: RefreshState;
   diagnostics: DataQualityDiagnosticsPayload;
 }
@@ -1723,6 +1739,8 @@ export interface FilingEventPayload {
   key_amounts: number[];
   exhibit_references: string[];
   exhibit_previews?: FilingEventExhibitPreviewPayload[];
+  is_amendment: boolean;
+  is_late_filing: boolean;
 }
 
 export interface FilingEventExhibitPreviewPayload {

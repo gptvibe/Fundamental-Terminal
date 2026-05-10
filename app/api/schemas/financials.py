@@ -560,6 +560,8 @@ class FilingComparisonMetricDeltaPayload(BaseModel):
     delta: Number = None
     relative_change: float | None = None
     direction: Literal["added", "removed", "increase", "decrease", "changed"]
+    source_concepts: list[str] = Field(default_factory=list)
+    missing_data_warning: str | None = None
 
 
 class FilingComparisonRiskIndicatorPayload(BaseModel):
@@ -647,6 +649,18 @@ class FilingCommentLetterHistoryPayload(BaseModel):
     recent_letters: list[FilingCommentLetterItemPayload] = Field(default_factory=list)
 
 
+class FilingNoticePayload(BaseModel):
+    notice_kind: Literal["nt_filing", "amended_filing"]
+    form: str
+    label: str
+    description: str
+    filing_date: DateType | None = None
+    accession_number: str | None = None
+    source_url: str | None = None
+    severity: Literal["medium", "high"]
+    warning: str
+
+
 class ChangesSinceLastFilingSummaryPayload(BaseModel):
     filing_type: str | None = None
     current_period_start: DateType | None = None
@@ -661,6 +675,7 @@ class ChangesSinceLastFilingSummaryPayload(BaseModel):
     amended_prior_value_count: int = 0
     high_signal_change_count: int = 0
     comment_letter_count: int = 0
+    filing_notice_count: int = 0
 
 
 class CompanyChangesSinceLastFilingResponse(ProvenanceEnvelope):
@@ -676,6 +691,7 @@ class CompanyChangesSinceLastFilingResponse(ProvenanceEnvelope):
     amended_prior_values: list[FilingComparisonAmendedValuePayload] = Field(default_factory=list)
     high_signal_changes: list[FilingHighSignalChangePayload] = Field(default_factory=list)
     comment_letter_history: FilingCommentLetterHistoryPayload = Field(default_factory=FilingCommentLetterHistoryPayload)
+    filing_notices: list[FilingNoticePayload] = Field(default_factory=list)
     refresh: RefreshState
     diagnostics: DataQualityDiagnosticsPayload = Field(default_factory=DataQualityDiagnosticsPayload)
 

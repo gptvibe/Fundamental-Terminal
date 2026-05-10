@@ -46,8 +46,8 @@ def test_company_route_hot_cache_keys_include_workspace_bootstrap_flags() -> Non
     )
 
     assert _company_route_hot_cache_keys(default_request) == [
-        "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=0:institutional=0:earnings=0:prices=default"
+        "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=0:institutional=0:earnings=0:prices=default:sections=all:compact=0"
     ]
     assert _company_route_hot_cache_keys(enabled_request) == [
-        "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=1:institutional=0:earnings=0:prices=default"
+        "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=1:institutional=0:earnings=0:prices=default:sections=all:compact=0"
     ]
