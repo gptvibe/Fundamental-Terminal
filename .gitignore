@@ -75,3 +75,4 @@ apply_patch.bat
 
 # Claude
 .claude/
+*.zip

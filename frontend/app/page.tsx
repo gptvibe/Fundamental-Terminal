@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { HomeSearch } from "@/components/home/home-search";
-import { MarketContextRail } from "@/components/home/market-context-rail";
-import { RecentCompanies } from "@/components/home/recent-companies";
-import { RefreshStatusPanel } from "@/components/home/refresh-status-panel";
-import { SourceStatusCard } from "@/components/home/source-status-card";
-import { WatchlistSummary } from "@/components/home/watchlist-summary";
+import { HomeSearch } from "../components/home/home-search";
+import { MarketContextRail } from "../components/home/market-context-rail";
+import { RecentCompanies } from "../components/home/recent-companies";
+import { RefreshStatusPanel } from "../components/home/refresh-status-panel";
+import { SourceStatusCard } from "../components/home/source-status-card";
+import { WatchlistSummary } from "../components/home/watchlist-summary";
 import { useLocalUserData } from "@/hooks/use-local-user-data";
 import { getWatchlistSummary } from "@/lib/api";
 import type { WatchlistSummaryItemPayload } from "@/lib/types";
