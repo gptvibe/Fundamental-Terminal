@@ -40,6 +40,7 @@ _SKIPPED_PATH_PREFIXES = (
     "/api/internal/performance-audit",
     "/api/internal/observability",
     "/health",
+    "/api/admin/performance",
 )
 _QUERY_PARAM_VALUE_ALLOWLIST = frozenset(
     {

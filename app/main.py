@@ -12,6 +12,7 @@ from app.middleware import (
     register_company_conditional_get_middleware,
     register_performance_audit_middleware,
     register_rate_limit_middleware,
+    register_route_timing_middleware,
 )
 from app.middleware.company_cache import _canonicalize_company_query_string, _company_route_hot_cache_keys  # noqa: F401
 from app.middleware.conditional_get import _build_company_cache_etag  # noqa: F401
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
     register_rate_limit_middleware(app)
     register_company_conditional_get_middleware(app)
     register_performance_audit_middleware(app)
+    register_route_timing_middleware(app)
     app.add_middleware(SecurityHeadersMiddleware)
     register_routers(app)
     return app

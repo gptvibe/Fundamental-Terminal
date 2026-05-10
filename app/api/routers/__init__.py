@@ -17,9 +17,11 @@ from app.api.routers.search import build_router as build_search_router
 from app.api.routers.sector_context import build_router as build_sector_context_router
 from app.api.routers.source_registry import build_router as build_source_registry_router
 from app.api.routers.workspace import build_router as build_workspace_router
+from app.api.routers.admin import build_router as build_admin_router
 
 
 ROUTER_BUILDERS = (
+    build_admin_router,
     build_jobs_router,
     build_search_router,
     build_screener_router,

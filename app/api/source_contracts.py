@@ -168,6 +168,8 @@ def is_user_visible_route(method: str, path: str) -> bool:
         return False
     if path.startswith("/api/internal/"):
         return False
+    if path.startswith("/api/admin/"):
+        return False
     return path.startswith("/api/")
 
 
