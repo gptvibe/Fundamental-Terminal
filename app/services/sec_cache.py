@@ -275,13 +275,19 @@ def _cache_filename(policy: CachePolicy, normalized_url: str) -> str:
 def _response_from_payload(method: str, normalized_url: str, payload: dict[str, Any]) -> httpx.Response:
     body = base64.b64decode(str(payload.get("content_b64", "")), validate=True)
     request = httpx.Request(method.upper(), normalized_url)
+    headers = dict(payload.get("headers", {}))
+    # Cached content is stored as decoded bytes, so transport/content encodings must be removed
+    # to prevent httpx from attempting an extra decompression pass.
+    for header_name in list(headers.keys()):
+        if header_name.lower() in {"content-encoding", "content-length", "transfer-encoding"}:
+            headers.pop(header_name, None)
     extensions: dict[str, Any] = {}
     cached_json = payload.get("json_payload")
     if cached_json is not None:
         extensions["cached_json_payload"] = cached_json
     return httpx.Response(
         int(payload.get("status_code", 200)),
-        headers=payload.get("headers", {}),
+        headers=headers,
         content=body,
         request=request,
         extensions=extensions,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from types import SimpleNamespace
@@ -177,3 +178,28 @@ def test_sec_http_cache_hit_miss_logs_are_debug_only(monkeypatch, tmp_path, capl
     messages = [record.message for record in caplog.records if "CACHE " in record.message]
     assert any(message == f"CACHE HIT {url}" for message in messages)
     assert any(message == f"CACHE MISS {uncached_supported_url}" for message in messages)
+
+
+def test_sec_http_cache_ignores_content_encoding_header_on_cached_response(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        sec_cache_module,
+        "settings",
+        SimpleNamespace(
+            sec_ticker_cache_ttl_seconds=60,
+        ),
+    )
+    cache = sec_cache_module.SecHttpCache(tmp_path)
+    url = "https://www.sec.gov/files/company_tickers.json"
+
+    payload = {
+        "status_code": 200,
+        "headers": {
+            "content-type": "application/json",
+            "content-encoding": "gzip",
+        },
+        "content_b64": base64.b64encode(b'{"ok": true}').decode("ascii"),
+    }
+
+    cached = sec_cache_module._response_from_payload("GET", url, payload)
+    assert cached.status_code == 200
+    assert cached.json() == {"ok": True}
