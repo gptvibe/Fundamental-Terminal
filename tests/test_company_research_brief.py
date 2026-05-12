@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import app.main as main_module
+from app.services.status_stream import RefreshEnqueueResult
 from app.services.company_research_brief import _statement_value
 
 
@@ -157,7 +158,16 @@ def test_company_brief_returns_stale_snapshot_and_queues_background_refresh(monk
             last_checked=datetime.now(timezone.utc) - timedelta(hours=main_module.settings.freshness_window_hours + 2),
         ),
     )
-    monkeypatch.setattr(main_module, "queue_company_refresh", lambda *_args, **_kwargs: "job-stale")
+    monkeypatch.setattr(
+        main_module,
+        "queue_company_refresh",
+        lambda *_args, **_kwargs: RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-stale",
+            ticker="ACME",
+            dataset="company_refresh",
+        ),
+    )
     monkeypatch.setattr(
         main_module,
         "_augment_company_brief_response",

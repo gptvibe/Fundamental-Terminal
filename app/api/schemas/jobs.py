@@ -8,7 +8,7 @@ from app.api.schemas.common import RefreshState
 
 
 class RefreshQueuedResponse(BaseModel):
-    status: Literal["queued"]
+    status: Literal["queued", "failed"]
     ticker: str
     force: bool
     refresh: RefreshState

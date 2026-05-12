@@ -372,6 +372,7 @@ from app.services.sector_context import get_company_sector_context
 from app.services.screener import build_official_screener_filter_catalog, run_official_screener
 from app.services.proxy_parser import ExecCompRow, ProxyFilingSignals, parse_proxy_filing_signals
 from app.services.derived_metrics import build_metrics_timeseries
+from app.services.dataset_registry import dataset_source_ids_by_runtime_dataset
 from app.services.earnings_intelligence import build_earnings_alerts, build_earnings_directional_backtest, build_earnings_peer_percentiles, build_sector_alert_profile
 from app.services.formula_registry import FORMULA_REGISTRY_VERSION, get_formula_metadata, list_formula_metadata
 from app.services.hot_cache import HotCacheLookup, _etag_for_json_bytes, _render_json_bytes, shared_hot_response_cache
@@ -445,24 +446,7 @@ SOURCE_REGISTRY_TIER_ORDER: dict[SourceTier, int] = {
     "commercial_fallback": 4,
     "manual_override": 5,
 }
-SOURCE_REGISTRY_DATASET_SOURCE_IDS: dict[str, tuple[str, ...]] = {
-    "financials": ("sec_companyfacts",),
-    "prices": ("yahoo_finance",),
-    "insiders": ("sec_edgar",),
-    "form144": ("sec_edgar",),
-    "earnings": ("sec_edgar",),
-    "earnings_models": ("ft_model_engine",),
-    "institutional": ("sec_edgar",),
-    "beneficial_ownership": ("sec_edgar",),
-    "filings": ("sec_edgar",),
-    "capital_markets": ("sec_edgar",),
-    "comment_letters": ("sec_edgar_corresp",),
-    "proxy": ("sec_edgar",),
-    "derived_metrics": ("ft_derived_metrics_mart",),
-    "charts_dashboard": ("ft_company_charts_dashboard",),
-    "oil_scenario_overlay": ("ft_oil_scenario_overlay",),
-    "capital_structure": ("ft_capital_structure_intelligence",),
-}
+SOURCE_REGISTRY_DATASET_SOURCE_IDS: dict[str, tuple[str, ...]] = dataset_source_ids_by_runtime_dataset()
 SOURCE_REGISTRY_SLO_SOURCE_IDS: dict[str, tuple[str, ...]] = {
     "sec_companyfacts_freshness": ("sec_companyfacts",),
     "sec_submissions_freshness": ("sec_edgar", "sec_edgar_corresp"),
@@ -2354,12 +2338,18 @@ def refresh_company(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     queue_ticker = snapshot.company.ticker if snapshot is not None else normalized_ticker
-    job_id = queue_company_refresh(queue_ticker, force=force)
+    enqueue_result = queue_company_refresh(queue_ticker, force=force)
+    response_status = "queued" if enqueue_result.status in {"enqueued", "skipped_due_to_existing_lock"} else "failed"
     return RefreshQueuedResponse(
-        status="queued",
+        status=response_status,
         ticker=queue_ticker,
         force=force,
-        refresh=RefreshState(triggered=True, reason="manual", ticker=queue_ticker, job_id=job_id),
+        refresh=RefreshState(
+            triggered=enqueue_result.status == "enqueued",
+            reason="manual",
+            ticker=queue_ticker,
+            job_id=enqueue_result.job_id,
+        ),
     )
 
 
@@ -6404,8 +6394,13 @@ def _trigger_refresh(
     queue_kwargs: dict[str, Any] = {"force": reason == "missing"}
     if "reason" in inspect.signature(queue_company_refresh).parameters:
         queue_kwargs["reason"] = reason
-    job_id = queue_company_refresh(normalized_ticker, **queue_kwargs)
-    return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
+    enqueue_result = queue_company_refresh(normalized_ticker, **queue_kwargs)
+    return RefreshState(
+        triggered=enqueue_result.status == "enqueued",
+        reason=reason,
+        ticker=normalized_ticker,
+        job_id=enqueue_result.job_id,
+    )
 
 
 def _trigger_cached_company_refresh(
@@ -6417,8 +6412,13 @@ def _trigger_cached_company_refresh(
     queue_kwargs: dict[str, Any] = {"force": False}
     if "reason" in inspect.signature(queue_company_refresh).parameters:
         queue_kwargs["reason"] = reason
-    job_id = queue_company_refresh(normalized_ticker, **queue_kwargs)
-    return RefreshState(triggered=True, reason=reason, ticker=normalized_ticker, job_id=job_id)
+    enqueue_result = queue_company_refresh(normalized_ticker, **queue_kwargs)
+    return RefreshState(
+        triggered=enqueue_result.status == "enqueued",
+        reason=reason,
+        ticker=normalized_ticker,
+        job_id=enqueue_result.job_id,
+    )
 
 
 def _serialize_company(

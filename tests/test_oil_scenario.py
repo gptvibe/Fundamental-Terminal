@@ -13,6 +13,7 @@ from app.api.handlers import models as model_handlers
 import app.services.oil_scenario as oil_scenario_service
 from app.db import get_db_session
 from app.main import app
+from app.services.status_stream import RefreshEnqueueResult
 
 
 def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
@@ -211,7 +212,13 @@ def test_oil_scenario_returns_stale_payload_and_queues_revalidation(monkeypatch)
     _patch_main_and_shared(
         monkeypatch,
         "queue_company_refresh",
-        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-stale",
+        lambda ticker, force=False: queued.append((ticker, force))
+        or RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-oil-scenario-stale",
+            ticker=ticker,
+            dataset="company_refresh",
+        ),
     )
     monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])
@@ -236,7 +243,13 @@ def test_oil_scenario_returns_placeholder_shell_when_dataset_missing(monkeypatch
     _patch_main_and_shared(
         monkeypatch,
         "queue_company_refresh",
-        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-scenario-missing",
+        lambda ticker, force=False: queued.append((ticker, force))
+        or RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-oil-scenario-missing",
+            ticker=ticker,
+            dataset="company_refresh",
+        ),
     )
     monkeypatch.setattr(oil_scenario_service, "get_company_models", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(oil_scenario_service, "get_company_financials", lambda *_args, **_kwargs: [])

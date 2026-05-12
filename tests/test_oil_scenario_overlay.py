@@ -13,6 +13,7 @@ from app.api.handlers import models as model_handlers
 import app.services.oil_scenario_overlay as overlay_service
 from app.db import get_db_session
 from app.main import app
+from app.services.status_stream import RefreshEnqueueResult
 
 
 def _patch_main_and_shared(monkeypatch, name: str, value) -> None:
@@ -185,7 +186,13 @@ def test_oil_scenario_overlay_returns_stale_payload_and_queues_revalidation(monk
     _patch_main_and_shared(
         monkeypatch,
         "queue_company_refresh",
-        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-stale",
+        lambda ticker, force=False: queued.append((ticker, force))
+        or RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-oil-stale",
+            ticker=ticker,
+            dataset="company_refresh",
+        ),
     )
 
     with _client() as client:
@@ -208,7 +215,13 @@ def test_oil_scenario_overlay_returns_placeholder_shell_when_dataset_missing(mon
     _patch_main_and_shared(
         monkeypatch,
         "queue_company_refresh",
-        lambda ticker, force=False: queued.append((ticker, force)) or "job-oil-missing",
+        lambda ticker, force=False: queued.append((ticker, force))
+        or RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-oil-missing",
+            ticker=ticker,
+            dataset="company_refresh",
+        ),
     )
 
     with _client() as client:

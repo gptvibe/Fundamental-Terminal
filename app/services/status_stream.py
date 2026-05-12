@@ -35,6 +35,7 @@ except Exception:  # pragma: no cover - optional dependency at runtime
 
 JobState = Literal["queued", "running", "completed", "failed"]
 JobLevel = Literal["info", "success", "error"]
+RefreshEnqueueStatus = Literal["enqueued", "skipped_due_to_existing_lock", "failed"]
 
 ACTIVE_JOB_STATES = frozenset({"queued", "running"})
 TERMINAL_JOB_STATES = frozenset({"completed", "failed"})
@@ -78,6 +79,14 @@ class ClaimedJob:
     company_id: int | None
     worker_id: str
     claim_token: str
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshEnqueueResult:
+    status: RefreshEnqueueStatus
+    job_id: str | None
+    ticker: str
+    dataset: str
 
 
 def _safe_put_nowait(queue: asyncio.Queue[JobEvent], event: JobEvent) -> None:
@@ -259,6 +268,10 @@ class SharedStatusBroker:
         self._recovery_interval_seconds = max(poll_interval_seconds, recovery_interval_seconds)
         self._recovery_batch_size = recovery_batch_size
         self._lease_duration = timedelta(seconds=settings.refresh_lock_timeout_seconds)
+        self._refresh_enqueue_lock_ttl_seconds = max(
+            settings.refresh_lock_timeout_seconds,
+            int(getattr(settings, "refresh_enqueue_lock_ttl_seconds", settings.refresh_lock_timeout_seconds * 2)),
+        )
         self._dedupe_ttl = timedelta(seconds=max(0, getattr(settings, "refresh_queue_dedupe_ttl_seconds", 0)))
         self._redis = self._build_sync_redis_client()
         self._redis_async = self._build_async_redis_client()
@@ -292,135 +305,64 @@ class SharedStatusBroker:
         as_of: str | None = None,
         company_id: int | None = None,
     ) -> str:
+        result = self.create_job_result(
+            ticker=ticker,
+            kind=kind,
+            dataset=dataset,
+            force=force,
+            reason=reason,
+            as_of=as_of,
+            company_id=company_id,
+        )
+        if result.status == "failed" or result.job_id is None:
+            raise RuntimeError(f"Unable to enqueue refresh job for {ticker.strip().upper()}")
+        return result.job_id
+
+    def create_job_result(
+        self,
+        *,
+        ticker: str,
+        kind: str,
+        dataset: str = "company_refresh",
+        force: bool = False,
+        reason: str = "manual",
+        as_of: str | None = None,
+        company_id: int | None = None,
+    ) -> RefreshEnqueueResult:
         normalized_ticker = ticker.strip().upper()
         normalized_reason = (reason or "manual").strip().lower() or "manual"
         normalized_as_of_key = self._normalize_as_of_key(as_of)
         now = datetime.now(timezone.utc)
         pending_job_id = uuid.uuid4().hex
         event: JobEvent | None = None
+        resolved_company_id = company_id
+        lock_acquired = False
 
-        with self._sync_session_scope() as session:
-            existing_job = self._find_equivalent_active_job(
-                session,
-                ticker=normalized_ticker,
-                kind=kind,
-                dataset=dataset,
-                reason=normalized_reason,
-                as_of_key=normalized_as_of_key,
-            )
-            if existing_job is not None:
-                self._log_duplicate_job(
-                    existing_job=existing_job,
-                    ticker=normalized_ticker,
-                    kind=kind,
-                    dataset=dataset,
-                    reason=normalized_reason,
-                    as_of_key=normalized_as_of_key,
-                    force=force,
-                )
-                return existing_job.job_id
+        try:
+            with self._sync_session_scope() as session:
+                if resolved_company_id is None:
+                    company = ensure_company(session, normalized_ticker)
+                    resolved_company_id = company.id if company is not None else None
 
-            if self._dedupe_ttl > timedelta(0):
-                recent_equivalent = self._find_recent_equivalent_terminal_job(
-                    session,
-                    ticker=normalized_ticker,
-                    kind=kind,
-                    dataset=dataset,
-                    reason=normalized_reason,
-                    as_of_key=normalized_as_of_key,
-                    cutoff=now - self._dedupe_ttl,
-                )
-                if recent_equivalent is not None:
-                    self._log_duplicate_job(
-                        existing_job=recent_equivalent,
-                        ticker=normalized_ticker,
-                        kind=kind,
-                        dataset=dataset,
-                        reason=normalized_reason,
-                        as_of_key=normalized_as_of_key,
-                        force=force,
-                    )
-                    return recent_equivalent.job_id
-
-            resolved_company_id = company_id
-            if resolved_company_id is None:
-                company = ensure_company(session, normalized_ticker)
-                resolved_company_id = company.id if company is not None else None
-
-            inserted = False
-            dialect_name = getattr(getattr(session, "bind", None), "dialect", None)
-            dialect_name = getattr(dialect_name, "name", "")
-
-            if dialect_name == "postgresql":
-                from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-
-                insert_stmt = (
-                    postgresql_insert(RefreshJob)
-                    .values(
-                        job_id=pending_job_id,
+                if resolved_company_id is not None:
+                    lock_acquired = self._acquire_refresh_enqueue_lock(
                         company_id=resolved_company_id,
-                        ticker=normalized_ticker,
                         dataset=dataset,
-                        as_of_key=normalized_as_of_key,
-                        reason=normalized_reason,
-                        kind=kind,
-                        force=force,
-                        status="queued",
-                        requested_at=now,
-                        updated_at=now,
+                        job_id=pending_job_id,
                     )
-                    .on_conflict_do_nothing(
-                        index_elements=[RefreshJob.ticker, RefreshJob.dataset, RefreshJob.as_of_key, RefreshJob.reason],
-                        index_where=text("status IN ('queued', 'running')"),
-                    )
-                    .returning(RefreshJob.job_id)
-                )
-                inserted_job_id = session.execute(insert_stmt).scalar_one_or_none()
-                if inserted_job_id is not None:
-                    pending_job_id = inserted_job_id
-                    inserted = True
-            else:
-                job = RefreshJob(
-                    job_id=pending_job_id,
-                    company_id=resolved_company_id,
-                    ticker=normalized_ticker,
-                    dataset=dataset,
-                    as_of_key=normalized_as_of_key,
-                    reason=normalized_reason,
-                    kind=kind,
-                    force=force,
-                    status="queued",
-                    requested_at=now,
-                    updated_at=now,
-                )
-                try:
-                    session.add(job)
-                    session.flush()
-                    inserted = True
-                except IntegrityError:
-                    session.rollback()
-                    existing_job = self._find_equivalent_active_job(
-                        session,
-                        ticker=normalized_ticker,
-                        kind=kind,
-                        dataset=dataset,
-                        reason=normalized_reason,
-                        as_of_key=normalized_as_of_key,
-                    )
-                    if existing_job is not None:
-                        self._log_duplicate_job(
-                            existing_job=existing_job,
+                    if not lock_acquired:
+                        existing_dataset_job = self._get_active_job_for_dataset(
+                            session,
                             ticker=normalized_ticker,
-                            kind=kind,
                             dataset=dataset,
-                            reason=normalized_reason,
-                            as_of_key=normalized_as_of_key,
-                            force=force,
                         )
-                        return existing_job.job_id
-                    raise
+                        return RefreshEnqueueResult(
+                            status="skipped_due_to_existing_lock",
+                            job_id=(existing_dataset_job.job_id if existing_dataset_job is not None else None),
+                            ticker=normalized_ticker,
+                            dataset=dataset,
+                        )
 
-            if not inserted:
                 existing_job = self._find_equivalent_active_job(
                     session,
                     ticker=normalized_ticker,
@@ -439,37 +381,210 @@ class SharedStatusBroker:
                         as_of_key=normalized_as_of_key,
                         force=force,
                     )
-                    return existing_job.job_id
-                raise RuntimeError(f"Unable to enqueue refresh job for {normalized_ticker}")
+                    return RefreshEnqueueResult(
+                        status="skipped_due_to_existing_lock",
+                        job_id=existing_job.job_id,
+                        ticker=normalized_ticker,
+                        dataset=dataset,
+                    )
 
-            job = self._get_job(session, pending_job_id, for_update=True)
-            if job is None:
-                raise RuntimeError(f"Refresh job {pending_job_id} was created but could not be reloaded")
+                if self._dedupe_ttl > timedelta(0):
+                    recent_equivalent = self._find_recent_equivalent_terminal_job(
+                        session,
+                        ticker=normalized_ticker,
+                        kind=kind,
+                        dataset=dataset,
+                        reason=normalized_reason,
+                        as_of_key=normalized_as_of_key,
+                        cutoff=now - self._dedupe_ttl,
+                    )
+                    if recent_equivalent is not None:
+                        self._log_duplicate_job(
+                            existing_job=recent_equivalent,
+                            ticker=normalized_ticker,
+                            kind=kind,
+                            dataset=dataset,
+                            reason=normalized_reason,
+                            as_of_key=normalized_as_of_key,
+                            force=force,
+                        )
+                        return RefreshEnqueueResult(
+                            status="skipped_due_to_existing_lock",
+                            job_id=recent_equivalent.job_id,
+                            ticker=normalized_ticker,
+                            dataset=dataset,
+                        )
 
-            event = self._append_event(
-                session,
-                job,
-                timestamp=now,
-                stage="queued",
-                message=f"{kind.title()} job queued for {normalized_ticker}",
-                status="queued",
-            )
-            if resolved_company_id is not None:
-                set_active_refresh_job(
+                inserted = False
+                dialect_name = getattr(getattr(session, "bind", None), "dialect", None)
+                dialect_name = getattr(dialect_name, "name", "")
+
+                if dialect_name == "postgresql":
+                    from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+
+                    insert_stmt = (
+                        postgresql_insert(RefreshJob)
+                        .values(
+                            job_id=pending_job_id,
+                            company_id=resolved_company_id,
+                            ticker=normalized_ticker,
+                            dataset=dataset,
+                            as_of_key=normalized_as_of_key,
+                            reason=normalized_reason,
+                            kind=kind,
+                            force=force,
+                            status="queued",
+                            requested_at=now,
+                            updated_at=now,
+                        )
+                        .on_conflict_do_nothing(
+                            index_elements=[RefreshJob.ticker, RefreshJob.dataset, RefreshJob.as_of_key, RefreshJob.reason],
+                            index_where=text("status IN ('queued', 'running')"),
+                        )
+                        .returning(RefreshJob.job_id)
+                    )
+                    inserted_job_id = session.execute(insert_stmt).scalar_one_or_none()
+                    if inserted_job_id is not None:
+                        pending_job_id = inserted_job_id
+                        inserted = True
+                else:
+                    job = RefreshJob(
+                        job_id=pending_job_id,
+                        company_id=resolved_company_id,
+                        ticker=normalized_ticker,
+                        dataset=dataset,
+                        as_of_key=normalized_as_of_key,
+                        reason=normalized_reason,
+                        kind=kind,
+                        force=force,
+                        status="queued",
+                        requested_at=now,
+                        updated_at=now,
+                    )
+                    try:
+                        session.add(job)
+                        session.flush()
+                        inserted = True
+                    except IntegrityError:
+                        session.rollback()
+                        existing_job = self._find_equivalent_active_job(
+                            session,
+                            ticker=normalized_ticker,
+                            kind=kind,
+                            dataset=dataset,
+                            reason=normalized_reason,
+                            as_of_key=normalized_as_of_key,
+                        )
+                        if existing_job is not None:
+                            self._log_duplicate_job(
+                                existing_job=existing_job,
+                                ticker=normalized_ticker,
+                                kind=kind,
+                                dataset=dataset,
+                                reason=normalized_reason,
+                                as_of_key=normalized_as_of_key,
+                                force=force,
+                            )
+                            return RefreshEnqueueResult(
+                                status="skipped_due_to_existing_lock",
+                                job_id=existing_job.job_id,
+                                ticker=normalized_ticker,
+                                dataset=dataset,
+                            )
+                        raise
+
+                if not inserted:
+                    existing_job = self._find_equivalent_active_job(
+                        session,
+                        ticker=normalized_ticker,
+                        kind=kind,
+                        dataset=dataset,
+                        reason=normalized_reason,
+                        as_of_key=normalized_as_of_key,
+                    )
+                    if existing_job is not None:
+                        self._log_duplicate_job(
+                            existing_job=existing_job,
+                            ticker=normalized_ticker,
+                            kind=kind,
+                            dataset=dataset,
+                            reason=normalized_reason,
+                            as_of_key=normalized_as_of_key,
+                            force=force,
+                        )
+                        return RefreshEnqueueResult(
+                            status="skipped_due_to_existing_lock",
+                            job_id=existing_job.job_id,
+                            ticker=normalized_ticker,
+                            dataset=dataset,
+                        )
+                    raise RuntimeError(f"Unable to enqueue refresh job for {normalized_ticker}")
+
+                job = self._get_job(session, pending_job_id, for_update=True)
+                if job is None:
+                    raise RuntimeError(f"Refresh job {pending_job_id} was created but could not be reloaded")
+
+                event = self._append_event(
                     session,
+                    job,
+                    timestamp=now,
+                    stage="queued",
+                    message=f"{kind.title()} job queued for {normalized_ticker}",
+                    status="queued",
+                )
+                if resolved_company_id is not None:
+                    set_active_refresh_job(
+                        session,
+                        company_id=resolved_company_id,
+                        dataset=dataset,
+                        job_id=job.job_id,
+                        updated_at=now,
+                    )
+                session.commit()
+        except Exception:
+            if lock_acquired and resolved_company_id is not None:
+                self._release_refresh_enqueue_lock(
                     company_id=resolved_company_id,
                     dataset=dataset,
-                    job_id=job.job_id,
-                    updated_at=now,
+                    job_id=pending_job_id,
                 )
-            session.commit()
+            return RefreshEnqueueResult(
+                status="failed",
+                job_id=None,
+                ticker=normalized_ticker,
+                dataset=dataset,
+            )
 
         if event is None:
-            raise RuntimeError(f"Refresh job {pending_job_id} was created without an event")
+            if lock_acquired and resolved_company_id is not None:
+                self._release_refresh_enqueue_lock(
+                    company_id=resolved_company_id,
+                    dataset=dataset,
+                    job_id=pending_job_id,
+                )
+            return RefreshEnqueueResult(
+                status="failed",
+                job_id=None,
+                ticker=normalized_ticker,
+                dataset=dataset,
+            )
+
+        if lock_acquired and resolved_company_id is not None:
+            self._refresh_enqueue_lock_ttl(
+                company_id=resolved_company_id,
+                dataset=dataset,
+                job_id=pending_job_id,
+            )
+
         _emit_event_log(pending_job_id, event)
         self._publish_realtime_event(pending_job_id, event)
         self._enqueue_job_signal(pending_job_id)
-        return pending_job_id
+        return RefreshEnqueueResult(
+            status="enqueued",
+            job_id=pending_job_id,
+            ticker=normalized_ticker,
+            dataset=dataset,
+        )
 
     def get_active_job_id(self, *, ticker: str, kind: str, dataset: str = "company_refresh") -> str | None:
         normalized_ticker = ticker.strip().upper()
@@ -527,6 +642,8 @@ class SharedStatusBroker:
 
     def touch(self, job_id: str, *, expected_claim_token: str | None = None) -> None:
         now = datetime.now(timezone.utc)
+        company_id: int | None = None
+        dataset: str | None = None
         try:
             with self._sync_session_scope() as session:
                 job = self._get_job(session, job_id, for_update=True)
@@ -537,9 +654,14 @@ class SharedStatusBroker:
                 job.last_heartbeat_at = now
                 job.lease_expires_at = now + self._lease_duration
                 job.updated_at = now
+                company_id = job.company_id
+                dataset = job.dataset
                 session.commit()
         except SQLAlchemyError:
             return
+
+        if company_id is not None and dataset is not None:
+            self._refresh_enqueue_lock_ttl(company_id=company_id, dataset=dataset, job_id=job_id)
 
     def heartbeat_worker(
         self,
@@ -659,6 +781,9 @@ class SharedStatusBroker:
 
     def claim_next_job(self, *, worker_id: str) -> ClaimedJob | None:
         now = datetime.now(timezone.utc)
+        claimed_job_id: str | None = None
+        claimed_company_id: int | None = None
+        claimed_dataset: str | None = None
 
         with self._sync_session_scope() as session:
             statement: Select[tuple[RefreshJob]] = (
@@ -692,9 +817,18 @@ class SharedStatusBroker:
                 status="running",
             )
             session.commit()
+            claimed_job_id = job.job_id
+            claimed_company_id = job.company_id
+            claimed_dataset = job.dataset
 
         _emit_event_log(job.job_id, event)
         self._publish_realtime_event(job.job_id, event)
+        if claimed_job_id is not None and claimed_company_id is not None and claimed_dataset is not None:
+            self._refresh_enqueue_lock_ttl(
+                company_id=claimed_company_id,
+                dataset=claimed_dataset,
+                job_id=claimed_job_id,
+            )
         return ClaimedJob(
             job_id=job.job_id,
             ticker=job.ticker,
@@ -1032,6 +1166,9 @@ class SharedStatusBroker:
         expected_claim_token: str | None,
     ) -> JobEvent | None:
         now = datetime.now(timezone.utc)
+        company_id: int | None = None
+        dataset: str | None = None
+        release_lock_job_id: str | None = None
         try:
             with self._sync_session_scope() as session:
                 job = self._get_job(session, job_id, for_update=True)
@@ -1060,6 +1197,10 @@ class SharedStatusBroker:
                 if next_status == "failed":
                     job.last_error = message
                 job.updated_at = now
+                company_id = job.company_id
+                dataset = job.dataset
+                if next_status in TERMINAL_JOB_STATES:
+                    release_lock_job_id = job.job_id
                 event = self._append_event(
                     session,
                     job,
@@ -1070,6 +1211,12 @@ class SharedStatusBroker:
                     level=level,
                 )
                 session.commit()
+                if company_id is not None and dataset is not None and release_lock_job_id is not None:
+                    self._release_refresh_enqueue_lock(
+                        company_id=company_id,
+                        dataset=dataset,
+                        job_id=release_lock_job_id,
+                    )
                 return event
         except SQLAlchemyError:
             return None
@@ -1329,6 +1476,53 @@ class SharedStatusBroker:
 
     def _worker_key(self, worker_id: str) -> str:
         return f"{self._worker_registry_key}:{worker_id}"
+
+    def _refresh_enqueue_lock_key(self, *, company_id: int, dataset: str) -> str:
+        return f"refresh-lock:{company_id}:{dataset}"
+
+    def _acquire_refresh_enqueue_lock(self, *, company_id: int, dataset: str, job_id: str) -> bool:
+        if self._redis is None:
+            return True
+        try:
+            acquired = self._redis.set(
+                self._refresh_enqueue_lock_key(company_id=company_id, dataset=dataset),
+                job_id,
+                nx=True,
+                ex=self._refresh_enqueue_lock_ttl_seconds,
+            )
+            return bool(acquired)
+        except RedisError:
+            return True
+
+    def _refresh_enqueue_lock_ttl(self, *, company_id: int, dataset: str, job_id: str) -> None:
+        if self._redis is None:
+            return
+        lock_key = self._refresh_enqueue_lock_key(company_id=company_id, dataset=dataset)
+        try:
+            refreshed = self._redis.set(
+                lock_key,
+                job_id,
+                xx=True,
+                ex=self._refresh_enqueue_lock_ttl_seconds,
+            )
+            if not refreshed:
+                self._redis.set(lock_key, job_id, nx=True, ex=self._refresh_enqueue_lock_ttl_seconds)
+        except RedisError:
+            return
+
+    def _release_refresh_enqueue_lock(self, *, company_id: int, dataset: str, job_id: str) -> None:
+        if self._redis is None:
+            return
+        lock_key = self._refresh_enqueue_lock_key(company_id=company_id, dataset=dataset)
+        try:
+            current_job_id = self._redis.get(lock_key)
+            if current_job_id is None:
+                return
+            if str(current_job_id) != job_id:
+                return
+            self._redis.delete(lock_key)
+        except RedisError:
+            return
 
 
 class JobReporter:

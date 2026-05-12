@@ -3479,7 +3479,7 @@ export interface CompanyWorkspaceBootstrapResponse {
 }
 
 export interface RefreshQueuedResponse {
-  status: "queued";
+  status: "queued" | "failed";
   ticker: string;
   force: boolean;
   refresh: RefreshState;

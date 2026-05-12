@@ -6,32 +6,45 @@ from fastapi import BackgroundTasks
 
 import app.api.handlers.jobs as job_handlers
 import app.services.fetch_trigger as fetch_trigger
+from app.services.status_stream import RefreshEnqueueResult
 
 
 def test_queue_company_refresh_returns_existing_job_id(monkeypatch):
     monkeypatch.setattr(
         fetch_trigger.status_broker,
-        "create_job",
-        lambda **_kwargs: "job-existing",
+        "create_job_result",
+        lambda **_kwargs: RefreshEnqueueResult(
+            status="skipped_due_to_existing_lock",
+            job_id="job-existing",
+            ticker="AAPL",
+            dataset="company_refresh",
+        ),
     )
 
-    job_id = fetch_trigger.queue_company_refresh("AAPL", force=False)
+    result = fetch_trigger.queue_company_refresh("AAPL", force=False)
 
-    assert job_id == "job-existing"
+    assert result.job_id == "job-existing"
+    assert result.status == "skipped_due_to_existing_lock"
 
 
 def test_queue_company_refresh_normalizes_and_enqueues(monkeypatch):
     captured: dict[str, object] = {}
 
-    def _create_job(**kwargs):
+    def _create_job_result(**kwargs):
         captured.update(kwargs)
-        return "job-new"
+        return RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-new",
+            ticker="MSFT",
+            dataset="company_refresh",
+        )
 
-    monkeypatch.setattr(fetch_trigger.status_broker, "create_job", _create_job)
+    monkeypatch.setattr(fetch_trigger.status_broker, "create_job_result", _create_job_result)
 
-    job_id = fetch_trigger.queue_company_refresh(" msft ", force=True)
+    result = fetch_trigger.queue_company_refresh(" msft ", force=True)
 
-    assert job_id == "job-new"
+    assert result.job_id == "job-new"
+    assert result.status == "enqueued"
     assert captured == {
         "ticker": "MSFT",
         "kind": "refresh",
@@ -53,10 +66,15 @@ def test_refresh_company_handler_queues_normalized_ticker_without_background_tas
         raising=False,
     )
 
-    def _queue_company_refresh(ticker: str, *, force: bool = False) -> str:
+    def _queue_company_refresh(ticker: str, *, force: bool = False) -> RefreshEnqueueResult:
         captured["ticker"] = ticker
         captured["force"] = force
-        return "job-manual"
+        return RefreshEnqueueResult(
+            status="enqueued",
+            job_id="job-manual",
+            ticker=ticker,
+            dataset="company_refresh",
+        )
 
     monkeypatch.setattr(job_handlers, "queue_company_refresh", _queue_company_refresh)
 

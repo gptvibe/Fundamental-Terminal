@@ -189,12 +189,18 @@ def refresh_company(
     normalized_ticker = _normalize_ticker(ticker)
     snapshot = _resolve_cached_company_snapshot(session, normalized_ticker)
     queue_ticker = snapshot.company.ticker if snapshot is not None else normalized_ticker
-    job_id = queue_company_refresh(queue_ticker, force=force)
+    enqueue_result = queue_company_refresh(queue_ticker, force=force)
+    response_status = "queued" if enqueue_result.status in {"enqueued", "skipped_due_to_existing_lock"} else "failed"
     return RefreshQueuedResponse(
-        status="queued",
+        status=response_status,
         ticker=queue_ticker,
         force=force,
-        refresh=RefreshState(triggered=True, reason="manual", ticker=queue_ticker, job_id=job_id),
+        refresh=RefreshState(
+            triggered=enqueue_result.status == "enqueued",
+            reason="manual",
+            ticker=queue_ticker,
+            job_id=enqueue_result.job_id,
+        ),
     )
 
 

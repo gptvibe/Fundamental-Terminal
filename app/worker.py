@@ -245,8 +245,13 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
 def enqueue_refresh_jobs(identifiers: list[str], *, force: bool = False) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     for identifier in identifiers:
-        job_id = queue_company_refresh(identifier, force=force)
-        logger.info("Queued refresh job %s for %s", job_id, identifier.strip().upper())
+        enqueue_result = queue_company_refresh(identifier, force=force)
+        logger.info(
+            "Refresh enqueue result status=%s job_id=%s ticker=%s",
+            enqueue_result.status,
+            enqueue_result.job_id,
+            identifier.strip().upper(),
+        )
     return 0
 
 
