@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Company, DatasetRefreshState
+from app.services.dataset_registry import get_dataset_freshness_ttl_seconds
 from app.services.hot_cache import shared_hot_response_cache
 
 DatasetName = Literal[
@@ -102,7 +103,9 @@ def cache_state_for_dataset(session: Session, company_id: int, dataset: DatasetN
     if deadline is not None and deadline >= datetime.now(timezone.utc):
         return last_checked, "fresh"
 
-    freshness_cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.freshness_window_hours)
+    fallback_ttl_seconds = int(settings.freshness_window_hours) * 3600
+    ttl_seconds = get_dataset_freshness_ttl_seconds(str(dataset), default_seconds=fallback_ttl_seconds)
+    freshness_cutoff = datetime.now(timezone.utc) - timedelta(seconds=ttl_seconds)
     return last_checked, ("fresh" if last_checked >= freshness_cutoff else "stale")
 
 
@@ -119,7 +122,9 @@ def mark_dataset_checked(
     invalidate_hot_cache: bool = False,
 ) -> None:
     normalized_checked_at = _normalize_datetime(checked_at)
-    deadline = normalized_checked_at + timedelta(hours=settings.freshness_window_hours)
+    fallback_ttl_seconds = int(settings.freshness_window_hours) * 3600
+    ttl_seconds = get_dataset_freshness_ttl_seconds(str(dataset), default_seconds=fallback_ttl_seconds)
+    deadline = normalized_checked_at + timedelta(seconds=ttl_seconds)
     statement = insert(DatasetRefreshState).values(
         company_id=company_id,
         dataset=str(dataset),

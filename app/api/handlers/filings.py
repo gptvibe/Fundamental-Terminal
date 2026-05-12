@@ -4,22 +4,19 @@ from app.api.handlers._common import main_bound
 from app.api.handlers._shared import *  # noqa: F401,F403
 from app.contracts.common import ResponseMetadataPayload
 from app.api.schemas.filings import CompanyExhibitsResponse, CompanyFilingRiskSignalsResponse, ExhibitPayload, FilingRiskSignalPayload, FilingRiskSignalSummaryPayload
+from app.services.dataset_registry import build_endpoint_freshness_metadata
 from app.services.sec.exhibits import extract_exhibits_from_index
 
 
 def _filings_response_metadata(*, refresh: RefreshState, source: str) -> ResponseMetadataPayload:
-    if refresh.reason == "fresh" and not refresh.triggered:
-        freshness = "fresh"
-    elif refresh.reason == "missing":
-        freshness = "missing"
-    else:
-        freshness = "stale"
     return ResponseMetadataPayload(
-        freshness=freshness,
-        source=source,
-        isStale=freshness != "fresh",
-        refreshQueued=bool(refresh.triggered),
-        jobId=refresh.job_id,
+        **build_endpoint_freshness_metadata(
+            dataset_key="company_profile_submissions",
+            refresh_reason=refresh.reason,
+            refresh_triggered=refresh.triggered,
+            job_id=refresh.job_id,
+            source=source,
+        )
     )
 
 

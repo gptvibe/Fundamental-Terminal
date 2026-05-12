@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, or_, select, DateTime
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -339,6 +339,71 @@ def select_point_in_time_financials(
     return sorted(visible.values(), key=lambda item: (item.period_end, item.filing_type), reverse=True)
 
 
+def get_point_in_time_financials(
+    session: Session,
+    company_id: int,
+    statement_type: str,
+    as_of: datetime,
+    *,
+    limit: int | None = None,
+) -> list[FinancialStatement]:
+    """
+    Get financial statements visible as of a specific datetime, using SQL.
+    
+    This is the optimized SQL-based replacement for select_point_in_time_financials().
+    For each (period_end, filing_type) combination, selects the statement with:
+    1. filing_acceptance_at <= as_of (or period_end <= as_of if acceptance_at is NULL)
+    2. Latest filing_acceptance_at (or latest last_updated)
+    3. Highest id as tiebreaker
+    
+    Avoids loading and filtering the full history in Python.
+    """
+    as_of_time = datetime.combine(as_of.date(), time.max, tzinfo=timezone.utc)
+    
+    # Subquery: rank statements by (period_end, filing_type) based on effective_at and sort keys
+    ranked = select(
+        FinancialStatement.id.label("id"),
+        FinancialStatement.period_end.label("period_end"),
+        FinancialStatement.filing_type.label("filing_type"),
+        func.row_number().over(
+            partition_by=[FinancialStatement.period_end, FinancialStatement.filing_type],
+            order_by=[
+                # Prefer statements effective before as_of
+                case(
+                    (FinancialStatement.filing_acceptance_at <= as_of_time, 0),
+                    else_=1,
+                ),
+                # Then by filing_acceptance_at DESC (most recent effective)
+                FinancialStatement.filing_acceptance_at.desc().nullslast(),
+                # Then by last_updated DESC
+                FinancialStatement.last_updated.desc(),
+                # Then by id DESC (newest record)
+                FinancialStatement.id.desc(),
+            ],
+        ).label("rn"),
+    ).where(
+        FinancialStatement.company_id == company_id,
+        FinancialStatement.statement_type == statement_type,
+        # Only include statements that were effective by as_of
+        case(
+            (FinancialStatement.filing_acceptance_at != None, FinancialStatement.filing_acceptance_at <= as_of_time),
+            else_=func.cast(FinancialStatement.period_end, DateTime(timezone=True)) <= as_of_time,
+        ),
+    ).subquery()
+    
+    # Select the top statement for each (period_end, filing_type) pair
+    statement = (
+        select(FinancialStatement)
+        .join(ranked, FinancialStatement.id == ranked.c.id)
+        .where(ranked.c.rn == 1)
+        .order_by(ranked.c.period_end.desc(), ranked.c.filing_type.asc())
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
+    
+    return list(session.execute(statement).scalars())
+
+
 def get_company_filing_insights(
     session: Session,
     company_id: int,
@@ -587,6 +652,52 @@ def filter_price_history_as_of(price_history: list[PriceHistory], as_of: datetim
 def latest_price_as_of(price_history: list[PriceHistory], as_of: datetime) -> PriceHistory | None:
     visible = filter_price_history_as_of(price_history, as_of)
     return visible[-1] if visible else None
+
+
+def get_price_history_as_of(
+    session: Session,
+    company_id: int,
+    as_of: datetime,
+) -> list[PriceHistory]:
+    """
+    Get price history visible as of a specific datetime, using SQL filtering.
+    
+    This is the optimized SQL-based replacement for filter_price_history_as_of().
+    It avoids loading and filtering the full history in Python.
+    """
+    as_of_date = as_of.date()
+    statement = (
+        select(PriceHistory)
+        .where(
+            PriceHistory.company_id == company_id,
+            PriceHistory.trade_date <= as_of_date,
+        )
+        .order_by(PriceHistory.trade_date.asc())
+    )
+    return list(session.execute(statement).scalars())
+
+
+def get_latest_price_as_of(
+    session: Session,
+    company_id: int,
+    as_of: datetime,
+) -> PriceHistory | None:
+    """
+    Get the most recent price point as of a specific datetime, using SQL.
+    
+    This is the optimized SQL-based replacement for latest_price_as_of().
+    """
+    as_of_date = as_of.date()
+    statement = (
+        select(PriceHistory)
+        .where(
+            PriceHistory.company_id == company_id,
+            PriceHistory.trade_date <= as_of_date,
+        )
+        .order_by(PriceHistory.trade_date.desc(), PriceHistory.id.desc())
+        .limit(1)
+    )
+    return session.execute(statement).scalar_one_or_none()
 
 
 def get_company_derived_metric_points(
