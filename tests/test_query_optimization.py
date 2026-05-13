@@ -425,6 +425,102 @@ class TestDerivedMetricsOptimization:
         assert all(p.period_type == "quarterly" for p in quarterly_result)
         assert len(quarterly_result) > 0
 
+    def test_batch_derived_metric_points_preserves_per_company_period_limits(
+        self,
+        db_session: Session,
+        test_company: Company,
+    ) -> None:
+        """Batch metric loading should avoid per-company fan-out while preserving row grouping."""
+        second_company = Company(
+            ticker="BATCH",
+            name="Batch Company",
+            cik="0000000002",
+            sector="Technology",
+            market_industry="Software",
+        )
+        db_session.add(second_company)
+        db_session.flush()
+        base_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        for company in [test_company, second_company]:
+            for i in range(4):
+                for metric_key in ["revenue_growth", "operating_margin"]:
+                    period_end = date(2026, 1, 1) + timedelta(days=i)
+                    db_session.add(
+                        DerivedMetricPoint(
+                            company_id=company.id,
+                            period_start=date(2026, 1, 1),
+                            period_end=period_end,
+                            period_type="ttm",
+                            filing_type="TTM",
+                            metric_key=metric_key,
+                            metric_value=float(i),
+                            metric_date=period_end,
+                            provenance={},
+                            source_statement_ids=[],
+                            quality_flags=[],
+                            last_updated=base_date,
+                            last_checked=base_date,
+                        )
+                    )
+        db_session.flush()
+
+        result = cache_queries.get_company_derived_metric_points_by_company_ids(
+            db_session,
+            [test_company.id, second_company.id],
+            period_type="ttm",
+            max_periods=2,
+        )
+
+        assert set(result) == {test_company.id, second_company.id}
+        assert {point.company_id for rows in result.values() for point in rows} == {test_company.id, second_company.id}
+        assert all(len({point.period_end for point in rows}) == 2 for rows in result.values())
+        assert all(len(rows) == 4 for rows in result.values())
+
+    def test_batch_price_history_groups_by_company(
+        self,
+        db_session: Session,
+        test_company: Company,
+    ) -> None:
+        second_company = Company(
+            ticker="PRICEB",
+            name="Price Batch Company",
+            cik="0000000003",
+            sector="Technology",
+            market_industry="Software",
+        )
+        db_session.add(second_company)
+        db_session.flush()
+        base_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        for company in [test_company, second_company]:
+            for i in range(3):
+                db_session.add(
+                    PriceHistory(
+                        company_id=company.id,
+                        trade_date=date(2026, 1, 1) + timedelta(days=i),
+                        close=100.0 + i,
+                        volume=1000 + i,
+                        source="test",
+                        last_updated=base_date,
+                        fetch_timestamp=base_date,
+                        last_checked=base_date,
+                    )
+                )
+        db_session.flush()
+
+        result = cache_queries.get_company_price_history_by_company_ids(
+            db_session,
+            [test_company.id, second_company.id],
+        )
+
+        assert [point.trade_date for point in result[test_company.id]] == [
+            date(2026, 1, 1),
+            date(2026, 1, 2),
+            date(2026, 1, 3),
+        ]
+        assert len(result[second_company.id]) == 3
+
 
 @pytest.mark.integration
 class TestQueryPerformance:

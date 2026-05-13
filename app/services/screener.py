@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -14,6 +16,7 @@ from app.models import Company, DerivedMetricPoint, FinancialRestatement, ModelR
 DEFAULT_PERIOD_TYPE = "ttm"
 DEFAULT_SORT_FIELD = "revenue_growth"
 DEFAULT_SORT_DIRECTION = "desc"
+logger = logging.getLogger(__name__)
 SUPPORTED_PERIOD_TYPES = ("quarterly", "annual", "ttm")
 SUPPORTED_QUALITY_FLAG_OPTIONS = (
     "filing_date_unavailable",
@@ -554,6 +557,7 @@ def _build_ranking_catalog_payload() -> list[dict[str, Any]]:
 
 
 def run_official_screener(session: Session, request_payload: dict[str, Any]) -> dict[str, Any]:
+    started_at = time.perf_counter()
     period_type = str(request_payload.get("period_type") or DEFAULT_PERIOD_TYPE)
     if period_type not in SUPPORTED_PERIOD_TYPES:
         period_type = DEFAULT_PERIOD_TYPE
@@ -588,15 +592,21 @@ def run_official_screener(session: Session, request_payload: dict[str, Any]) -> 
     limit = max(1, min(int(request_payload.get("limit") or 50), 200))
     offset = max(0, int(request_payload.get("offset") or 0))
 
+    load_started_at = time.perf_counter()
     candidates = _load_official_screener_candidates(
         session,
         period_type=period_type,
         ticker_universe=ticker_universe,
     )
+    loaded_ms = (time.perf_counter() - load_started_at) * 1000.0
+    ranking_started_at = time.perf_counter()
     _attach_explainable_rankings(candidates)
+    ranking_ms = (time.perf_counter() - ranking_started_at) * 1000.0
+    filter_started_at = time.perf_counter()
     matched_candidates = [candidate for candidate in candidates if _candidate_matches_filters(candidate, filters)]
     ordered_candidates = _sort_candidates(matched_candidates, field=sort_field, direction=sort_direction)
     page = ordered_candidates[offset : offset + limit]
+    filter_sort_ms = (time.perf_counter() - filter_started_at) * 1000.0
 
     summary_source = matched_candidates or candidates
     statement_sources = sorted(
@@ -622,6 +632,16 @@ def run_official_screener(session: Session, request_payload: dict[str, Any]) -> 
         confidence_flags.append("partial_shareholder_yield_coverage")
     if any(_candidate_is_restatement_flagged(candidate) for candidate in candidates):
         confidence_flags.append("restatement_flags_present")
+
+    logger.debug(
+        "PERF screener_search candidates=%s matched=%s load_ms=%.1f ranking_ms=%.1f filter_sort_ms=%.1f total_ms=%.1f",
+        len(candidates),
+        len(matched_candidates),
+        loaded_ms,
+        ranking_ms,
+        filter_sort_ms,
+        (time.perf_counter() - started_at) * 1000.0,
+    )
 
     return {
         "query": {

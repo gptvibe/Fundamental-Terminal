@@ -17,13 +17,17 @@ from typing import Any
 
 import httpx
 
+from app.observability import observe_upstream_request
+from app.services.sec_cache import sec_http_cache
 from app.services.sec.refresh_orchestrator import _select_statement_period
+from app.services.shared_upstream_cache import shared_upstream_cache
 
 logger = logging.getLogger(__name__)
 
 _FRAMES_BASE_URL = "https://data.sec.gov/api/xbrl/frames"
 _DEFAULT_USER_AGENT = "Fundamental-Terminal research@example.com"
 _MIN_REQUEST_INTERVAL_SECONDS = 0.12  # ~8 req/s — SEC asks for <=10/s
+_MAX_RETRIES = 3
 
 # Maps internal concept_key -> list of (taxonomy, tag, unit, period_suffix_hint)
 # period_suffix_hint is "flow" (duration) or "instant" (point-in-time).
@@ -136,46 +140,54 @@ class SecFramesClient:
         concept_key: str,
     ) -> FrameResponse | None:
         """Fetch a single frame.  Returns None on 404."""
-        self._throttle()
         url = f"{_FRAMES_BASE_URL}/{taxonomy}/{tag}/{unit}/{period_label}.json"
-        fetched_at = datetime.now(tz=timezone.utc)
-        try:
-            response = self._client.get(url)
-        except httpx.RequestError as exc:
-            raise RuntimeError(f"SEC frames request failed: {exc}") from exc
-
-        if response.status_code == 404:
+        response = self._request_frame(url)
+        if response is None:
             return None
-        if response.status_code == 429:
-            retry_after = int(response.headers.get("Retry-After", "10"))
-            logger.warning("SEC frames rate-limited; sleeping %ss", retry_after)
-            time.sleep(retry_after)
-            return self.fetch_frame(taxonomy, tag, unit, period_label, concept_key)
-        response.raise_for_status()
-
-        raw: dict[str, Any] = response.json()
-        data_rows = [
-            FrameDataPoint(
-                accn=str(row.get("accn", "")),
-                cik=int(row.get("cik", 0)),
-                entity_name=str(row.get("entityName", "")),
-                loc=str(row.get("loc", "")),
-                end=str(row.get("end", "")),
-                val=float(row.get("val", 0)),
-            )
-            for row in (raw.get("data") or [])
-        ]
-        return FrameResponse(
-            taxonomy=raw.get("taxonomy", taxonomy),
-            tag=raw.get("tag", tag),
-            cip=raw.get("cip", ""),
-            label=raw.get("label", tag),
-            description=raw.get("description", ""),
-            pts=int(raw.get("pts", len(data_rows))),
+        return _frame_response_from_http_response(
+            response,
             period_label=period_label,
             concept_key=concept_key,
-            fetched_at=fetched_at,
-            data=data_rows,
+            fallback_taxonomy=taxonomy,
+            fallback_tag=tag,
+        )
+
+    def _request_frame(self, url: str) -> httpx.Response | None:
+        cached_response = sec_http_cache.get("GET", url)
+        if cached_response is not None:
+            return cached_response
+
+        def _fetch_response() -> httpx.Response | None:
+            for attempt in range(1, _MAX_RETRIES + 1):
+                self._throttle()
+                try:
+                    with observe_upstream_request(source="sec_xbrl_frames"):
+                        response = self._client.get(url)
+                except httpx.RequestError as exc:
+                    raise RuntimeError(f"SEC frames request failed: {exc}") from exc
+
+                if response.status_code == 404:
+                    return None
+                if response.status_code == 429:
+                    if attempt >= _MAX_RETRIES:
+                        logger.warning("SEC frames rate-limited after %s attempts; returning no frame", attempt)
+                        return None
+                    retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+                    logger.warning("SEC frames rate-limited; sleeping %ss", retry_after)
+                    time.sleep(retry_after)
+                    continue
+                response.raise_for_status()
+                if isinstance(response, httpx.Response):
+                    sec_http_cache.put("GET", url, response)
+                return response
+
+        cache_key = sec_http_cache.cache_key("GET", url)
+        if cache_key is None:
+            return _fetch_response()
+        return shared_upstream_cache.run_singleflight(
+            f"sec:GET:{cache_key}",
+            wait_for=lambda: sec_http_cache.get("GET", url),
+            fill=_fetch_response,
         )
 
     def fetch_concept_frame(
@@ -195,6 +207,48 @@ class SecFramesClient:
                 if frame is not None and frame.data:
                     return frame
         return None
+
+
+def _frame_response_from_http_response(
+    response: httpx.Response,
+    *,
+    period_label: str,
+    concept_key: str,
+    fallback_taxonomy: str,
+    fallback_tag: str,
+) -> FrameResponse:
+    fetched_at = datetime.now(tz=timezone.utc)
+    raw: dict[str, Any] = response.json()
+    data_rows = [
+        FrameDataPoint(
+            accn=str(row.get("accn", "")),
+            cik=int(row.get("cik", 0)),
+            entity_name=str(row.get("entityName", "")),
+            loc=str(row.get("loc", "")),
+            end=str(row.get("end", "")),
+            val=float(row.get("val", 0)),
+        )
+        for row in (raw.get("data") or [])
+    ]
+    return FrameResponse(
+        taxonomy=raw.get("taxonomy", fallback_taxonomy),
+        tag=raw.get("tag", fallback_tag),
+        cip=raw.get("cip", ""),
+        label=raw.get("label", fallback_tag),
+        description=raw.get("description", ""),
+        pts=int(raw.get("pts", len(data_rows))),
+        period_label=period_label,
+        concept_key=concept_key,
+        fetched_at=fetched_at,
+        data=data_rows,
+    )
+
+
+def _retry_after_seconds(value: str | None) -> int:
+    try:
+        return max(0, int(value or "10"))
+    except ValueError:
+        return 10
 
 
 __all__ = [

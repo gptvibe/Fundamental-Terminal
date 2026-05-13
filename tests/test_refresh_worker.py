@@ -18,6 +18,12 @@ class _FakeBroker:
     def requeue_expired_jobs(self, *, limit: int) -> None:
         self.requeue_limits.append(limit)
 
+    def claim_next_job(self, *, worker_id: str):
+        assert worker_id
+        if self._jobs:
+            return self._jobs.pop(0)
+        return None
+
     def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float):
         assert worker_id
         assert timeout_seconds >= 0
@@ -213,6 +219,59 @@ def test_queue_worker_uses_sleep_for_non_blocking_idle_poll(monkeypatch) -> None
     assert _CountingEvent.allocations == 1
 
 
+def test_queue_worker_claims_durable_job_before_blocking(monkeypatch) -> None:
+    blocking_calls: list[float] = []
+
+    class _DurableQueuedBroker:
+        has_blocking_queue = True
+
+        def __init__(self) -> None:
+            self._jobs = [_job("job-1", ticker="RDDT"), None]
+
+        def requeue_expired_jobs(self, *, limit: int) -> None:
+            assert limit == 10
+
+        def claim_next_job(self, *, worker_id: str):
+            assert worker_id
+            if self._jobs:
+                return self._jobs.pop(0)
+            return None
+
+        def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float):
+            blocking_calls.append(timeout_seconds)
+            return None
+
+        def heartbeat_worker(
+            self,
+            worker_id: str,
+            *,
+            state: str,
+            current_job_id: str | None = None,
+            ticker: str | None = None,
+        ) -> None:
+            assert worker_id
+            assert state
+
+        def clear_worker_heartbeat(self, worker_id: str) -> None:
+            assert worker_id
+
+    monkeypatch.setattr(worker_module, "status_broker", _DurableQueuedBroker())
+    monkeypatch.setattr(worker_module.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(worker_module, "EdgarIngestionService", lambda: _FakeService("service-1"))
+    seen_job_ids: list[str] = []
+    monkeypatch.setattr(
+        worker_module,
+        "run_refresh_job",
+        lambda _identifier, **kwargs: seen_job_ids.append(kwargs["job_id"]) or {"ok": True},
+    )
+
+    result = worker_module.run_refresh_queue_worker(poll_interval_seconds=0.25, once=True)
+
+    assert result == 0
+    assert seen_job_ids == ["job-1"]
+    assert blocking_calls == [0.25]
+
+
 def test_worker_lifecycle_heartbeat_writes_health_file(monkeypatch, tmp_path) -> None:
     health_file = tmp_path / "worker-heartbeat.txt"
     seen_heartbeats: list[tuple[str, str]] = []
@@ -255,6 +314,10 @@ def test_queue_worker_propagates_claim_errors_and_clears_heartbeat(monkeypatch) 
         def requeue_expired_jobs(self, *, limit: int) -> None:
             assert limit == 10
 
+        def claim_next_job(self, *, worker_id: str):
+            assert worker_id
+            return None
+
         def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float):
             assert worker_id
             assert timeout_seconds == 0.5
@@ -292,6 +355,9 @@ def test_queue_worker_propagates_recovery_errors_and_clears_heartbeat(monkeypatc
         def requeue_expired_jobs(self, *, limit: int) -> None:
             assert limit == 10
             raise RuntimeError("recovery failed")
+
+        def claim_next_job(self, *, worker_id: str):
+            raise AssertionError("claim_next_job should not be called after recovery failure")
 
         def claim_next_job_blocking(self, *, worker_id: str, timeout_seconds: float):
             raise AssertionError("claim_next_job_blocking should not be called after recovery failure")

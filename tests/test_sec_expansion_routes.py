@@ -2379,6 +2379,58 @@ def test_watchlist_summary_endpoint_includes_research_brief_material_change_dige
     assert item["material_change"]["highlights"][0]["title"] == "Demand language softened"
 
 
+def test_watchlist_summary_endpoint_strict_mode_sanitizes_reverse_dcf_without_falling_back(monkeypatch):
+    snap = _snapshot("AAPL", "0000320193")
+    _patch_main_and_shared(monkeypatch, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda *_args, **_kwargs: {"AAPL": snap})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_coverage_counts",
+        lambda *_args, **_kwargs: {snap.company.id: {"financial_periods": 2, "price_points": 3}},
+    )
+    monkeypatch.setattr(main_module, "_load_watchlist_summary_preload", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        main_module,
+        "_refresh_for_snapshot",
+        lambda *_args, **_kwargs: RefreshState(triggered=False, reason="fresh", ticker="AAPL", job_id=None),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_load_company_activity_data",
+        lambda *_args, **_kwargs: {
+            "beneficial_filings": [],
+            "capital_filings": [],
+            "insider_trades": [],
+            "institutional_holdings": [],
+            "filings": [],
+            "filing_events": [],
+            "governance_filings": [],
+            "form144_filings": [],
+            "comment_letters": [],
+        },
+    )
+    monkeypatch.setattr(main_module, "_visible_price_history", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(main_module, "get_company_research_brief_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        main_module,
+        "get_company_models",
+        lambda *_args, **_kwargs: [
+            SimpleNamespace(model_name="reverse_dcf", result={"status": "ready", "model_status": "ready", "implied_growth": 0.08}),
+        ],
+    )
+
+    client = TestClient(app)
+    response = client.post("/api/watchlist/summary", json={"tickers": ["AAPL"]})
+
+    assert response.status_code == 200
+    item = response.json()["companies"][0]
+    assert item["ticker"] == "AAPL"
+    assert item["name"] == "Apple Inc."
+    assert item["refresh"]["reason"] == "fresh"
+    assert item["implied_growth"] is None
+    assert item["implied_growth_status"] == "insufficient_data"
+
+
 def test_watchlist_summary_endpoint_tolerates_per_ticker_builder_exceptions(monkeypatch):
     snapshots = {
         "AAPL": _snapshot("AAPL", "0000320193"),
@@ -2602,6 +2654,101 @@ def test_watchlist_calendar_endpoint_projects_expected_events(monkeypatch):
     assert sec_event["ticker"] == "MSFT"
     assert sec_event["date"] == "2026-05-20"
     assert sec_event["form"] == "8-K"
+
+
+def test_watchlist_calendar_company_events_use_preloaded_batch_data(monkeypatch):
+    snapshot = _snapshot("AAPL", "0000320193")
+    snapshot.company.id = 1
+    filing_event = SimpleNamespace(
+        accession_number="0001-26-000001",
+        item_code="2.02",
+        filing_date=date(2026, 5, 20),
+        report_date=date(2026, 5, 20),
+        summary="8-K Item 2.02: Earnings update.",
+        form="8-K",
+        items="2.02,9.01",
+        category="Earnings",
+        source_url="https://www.sec.gov/Archives/example",
+    )
+    monkeypatch.setattr(
+        main_module,
+        "_visible_financials_for_company",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("financials should be preloaded")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_filing_events",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("filing events should be preloaded")),
+    )
+
+    token = main_module._watchlist_calendar_preload_ctx.set(
+        {
+            "financials_by_company_id": {1: []},
+            "filing_events_by_company_id": {1: [filing_event]},
+        }
+    )
+    try:
+        events = main_module._build_watchlist_calendar_company_events(
+            object(),
+            snapshot,
+            window_start=date(2026, 5, 1),
+            window_end=date(2026, 5, 31),
+        )
+    finally:
+        main_module._watchlist_calendar_preload_ctx.reset(token)
+
+    assert len(events) == 1
+    assert events[0].event_type == "sec_event"
+    assert events[0].ticker == "AAPL"
+
+
+def test_watchlist_calendar_endpoint_uses_preload_for_full_watchlist(monkeypatch):
+    tickers = [f"TK{i:02d}" for i in range(50)]
+    snapshots = {}
+    for index, ticker in enumerate(tickers, start=1):
+        snapshot = _snapshot(ticker, str(index).zfill(10))
+        snapshot.company.id = index
+        snapshots[ticker] = snapshot
+
+    preload_calls: list[list[str]] = []
+
+    monkeypatch.setattr(main_module, "_watchlist_calendar_today", lambda: date(2026, 4, 4))
+    monkeypatch.setattr(main_module, "get_company_snapshots_by_ticker", lambda _session, requested: {ticker: snapshots[ticker] for ticker in requested})
+
+    def _preload(_session, snapshots_by_ticker):
+        preload_calls.append(list(snapshots_by_ticker))
+        return {
+            "financials_by_company_id": {
+                snapshot.company.id: []
+                for snapshot in snapshots.values()
+            },
+            "filing_events_by_company_id": {
+                snapshot.company.id: []
+                for snapshot in snapshots.values()
+            },
+        }
+
+    monkeypatch.setattr(main_module, "_load_watchlist_calendar_preload", _preload)
+    monkeypatch.setattr(
+        main_module,
+        "_visible_financials_for_company",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("financials should use preload")),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "get_company_filing_events",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("filing events should use preload")),
+    )
+
+    client = TestClient(app)
+    response = client.get("/api/watchlist/calendar", params=[("tickers", ticker) for ticker in tickers])
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tickers"] == tickers
+    assert preload_calls == [tickers]
+    assert payload["events"]
+    assert all(item["event_type"] == "institutional_deadline" for item in payload["events"])
 
 
 def test_watchlist_calendar_endpoint_rejects_more_than_50_tickers():

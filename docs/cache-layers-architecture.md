@@ -39,6 +39,26 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 - If data is stale or missing, return the cached or partial payload immediately and queue background refresh work.
 - Direct live-fetch utility routes remain separate for explicit SEC exploration flows.
 
+## Batch Preload Pattern
+- Compare and watchlist calendar routes normalize the ticker batch, load company snapshots once, then preload route-specific supporting data into a request-local `ContextVar`.
+- `/api/companies/compare` preloads financial statements, price cache state, price history, derived metric points, derived metric freshness, and latest model runs for the requested companies.
+- `/api/watchlist/calendar` preloads visible financial statements and filing events for the full watchlist request.
+- Item builders still keep the older per-company query path as a fallback. This is intentional: preload failures should degrade to a slower response instead of failing the endpoint, and monkeypatch-heavy legacy tests can still exercise builders with lightweight sessions.
+- Preload failures are logged. Treat those logs as performance warnings, because response schemas and fallback behavior are intentionally unchanged.
+
+## SEC Cache Visibility
+- `SecHttpCache.prune_expired()` only removes expired or corrupted expiring entries. Accession-known SEC archive artifacts marked `immutable=true` are intentionally retained because they are official historical artifacts.
+- Use `get_sec_cache_disk_usage()` or `log_sec_cache_disk_usage()` from `app.services.sec_cache` to inspect cache file count, total bytes, immutable bytes, expiring bytes, stale bytes, and unreadable files without deleting anything.
+- Disk-size controls should prefer monitoring and alerting first. Do not add size-based eviction that can delete immutable SEC archive artifacts unless the retention policy is explicitly changed and documented.
+
+## Manual Regression Checks
+- Compare maximum batch: request `/api/companies/compare?tickers=AAPL,MSFT,GOOG,AMZN,META` and confirm all five companies return financials, metrics, model payloads, provenance, and unchanged fallback disclosures.
+- Compare missing ticker: request `/api/companies/compare?tickers=AAPL,UNKNOWN` and confirm the unknown ticker returns the existing `company_missing`/missing refresh shape without affecting AAPL.
+- Full watchlist calendar: request `/api/watchlist/calendar` with 50 `tickers` query parameters and confirm expected filing projections, SEC events, and 13F deadline events are sorted and not duplicated.
+- Cold SEC cache: move or empty `data/sec_cache/` in a local environment, trigger a company refresh or SEC frames screener request, then confirm SEC responses repopulate cache files with structured metadata.
+- SEC 429 retry: in a mocked or staging client, return repeated 429 responses for a frames URL and confirm the client waits according to `Retry-After`, retries up to the configured attempts, and returns no frame instead of failing the route.
+- Migration: run `alembic upgrade head`, then `python scripts/check_migration_safety.py`, and verify the screener derived-metric index exists.
+
 ## Developer Rules
 - Do not add request-path live fetches to persisted research endpoints.
 - Reuse the existing refresh queue and SSE flow instead of inventing parallel status plumbing.
@@ -49,6 +69,7 @@ Fundamental Terminal is intentionally cache-first. Company research routes shoul
 - Inspect startup logs for `shared_hot_cache.backend` to confirm the active backend mode.
 - Inspect runtime logs for `shared_hot_cache.local_fallback` when Redis operations fail and requests drop to process-local fallback.
 - Inspect `/api/internal/cache-metrics` for `hot_cache_backend`, `hot_cache_backend_mode`, `hot_cache_status`, `hot_cache_operator_summary`, plus `hot_cache.backend_details.startup_reason`, `fallback_events_total`, and `cross_instance_reuse`.
+- Periodically call `log_sec_cache_disk_usage()` from an operational shell or scheduled health task to capture SEC disk-cache growth, especially immutable archive artifact growth.
 - If the cache is in `local_memory_fallback`, verify `REDIS_URL`, Redis health, and network reachability from every app instance.
 
 Sample metrics signal:

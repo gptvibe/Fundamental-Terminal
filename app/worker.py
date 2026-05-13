@@ -141,9 +141,8 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
                         next_recovery_at = now + settings.refresh_recovery_interval_seconds
 
                     while len(active_jobs) < max_concurrent_jobs:
-                        if active_jobs:
-                            job = status_broker.claim_next_job(worker_id=worker_id)
-                        else:
+                        job = status_broker.claim_next_job(worker_id=worker_id)
+                        if job is None and not active_jobs:
                             job = status_broker.claim_next_job_blocking(worker_id=worker_id, timeout_seconds=effective_poll_interval)
                         if job is None:
                             break
@@ -184,7 +183,9 @@ def run_refresh_queue_worker(*, poll_interval_seconds: float | None = None, once
                 status_broker.requeue_expired_jobs(limit=10)
                 next_recovery_at = now + settings.refresh_recovery_interval_seconds
 
-            job = status_broker.claim_next_job_blocking(worker_id=worker_id, timeout_seconds=effective_poll_interval)
+            job = status_broker.claim_next_job(worker_id=worker_id)
+            if job is None:
+                job = status_broker.claim_next_job_blocking(worker_id=worker_id, timeout_seconds=effective_poll_interval)
             if job is None:
                 _close_refresh_service(service)
                 service = None

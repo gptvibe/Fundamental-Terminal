@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from app.config import SecClientConfig, build_sec_client_config, settings
 from app.db.session import SessionLocal, get_engine
 from app.model_engine import precompute_core_models
-from app.observability import emit_structured_log
+from app.observability import emit_structured_log, observe_upstream_request
 from app.models import BeneficialOwnershipReport, CapitalMarketsEvent, CommentLetter, Company, EarningsRelease, FilingEvent, FilingRiskSignal, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade
 from app.services.filing_risk_signals import build_non_timely_filing_signals
 from app.services.filing_parser import FilingParser, ParsedFilingInsight, SUPPORTED_PARSER_FORMS
@@ -1010,6 +1010,62 @@ class PriceHistoryPrefetchResult:
     error: Exception | None = None
 
 
+def _filing_index_cache_key(submissions: dict[str, Any]) -> str | None:
+    filings_root = submissions.get("filings", {}) if isinstance(submissions, dict) else {}
+    recent = filings_root.get("recent", {}) if isinstance(filings_root, dict) else {}
+    cik = str(submissions.get("cik") or submissions.get("centralIndexKey") or "").strip()
+    normalized_cik = cik.zfill(10) if cik.isdigit() else "unknown"
+    fingerprint_payload = {
+        "recent_accessions": recent.get("accessionNumber") if isinstance(recent, dict) else None,
+        "recent_filing_dates": recent.get("filingDate") if isinstance(recent, dict) else None,
+        "recent_acceptance": recent.get("acceptanceDateTime") if isinstance(recent, dict) else None,
+        "files": [
+            str(item.get("name") or "")
+            for item in (filings_root.get("files", []) if isinstance(filings_root, dict) else [])
+            if isinstance(item, dict)
+        ],
+    }
+    encoded = json.dumps(fingerprint_payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return f"sec:filing-index:cik:{normalized_cik}:inputs:{hashlib.sha256(encoded).hexdigest()[:24]}"
+
+
+def _serialize_filing_index(filing_index: dict[str, FilingMetadata]) -> dict[str, dict[str, Any]]:
+    return {
+        accession: {
+            "accession_number": metadata.accession_number,
+            "form": metadata.form,
+            "filing_date": metadata.filing_date.isoformat() if metadata.filing_date else None,
+            "report_date": metadata.report_date.isoformat() if metadata.report_date else None,
+            "acceptance_datetime": metadata.acceptance_datetime.isoformat() if metadata.acceptance_datetime else None,
+            "primary_document": metadata.primary_document,
+            "primary_doc_description": metadata.primary_doc_description,
+            "items": metadata.items,
+        }
+        for accession, metadata in filing_index.items()
+    }
+
+
+def _deserialize_filing_index(payload: dict[str, Any]) -> dict[str, FilingMetadata]:
+    restored: dict[str, FilingMetadata] = {}
+    for accession, raw_metadata in payload.items():
+        if not isinstance(raw_metadata, dict):
+            continue
+        accession_number = str(raw_metadata.get("accession_number") or accession or "").strip()
+        if not accession_number:
+            continue
+        restored[accession_number] = FilingMetadata(
+            accession_number=accession_number,
+            form=raw_metadata.get("form"),
+            filing_date=_parse_date(raw_metadata.get("filing_date")),
+            report_date=_parse_date(raw_metadata.get("report_date")),
+            acceptance_datetime=_parse_datetime_value(raw_metadata.get("acceptance_datetime")),
+            primary_document=raw_metadata.get("primary_document"),
+            primary_doc_description=raw_metadata.get("primary_doc_description"),
+            items=raw_metadata.get("items"),
+        )
+    return restored
+
+
 class EdgarClient:
     def __init__(self) -> None:
         self._client_config = build_sec_client_config(settings)
@@ -1047,7 +1103,8 @@ class EdgarClient:
             attempt = 0
             while True:
                 self._throttle()
-                response = self._http.request(method, url, **request_kwargs)
+                with observe_upstream_request(source="sec_edgar"):
+                    response = self._http.request(method, url, **request_kwargs)
                 self._last_request_monotonic = time.monotonic()
                 if response.status_code == 304 and stale_entry is not None:
                     response.read()
@@ -1240,6 +1297,14 @@ class EdgarClient:
         return self._get_json(f"{settings.sec_companyfacts_base_url}/CIK{cik}.json")
 
     def build_filing_index(self, submissions: dict[str, Any]) -> dict[str, FilingMetadata]:
+        cache_key = _filing_index_cache_key(submissions)
+        if cache_key is not None:
+            cached_index = shared_upstream_cache.get_json(cache_key)
+            if isinstance(cached_index, dict):
+                restored = _deserialize_filing_index(cached_index)
+                if restored:
+                    return restored
+
         filing_index: dict[str, FilingMetadata] = {}
         filings_root = submissions.get("filings", {})
         recent = filings_root.get("recent", {})
@@ -1254,6 +1319,12 @@ class EdgarClient:
                 extra_payload = extra_payload.get("filings", {}).get("recent", {})
             self._ingest_columnar_filings(extra_payload, filing_index)
 
+        if cache_key is not None:
+            shared_upstream_cache.store_json(
+                cache_key,
+                _serialize_filing_index(filing_index),
+                ttl_seconds=24 * 60 * 60,
+            )
         return filing_index
 
     def _ingest_columnar_filings(

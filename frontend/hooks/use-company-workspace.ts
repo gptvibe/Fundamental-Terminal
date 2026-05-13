@@ -181,6 +181,19 @@ export function useCompanyWorkspace(
   const refreshState = data?.refresh ?? institutionalData?.refresh ?? insiderData?.refresh ?? null;
   const trackedJobId = activeJobId ?? refreshState?.job_id;
   const { consoleEntries: streamEntries, connectionState, lastEvent } = useJobStream(trackedJobId);
+  const settledTrackedJob = Boolean(trackedJobId && settledJobIds.includes(trackedJobId));
+  const effectiveRefreshState = useMemo(() => {
+    if (!refreshState || !trackedJobId || !settledTrackedJob || refreshState.job_id !== trackedJobId) {
+      return refreshState;
+    }
+
+    return {
+      ...refreshState,
+      triggered: false,
+      job_id: null,
+    };
+  }, [refreshState, settledTrackedJob, trackedJobId]);
+  const effectiveActiveJobId = settledTrackedJob ? null : trackedJobId;
 
   const runWithAudit = useCallback(async <T,>(source: string, work: () => Promise<T>): Promise<T> => {
     if (!auditPageRoute || !auditScenario) {
@@ -511,8 +524,8 @@ export function useCompanyWorkspace(
     insiderError,
     institutionalError,
     refreshing,
-    refreshState,
-    activeJobId: trackedJobId,
+    refreshState: effectiveRefreshState,
+    activeJobId: effectiveActiveJobId,
     consoleEntries,
     connectionState,
     queueRefresh,

@@ -112,6 +112,51 @@ def _load_top_rows_by_company_ids(
     return _group_rows_by_company_id(normalized_ids, list(session.execute(statement).scalars()))
 
 
+def _load_dataset_refresh_states_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    dataset: str,
+) -> dict[int, tuple[datetime | None, datetime | None]]:
+    statement = select(
+        DatasetRefreshState.company_id,
+        DatasetRefreshState.last_checked,
+        DatasetRefreshState.freshness_deadline,
+    ).where(
+        DatasetRefreshState.company_id.in_(company_ids),
+        DatasetRefreshState.dataset == dataset,
+    )
+    return {
+        int(company_id): (
+            _normalize_datetime(last_checked),
+            _normalize_datetime(freshness_deadline),
+        )
+        for company_id, last_checked, freshness_deadline in session.execute(statement).all()
+    }
+
+
+def _backfill_dataset_last_checked_by_company_ids(
+    session: Session,
+    model: Any,
+    company_ids: set[int],
+    dataset: str,
+) -> dict[int, datetime | None]:
+    if not company_ids:
+        return {}
+
+    statement = (
+        select(model.company_id, func.max(model.last_checked))
+        .where(model.company_id.in_(sorted(company_ids)))
+        .group_by(model.company_id)
+    )
+    result: dict[int, datetime | None] = {}
+    for company_id, last_checked in session.execute(statement).all():
+        normalized = _normalize_datetime(last_checked)
+        result[int(company_id)] = normalized
+        if normalized is not None:
+            mark_dataset_checked(session, int(company_id), dataset, checked_at=normalized, success=True)
+    return result
+
+
 def search_company_snapshots(
     session: Session,
     ticker_query: str,
@@ -289,6 +334,35 @@ def get_company_regulated_bank_financials(
     if limit is not None:
         statement = statement.limit(limit)
     return list(session.execute(statement).scalars())
+
+
+def get_company_regulated_bank_financials_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    limit: int | None = None,
+) -> dict[int, list[FinancialStatement]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    if limit is None:
+        return _load_rows_by_company_ids(
+            session,
+            FinancialStatement,
+            normalized_ids,
+            filters=(FinancialStatement.statement_type == BANK_REGULATORY_STATEMENT_TYPE,),
+            order_by=(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc()),
+        )
+
+    return _load_top_rows_by_company_ids(
+        session,
+        FinancialStatement,
+        normalized_ids,
+        limit=limit,
+        filters=(FinancialStatement.statement_type == BANK_REGULATORY_STATEMENT_TYPE,),
+        order_by=(FinancialStatement.period_end.desc(), FinancialStatement.filing_type.asc()),
+    )
 
 
 def get_company_financial_restatements(
@@ -587,6 +661,15 @@ def get_company_price_history(session: Session, company_id: int) -> list[PriceHi
     return list(session.execute(statement).scalars())
 
 
+def get_company_price_history_by_company_ids(session: Session, company_ids: list[int]) -> dict[int, list[PriceHistory]]:
+    return _load_rows_by_company_ids(
+        session,
+        PriceHistory,
+        company_ids,
+        order_by=(PriceHistory.trade_date.asc(), PriceHistory.id.asc()),
+    )
+
+
 def get_company_financials_by_company_ids(
     session: Session,
     company_ids: list[int],
@@ -725,6 +808,58 @@ def get_company_derived_metric_points(
     return list(session.execute(statement).scalars())
 
 
+def get_company_derived_metric_points_by_company_ids(
+    session: Session,
+    company_ids: list[int],
+    *,
+    period_type: str | None = None,
+    max_periods: int = 24,
+) -> dict[int, list[DerivedMetricPoint]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+    if max_periods <= 0:
+        return {company_id: [] for company_id in normalized_ids}
+
+    ranked_periods = (
+        select(
+            DerivedMetricPoint.company_id.label("company_id"),
+            DerivedMetricPoint.period_end.label("period_end"),
+            func.row_number()
+            .over(
+                partition_by=DerivedMetricPoint.company_id,
+                order_by=DerivedMetricPoint.period_end.desc(),
+            )
+            .label("rn"),
+        )
+        .where(DerivedMetricPoint.company_id.in_(normalized_ids))
+    )
+    if period_type:
+        ranked_periods = ranked_periods.where(DerivedMetricPoint.period_type == period_type)
+    ranked_periods = ranked_periods.group_by(
+        DerivedMetricPoint.company_id,
+        DerivedMetricPoint.period_end,
+    ).subquery()
+
+    statement = select(DerivedMetricPoint).join(
+        ranked_periods,
+        (DerivedMetricPoint.company_id == ranked_periods.c.company_id)
+        & (DerivedMetricPoint.period_end == ranked_periods.c.period_end),
+    ).where(
+        ranked_periods.c.rn <= max_periods,
+    )
+    if period_type:
+        statement = statement.where(DerivedMetricPoint.period_type == period_type)
+    statement = statement.order_by(
+        DerivedMetricPoint.company_id.asc(),
+        DerivedMetricPoint.period_type.asc(),
+        DerivedMetricPoint.period_end.asc(),
+        DerivedMetricPoint.metric_key.asc(),
+    )
+
+    return _group_rows_by_company_id(normalized_ids, list(session.execute(statement).scalars()))
+
+
 def get_company_derived_metrics_last_checked(session: Session, company_id: int) -> datetime | None:
     last_checked, _cache_state = cache_state_for_dataset(session, company_id, "derived_metrics")
     if last_checked is not None:
@@ -735,6 +870,33 @@ def get_company_derived_metrics_last_checked(session: Session, company_id: int) 
     if scanned is not None:
         mark_dataset_checked(session, company_id, "derived_metrics", checked_at=scanned, success=True)
     return scanned
+
+
+def get_company_derived_metrics_last_checked_by_company_ids(session: Session, company_ids: list[int]) -> dict[int, datetime | None]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    result: dict[int, datetime | None] = {company_id: None for company_id in normalized_ids}
+    missing_ids = set(normalized_ids)
+    for company_id, (last_checked, _freshness_deadline) in _load_dataset_refresh_states_by_company_ids(
+        session,
+        normalized_ids,
+        "derived_metrics",
+    ).items():
+        result[company_id] = last_checked
+        if last_checked is not None:
+            missing_ids.discard(company_id)
+
+    for company_id, scanned in _backfill_dataset_last_checked_by_company_ids(
+        session,
+        DerivedMetricPoint,
+        missing_ids,
+        "derived_metrics",
+    ).items():
+        result[company_id] = scanned
+
+    return result
 
 
 def get_company_price_cache_status(session: Session, company_id: int) -> tuple[datetime | None, str]:
@@ -752,6 +914,38 @@ def get_company_price_cache_status(session: Session, company_id: int) -> tuple[d
     if scanned is not None:
         mark_dataset_checked(session, company_id, "prices", checked_at=scanned, success=True)
     return scanned, _cache_state_from_last_checked(scanned)
+
+
+def get_company_price_cache_status_by_company_ids(session: Session, company_ids: list[int]) -> dict[int, tuple[datetime | None, str]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    result: dict[int, tuple[datetime | None, str]] = {company_id: (None, "missing") for company_id in normalized_ids}
+    missing_ids = set(normalized_ids)
+    now = datetime.now(timezone.utc)
+    freshness_cutoff = now - timedelta(hours=settings.freshness_window_hours)
+    for company_id, (last_checked, freshness_deadline) in _load_dataset_refresh_states_by_company_ids(
+        session,
+        normalized_ids,
+        "prices",
+    ).items():
+        if last_checked is None:
+            result[company_id] = (None, "missing")
+            continue
+        cache_state = "fresh" if (freshness_deadline is not None and freshness_deadline >= now) or last_checked >= freshness_cutoff else "stale"
+        result[company_id] = (last_checked, cache_state)
+        missing_ids.discard(company_id)
+
+    for company_id, scanned in _backfill_dataset_last_checked_by_company_ids(
+        session,
+        PriceHistory,
+        missing_ids,
+        "prices",
+    ).items():
+        result[company_id] = (scanned, _cache_state_from_last_checked(scanned))
+
+    return result
 
 
 def get_company_insider_trades(

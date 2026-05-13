@@ -52,22 +52,15 @@ def company_compare(
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyCompareResponse:
-    tickers = _read_singleton_query_param_or_400(request, "tickers", fallback=tickers) or ""
-    normalized_tickers = _normalize_compare_tickers(tickers)
-    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
-    parsed_as_of = _validated_as_of(requested_as_of)
-    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
-    companies = [
-        _build_company_compare_item(
-            session=session,
-            ticker=ticker,
-            requested_as_of=requested_as_of,
-            parsed_as_of=parsed_as_of,
-            snapshot=snapshots_by_ticker.get(ticker),
-        )
-        for ticker in normalized_tickers
-    ]
-    return CompanyCompareResponse(tickers=normalized_tickers, companies=companies)
+    # Active route registration lives in app/api/routers/financials.py; keep
+    # this wrapper thin so split routers and legacy app.main exports share the
+    # same compare implementation.
+    return _build_company_compare_response(
+        session=session,
+        tickers=tickers,
+        request=request,
+        as_of=as_of,
+    )
 
 
 @main_bound

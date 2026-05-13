@@ -1,11 +1,16 @@
 """Tests for the SEC XBRL frames client and screener service."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
+from threading import Event
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
+import app.services.sec.frames as frames_module
+from app.services.sec_cache import SecHttpCache
 from app.services.sec.frames import (
     ALL_SCREENER_CONCEPT_KEYS,
     FrameDataPoint,
@@ -114,7 +119,7 @@ def test_fetch_frame_404_returns_none() -> None:
     assert result is None
 
 
-def test_fetch_frame_429_retries_once() -> None:
+def test_fetch_frame_429_retries_then_returns_success() -> None:
     client = SecFramesClient.__new__(SecFramesClient)
     client._last_request_at = 0.0
 
@@ -135,6 +140,94 @@ def test_fetch_frame_429_retries_once() -> None:
 
     assert result is not None
     assert len(result.data) == 2
+    assert mock_http.get.call_count == 2
+
+
+def test_fetch_frame_429_exhaustion_returns_none() -> None:
+    client = SecFramesClient.__new__(SecFramesClient)
+    client._last_request_at = 0.0
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.headers = {"Retry-After": "0"}
+
+    mock_http = MagicMock()
+    mock_http.get.return_value = rate_limited
+    client._client = mock_http
+
+    with patch("time.sleep"):
+        result = client.fetch_frame("us-gaap", "Revenues", "USD", "CY2024", "revenue")
+
+    assert result is None
+    assert mock_http.get.call_count == 3
+
+
+def test_fetch_frame_reuses_sec_http_cache(monkeypatch, tmp_path) -> None:
+    cache = SecHttpCache(tmp_path)
+    monkeypatch.setattr(frames_module, "sec_http_cache", cache)
+    monkeypatch.setattr(frames_module.shared_upstream_cache, "_redis", None)
+    frames_module.shared_upstream_cache.clear_local()
+
+    client = SecFramesClient.__new__(SecFramesClient)
+    client._last_request_at = 0.0
+
+    url = "https://data.sec.gov/api/xbrl/frames/us-gaap/Revenues/USD/CY2024.json"
+    mock_http = MagicMock()
+    mock_http.get.return_value = httpx.Response(
+        200,
+        headers={"content-type": "application/json"},
+        json=_make_frame_json(),
+        request=httpx.Request("GET", url),
+    )
+    client._client = mock_http
+
+    first = client.fetch_frame("us-gaap", "Revenues", "USD", "CY2024", "revenue")
+    second = client.fetch_frame("us-gaap", "Revenues", "USD", "CY2024", "revenue")
+
+    assert first is not None
+    assert second is not None
+    assert mock_http.get.call_count == 1
+    assert second.data[0].entity_name == "Acme Corp"
+
+
+def test_fetch_frame_singleflight_dedupes_identical_pulls(monkeypatch, tmp_path) -> None:
+    cache = SecHttpCache(tmp_path)
+    monkeypatch.setattr(frames_module, "sec_http_cache", cache)
+    monkeypatch.setattr(frames_module.shared_upstream_cache, "_redis", None)
+    frames_module.shared_upstream_cache.clear_local()
+
+    client = SecFramesClient.__new__(SecFramesClient)
+    client._last_request_at = 0.0
+    url = "https://data.sec.gov/api/xbrl/frames/us-gaap/Revenues/USD/CY2024.json"
+    release_fetch = Event()
+    fetch_started = Event()
+    fetch_count = 0
+
+    def _get(_url: str):
+        nonlocal fetch_count
+        fetch_count += 1
+        fetch_started.set()
+        assert release_fetch.wait(timeout=1.0)
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json=_make_frame_json(),
+            request=httpx.Request("GET", url),
+        )
+
+    client._client = MagicMock(get=_get)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(client.fetch_frame, "us-gaap", "Revenues", "USD", "CY2024", "revenue")
+        assert fetch_started.wait(timeout=1.0)
+        second_future = executor.submit(client.fetch_frame, "us-gaap", "Revenues", "USD", "CY2024", "revenue")
+        release_fetch.set()
+        first = first_future.result(timeout=2.0)
+        second = second_future.result(timeout=2.0)
+
+    assert first is not None
+    assert second is not None
+    assert fetch_count == 1
 
 
 # ---------------------------------------------------------------------------

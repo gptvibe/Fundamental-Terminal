@@ -34,6 +34,13 @@ class DerivedMetricPoint(Base):
         ),
         Index("ix_derived_metric_points_company_metric", "company_id", "metric_key"),
         Index("ix_derived_metric_points_period_type", "period_type"),
+        Index(
+            "ix_derived_metric_points_period_type_company_period",
+            "period_type",
+            "company_id",
+            "period_end",
+            "metric_key",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

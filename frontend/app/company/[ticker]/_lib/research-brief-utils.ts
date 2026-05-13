@@ -545,6 +545,11 @@ export function mapBriefResponseToAsyncState(brief: import("@/lib/types").Compan
   const whatChangedAvailable = isBriefSectionAvailable(brief, "what_changed") || brief.build_state === "ready";
   const capitalRiskAvailable = isBriefSectionAvailable(brief, "capital_and_risk") || brief.build_state === "ready";
   const valuationAvailable = isBriefSectionAvailable(brief, "valuation") || brief.build_state === "ready";
+  const monitorSectionAvailable = isBriefSectionAvailable(brief, "monitor");
+  const monitorAvailable = monitorSectionAvailable || brief.build_state === "ready";
+  const activityOverview = monitorSectionAvailable
+    ? brief.monitor.activity_overview
+    : brief.what_changed.activity_overview ?? brief.monitor.activity_overview;
 
   return {
     brief,
@@ -556,7 +561,7 @@ export function mapBriefResponseToAsyncState(brief: import("@/lib/types").Compan
     sectionStatuses: [...brief.section_statuses],
     filingTimeline: [...brief.filing_timeline],
     summaryCards: [...brief.stale_summary_cards],
-    activityOverview: resolveBriefSectionData(whatChangedAvailable, brief.what_changed.activity_overview),
+    activityOverview: resolveBriefSectionData(monitorAvailable, activityOverview),
     changes: resolveBriefSectionData(whatChangedAvailable, brief.what_changed.changes),
     earningsSummary: resolveBriefSectionData(whatChangedAvailable, brief.what_changed.earnings_summary),
     capitalStructure: resolveBriefSectionData(capitalRiskAvailable, brief.capital_and_risk.capital_structure),

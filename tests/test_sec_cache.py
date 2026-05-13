@@ -203,3 +203,103 @@ def test_sec_http_cache_ignores_content_encoding_header_on_cached_response(monke
     cached = sec_cache_module._response_from_payload("GET", url, payload)
     assert cached.status_code == 200
     assert cached.json() == {"ok": True}
+
+
+def test_sec_http_cache_stores_companyfacts_json_payload(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        sec_cache_module,
+        "settings",
+        SimpleNamespace(
+            sec_ticker_cache_ttl_seconds=60,
+        ),
+    )
+    cache = sec_cache_module.SecHttpCache(tmp_path)
+    url = "https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"
+    payload = {"cik": 320193, "facts": {"us-gaap": {"Revenues": {"units": {}}}}}
+    response = httpx.Response(
+        200,
+        headers={"content-type": "application/json"},
+        json=payload,
+        request=httpx.Request("GET", url),
+    )
+
+    cache.put("GET", url, response)
+    cached = cache.get("GET", url)
+
+    assert cached is not None
+    assert cached.extensions["cached_json_payload"] == payload
+
+
+def test_sec_http_cache_marks_accession_documents_immutable(tmp_path) -> None:
+    cache = sec_cache_module.SecHttpCache(tmp_path)
+    url = "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20251231.htm"
+    response = httpx.Response(
+        200,
+        headers={"content-type": "text/html"},
+        content=b"<html></html>",
+        request=httpx.Request("GET", url),
+    )
+
+    cache.put("GET", url, response)
+    entry = cache.get_stale("GET", url)
+
+    assert entry is not None
+    assert entry.policy.endpoint == "filing_document"
+    assert entry.policy.immutable is True
+    assert entry.payload["immutable"] is True
+    assert entry.payload["cache_key"].startswith("sec|filing_document|cik:0000320193|accession:000032019326000010")
+
+
+def test_sec_http_cache_reports_disk_usage_without_deleting_immutable_entries(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        sec_cache_module,
+        "settings",
+        SimpleNamespace(
+            sec_ticker_cache_ttl_seconds=60,
+        ),
+    )
+    cache = sec_cache_module.SecHttpCache(tmp_path)
+    ticker_url = "https://www.sec.gov/files/company_tickers.json"
+    filing_url = "https://www.sec.gov/Archives/edgar/data/320193/000032019326000010/aapl-20251231.htm"
+
+    cache.put(
+        "GET",
+        ticker_url,
+        httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=b'{"0": {"ticker": "AAPL"}}',
+            request=httpx.Request("GET", ticker_url),
+        ),
+    )
+    cache.put(
+        "GET",
+        filing_url,
+        httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            content=b"<html></html>",
+            request=httpx.Request("GET", filing_url),
+        ),
+    )
+
+    ticker_entry = cache.get_stale("GET", ticker_url)
+    filing_entry = cache.get_stale("GET", filing_url)
+    assert ticker_entry is not None
+    assert filing_entry is not None
+
+    expired_payload = dict(ticker_entry.payload)
+    expired_payload["expires_at"] = 0.0
+    ticker_entry.cache_path.write_text(json.dumps(expired_payload, separators=(",", ":")), encoding="utf-8")
+
+    usage = cache.disk_usage()
+
+    assert usage.root == str(tmp_path)
+    assert usage.file_count == 2
+    assert usage.total_bytes > 0
+    assert usage.immutable_file_count == 1
+    assert usage.immutable_bytes == filing_entry.cache_path.stat().st_size
+    assert usage.expiring_file_count == 1
+    assert usage.stale_file_count == 1
+    assert usage.unreadable_file_count == 0
+    assert filing_entry.cache_path.exists()

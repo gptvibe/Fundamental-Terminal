@@ -213,6 +213,65 @@ describe("useCompanyWorkspace", () => {
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
   });
 
+  it("suppresses a stale active refresh after the tracked job reaches a terminal event", async () => {
+    const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
+
+    fetchBootstrap.mockResolvedValue({
+      company: { ticker: "RKLB", name: "Rocket Lab Corp", cache_state: "fresh" },
+      financials: buildFinancialsResponse({
+        company: {
+          ticker: "RKLB",
+          name: "Rocket Lab Corp",
+          sector: "Space",
+          market_sector: "Space",
+          last_checked: "2026-03-31T00:00:00Z",
+          cache_state: "fresh",
+        },
+        refresh: { triggered: false, reason: "missing", ticker: "RKLB", job_id: "job-rklb" },
+      }),
+      brief: buildResearchBriefResponse(),
+      earnings_summary: null,
+      insider_trades: null,
+      institutional_holdings: null,
+      errors: { insider: null, institutional: null, earnings_summary: null },
+    } as never);
+    mockUseJobStream.mockImplementation((jobId: string | null | undefined) => ({
+      consoleEntries: [],
+      connectionState: jobId ? "closed" : "idle",
+      lastEvent: jobId
+        ? {
+            job_id: jobId,
+            trace_id: jobId,
+            ticker: "RKLB",
+            kind: "refresh",
+            timestamp: "2026-03-31T00:00:05Z",
+            sequence: 3,
+            stage: "complete",
+            message: "Refresh complete",
+            level: "success",
+            status: "completed",
+          }
+        : null,
+    }));
+
+    const { result } = renderHook(() =>
+      useCompanyWorkspace("RKLB", {
+        includeOverviewBrief: true,
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeJobId).toBeNull();
+      expect(result.current.refreshState?.job_id ?? null).toBeNull();
+    });
+
+    expect(invalidateApiReadCacheForTicker).toHaveBeenCalledWith("RKLB");
+  });
+
   it("falls back to overview for expected bootstrap compatibility errors", async () => {
     const fetchBootstrap = vi.mocked(getCompanyWorkspaceBootstrap);
     const fetchOverview = vi.mocked(getCompanyOverview);

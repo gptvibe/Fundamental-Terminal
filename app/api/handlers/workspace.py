@@ -79,23 +79,34 @@ def watchlist_calendar(
     window_start = _watchlist_calendar_today()
     window_end = window_start + timedelta(days=WATCHLIST_CALENDAR_WINDOW_DAYS)
     snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+    preload: WatchlistCalendarPreload | None = None
+    try:
+        # Active route registration lives in app/api/routers/workspace.py. This
+        # split handler shares _shared.py builders for legacy compatibility.
+        preload = _load_watchlist_calendar_preload(session, snapshots_by_ticker)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to batch watchlist calendar preload data")
 
     events: list[WatchlistCalendarEventPayload] = []
-    for ticker in normalized_tickers:
-        snapshot = snapshots_by_ticker.get(ticker)
-        if snapshot is None:
-            continue
-        try:
-            events.extend(
-                _build_watchlist_calendar_company_events(
-                    session,
-                    snapshot,
-                    window_start=window_start,
-                    window_end=window_end,
+    preload_token = _watchlist_calendar_preload_ctx.set(preload)
+    try:
+        for ticker in normalized_tickers:
+            snapshot = snapshots_by_ticker.get(ticker)
+            if snapshot is None:
+                continue
+            try:
+                events.extend(
+                    _build_watchlist_calendar_company_events(
+                        session,
+                        snapshot,
+                        window_start=window_start,
+                        window_end=window_end,
+                    )
                 )
-            )
-        except Exception:
-            logging.getLogger(__name__).exception("Unable to build watchlist calendar events for '%s'", ticker)
+            except Exception:
+                logging.getLogger(__name__).exception("Unable to build watchlist calendar events for '%s'", ticker)
+    finally:
+        _watchlist_calendar_preload_ctx.reset(preload_token)
 
     events.extend(_build_watchlist_13f_deadline_events(window_start=window_start, window_end=window_end))
     events.sort(key=lambda item: (item.date, item.ticker or "", item.title, item.id))

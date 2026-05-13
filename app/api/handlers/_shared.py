@@ -15,7 +15,7 @@ import sys
 import time
 from email.utils import formatdate
 from datetime import date as DateType, datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
 
 from fastapi import BackgroundTasks, Body, Depends, HTTPException, Query, Request, Response, status  # noqa: F401
@@ -250,8 +250,9 @@ from app.config import settings
 from app.db import async_session_maker as async_session, bind_request_sync_session, get_async_engine, get_async_pool_status, get_db_session
 from app.model_engine.engine import ModelEngine, build_company_dataset, build_market_snapshot
 from app.model_engine.output_normalization import normalize_model_status, standardize_model_result
+from app.model_engine.utils import status_explanation
 from app.model_engine.models import dupont as dupont_model
-from app.models import Company, EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement, RefreshJob
+from app.models import Company, DerivedMetricPoint, EarningsModelPoint, EarningsRelease, ExecutiveCompensation, FilingEvent, FinancialRestatement, FinancialStatement, Form144Filing, InsiderTrade, ModelRun, PriceHistory, ProxyStatement, RefreshJob
 from app.models.dataset_refresh_state import DatasetRefreshState
 from app.observability import snapshot_request_observations, snapshot_worker_observations
 from app.performance_audit import reset as reset_performance_audit_store
@@ -280,7 +281,9 @@ from app.services.cache_queries import (
     get_company_earnings_model_points,
     get_company_earnings_releases,
     get_company_derived_metric_points,
+    get_company_derived_metric_points_by_company_ids,
     get_company_derived_metrics_last_checked,
+    get_company_derived_metrics_last_checked_by_company_ids,
     get_company_financial_restatements,
     get_company_executive_compensation,  # noqa: F401
     get_company_filing_events,
@@ -291,6 +294,7 @@ from app.services.cache_queries import (
     get_company_financials,
     get_company_financials_by_company_ids,
     get_company_regulated_bank_financials,
+    get_company_regulated_bank_financials_by_company_ids,
     get_company_form144_cache_status,
     get_company_form144_filings,
     get_company_form144_filings_by_company_ids,
@@ -303,7 +307,9 @@ from app.services.cache_queries import (
     get_company_models,
     get_company_models_by_company_ids,
     get_company_price_cache_status,
+    get_company_price_cache_status_by_company_ids,
     get_company_price_history,
+    get_company_price_history_by_company_ids,
     get_latest_company_price_points_by_company_ids,
     get_company_proxy_cache_status,
     get_company_proxy_statements,
@@ -387,6 +393,13 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 
 
 class _LegacyRouteDecorators:
+    """Identity decorators kept for legacy app.main exports.
+
+    The live FastAPI app registers split routers from app/api/routers/. These
+    decorators intentionally do not register routes, so _shared.py can retain
+    compatibility handler definitions without shadowing the active routers.
+    """
+
     @staticmethod
     def _identity(function: Any) -> Any:
         return function
@@ -419,6 +432,24 @@ STRICT_OFFICIAL_DISABLED_SOURCE_TIERS = {"commercial_fallback", "manual_override
 WATCHLIST_SUMMARY_ACTIVITY_LIMIT = 80
 WATCHLIST_SUMMARY_PROXY_LIMIT = 40
 WATCHLIST_SUMMARY_MODEL_NAMES = ["dcf", "roic", "reverse_dcf", "capital_allocation", "ratios"]
+COMPARE_REQUESTED_MODELS = ("dcf", "piotroski", "altman_z")
+
+
+CompareModelRun = ModelRun | dict[str, Any]
+
+
+class CompanyComparePreload(TypedDict, total=False):
+    financials_by_company_id: dict[int, list[FinancialStatement]]
+    price_cache_status_by_company_id: dict[int, tuple[datetime | None, str]]
+    price_history_by_company_id: dict[int, list[PriceHistory]]
+    metric_rows_by_company_id: dict[int, list[DerivedMetricPoint]]
+    last_metrics_check_by_company_id: dict[int, datetime | None]
+    model_runs_by_company_id: dict[int, dict[str, CompareModelRun]]
+
+
+class WatchlistCalendarPreload(TypedDict, total=False):
+    financials_by_company_id: dict[int, list[FinancialStatement]]
+    filing_events_by_company_id: dict[int, list[FilingEvent]]
 
 
 def _is_oil_scenarios_enabled() -> bool:
@@ -436,6 +467,14 @@ def _is_oil_scenarios_enabled() -> bool:
 
 _watchlist_summary_preload_ctx: ContextVar[dict[str, Any] | None] = ContextVar(
     "watchlist_summary_preload_ctx",
+    default=None,
+)
+_watchlist_calendar_preload_ctx: ContextVar[WatchlistCalendarPreload | None] = ContextVar(
+    "watchlist_calendar_preload_ctx",
+    default=None,
+)
+_company_compare_preload_ctx: ContextVar[CompanyComparePreload | None] = ContextVar(
+    "company_compare_preload_ctx",
     default=None,
 )
 SOURCE_REGISTRY_TIER_ORDER: dict[SourceTier, int] = {
@@ -1073,6 +1112,146 @@ def official_screener_search(
     )
 
 
+def _visible_financials_by_company_ids(
+    session: Session,
+    snapshots: list[CompanyCacheSnapshot],
+    *,
+    limit: int | None = None,
+) -> dict[int, list[FinancialStatement]]:
+    company_ids = sorted({snapshot.company.id for snapshot in snapshots})
+    if not company_ids:
+        return {}
+
+    sec_financials_by_company_id = get_company_financials_by_company_ids(session, company_ids, limit=limit)
+    regulated_company_ids = [
+        snapshot.company.id
+        for snapshot in snapshots
+        if classify_regulated_entity(snapshot.company) is not None
+    ]
+    regulated_financials_by_company_id = (
+        get_company_regulated_bank_financials_by_company_ids(session, regulated_company_ids, limit=limit)
+        if regulated_company_ids
+        else {}
+    )
+
+    result: dict[int, list[FinancialStatement]] = {}
+    snapshots_by_company_id = {snapshot.company.id: snapshot for snapshot in snapshots}
+    for company_id in company_ids:
+        snapshot = snapshots_by_company_id[company_id]
+        sec_financials = sec_financials_by_company_id.get(company_id, [])
+        if company_id not in regulated_financials_by_company_id:
+            result[company_id] = sec_financials
+            continue
+        result[company_id] = select_preferred_financials(
+            snapshot.company,
+            sec_financials,
+            regulated_financials_by_company_id.get(company_id, []),
+        )
+    return result
+
+
+def _load_company_compare_preload(
+    session: Session,
+    snapshots_by_ticker: dict[str, CompanyCacheSnapshot],
+    *,
+    parsed_as_of: datetime | None,
+    requested_models: list[str],
+) -> CompanyComparePreload | None:
+    if not hasattr(session, "execute"):
+        return None
+
+    snapshots = [snapshot for snapshot in snapshots_by_ticker.values() if snapshot is not None]
+    company_ids = sorted({snapshot.company.id for snapshot in snapshots})
+    if not company_ids:
+        return None
+
+    preload: CompanyComparePreload = {
+        "financials_by_company_id": _visible_financials_by_company_ids(session, snapshots),
+        "price_cache_status_by_company_id": (
+            {company_id: (None, "fresh") for company_id in company_ids}
+            if settings.strict_official_mode
+            else get_company_price_cache_status_by_company_ids(session, company_ids)
+        ),
+        "price_history_by_company_id": (
+            {company_id: [] for company_id in company_ids}
+            if settings.strict_official_mode
+            else get_company_price_history_by_company_ids(session, company_ids)
+        ),
+    }
+
+    if parsed_as_of is None:
+        for snapshot in snapshots:
+            if snapshot.cache_state != "fresh":
+                continue
+            model_job_results = ModelEngine(session).compute_models(
+                snapshot.company.id,
+                model_names=requested_models,
+                force=False,
+            )
+            if any(not result.cached for result in model_job_results):
+                session.commit()
+
+        preload["metric_rows_by_company_id"] = get_company_derived_metric_points_by_company_ids(
+            session,
+            company_ids,
+            max_periods=24,
+        )
+        preload["last_metrics_check_by_company_id"] = get_company_derived_metrics_last_checked_by_company_ids(
+            session,
+            company_ids,
+        )
+        preload["model_runs_by_company_id"] = get_company_models_by_company_ids(
+            session,
+            company_ids,
+            model_names=requested_models,
+            config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+        )
+
+    return preload
+
+
+def _build_company_compare_response(
+    *,
+    session: Session,
+    tickers: str,
+    request: Request | None,
+    as_of: str | None,
+) -> CompanyCompareResponse:
+    tickers = _read_singleton_query_param_or_400(request, "tickers", fallback=tickers) or ""
+    normalized_tickers = _normalize_compare_tickers(tickers)
+    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
+    parsed_as_of = _validated_as_of(requested_as_of)
+    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+    requested_models = list(COMPARE_REQUESTED_MODELS)
+
+    preload: CompanyComparePreload | None = None
+    try:
+        preload = _load_company_compare_preload(
+            session,
+            snapshots_by_ticker,
+            parsed_as_of=parsed_as_of,
+            requested_models=requested_models,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to batch company compare preload data")
+
+    preload_token = _company_compare_preload_ctx.set(preload)
+    try:
+        companies = [
+            _build_company_compare_item(
+                session=session,
+                ticker=ticker,
+                requested_as_of=requested_as_of,
+                parsed_as_of=parsed_as_of,
+                snapshot=snapshots_by_ticker.get(ticker),
+            )
+            for ticker in normalized_tickers
+        ]
+    finally:
+        _company_compare_preload_ctx.reset(preload_token)
+    return CompanyCompareResponse(tickers=normalized_tickers, companies=companies)
+
+
 @app.get("/api/companies/compare", response_model=CompanyCompareResponse)
 def company_compare(
     tickers: str = Query(..., description="Comma-separated tickers to compare"),
@@ -1080,22 +1259,12 @@ def company_compare(
     as_of: str | None = Query(default=None, description="Point-in-time cutoff as an ISO-8601 date or timestamp"),
     session: Session = Depends(get_db_session),
 ) -> CompanyCompareResponse:
-    tickers = _read_singleton_query_param_or_400(request, "tickers", fallback=tickers) or ""
-    normalized_tickers = _normalize_compare_tickers(tickers)
-    requested_as_of = _read_singleton_query_param_or_400(request, "as_of", fallback=as_of)
-    parsed_as_of = _validated_as_of(requested_as_of)
-    snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
-    companies = [
-        _build_company_compare_item(
-            session=session,
-            ticker=ticker,
-            requested_as_of=requested_as_of,
-            parsed_as_of=parsed_as_of,
-            snapshot=snapshots_by_ticker.get(ticker),
-        )
-        for ticker in normalized_tickers
-    ]
-    return CompanyCompareResponse(tickers=normalized_tickers, companies=companies)
+    return _build_company_compare_response(
+        session=session,
+        tickers=tickers,
+        request=request,
+        as_of=as_of,
+    )
 
 
 @app.get("/api/companies/{ticker}/financials", response_model=CompanyFinancialsResponse)
@@ -5338,6 +5507,28 @@ def _load_watchlist_summary_preload(
     }
 
 
+def _load_watchlist_calendar_preload(
+    session: Session,
+    snapshots_by_ticker: dict[str, CompanyCacheSnapshot],
+) -> WatchlistCalendarPreload | None:
+    if not hasattr(session, "execute"):
+        return None
+
+    snapshots = [snapshot for snapshot in snapshots_by_ticker.values() if snapshot is not None]
+    company_ids = sorted({snapshot.company.id for snapshot in snapshots})
+    if not company_ids:
+        return None
+
+    return {
+        "financials_by_company_id": _visible_financials_by_company_ids(session, snapshots, limit=24),
+        "filing_events_by_company_id": get_company_filing_events_by_company_ids(
+            session,
+            company_ids,
+            limit=120,
+        ),
+    }
+
+
 @app.post("/api/watchlist/summary", response_model=WatchlistSummaryResponse)
 def watchlist_summary(
     payload: WatchlistSummaryRequest,
@@ -5408,23 +5599,32 @@ def watchlist_calendar(
     window_start = _watchlist_calendar_today()
     window_end = window_start + timedelta(days=WATCHLIST_CALENDAR_WINDOW_DAYS)
     snapshots_by_ticker = get_company_snapshots_by_ticker(session, normalized_tickers)
+    preload: WatchlistCalendarPreload | None = None
+    try:
+        preload = _load_watchlist_calendar_preload(session, snapshots_by_ticker)
+    except Exception:
+        logging.getLogger(__name__).exception("Unable to batch watchlist calendar preload data")
 
     events: list[WatchlistCalendarEventPayload] = []
-    for ticker in normalized_tickers:
-        snapshot = snapshots_by_ticker.get(ticker)
-        if snapshot is None:
-            continue
-        try:
-            events.extend(
-                _build_watchlist_calendar_company_events(
-                    session,
-                    snapshot,
-                    window_start=window_start,
-                    window_end=window_end,
+    preload_token = _watchlist_calendar_preload_ctx.set(preload)
+    try:
+        for ticker in normalized_tickers:
+            snapshot = snapshots_by_ticker.get(ticker)
+            if snapshot is None:
+                continue
+            try:
+                events.extend(
+                    _build_watchlist_calendar_company_events(
+                        session,
+                        snapshot,
+                        window_start=window_start,
+                        window_end=window_end,
+                    )
                 )
-            )
-        except Exception:
-            logging.getLogger(__name__).exception("Unable to build watchlist calendar events for '%s'", ticker)
+            except Exception:
+                logging.getLogger(__name__).exception("Unable to build watchlist calendar events for '%s'", ticker)
+    finally:
+        _watchlist_calendar_preload_ctx.reset(preload_token)
 
     events.extend(_build_watchlist_13f_deadline_events(window_start=window_start, window_end=window_end))
     events.sort(key=lambda item: (item.date, item.ticker or "", item.title, item.id))
@@ -10648,17 +10848,33 @@ def _build_watchlist_calendar_company_events(
     window_end: DateType,
 ) -> list[WatchlistCalendarEventPayload]:
     events: list[WatchlistCalendarEventPayload] = []
+    preload = _watchlist_calendar_preload_ctx.get()
+    financials_by_company_id = preload.get("financials_by_company_id", {}) if preload else {}
+    filing_events_by_company_id = preload.get("filing_events_by_company_id", {}) if preload else {}
 
-    projected_filing = _project_watchlist_expected_filing(
-        session,
-        snapshot,
-        window_start=window_start,
-        window_end=window_end,
-    )
+    if snapshot.company.id in financials_by_company_id:
+        projected_filing = _project_watchlist_expected_filing_from_financials(
+            snapshot,
+            financials_by_company_id.get(snapshot.company.id, []),
+            window_start=window_start,
+            window_end=window_end,
+        )
+    else:
+        projected_filing = _project_watchlist_expected_filing(
+            session,
+            snapshot,
+            window_start=window_start,
+            window_end=window_end,
+        )
     if projected_filing is not None:
         events.append(projected_filing)
 
-    for filing_event in get_company_filing_events(session, snapshot.company.id, limit=120):
+    filing_events = (
+        filing_events_by_company_id.get(snapshot.company.id, [])
+        if snapshot.company.id in filing_events_by_company_id
+        else get_company_filing_events(session, snapshot.company.id, limit=120)
+    )
+    for filing_event in filing_events:
         event_date = filing_event.filing_date or filing_event.report_date
         if event_date is None or event_date < window_start or event_date > window_end:
             continue
@@ -10693,6 +10909,21 @@ def _project_watchlist_expected_filing(
         snapshot.company,
         limit=24,
     )
+    return _project_watchlist_expected_filing_from_financials(
+        snapshot,
+        financials,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+
+def _project_watchlist_expected_filing_from_financials(
+    snapshot: CompanyCacheSnapshot,
+    financials: list[Any],
+    *,
+    window_start: DateType,
+    window_end: DateType,
+) -> WatchlistCalendarEventPayload | None:
     periodic_records = _dedupe_projectable_watchlist_financials(financials)
     if not periodic_records:
         return None
@@ -11376,7 +11607,7 @@ def _build_company_compare_item(
             models=_apply_requested_as_of(
                 CompanyModelsResponse(
                     company=None,
-                    requested_models=["dcf", "piotroski", "altman_z"],
+                    requested_models=list(COMPARE_REQUESTED_MODELS),
                     models=[],
                     refresh=refresh,
                     diagnostics=_build_data_quality_diagnostics(stale_flags=["company_missing"]),
@@ -11386,10 +11617,28 @@ def _build_company_compare_item(
             ),
         )
 
-    financials = _visible_financials_for_company(session, snapshot.company)
-    price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
+    preload = _company_compare_preload_ctx.get()
+    company_id = snapshot.company.id
+    financials_by_company_id = preload.get("financials_by_company_id", {}) if preload else {}
+    price_cache_status_by_company_id = preload.get("price_cache_status_by_company_id", {}) if preload else {}
+    price_history_by_company_id = preload.get("price_history_by_company_id", {}) if preload else {}
+
+    financials = (
+        list(financials_by_company_id[company_id])
+        if company_id in financials_by_company_id
+        else _visible_financials_for_company(session, snapshot.company)
+    )
+    price_last_checked, price_cache_state = (
+        price_cache_status_by_company_id[company_id]
+        if company_id in price_cache_status_by_company_id
+        else _visible_price_cache_status(session, company_id)
+    )
     refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
-    price_history = _visible_price_history(session, snapshot.company.id)
+    price_history = (
+        list(price_history_by_company_id[company_id])
+        if company_id in price_history_by_company_id
+        else _visible_price_history(session, company_id)
+    )
     compare_financials = financials
     compare_price_history = price_history
     if parsed_as_of is not None:
@@ -11425,8 +11674,18 @@ def _build_company_compare_item(
 
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
     if parsed_as_of is None:
-        metric_rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)
-        last_metrics_check = get_company_derived_metrics_last_checked(session, snapshot.company.id)
+        metric_rows_by_company_id = preload.get("metric_rows_by_company_id", {}) if preload else {}
+        last_metrics_check_by_company_id = preload.get("last_metrics_check_by_company_id", {}) if preload else {}
+        metric_rows = (
+            list(metric_rows_by_company_id[company_id])
+            if company_id in metric_rows_by_company_id
+            else get_company_derived_metric_points(session, company_id, max_periods=24)
+        )
+        last_metrics_check = (
+            last_metrics_check_by_company_id[company_id]
+            if company_id in last_metrics_check_by_company_id
+            else get_company_derived_metrics_last_checked(session, company_id)
+        )
         if not metric_rows:
             refresh = _trigger_refresh(snapshot.company.ticker, reason="missing")
             if staleness_reason == "fresh":
@@ -11504,19 +11763,24 @@ def _build_company_compare_item(
             requested_as_of,
         )
 
-    requested_models = ["dcf", "piotroski", "altman_z"]
-    if parsed_as_of is None and snapshot.cache_state == "fresh":
+    requested_models = list(COMPARE_REQUESTED_MODELS)
+    model_runs_by_company_id = preload.get("model_runs_by_company_id", {}) if preload else {}
+    has_preloaded_model_runs = parsed_as_of is None and company_id in model_runs_by_company_id
+    if parsed_as_of is None and snapshot.cache_state == "fresh" and not has_preloaded_model_runs:
         model_job_results = ModelEngine(session).compute_models(snapshot.company.id, model_names=requested_models, force=False)
         if any(not result.cached for result in model_job_results):
             session.commit()
 
     if parsed_as_of is None:
-        model_runs: list[ModelRun | dict[str, Any]] = get_company_models(
-            session,
-            snapshot.company.id,
-            requested_models,
-            config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
-        )
+        if has_preloaded_model_runs:
+            model_runs = list(model_runs_by_company_id.get(company_id, {}).values())
+        else:
+            model_runs = get_company_models(
+                session,
+                company_id,
+                requested_models,
+                config_by_model={"dupont": {"mode": dupont_model.get_mode()}},
+            )
     else:
         latest_price = latest_price_as_of(compare_price_history, parsed_as_of)
         dataset = build_company_dataset(
