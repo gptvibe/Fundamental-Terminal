@@ -16,6 +16,7 @@ import {
   searchCompanies,
   type ReadCachePolicy,
 } from "@/lib/api";
+import { INFLIGHT_REQUEST_TIMEOUT_MS } from "@/lib/api/inflight";
 
 describe("api read cache", () => {
   function buildFinancialsPayload(ticker = "AAPL", reason = "none") {
@@ -380,7 +381,7 @@ describe("api read cache", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    vi.setSystemTime(new Date("2026-04-27T00:00:16Z"));
+    vi.setSystemTime(new Date(`2026-04-27T00:00:${Math.floor(INFLIGHT_REQUEST_TIMEOUT_MS / 1000) + 1}Z`));
 
     const retried = await getCompanyChangesSinceLastFiling("AAPL");
 
@@ -406,8 +407,10 @@ describe("api read cache", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const pending = expect(getCompanyChangesSinceLastFiling("AAPL")).rejects.toThrow("API request timed out after 15000 ms");
-    await vi.advanceTimersByTimeAsync(15_000);
+    const pending = expect(getCompanyChangesSinceLastFiling("AAPL")).rejects.toThrow(
+      `API request timed out after ${INFLIGHT_REQUEST_TIMEOUT_MS} ms`
+    );
+    await vi.advanceTimersByTimeAsync(INFLIGHT_REQUEST_TIMEOUT_MS);
 
     await pending;
     expect(fetchMock).toHaveBeenCalledTimes(1);

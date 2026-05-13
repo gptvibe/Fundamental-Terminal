@@ -268,9 +268,14 @@ describe("CompanyCapitalMarketsPage", () => {
   it("renders the equity claim risk pack summary and evidence panels", async () => {
     render(React.createElement(CompanyCapitalMarketsPage));
 
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Equity Claim Risk Pack" })).toBeTruthy();
-    });
+    expect(await screen.findByRole("heading", { name: "Equity Claim Risk Pack" }, { timeout: 5000 })).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Capital needs look elevated because dilution, financing, and reporting signals are all active.",
+        {},
+        { timeout: 5000 }
+      )
+    ).toBeTruthy();
 
     expect(screen.getByText(/SEC-derived underwriting workspace covering dilution/i)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Investor summary" })).toBeTruthy();
@@ -281,7 +286,6 @@ describe("CompanyCapitalMarketsPage", () => {
     expect(screen.getByRole("heading", { name: "Hybrid securities and debt maturity wall" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Covenant, restatement, and control signals" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Provenance and diagnostics" })).toBeTruthy();
-    expect(screen.getByText("Capital needs look elevated because dilution, financing, and reporting signals are all active.")).toBeTruthy();
     expect(screen.getByText("Latest share-count bridge")).toBeTruthy();
     expect(screen.queryByText("dilution-chart") ?? screen.getByText(/Loading share dilution chart/i)).toBeTruthy();
   });
