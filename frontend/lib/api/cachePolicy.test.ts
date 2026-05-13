@@ -119,6 +119,16 @@ describe("shouldBypassReadCache", () => {
     expect(shouldBypassReadCache("/companies/AAPL/financials")).toBe(false);
   });
 
+  it("returns true for company compare requests", () => {
+    expect(shouldBypassReadCache("/companies/compare?tickers=AAPL,MSFT")).toBe(true);
+  });
+
+  it("returns true for workspace bootstrap requests that include the overview brief", () => {
+    expect(
+      shouldBypassReadCache("/companies/AAPL/workspace-bootstrap?financials_view=core_segments&include_overview_brief=true")
+    ).toBe(true);
+  });
+
   it("returns true for paths containing /refresh", () => {
     expect(shouldBypassReadCache("/companies/AAPL/refresh")).toBe(true);
   });

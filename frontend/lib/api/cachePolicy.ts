@@ -52,6 +52,10 @@ export function isReadRequest(init?: RequestInit): boolean {
 }
 
 export function shouldBypassReadCache(path: string): boolean {
+  if (/^\/companies\/compare(?:\?|$)/.test(path)) {
+    return true;
+  }
+
   if (path.includes("/refresh")) {
     return true;
   }
@@ -62,5 +66,9 @@ export function shouldBypassReadCache(path: string): boolean {
   }
 
   const params = new URLSearchParams(path.slice(queryIndex + 1));
+  if (/^\/companies\/[^/]+\/workspace-bootstrap(?:\?|$)/.test(path) && params.get("include_overview_brief") === "true") {
+    return true;
+  }
+
   return params.get("refresh") === "true";
 }

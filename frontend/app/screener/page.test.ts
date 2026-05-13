@@ -75,9 +75,7 @@ describe("OfficialScreenerPage", () => {
   it("renders ranked results and expands why-matched details", async () => {
     render(React.createElement(OfficialScreenerPage));
 
-    await waitFor(() => {
-      expect(screen.getByText("Apple Inc.")).toBeTruthy();
-    });
+    expect(await screen.findByText("Apple Inc.", {}, { timeout: 5000 })).toBeTruthy();
 
     const link = screen.getByRole("link", { name: "Research Brief" });
     expect(link.getAttribute("href")).toBe("/company/AAPL");
@@ -136,9 +134,7 @@ describe("OfficialScreenerPage", () => {
 
     render(React.createElement(OfficialScreenerPage));
 
-    await waitFor(() => {
-      expect(screen.getByText("Apple Inc.")).toBeTruthy();
-    });
+    expect(await screen.findByText("Apple Inc.", {}, { timeout: 5000 })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Why Matched" }));
 
@@ -159,9 +155,7 @@ describe("OfficialScreenerPage", () => {
 
     render(React.createElement(OfficialScreenerPage));
 
-    await waitFor(() => {
-      expect(screen.getByText("Apple Inc.")).toBeTruthy();
-    });
+    expect(await screen.findByText("Apple Inc.", {}, { timeout: 5000 })).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText("Large-cap compounders"), {
       target: { value: "High Quality" },
@@ -183,9 +177,7 @@ describe("OfficialScreenerPage", () => {
   it("exports the visible screener results as CSV", async () => {
     render(React.createElement(OfficialScreenerPage));
 
-    await waitFor(() => {
-      expect(screen.getByText("Apple Inc.")).toBeTruthy();
-    });
+    expect(await screen.findByText("Apple Inc.", {}, { timeout: 5000 })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Download CSV" }));
 

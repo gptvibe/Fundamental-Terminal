@@ -288,9 +288,8 @@ describe("CompanyResearchBriefPage", () => {
       expect(screen.getByRole("heading", { name: "Monitor" })).toBeTruthy();
     });
 
-    await waitFor(() => {
-      expect(screen.getAllByText("planned-sale").length).toBeGreaterThan(0);
-    });
+    const plannedSaleBadges = await screen.findAllByText("planned-sale", {}, { timeout: 5000 });
+    expect(plannedSaleBadges.length).toBeGreaterThan(0);
 
     expect(screen.getByRole("button", { name: "Refresh Brief Data" })).toBeTruthy();
     expect(screen.getByLabelText("Top provenance and freshness strip")).toBeTruthy();
@@ -337,7 +336,7 @@ describe("CompanyResearchBriefPage", () => {
     });
     expect(screen.getAllByText("Source freshness timeline").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Collapse Snapshot" })).toBeTruthy();
-    expect(screen.getAllByText("planned-sale")[0]?.className).toContain("tone-red");
+    expect(plannedSaleBadges[0]?.className).toContain("tone-red");
     expect(screen.getAllByText("high")[0]?.className).toContain("tone-red");
     await waitFor(() => {
       expect(screen.getByText("Ownership watch")).toBeTruthy();

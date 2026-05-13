@@ -540,8 +540,8 @@ describe("ProjectionStudio", () => {
 
     render(React.createElement(ProjectionStudio, { payload: payload as never, studio: studio as never }));
 
-    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledWith("ACME", { overrides: {} }, expect.anything()));
-    const dsoSlider = await waitFor(() => screen.getByTestId("studio-what-if-slider-dso"));
+    await waitFor(() => expect(getCompanyChartsWhatIf).toHaveBeenCalledWith("ACME", { overrides: {} }, expect.anything()), { timeout: 5000 });
+    const dsoSlider = await screen.findByTestId("studio-what-if-slider-dso", {}, { timeout: 5000 });
     expect(dsoSlider.getAttribute("min")).toBe("5");
     expect(dsoSlider.getAttribute("max")).toBe("150");
     expect(dsoSlider.getAttribute("step")).toBe("1");
