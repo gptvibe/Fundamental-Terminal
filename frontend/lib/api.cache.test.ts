@@ -536,6 +536,21 @@ describe("api read cache", () => {
     );
   });
 
+  it("reuses cached complete workspace bootstrap payloads with overview brief enabled", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(buildOkJsonResponse(buildWorkspaceBootstrapPayload("BROS")));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+    const second = await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true });
+
+    expect(first.company?.ticker).toBe("BROS");
+    expect(second.company?.ticker).toBe("BROS");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("drops cached workspace bootstrap placeholders that only contain company metadata", async () => {
     const fetchMock = vi
       .fn()

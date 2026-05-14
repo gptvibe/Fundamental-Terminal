@@ -670,6 +670,26 @@ def get_company_price_history_by_company_ids(session: Session, company_ids: list
     )
 
 
+def get_company_price_history_by_company_ids_as_of(
+    session: Session,
+    company_ids: list[int],
+    as_of: datetime,
+) -> dict[int, list[PriceHistory]]:
+    normalized_ids = _normalize_company_ids(company_ids)
+    if not normalized_ids:
+        return {}
+
+    statement = (
+        select(PriceHistory)
+        .where(
+            PriceHistory.company_id.in_(normalized_ids),
+            PriceHistory.trade_date <= as_of.date(),
+        )
+        .order_by(PriceHistory.company_id.asc(), PriceHistory.trade_date.asc(), PriceHistory.id.asc())
+    )
+    return _group_rows_by_company_id(normalized_ids, list(session.execute(statement).scalars()))
+
+
 def get_company_financials_by_company_ids(
     session: Session,
     company_ids: list[int],

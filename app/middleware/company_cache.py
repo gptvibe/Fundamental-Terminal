@@ -13,6 +13,15 @@ from app.query_params import DuplicateSingletonQueryParamError, read_singleton_q
 
 
 COMPANY_ROUTE_CACHE_CONTROL = "public, max-age=20, stale-while-revalidate=300"
+BOOTSTRAP_SECTION_NAMES = {
+    "company_summary",
+    "latest_financials",
+    "recent_filings",
+    "recent_events",
+    "ownership_summary",
+    "source_freshness",
+    "warnings",
+}
 
 
 def _legacy_or_shared_attr(name: str):
@@ -65,11 +74,17 @@ def _canonicalize_company_query_string(request: Request) -> str:
     elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/workspace-bootstrap"):
         singleton_names.update(
             {
+                "compact",
                 "financials_view",
                 "include_overview_brief",
                 "include_insiders",
                 "include_institutional",
                 "include_earnings_summary",
+                "price_end_date",
+                "price_latest_n",
+                "price_max_points",
+                "price_start_date",
+                "sections",
             }
         )
     elif request.url.path.startswith("/api/companies/") and request.url.path.endswith("/models"):
@@ -127,6 +142,27 @@ def _canonicalize_company_query_string(request: Request) -> str:
                 continue
             normalized = raw_value.strip().lower()
             singleton_values[flag_name] = "true" if normalized in {"1", "true", "yes", "on"} else None
+
+        price_controls, price_controls_are_valid = _resolved_company_price_controls_from_values(singleton_values)
+        if not price_controls_are_valid or price_controls is None:
+            raise ValueError("Invalid workspace-bootstrap price history controls")
+        singleton_values["price_start_date"] = price_controls["start"]
+        singleton_values["price_end_date"] = price_controls["end"]
+        singleton_values["price_latest_n"] = price_controls["latest"]
+        singleton_values["price_max_points"] = price_controls["max_points"]
+
+        raw_sections = singleton_values.get("sections")
+        normalized_sections = _normalized_bootstrap_sections(
+            raw_sections,
+            include_overview_brief=singleton_values.get("include_overview_brief") == "true",
+            include_insiders=singleton_values.get("include_insiders") == "true",
+            include_institutional=singleton_values.get("include_institutional") == "true",
+            include_earnings_summary=singleton_values.get("include_earnings_summary") == "true",
+        )
+        singleton_values["sections"] = ",".join(sorted(normalized_sections)) if normalized_sections else None
+
+        raw_compact = singleton_values.get("compact")
+        singleton_values["compact"] = "true" if raw_compact is not None and raw_compact.strip().lower() in {"1", "true", "yes"} else None
 
     query_items = sorted(
         [
@@ -219,6 +255,91 @@ def _normalized_company_flag(request: Request, name: str) -> tuple[bool | None, 
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}, True
 
 
+def _read_company_singleton_query_param(request: Request, name: str) -> tuple[str | None, bool]:
+    try:
+        return read_singleton_query_param(request, name), True
+    except DuplicateSingletonQueryParamError:
+        return None, False
+
+
+def _coerce_optional_positive_int(value: str | None) -> tuple[int | None, bool]:
+    if value is None or value.strip() == "":
+        return None, True
+    try:
+        return int(value), True
+    except ValueError:
+        return None, False
+
+
+def _resolved_company_price_controls_from_values(
+    values: dict[str, str | None],
+) -> tuple[dict[str, str | None] | None, bool]:
+    latest_n, latest_is_valid = _coerce_optional_positive_int(values.get("price_latest_n"))
+    max_points, max_points_is_valid = _coerce_optional_positive_int(values.get("price_max_points"))
+    if not latest_is_valid or not max_points_is_valid:
+        return None, False
+
+    try:
+        start_date, end_date, latest_n, max_points = _shared._normalize_price_history_query_controls(
+            price_start_date=values.get("price_start_date"),
+            price_end_date=values.get("price_end_date"),
+            price_latest_n=latest_n,
+            price_max_points=max_points,
+        )
+    except Exception:
+        return None, False
+
+    return {
+        "start": start_date.isoformat() if start_date is not None else None,
+        "end": end_date.isoformat() if end_date is not None else None,
+        "latest": str(latest_n) if latest_n is not None else None,
+        "max_points": str(max_points) if max_points is not None else None,
+        "token": _shared._price_history_cache_token(
+            start_date=start_date,
+            end_date=end_date,
+            latest_n=latest_n,
+            max_points=max_points,
+        ),
+    }, True
+
+
+def _resolved_company_price_controls(request: Request) -> tuple[dict[str, str | None] | None, bool]:
+    values: dict[str, str | None] = {}
+    for name in ("price_start_date", "price_end_date", "price_latest_n", "price_max_points"):
+        raw_value, is_valid = _read_company_singleton_query_param(request, name)
+        if not is_valid:
+            return None, False
+        values[name] = raw_value
+    return _resolved_company_price_controls_from_values(values)
+
+
+def _normalized_bootstrap_sections(
+    raw_sections: str | None,
+    *,
+    include_overview_brief: bool,
+    include_insiders: bool,
+    include_institutional: bool,
+    include_earnings_summary: bool,
+) -> list[str]:
+    sections = [
+        value.strip().lower()
+        for value in (raw_sections or "").split(",")
+        if value.strip()
+    ]
+    requested_sections = [section for section in sections if section in BOOTSTRAP_SECTION_NAMES]
+    if requested_sections:
+        return list(dict.fromkeys(requested_sections))
+
+    legacy_sections: list[str] = []
+    if include_overview_brief:
+        legacy_sections.extend(["company_summary", "recent_filings", "recent_events"])
+    if include_insiders or include_institutional:
+        legacy_sections.append("ownership_summary")
+    if include_earnings_summary:
+        legacy_sections.append("recent_events")
+    return list(dict.fromkeys(legacy_sections))
+
+
 def _company_route_hot_cache_keys(request: Request) -> list[str]:
     path = request.url.path
     if not path.startswith("/api/companies/"):
@@ -269,6 +390,21 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
         include_earnings_summary, earnings_is_valid = _normalized_company_flag(request, "include_earnings_summary")
         if not all((overview_is_valid, insiders_are_valid, institutional_is_valid, earnings_is_valid)):
             return []
+        price_controls, price_controls_are_valid = _resolved_company_price_controls(request)
+        if not price_controls_are_valid or price_controls is None:
+            return []
+        raw_sections, sections_are_valid = _read_company_singleton_query_param(request, "sections")
+        raw_compact, compact_is_valid = _read_company_singleton_query_param(request, "compact")
+        if not sections_are_valid or not compact_is_valid:
+            return []
+        sections = _normalized_bootstrap_sections(
+            raw_sections,
+            include_overview_brief=bool(include_overview_brief),
+            include_insiders=bool(include_insiders),
+            include_institutional=bool(include_institutional),
+            include_earnings_summary=bool(include_earnings_summary),
+        )
+        compact = raw_compact is not None and raw_compact.strip().lower() in {"1", "true", "yes"}
         build_workspace_key = _legacy_or_shared_attr("_company_workspace_bootstrap_hot_key")
         if callable(build_workspace_key):
             return [
@@ -280,6 +416,9 @@ def _company_route_hot_cache_keys(request: Request) -> list[str]:
                     include_insiders=bool(include_insiders),
                     include_institutional=bool(include_institutional),
                     include_earnings_summary=bool(include_earnings_summary),
+                    price_token=str(price_controls["token"] or "default"),
+                    sections=tuple(sorted(sections)),
+                    compact=compact,
                 )
             ]
         return []

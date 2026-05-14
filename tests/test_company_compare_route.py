@@ -297,6 +297,37 @@ def test_company_compare_preload_failure_falls_back_to_per_company_helpers(monke
     }
 
 
+def test_company_compare_preload_uses_batch_as_of_price_history(monkeypatch):
+    snapshot = _snapshot("AAPL")
+    parsed_as_of = datetime(2025, 6, 30, tzinfo=timezone.utc)
+    calls: list[tuple[list[int], datetime]] = []
+
+    monkeypatch.setattr(main_module, "_visible_financials_by_company_ids", lambda *_args, **_kwargs: {snapshot.company.id: [_financial(date(2025, 12, 31))]})
+    monkeypatch.setattr(main_module, "get_company_price_cache_status_by_company_ids", lambda *_args, **_kwargs: {snapshot.company.id: (parsed_as_of, "fresh")})
+    monkeypatch.setattr(
+        main_module,
+        "get_company_price_history_by_company_ids",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("as_of compare should not load unbounded price history")),
+    )
+
+    def _price_history_as_of(_session, company_ids, as_of):
+        calls.append((list(company_ids), as_of))
+        return {snapshot.company.id: []}
+
+    monkeypatch.setattr(main_module, "get_company_price_history_by_company_ids_as_of", _price_history_as_of)
+
+    preload = main_module._load_company_compare_preload(
+        SimpleNamespace(execute=lambda *_args, **_kwargs: None),
+        {"AAPL": snapshot},
+        parsed_as_of=parsed_as_of,
+        requested_models=[],
+    )
+
+    assert preload is not None
+    assert preload["price_history_by_company_id"] == {snapshot.company.id: []}
+    assert calls == [([snapshot.company.id], parsed_as_of)]
+
+
 def test_company_compare_item_uses_preloaded_batch_data(monkeypatch):
     snapshot = _snapshot("AAPL")
     financial = _financial(date(2025, 12, 31))

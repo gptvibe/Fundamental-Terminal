@@ -310,6 +310,7 @@ from app.services.cache_queries import (
     get_company_price_cache_status_by_company_ids,
     get_company_price_history,
     get_company_price_history_by_company_ids,
+    get_company_price_history_by_company_ids_as_of,
     get_latest_company_price_points_by_company_ids,
     get_company_proxy_cache_status,
     get_company_proxy_statements,
@@ -1175,7 +1176,11 @@ def _load_company_compare_preload(
         "price_history_by_company_id": (
             {company_id: [] for company_id in company_ids}
             if settings.strict_official_mode
-            else get_company_price_history_by_company_ids(session, company_ids)
+            else (
+                get_company_price_history_by_company_ids_as_of(session, company_ids, parsed_as_of)
+                if parsed_as_of is not None
+                else get_company_price_history_by_company_ids(session, company_ids)
+            )
         ),
     }
 
@@ -6189,6 +6194,8 @@ def _company_workspace_bootstrap_hot_key(
     include_institutional: bool,
     include_earnings_summary: bool,
     price_token: str = "default",
+    sections: tuple[str, ...] = (),
+    compact: bool = False,
 ) -> str:
     from app.api.handlers.company_overview import _company_workspace_bootstrap_hot_key as _company_workspace_bootstrap_hot_key_impl
 
@@ -6201,6 +6208,8 @@ def _company_workspace_bootstrap_hot_key(
         include_institutional=include_institutional,
         include_earnings_summary=include_earnings_summary,
         price_token=price_token,
+        sections=sections,
+        compact=compact,
     )
 
 

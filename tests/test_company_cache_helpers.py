@@ -49,5 +49,16 @@ def test_company_route_hot_cache_keys_include_workspace_bootstrap_flags() -> Non
         "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=0:institutional=0:earnings=0:prices=default:sections=all:compact=0"
     ]
     assert _company_route_hot_cache_keys(enabled_request) == [
-        "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=1:institutional=0:earnings=0:prices=default:sections=all:compact=0"
+        "workspace_bootstrap:AAPL:view=full:asof=latest:overview=0:insiders=1:institutional=0:earnings=0:prices=default:sections=ownership_summary:compact=0"
+    ]
+
+
+def test_company_route_hot_cache_keys_include_workspace_bootstrap_price_sections_and_compact() -> None:
+    request = _request_with_query_string(
+        "financials_view=core_segments&include_overview_brief=true&price_latest_n=3200&price_max_points=480&sections=latest_financials,company_summary&compact=true",
+        path="/api/companies/AAPL/workspace-bootstrap",
+    )
+
+    assert _company_route_hot_cache_keys(request) == [
+        "workspace_bootstrap:AAPL:view=core_segments:asof=latest:overview=1:insiders=0:institutional=0:earnings=0:prices=start=none;end=none;latest=3200;points=480:sections=company_summary,latest_financials:compact=1"
     ]

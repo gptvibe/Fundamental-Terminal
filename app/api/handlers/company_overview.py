@@ -297,14 +297,16 @@ def company_workspace_bootstrap(
         is_compact=is_compact_mode,
         requested_sections=requested_sections,
     )
-    workspace_datasets = ["financials", "prices"]
-    if include_overview_brief:
+    workspace_datasets = []
+    if should_load_financials:
+        workspace_datasets.extend(["financials", "prices"])
+    if should_load_brief:
         workspace_datasets.append("company_research_brief")
-    if include_insiders:
+    if should_load_insiders:
         workspace_datasets.append("insiders")
-    if include_institutional:
+    if should_load_institutional:
         workspace_datasets.append("institutional")
-    if include_earnings_summary:
+    if should_load_earnings:
         workspace_datasets.append("earnings")
     shared._store_hot_cached_payload_sync(
         hot_key,

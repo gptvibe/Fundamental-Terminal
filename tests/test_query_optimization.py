@@ -8,7 +8,7 @@ to ensure correctness and performance improvements.
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
@@ -520,6 +520,67 @@ class TestDerivedMetricsOptimization:
             date(2026, 1, 3),
         ]
         assert len(result[second_company.id]) == 3
+
+    def test_batch_price_history_as_of_filters_in_sql_with_one_query(
+        self,
+        db_session: Session,
+        test_company: Company,
+    ) -> None:
+        second_company = Company(
+            ticker="PRICEC",
+            name="Price As Of Batch Company",
+            cik="0000000004",
+            sector="Technology",
+            market_industry="Software",
+        )
+        db_session.add(second_company)
+        db_session.flush()
+        base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        for company in [test_company, second_company]:
+            for i in range(5):
+                db_session.add(
+                    PriceHistory(
+                        company_id=company.id,
+                        trade_date=date(2026, 1, 1) + timedelta(days=i),
+                        close=100.0 + i,
+                        volume=1000 + i,
+                        source="test",
+                        last_updated=base_time,
+                        fetch_timestamp=base_time,
+                        last_checked=base_time,
+                    )
+                )
+        db_session.flush()
+
+        query_count = 0
+
+        def _count_query(*_args, **_kwargs) -> None:
+            nonlocal query_count
+            query_count += 1
+
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", _count_query)
+        try:
+            result = cache_queries.get_company_price_history_by_company_ids_as_of(
+                db_session,
+                [test_company.id, second_company.id],
+                datetime(2026, 1, 3, tzinfo=timezone.utc),
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", _count_query)
+
+        assert query_count == 1
+        assert [point.trade_date for point in result[test_company.id]] == [
+            date(2026, 1, 1),
+            date(2026, 1, 2),
+            date(2026, 1, 3),
+        ]
+        assert [point.trade_date for point in result[second_company.id]] == [
+            date(2026, 1, 1),
+            date(2026, 1, 2),
+            date(2026, 1, 3),
+        ]
 
 
 @pytest.mark.integration
