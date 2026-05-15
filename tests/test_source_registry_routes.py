@@ -50,6 +50,21 @@ class _FakeHealthSession:
         return _FakeRowResult(self._queue_rows)
 
 
+class _FakeSourceRegistryRouteSession:
+    def __init__(self, refresh_rows, last_checked_values):
+        self._refresh_rows = refresh_rows
+        self._last_checked_values = last_checked_values
+        self.execute_call_count = 0
+
+    def execute(self, _statement):
+        self.execute_call_count += 1
+        if self.execute_call_count == 1:
+            return _FakeRowResult(self._refresh_rows)
+        if self.execute_call_count == 2:
+            return _FakeScalarResult(self._last_checked_values)
+        raise AssertionError("source registry route should reuse preloaded refresh-state rows")
+
+
 class _FakeErrorSession:
     def __init__(self, rows):
         self._rows = rows
@@ -186,12 +201,8 @@ def test_build_source_registry_health_payload_computes_average_age(monkeypatch):
             None,
         ],
         status_rows=[
-            ("financials", now - timedelta(hours=2), now + timedelta(hours=2), None, now - timedelta(minutes=30)),
-            ("prices", now - timedelta(hours=6), now - timedelta(hours=1), "quote timeout", now - timedelta(hours=1)),
-        ],
-        queue_rows=[
-            ("job-1", now - timedelta(minutes=5), 0, None),
-            (None, now - timedelta(minutes=20), 1, "quote timeout"),
+            ("financials", 10, now - timedelta(hours=2), now + timedelta(hours=2), None, now - timedelta(minutes=30), "job-1", now - timedelta(minutes=5), 0),
+            ("prices", 11, now - timedelta(hours=6), now - timedelta(hours=1), "quote timeout", now - timedelta(hours=1), None, now - timedelta(minutes=20), 1),
         ],
     )
     expected_errors = [
@@ -226,6 +237,34 @@ def test_build_source_registry_health_payload_computes_average_age(monkeypatch):
     assert payload.worker_queue.datasets_with_failures == 1
     assert any(slo.key == "sec_companyfacts_freshness" and slo.status == "healthy" for slo in payload.slos)
     assert any(slo.key == "fallback_usage" and slo.status == "degraded" for slo in payload.slos)
+    assert session._execute_call_count == 2
+
+
+def test_source_registry_endpoint_reuses_refresh_state_rows(monkeypatch):
+    now = datetime.now(timezone.utc)
+    session = _FakeSourceRegistryRouteSession(
+        refresh_rows=[
+            ("financials", 10, now - timedelta(hours=2), now + timedelta(hours=2), None, now - timedelta(minutes=30), "job-1", now - timedelta(minutes=5), 0),
+            ("prices", 11, now - timedelta(hours=6), now - timedelta(hours=1), "quote timeout", now - timedelta(hours=1), None, now - timedelta(minutes=20), 1),
+        ],
+        last_checked_values=[
+            now - timedelta(hours=2),
+            now - timedelta(minutes=30),
+        ],
+    )
+
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=False, refresh_lock_timeout_seconds=900))
+
+    with _client(session) as client:
+        response = client.get("/api/source-registry")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["health"]["total_companies_cached"] == 2
+    assert payload["health"]["worker_queue"]["active_job_count"] == 1
+    assert payload["health"]["worker_queue"]["datasets_with_failures"] == 1
+    assert payload["health"]["sources_with_recent_errors"][0]["source_id"] == "yahoo_finance"
+    assert session.execute_call_count == 2
 
 
 def test_build_source_registry_error_payloads_aggregates_by_source():

@@ -17,10 +17,13 @@ def test_build_focus_cases_covers_requested_routes() -> None:
     assert {
         "company_overview",
         "company_financials",
+        "company_workspace_bootstrap",
         "company_charts",
         "derived_metrics",
         "company_models",
         "company_compare",
+        "watchlist_summary",
+        "watchlist_calendar",
         "screener_search",
         "source_registry",
         "source_registry_status",
@@ -35,6 +38,14 @@ def test_build_url_adds_nonce_for_cold_mode() -> None:
 
     assert "__bench_nonce" not in warm_url
     assert "__bench_nonce=abc" in cold_url
+
+
+def test_build_url_supports_repeated_query_params() -> None:
+    case = BenchmarkCase(name="watchlist_calendar", method="GET", path="/api/watchlist/calendar", params={"tickers": ["AAPL", "MSFT"]})
+
+    url = _build_url("http://127.0.0.1:8000", case, cache_mode="warm", nonce=None)
+
+    assert url == "http://127.0.0.1:8000/api/watchlist/calendar?tickers=AAPL&tickers=MSFT"
 
 
 def test_infer_cache_states_reads_common_header_values() -> None:

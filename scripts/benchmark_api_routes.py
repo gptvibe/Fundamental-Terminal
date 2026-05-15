@@ -54,7 +54,7 @@ class BenchmarkCase:
     name: str
     method: str
     path: str
-    params: dict[str, str]
+    params: dict[str, str | list[str]]
     json_body: dict[str, Any] | None = None
 
 
@@ -67,6 +67,11 @@ def build_focus_cases(ticker: str, compare_tickers: str) -> list[BenchmarkCase]:
     )
     if not normalized_compare:
         normalized_compare = normalized_ticker
+    normalized_compare_tickers = [
+        item
+        for item in normalized_compare.split(",")
+        if item
+    ]
 
     return [
         BenchmarkCase(
@@ -80,6 +85,15 @@ def build_focus_cases(ticker: str, compare_tickers: str) -> list[BenchmarkCase]:
             method="GET",
             path=f"/api/companies/{normalized_ticker}/financials",
             params={},
+        ),
+        BenchmarkCase(
+            name="company_workspace_bootstrap",
+            method="GET",
+            path=f"/api/companies/{normalized_ticker}/workspace-bootstrap",
+            params={
+                "financials_view": "core_segments",
+                "include_overview_brief": "true",
+            },
         ),
         BenchmarkCase(
             name="company_charts",
@@ -104,6 +118,19 @@ def build_focus_cases(ticker: str, compare_tickers: str) -> list[BenchmarkCase]:
             method="GET",
             path="/api/companies/compare",
             params={"tickers": normalized_compare},
+        ),
+        BenchmarkCase(
+            name="watchlist_summary",
+            method="POST",
+            path="/api/watchlist/summary",
+            params={},
+            json_body={"tickers": normalized_compare_tickers},
+        ),
+        BenchmarkCase(
+            name="watchlist_calendar",
+            method="GET",
+            path="/api/watchlist/calendar",
+            params={"tickers": normalized_compare_tickers},
         ),
         BenchmarkCase(
             name="screener_search",
@@ -146,7 +173,7 @@ def _build_url(
 
     url = f"{base_url.rstrip('/')}{case.path}"
     if query:
-        url = f"{url}?{urlencode(query)}"
+        url = f"{url}?{urlencode(query, doseq=True)}"
     return url
 
 

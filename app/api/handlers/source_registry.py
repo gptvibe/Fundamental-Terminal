@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import Depends
-from sqlalchemy import Select
 from sqlalchemy.orm import Session
 
 from app.api.endpoint_source_contract_manifest import USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS
@@ -26,6 +26,19 @@ _SOURCE_REGISTRY_SLO_SOURCE_IDS: dict[str, tuple[str, ...]] = {
     "sec_companyfacts_freshness": ("sec_companyfacts",),
     "sec_submissions_freshness": ("sec_edgar", "sec_edgar_corresp"),
 }
+
+
+@dataclass(frozen=True)
+class _SourceRegistryRefreshStateRow:
+    dataset: str
+    company_id: int | None
+    last_success: datetime | None
+    freshness_deadline: datetime | None
+    last_error: str | None
+    updated_at: datetime | None
+    active_job_id: str | None
+    last_checked: datetime | None
+    failure_count: int
 
 
 def _main_module() -> Any:
@@ -55,8 +68,14 @@ async def source_registry(
 
     def invoke(sync_session: Session) -> SourceRegistryResponse:
         main_module = _main_module()
+        refresh_state_rows: list[_SourceRegistryRefreshStateRow] | None = None
         try:
-            status_by_source = _build_source_registry_status_by_source(sync_session, now=generated_at)
+            refresh_state_rows = _load_source_registry_refresh_state_rows(sync_session)
+            status_by_source = _build_source_registry_status_by_source(
+                sync_session,
+                now=generated_at,
+                refresh_state_rows=refresh_state_rows,
+            )
         except Exception:
             logging.getLogger(__name__).exception("Unable to build source registry status payloads")
             status_by_source = {}
@@ -70,7 +89,12 @@ async def source_registry(
             for source_id in _sorted_source_registry_ids()
         ]
         try:
-            health = main_module._build_source_registry_health_payload(sync_session, now=generated_at)
+            health = main_module._build_source_registry_health_payload(
+                sync_session,
+                now=generated_at,
+                source_statuses=status_by_source,
+                refresh_state_rows=refresh_state_rows,
+            )
         except Exception:
             logging.getLogger(__name__).exception("Unable to build source registry health payload")
             health = main_module._empty_source_registry_health_payload()
@@ -110,29 +134,147 @@ def _build_source_registry_usage_paths() -> dict[str, list[str]]:
     }
 
 
+def _load_source_registry_refresh_state_rows(session: Session) -> list[_SourceRegistryRefreshStateRow]:
+    rows = session.execute(
+        shared.select(
+            shared.DatasetRefreshState.dataset,
+            shared.DatasetRefreshState.company_id,
+            shared.DatasetRefreshState.last_success,
+            shared.DatasetRefreshState.freshness_deadline,
+            shared.DatasetRefreshState.last_error,
+            shared.DatasetRefreshState.updated_at,
+            shared.DatasetRefreshState.active_job_id,
+            shared.DatasetRefreshState.last_checked,
+            shared.DatasetRefreshState.failure_count,
+        )
+    ).all()
+    return [_coerce_source_registry_refresh_state_row(row) for row in rows]
+
+
+def _coerce_source_registry_refresh_state_row(row: Any) -> _SourceRegistryRefreshStateRow:
+    if isinstance(row, _SourceRegistryRefreshStateRow):
+        return row
+
+    dataset = getattr(row, "dataset", None)
+    if dataset is not None:
+        return _SourceRegistryRefreshStateRow(
+            dataset=str(dataset),
+            company_id=_coerce_optional_int(getattr(row, "company_id", None)),
+            last_success=getattr(row, "last_success", None),
+            freshness_deadline=getattr(row, "freshness_deadline", None),
+            last_error=_coerce_optional_str(getattr(row, "last_error", None)),
+            updated_at=getattr(row, "updated_at", None),
+            active_job_id=_coerce_optional_str(getattr(row, "active_job_id", None)),
+            last_checked=getattr(row, "last_checked", None),
+            failure_count=_coerce_int(getattr(row, "failure_count", None)),
+        )
+
+    values = tuple(row)
+    if len(values) >= 9:
+        (
+            dataset_id,
+            company_id,
+            last_success,
+            freshness_deadline,
+            last_error,
+            updated_at,
+            active_job_id,
+            last_checked,
+            failure_count,
+            *_rest,
+        ) = values
+        return _SourceRegistryRefreshStateRow(
+            dataset=str(dataset_id),
+            company_id=_coerce_optional_int(company_id),
+            last_success=last_success,
+            freshness_deadline=freshness_deadline,
+            last_error=_coerce_optional_str(last_error),
+            updated_at=updated_at,
+            active_job_id=_coerce_optional_str(active_job_id),
+            last_checked=last_checked,
+            failure_count=_coerce_int(failure_count),
+        )
+    if len(values) == 5 and isinstance(values[1], int):
+        dataset_id, company_id, failure_count, last_error, updated_at = values
+        return _SourceRegistryRefreshStateRow(
+            dataset=str(dataset_id),
+            company_id=_coerce_optional_int(company_id),
+            last_success=None,
+            freshness_deadline=None,
+            last_error=_coerce_optional_str(last_error),
+            updated_at=updated_at,
+            active_job_id=None,
+            last_checked=None,
+            failure_count=_coerce_int(failure_count),
+        )
+    if len(values) == 5:
+        dataset_id, last_success, freshness_deadline, last_error, updated_at = values
+        return _SourceRegistryRefreshStateRow(
+            dataset=str(dataset_id),
+            company_id=None,
+            last_success=last_success,
+            freshness_deadline=freshness_deadline,
+            last_error=_coerce_optional_str(last_error),
+            updated_at=updated_at,
+            active_job_id=None,
+            last_checked=None,
+            failure_count=0,
+        )
+    if len(values) == 4:
+        active_job_id, last_checked, failure_count, last_error = values
+        return _SourceRegistryRefreshStateRow(
+            dataset="",
+            company_id=None,
+            last_success=None,
+            freshness_deadline=None,
+            last_error=_coerce_optional_str(last_error),
+            updated_at=None,
+            active_job_id=_coerce_optional_str(active_job_id),
+            last_checked=last_checked,
+            failure_count=_coerce_int(failure_count),
+        )
+    raise ValueError("Unsupported source registry refresh-state row shape")
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_int(value: Any) -> int:
+    coerced = _coerce_optional_int(value)
+    return coerced if coerced is not None else 0
+
+
+def _coerce_optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
 def _build_source_registry_status_by_source(
     session: Session,
     *,
     now: datetime,
+    refresh_state_rows: list[Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    statement: Select[Any] = shared.select(
-        shared.DatasetRefreshState.dataset,
-        shared.DatasetRefreshState.last_success,
-        shared.DatasetRefreshState.freshness_deadline,
-        shared.DatasetRefreshState.last_error,
-        shared.DatasetRefreshState.updated_at,
-    )
-    rows = session.execute(statement).all()
+    rows = refresh_state_rows if refresh_state_rows is not None else _load_source_registry_refresh_state_rows(session)
 
     statuses: dict[str, dict[str, Any]] = {}
-    for dataset_id, last_success, freshness_deadline, last_error, updated_at in rows:
-        mapped_source_ids = shared.SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(str(dataset_id), ())
+    for raw_row in rows:
+        row = _coerce_source_registry_refresh_state_row(raw_row)
+        mapped_source_ids = shared.SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(row.dataset, ())
         if not mapped_source_ids:
             continue
 
-        normalized_last_success = _normalize_utc_datetime(last_success)
-        normalized_deadline = _normalize_utc_datetime(freshness_deadline)
-        normalized_updated_at = _normalize_utc_datetime(updated_at)
+        normalized_last_success = _normalize_utc_datetime(row.last_success)
+        normalized_deadline = _normalize_utc_datetime(row.freshness_deadline)
+        normalized_updated_at = _normalize_utc_datetime(row.updated_at)
         is_stale = normalized_deadline is not None and normalized_deadline < now
 
         for source_id in mapped_source_ids:
@@ -153,10 +295,10 @@ def _build_source_registry_status_by_source(
 
             status["is_stale"] = bool(status["is_stale"] or is_stale)
 
-            if last_error and normalized_updated_at is not None:
+            if row.last_error and normalized_updated_at is not None:
                 existing_last_error_at = status["last_error_at"]
                 if existing_last_error_at is None or normalized_updated_at >= existing_last_error_at:
-                    status["last_error"] = str(last_error)
+                    status["last_error"] = row.last_error
                     status["last_error_at"] = normalized_updated_at
 
     return statuses
@@ -198,6 +340,8 @@ def _build_source_registry_health_payload(
     session: Session,
     *,
     now: datetime,
+    source_statuses: dict[str, dict[str, Any]] | None = None,
+    refresh_state_rows: list[Any] | None = None,
 ) -> SourceRegistryHealthPayload:
     cached_company_checks = [
         last_checked
@@ -206,7 +350,9 @@ def _build_source_registry_health_payload(
     ]
     normalized_checks = [shared._normalize_utc_datetime(last_checked) for last_checked in cached_company_checks]
     ages = [max((now - last_checked).total_seconds(), 0.0) for last_checked in normalized_checks if last_checked is not None]
-    source_statuses = _build_source_registry_status_by_source(session, now=now)
+    rows = refresh_state_rows if refresh_state_rows is not None else _load_source_registry_refresh_state_rows(session)
+    if source_statuses is None:
+        source_statuses = _build_source_registry_status_by_source(session, now=now, refresh_state_rows=rows)
     stale_source_count = sum(1 for status in source_statuses.values() if bool(status.get("is_stale")))
     sources_with_active_errors_count = sum(1 for status in source_statuses.values() if _source_status_has_active_error(status))
     fallback_source_ids = [
@@ -222,12 +368,16 @@ def _build_source_registry_health_payload(
     last_successful_refresh_at = _pick_latest_timestamp(
         [status.get("last_success_at") for status in source_statuses.values()]
     )
-    worker_queue = _build_worker_queue_health_payload(session, now=now)
+    worker_queue = _build_worker_queue_health_payload(session, now=now, refresh_state_rows=rows)
     return SourceRegistryHealthPayload(
         total_companies_cached=len(ages),
         average_data_age_seconds=(sum(ages) / len(ages)) if ages else None,
         recent_error_window_hours=shared.SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS,
-        sources_with_recent_errors=_main_module()._build_source_registry_error_payloads(session, now=now),
+        sources_with_recent_errors=_main_module()._build_source_registry_error_payloads(
+            session,
+            now=now,
+            refresh_state_rows=rows,
+        ),
         stale_source_count=stale_source_count,
         sources_with_active_errors_count=sources_with_active_errors_count,
         fallback_source_count=len(fallback_source_ids),
@@ -422,15 +572,9 @@ def _build_worker_queue_health_payload(
     session: Session,
     *,
     now: datetime,
+    refresh_state_rows: list[Any] | None = None,
 ) -> SourceRegistryWorkerQueueHealthPayload:
-    rows = session.execute(
-        shared.select(
-            shared.DatasetRefreshState.active_job_id,
-            shared.DatasetRefreshState.last_checked,
-            shared.DatasetRefreshState.failure_count,
-            shared.DatasetRefreshState.last_error,
-        )
-    ).all()
+    rows = refresh_state_rows if refresh_state_rows is not None else _load_source_registry_refresh_state_rows(session)
 
     settings = _current_settings()
     lock_timeout_seconds = max(int(getattr(settings, "refresh_lock_timeout_seconds", 900) or 900), 1)
@@ -440,13 +584,14 @@ def _build_worker_queue_health_payload(
     stalled_job_count = 0
     datasets_with_failures = 0
 
-    for active_job_id, last_checked, failure_count, last_error in rows:
-        normalized_last_checked = _normalize_utc_datetime(last_checked)
-        if active_job_id:
+    for raw_row in rows:
+        row = _coerce_source_registry_refresh_state_row(raw_row)
+        normalized_last_checked = _normalize_utc_datetime(row.last_checked)
+        if row.active_job_id:
             active_job_count += 1
             if normalized_last_checked is not None and normalized_last_checked < lock_cutoff:
                 stalled_job_count += 1
-        if int(failure_count or 0) > 0 or bool(last_error):
+        if int(row.failure_count or 0) > 0 or bool(row.last_error):
             datasets_with_failures += 1
 
     failed_refresh_count: int | None = None
@@ -487,26 +632,22 @@ def _build_source_registry_error_payloads(
     session: Session,
     *,
     now: datetime,
+    refresh_state_rows: list[Any] | None = None,
 ) -> list[SourceRegistryErrorPayload]:
     cutoff = now - timedelta(hours=shared.SOURCE_REGISTRY_RECENT_ERROR_WINDOW_HOURS)
-    rows = session.execute(
-        shared.select(
-            shared.DatasetRefreshState.dataset,
-            shared.DatasetRefreshState.company_id,
-            shared.DatasetRefreshState.failure_count,
-            shared.DatasetRefreshState.last_error,
-            shared.DatasetRefreshState.updated_at,
-        ).where(
-            shared.DatasetRefreshState.last_error.is_not(None),
-            shared.DatasetRefreshState.updated_at >= cutoff,
-        )
-    ).all()
+    rows = refresh_state_rows if refresh_state_rows is not None else _load_source_registry_refresh_state_rows(session)
 
     aggregates: dict[str, dict[str, Any]] = {}
-    for dataset_id, company_id, failure_count, last_error, updated_at in rows:
-        for source_id in shared.SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(str(dataset_id), ()):
+    for raw_row in rows:
+        row = _coerce_source_registry_refresh_state_row(raw_row)
+        if not row.last_error or row.updated_at is None:
+            continue
+        normalized_updated_at = shared._normalize_utc_datetime(row.updated_at)
+        if normalized_updated_at < cutoff:
+            continue
+        for source_id in shared.SOURCE_REGISTRY_DATASET_SOURCE_IDS.get(row.dataset, ()):
             definition = shared.get_source_definition(source_id)
-            if definition is None or not last_error:
+            if definition is None:
                 continue
             aggregate = aggregates.setdefault(
                 source_id,
@@ -517,17 +658,17 @@ def _build_source_registry_error_payloads(
                     "affected_dataset_ids": set(),
                     "affected_company_ids": set(),
                     "failure_count": 0,
-                    "last_error": str(last_error),
-                    "last_error_at": shared._normalize_utc_datetime(updated_at),
+                    "last_error": row.last_error,
+                    "last_error_at": normalized_updated_at,
                 },
             )
-            aggregate["affected_dataset_ids"].add(str(dataset_id))
-            aggregate["affected_company_ids"].add(int(company_id))
-            aggregate["failure_count"] += int(failure_count or 1)
-            normalized_updated_at = shared._normalize_utc_datetime(updated_at)
+            aggregate["affected_dataset_ids"].add(row.dataset)
+            if row.company_id is not None:
+                aggregate["affected_company_ids"].add(row.company_id)
+            aggregate["failure_count"] += int(row.failure_count or 1)
             if normalized_updated_at >= aggregate["last_error_at"]:
                 aggregate["last_error_at"] = normalized_updated_at
-                aggregate["last_error"] = str(last_error)
+                aggregate["last_error"] = row.last_error
 
     return [
         SourceRegistryErrorPayload(
@@ -588,6 +729,7 @@ __all__ = [
     "_build_source_registry_status_by_source",
     "_build_source_registry_usage_paths",
     "_empty_source_registry_health_payload",
+    "_load_source_registry_refresh_state_rows",
     "_sorted_source_registry_ids",
     "_source_registry_latest_checks_subquery",
     "source_registry",

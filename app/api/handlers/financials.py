@@ -578,7 +578,7 @@ def company_metrics_timeseries(
     financials = _visible_financials_for_company(session, snapshot.company)
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
     price_history = _visible_price_history(session, snapshot.company.id)
     if parsed_as_of is not None:
         financials = select_point_in_time_financials(financials, parsed_as_of)
@@ -645,7 +645,7 @@ def company_derived_metrics(
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = _visible_financials_for_company(session, snapshot.company)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
 
     if parsed_as_of is None:
         rows = get_company_derived_metric_points(
@@ -776,7 +776,7 @@ def company_derived_metrics_summary(
     price_last_checked, price_cache_state = _visible_price_cache_status(session, snapshot.company.id)
     financials = _visible_financials_for_company(session, snapshot.company)
     staleness_reason = _metrics_staleness_reason(snapshot, price_cache_state, financials)
-    refresh = _refresh_for_financial_page(background_tasks, snapshot, price_cache_state, financials)
+    refresh = _refresh_for_financial_page(snapshot, price_cache_state, financials)
 
     if parsed_as_of is None:
         rows = get_company_derived_metric_points(session, snapshot.company.id, max_periods=24)

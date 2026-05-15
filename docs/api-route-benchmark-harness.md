@@ -3,11 +3,13 @@
 This repository includes a repeatable benchmark harness for the main API routes:
 
 - company overview
+- company workspace bootstrap
 - company financials
 - charts
 - derived metrics
 - models
 - compare
+- watchlist summary and calendar
 - screener
 - source registry and source status
 

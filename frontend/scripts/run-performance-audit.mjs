@@ -13,6 +13,10 @@ const DEFAULT_BACKEND_URL = "http://127.0.0.1:8000";
 const DEFAULT_TICKER = "AAPL";
 const DEFAULT_ROUNDS = 8;
 const DEFAULT_RESOLVE_QUERY = "NET";
+const DEFAULT_AUDIT_IDLE_STABLE_MS = 500;
+const DEFAULT_AUDIT_IDLE_TIMEOUT_MS = 5000;
+const DEFAULT_ROUTE_FETCH_TIMEOUT_MS = 30000;
+const DEFAULT_CONTEXT_CLOSE_TIMEOUT_MS = 5000;
 const SEARCH_DUPLICATE_WINDOW_MS = 1500;
 const MODEL_NAMES = ["ratios", "dupont", "dcf", "reverse_dcf", "roic", "capital_allocation"];
 const LOCAL_USER_DATA_STORAGE_KEY = "ft-local-user-data";
@@ -204,17 +208,22 @@ async function main() {
   for (const scenario of PAGE_SCENARIOS) {
     if (typeof scenario.run === "function") {
       scenarioResults.push(await runScenarioPhase(browser, config, scenario, "cold"));
+      process.stdout.write(`Collected ${scenario.label} cold scenario.\n`);
       scenarioResults.push(await runScenarioPhase(browser, config, scenario, "warm"));
+      process.stdout.write(`Collected ${scenario.label} warm scenario.\n`);
       continue;
     }
 
     scenarioResults.push(await runScenarioPhase(browser, config, scenario, "cold"));
+    process.stdout.write(`Collected ${scenario.label} cold scenario.\n`);
     scenarioResults.push(await runScenarioPhase(browser, config, scenario, "warm"));
+    process.stdout.write(`Collected ${scenario.label} warm scenario.\n`);
   }
 
   const benchmarkResults = [];
   for (const routeCase of HOT_ROUTE_CASES) {
     benchmarkResults.push(await benchmarkRouteCase(config, routeCase));
+    process.stdout.write(`Benchmarked ${routeCase.label}.\n`);
   }
 
   await browser.close();
@@ -248,6 +257,10 @@ function parseArgs(args) {
     resolveQuery: String(values.get("resolve-query") ?? DEFAULT_RESOLVE_QUERY).trim(),
     rounds: Number.parseInt(values.get("rounds") ?? String(DEFAULT_ROUNDS), 10),
     repoRoot: path.resolve(SCRIPT_DIR, "..", ".."),
+    auditIdleStableMs: parsePositiveInt(values.get("audit-idle-stable-ms"), DEFAULT_AUDIT_IDLE_STABLE_MS),
+    auditIdleTimeoutMs: parsePositiveInt(values.get("audit-idle-timeout-ms"), DEFAULT_AUDIT_IDLE_TIMEOUT_MS),
+    routeFetchTimeoutMs: parsePositiveInt(values.get("route-fetch-timeout-ms"), DEFAULT_ROUTE_FETCH_TIMEOUT_MS),
+    contextCloseTimeoutMs: parsePositiveInt(values.get("context-close-timeout-ms"), DEFAULT_CONTEXT_CLOSE_TIMEOUT_MS),
   };
 }
 
@@ -260,11 +273,11 @@ async function runHomepageSearchScenario(page, config, phase, label, query) {
   const input = page.getByRole("combobox", { name: /search by ticker, company, or cik/i });
   await input.fill("");
   await input.fill(query);
-  await waitForAuditIdle(page);
+  await waitForAuditIdle(page, config);
   await input.press("Enter");
   await page.waitForTimeout(150);
   await waitForFrontendAudit(page);
-  await waitForAuditIdle(page);
+  await waitForAuditIdle(page, config);
   return collectScenarioResult(page, config.backendUrl, label, phase);
 }
 
@@ -272,17 +285,17 @@ async function runHomepageSearchScenario(page, config, phase, label, query) {
 async function runTopbarSearchScenario(page, config, phase, label, query) {
   await page.goto(`${config.frontendUrl}/company/${encodeURIComponent(config.ticker)}`, { waitUntil: "domcontentloaded" });
   await waitForFrontendAudit(page);
-  await waitForAuditIdle(page);
+  await waitForAuditIdle(page, config);
   await resetCollectors(page, config.backendUrl, phase);
 
   const input = page.getByRole("combobox", { name: /search company or ticker/i }).first();
   await input.fill("");
   await input.fill(query);
-  await waitForAuditIdle(page);
+  await waitForAuditIdle(page, config);
   await input.press("Enter");
   await page.waitForTimeout(150);
   await waitForFrontendAudit(page);
-  await waitForAuditIdle(page);
+  await waitForAuditIdle(page, config);
   return collectScenarioResult(page, config.backendUrl, label, phase);
 }
 
@@ -358,7 +371,7 @@ async function runScenarioPhase(browser, config, scenario, phase) {
     await runNavigationScenario(page, config, scenario, "cold");
     return await runNavigationScenario(page, config, scenario, phase);
   } finally {
-    await context.close();
+    await closeContextWithTimeout(context, config.contextCloseTimeoutMs);
   }
 }
 
@@ -374,8 +387,8 @@ async function resetCollectors(page, backendUrl, phase) {
 
 async function waitForAuditIdle(page, options = {}) {
   await waitForFrontendAudit(page);
-  const stableForMs = options.stableForMs ?? 800;
-  const timeoutMs = options.timeoutMs ?? 20000;
+  const stableForMs = options.stableForMs ?? options.auditIdleStableMs ?? DEFAULT_AUDIT_IDLE_STABLE_MS;
+  const timeoutMs = options.timeoutMs ?? options.auditIdleTimeoutMs ?? DEFAULT_AUDIT_IDLE_TIMEOUT_MS;
   const startedAt = Date.now();
   let lastSignature = "";
   let lastChangedAt = Date.now();
@@ -412,7 +425,7 @@ async function runNavigationScenario(page, config, scenario, phase) {
   await resetCollectors(page, config.backendUrl, phase);
   await page.goto(scenario.pathFor(config), { waitUntil: "domcontentloaded" });
   await waitForFrontendAudit(page);
-  await waitForAuditIdle(page);
+  await waitForAuditIdle(page, config);
   return collectScenarioResult(page, config.backendUrl, scenario.label, phase);
 }
 
@@ -437,8 +450,8 @@ function summarizeScenario(label, phase, frontendSnapshot, backendSnapshot) {
 
   const pageElapsedMs = derivePageElapsedMs(blockingRequests);
   const backendRecords = Array.isArray(backendSnapshot.records) ? backendSnapshot.records : [];
-  const totalSqlQueries = backendRecords.reduce((sum, record) => sum + Number(record.sql_query_count ?? 0), 0);
-  const totalSqlElapsedMs = backendRecords.reduce((sum, record) => sum + Number(record.sql_elapsed_ms ?? 0), 0);
+  const totalSqlQueries = backendRecords.reduce((sum, record) => sum + readNumber(record, ["sql_query_count", "db_query_count"]), 0);
+  const totalSqlElapsedMs = backendRecords.reduce((sum, record) => sum + readNumber(record, ["sql_elapsed_ms", "db_duration_ms"]), 0);
   const totalResponseBytes = backendRecords.reduce((sum, record) => sum + Number(record.response_bytes ?? 0), 0);
   const totalSerializationMs = backendRecords.reduce((sum, record) => sum + Number(record.serialization_ms ?? 0), 0);
   const searchAudit = summarizeSearchFlowAudit(blockingRequests);
@@ -599,7 +612,11 @@ async function benchmarkRouteCase(config, routeCase) {
   await fetch(`${config.backendUrl}/api/internal/performance-audit/reset`, { method: "POST" });
 
   for (let roundIndex = 0; roundIndex < config.rounds; roundIndex += 1) {
-    const response = await fetch(routeCase.url(config), materializeFetchOptions(routeCase.options, config));
+    const response = await fetchWithTimeout(
+      routeCase.url(config),
+      materializeFetchOptions(routeCase.options, config),
+      config.routeFetchTimeoutMs
+    );
     await response.text();
     if (!response.ok) {
       throw new Error(`${routeCase.label} failed with ${response.status} ${response.statusText}`);
@@ -628,8 +645,8 @@ async function benchmarkRouteCase(config, routeCase) {
 function summarizeRecord(record) {
   return {
     latencyMs: round(Number(record.duration_ms ?? 0)),
-    sqlQueryCount: Number(record.sql_query_count ?? 0),
-    sqlElapsedMs: round(Number(record.sql_elapsed_ms ?? 0)),
+    sqlQueryCount: readNumber(record, ["sql_query_count", "db_query_count"]),
+    sqlElapsedMs: round(readNumber(record, ["sql_elapsed_ms", "db_duration_ms"])),
     serializationMs: round(Number(record.serialization_ms ?? 0)),
     responseBytes: Number(record.response_bytes ?? 0),
   };
@@ -649,8 +666,8 @@ function summarizeRecords(records) {
   }
 
   const latencies = records.map((record) => Number(record.duration_ms ?? 0));
-  const sqlCounts = records.map((record) => Number(record.sql_query_count ?? 0));
-  const sqlElapsed = records.map((record) => Number(record.sql_elapsed_ms ?? 0));
+  const sqlCounts = records.map((record) => readNumber(record, ["sql_query_count", "db_query_count"]));
+  const sqlElapsed = records.map((record) => readNumber(record, ["sql_elapsed_ms", "db_duration_ms"]));
   const serialization = records.map((record) => Number(record.serialization_ms ?? 0));
   const responseBytes = records.map((record) => Number(record.response_bytes ?? 0));
 
@@ -953,6 +970,53 @@ function materializeFetchOptions(options, config) {
     materialized.body = materialized.body.replaceAll(`"${configTickerPlaceholder()}"`, `"${config.ticker}"`);
   }
   return materialized;
+}
+
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...(options ?? {}),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
+async function closeContextWithTimeout(context, timeoutMs) {
+  let timeout;
+  try {
+    await Promise.race([
+      context.close(),
+      new Promise((resolve) => {
+        timeout = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
+function readNumber(record, keys) {
+  for (const key of keys) {
+    const value = Number(record[key] ?? 0);
+    if (Number.isFinite(value) && value !== 0) {
+      return value;
+    }
+  }
+  const fallback = Number(record[keys[0]] ?? 0);
+  return Number.isFinite(fallback) ? fallback : 0;
+}
+
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 
