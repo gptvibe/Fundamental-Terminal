@@ -3094,6 +3094,19 @@ def latest_model_evaluation(
         ]
         confidence_flags = []
 
+    strict_suppression_flags = strict_official_model_evaluation_suppression_flags(usages)
+    if strict_suppression_flags:
+        payload = ModelEvaluationResponse(run=None, **_empty_provenance_contract(*strict_suppression_flags))
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            payload,
+            last_modified=last_refreshed_at,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return payload
+
     payload = ModelEvaluationResponse(
         run=ModelEvaluationRunPayload.model_validate(serialized_run),
         **_build_provenance_contract(
@@ -6921,6 +6934,27 @@ def _build_provenance_contract(
 
 def _empty_provenance_contract(*flags: str) -> dict[str, Any]:
     return _build_provenance_contract([], confidence_flags=[flag for flag in flags if flag])
+
+
+def strict_official_model_evaluation_suppression_flags(usages: list[SourceUsage]) -> list[str]:
+    if not settings.strict_official_mode:
+        return []
+
+    disabled_tiers: set[str] = set()
+    for usage in usages:
+        definition = get_source_definition(usage.source_id)
+        if definition is not None and definition.tier in STRICT_OFFICIAL_DISABLED_SOURCE_TIERS:
+            disabled_tiers.add(definition.tier)
+
+    if not disabled_tiers:
+        return []
+
+    flags = {"model_evaluation_suppressed_strict_official_mode"}
+    if "commercial_fallback" in disabled_tiers:
+        flags.add("strict_official_mode_price_disabled")
+    if "manual_override" in disabled_tiers:
+        flags.add("synthetic_fixture_suppressed")
+    return sorted(flags)
 
 
 def _confidence_flags_from_diagnostics(diagnostics: DataQualityDiagnosticsPayload | None) -> list[str]:

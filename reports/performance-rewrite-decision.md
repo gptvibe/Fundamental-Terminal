@@ -1,6 +1,6 @@
 # Performance Rewrite Decision
 
-Date: 2026-05-14
+Date: 2026-05-21
 
 ## Current Architecture Summary
 
@@ -34,10 +34,14 @@ The correct architecture direction is not a full rewrite. The existing layering 
   - Command: `npm --prefix frontend run build`
   - Result: passed.
   - First Load JS: `/` 117 kB, `/company/[ticker]` 183 kB, `/company/[ticker]/charts` 243 kB, `/compare` 123 kB, `/watchlist` 116 kB, `/screener` 128 kB, `/data-sources` 110 kB.
-- Attempted browser performance audit:
-  - Command: `$env:PERFORMANCE_AUDIT_ENABLED='true'; $env:NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED='true'; npm --prefix frontend run audit:performance -- --ticker AAPL`
-  - Result: failed with `TypeError: fetch failed`.
-  - Cause: environment-related; no backend/frontend services were listening on `127.0.0.1:8000` or `127.0.0.1:3000`.
+- Ran browser performance audit against the rebuilt Docker stack:
+  - Command: `npm --prefix frontend run audit:performance -- --ticker AAPL`
+  - Result: passed and wrote `artifacts/performance/baselines/performance-baseline.md` plus `artifacts/performance/baselines/performance-baseline.json`.
+  - The audit now completes every page scenario and every hot-route benchmark, including model evaluation, source registry, watchlist, and refresh queue routes.
+- The audit exposed a strict-official-mode source-contract bug on `/api/model-evaluations/latest` before the final pass:
+  - Failing route result: HTTP 500.
+  - Cause: a synthetic fixture model-evaluation run exposed `ft_model_evaluation_fixture`, whose registry tier is `manual_override`, while `STRICT_OFFICIAL_MODE=true`.
+  - Decision: targeted backend refactor. Suppress strict-mode-ineligible model-evaluation runs behind the existing nullable `run` contract instead of changing routes or payload shape.
 - Inspected previous live/container audit artifacts:
   - `artifacts/performance/baselines/performance-baseline.md`
   - `artifacts/performance/baselines/current-stack-benchmark.json`
@@ -89,7 +93,7 @@ The larger company-bootstrap and charts-backgrounding changes should be handled 
 - No API response fields will be removed or renamed.
 - No route URL will change.
 - No unofficial fundamentals feed will be added.
-- Strict official mode behavior is untouched.
+- Strict official mode behavior is preserved and now explicitly suppresses model-evaluation payloads backed by manual override or commercial fallback sources.
 - Provenance, source mix, freshness, and fallback disclosures remain in place.
 - Routers remain thin; handler/service boundaries stay within the current architecture rules.
 
@@ -101,8 +105,9 @@ Implemented the targeted refactor, not a full rewrite:
 2. The `app.main` compatibility helpers accept the same optional preloaded rows, so the route no longer has to trigger duplicate refresh-state scans to preserve the old response shape.
 3. `scripts/benchmark_api_routes.py` now covers the requested hot flows: company workspace bootstrap, charts, compare, watchlist summary, watchlist calendar, screener, source registry, and cache metrics. It also supports repeated query params correctly.
 4. Docker build/local profiles now expose opt-in performance audit env vars with defaults still off: `PERFORMANCE_AUDIT_ENABLED`, `PERFORMANCE_AUDIT_MAX_RECORDS`, and `NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED`.
-5. `frontend/scripts/run-performance-audit.mjs` now reads both legacy `sql_*` and current `db_*` audit field names, bounds route fetch waits, and bounds page-idle/context-close waits to make future audit failures easier to diagnose.
+5. `frontend/scripts/run-performance-audit.mjs` now reads both legacy `sql_*` and current `db_*` audit field names, bounds route fetch waits, bounds page-idle/context/browser-close waits, and includes a `--self-test` mode for the audit summarizers.
 6. Fixed a live metrics route regression found during validation: derived metrics handlers were passing the old `background_tasks` argument to `_refresh_for_financial_page`.
+7. Fixed the strict-official-mode model-evaluation contract failure found by the final audit. `/api/model-evaluations/latest` now returns `run: null` with confidence flags when the latest run is backed by `manual_override` or `commercial_fallback` sources, preserving the existing response shape while avoiding fallback/manual provenance exposure.
 
 ## Post-Implementation Evidence
 
@@ -114,14 +119,19 @@ Implemented the targeted refactor, not a full rewrite:
   - `derived_metrics`: p50 61.68 ms, p95 117.49 ms, payload 757,122 bytes.
   - `company_compare`: p50 196.12 ms, p95 207.98 ms, payload 843,087 bytes.
   - `source_registry`: p50 94.01 ms, p95 115.30 ms on the just-restarted Docker stack; a direct restored-stack curl immediately before the benchmark returned 200 in 95 ms.
-- Direct browser checks against the rebuilt stack rendered these pages with HTTP 200 and no console errors: `/`, `/data-sources`, `/company/AAPL`, `/company/AAPL/charts`, `/compare?tickers=AAPL,MSFT`, `/watchlist`, `/screener`, and `/company/DUOL`.
-- The not-cached DUOL page rendered its company brief shell and queued background refresh work without surfacing a UI error.
+- Direct browser checks against the rebuilt stack rendered these pages with HTTP 200 and no console errors: `/`, `/data-sources`, `/company/AAPL`, `/company/AAPL/charts`, `/compare?tickers=AAPL,MSFT`, `/watchlist`, `/screener`, `/company/RDDT`, and `/company/CRWV`.
+- `CRWV` was absent from the local `companies` table before navigation; `/company/CRWV` still rendered the company brief shell without surfacing a UI error.
+- The final full browser performance audit passed after the strict-mode model-evaluation fix:
+  - Command: `npm --prefix frontend run audit:performance -- --ticker AAPL`
+  - Result: completed all page scenarios and route benchmarks, writing fresh baseline artifacts.
+  - Current frontend build highlights: `/` 117 kB first-load JS, `/company/[ticker]` 183 kB, `/company/[ticker]/charts` 243 kB, `/compare` 123 kB, `/watchlist` 116 kB, `/screener` 128 kB, `/data-sources` 110 kB.
+- In strict official mode, a synthetic fixture model-evaluation run now returns HTTP 200 with `run: null`, empty provenance, and confidence flags `model_evaluation_suppressed_strict_official_mode`, `strict_official_mode`, and `synthetic_fixture_suppressed`.
 
 ## Validation Outcome
 
 Passed:
 
-- `python -m pytest` -> 1003 passed, 1 skipped.
+- `python -m pytest` -> 1004 passed, 1 skipped.
 - `python scripts/check_architecture_boundaries.py` -> passed.
 - `python scripts/check_migration_safety.py` -> passed.
 - `python -m ruff check app/main.py app/api/routers app/api/schemas app/services scripts/check_architecture_boundaries.py --select F401,F821,F822,F823,E9` -> passed.
@@ -130,13 +140,10 @@ Passed:
 - `npm --prefix frontend run lint` -> passed.
 - `npm --prefix frontend run typecheck` -> passed.
 - `npm --prefix frontend run build` -> passed.
+- `npm --prefix frontend run audit:performance -- --self-test` -> passed.
+- `npm --prefix frontend run audit:performance -- --ticker AAPL` -> passed.
 - `docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d` -> passed; final restored stack is healthy with `performance_audit_enabled:false`.
-
-Not fully passed:
-
-- `npm --prefix frontend run audit:performance -- --ticker AAPL` timed out after 30 minutes even after the Docker audit flags were plumbed through.
-- A reduced AAPL-only audit also timed out after 15-20 minutes. The backend collector did capture records, but the Playwright driver stopped progressing after early page scenarios. I fixed the field-name and timeout issues found in the script, but the full command still needs a separate harness debugging pass.
 
 ## Remaining Work
 
-The next high-impact performance work should be a partial rewrite of company bootstrap materialization and chart cold-path refresh behavior, behind existing public contracts. The current evidence still points to oversized compatibility payloads and cold-path recomputation risk on company, charts, compare, and metrics flows, but the present change deliberately stayed on the lower-risk source/freshness and observability path.
+The next high-impact performance work should be a partial rewrite of company bootstrap materialization and chart cold-path refresh behavior, behind existing public contracts. The current evidence still points to oversized compatibility payloads, repeated company bootstrap requests, and cold-path recomputation risk on company, charts, compare, and metrics flows, but the present change deliberately stayed on the lower-risk source/freshness, strict-mode compatibility, and observability path.

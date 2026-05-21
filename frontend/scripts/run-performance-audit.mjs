@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import process from "node:process";
@@ -17,6 +18,7 @@ const DEFAULT_AUDIT_IDLE_STABLE_MS = 500;
 const DEFAULT_AUDIT_IDLE_TIMEOUT_MS = 5000;
 const DEFAULT_ROUTE_FETCH_TIMEOUT_MS = 30000;
 const DEFAULT_CONTEXT_CLOSE_TIMEOUT_MS = 5000;
+const DEFAULT_BROWSER_CLOSE_TIMEOUT_MS = 5000;
 const SEARCH_DUPLICATE_WINDOW_MS = 1500;
 const MODEL_NAMES = ["ratios", "dupont", "dcf", "reverse_dcf", "roic", "capital_allocation"];
 const LOCAL_USER_DATA_STORAGE_KEY = "ft-local-user-data";
@@ -196,6 +198,12 @@ const HOT_ROUTE_CASES = [
 
 async function main() {
   const config = parseArgs(process.argv.slice(2));
+  if (config.selfTest) {
+    runSelfTest();
+    process.stdout.write("run-performance-audit self-test passed.\n");
+    return;
+  }
+
   const baselineDir = path.resolve(config.repoRoot, "artifacts", "performance", "baselines");
   const jsonOutputPath = path.join(baselineDir, "performance-baseline.json");
   const markdownOutputPath = path.join(baselineDir, "performance-baseline.md");
@@ -204,36 +212,38 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true });
 
-  const scenarioResults = [];
-  for (const scenario of PAGE_SCENARIOS) {
-    if (typeof scenario.run === "function") {
+  try {
+    const scenarioResults = [];
+    for (const scenario of PAGE_SCENARIOS) {
+      if (typeof scenario.run === "function") {
+        scenarioResults.push(await runScenarioPhase(browser, config, scenario, "cold"));
+        process.stdout.write(`Collected ${scenario.label} cold scenario.\n`);
+        scenarioResults.push(await runScenarioPhase(browser, config, scenario, "warm"));
+        process.stdout.write(`Collected ${scenario.label} warm scenario.\n`);
+        continue;
+      }
+
       scenarioResults.push(await runScenarioPhase(browser, config, scenario, "cold"));
       process.stdout.write(`Collected ${scenario.label} cold scenario.\n`);
       scenarioResults.push(await runScenarioPhase(browser, config, scenario, "warm"));
       process.stdout.write(`Collected ${scenario.label} warm scenario.\n`);
-      continue;
     }
 
-    scenarioResults.push(await runScenarioPhase(browser, config, scenario, "cold"));
-    process.stdout.write(`Collected ${scenario.label} cold scenario.\n`);
-    scenarioResults.push(await runScenarioPhase(browser, config, scenario, "warm"));
-    process.stdout.write(`Collected ${scenario.label} warm scenario.\n`);
+    const benchmarkResults = [];
+    for (const routeCase of HOT_ROUTE_CASES) {
+      benchmarkResults.push(await benchmarkRouteCase(config, routeCase));
+      process.stdout.write(`Benchmarked ${routeCase.label}.\n`);
+    }
+
+    const summary = buildSummary(config, scenarioResults, benchmarkResults);
+    await fs.mkdir(baselineDir, { recursive: true });
+    await fs.writeFile(jsonOutputPath, JSON.stringify(summary, null, 2));
+    await fs.writeFile(markdownOutputPath, buildMarkdown(summary), "utf8");
+
+    process.stdout.write(`Wrote ${path.relative(config.repoRoot, markdownOutputPath)} and ${path.relative(config.repoRoot, jsonOutputPath)}\n`);
+  } finally {
+    await closeBrowserWithTimeout(browser, config.browserCloseTimeoutMs);
   }
-
-  const benchmarkResults = [];
-  for (const routeCase of HOT_ROUTE_CASES) {
-    benchmarkResults.push(await benchmarkRouteCase(config, routeCase));
-    process.stdout.write(`Benchmarked ${routeCase.label}.\n`);
-  }
-
-  await browser.close();
-
-  const summary = buildSummary(config, scenarioResults, benchmarkResults);
-  await fs.mkdir(baselineDir, { recursive: true });
-  await fs.writeFile(jsonOutputPath, JSON.stringify(summary, null, 2));
-  await fs.writeFile(markdownOutputPath, buildMarkdown(summary), "utf8");
-
-  process.stdout.write(`Wrote ${path.relative(config.repoRoot, markdownOutputPath)} and ${path.relative(config.repoRoot, jsonOutputPath)}\n`);
 }
 
 
@@ -244,8 +254,13 @@ function parseArgs(args) {
     if (!token.startsWith("--")) {
       continue;
     }
-    values.set(token.slice(2), args[index + 1]);
-    index += 1;
+    const nextToken = args[index + 1];
+    if (nextToken && !nextToken.startsWith("--")) {
+      values.set(token.slice(2), nextToken);
+      index += 1;
+    } else {
+      values.set(token.slice(2), true);
+    }
   }
 
   return {
@@ -261,6 +276,8 @@ function parseArgs(args) {
     auditIdleTimeoutMs: parsePositiveInt(values.get("audit-idle-timeout-ms"), DEFAULT_AUDIT_IDLE_TIMEOUT_MS),
     routeFetchTimeoutMs: parsePositiveInt(values.get("route-fetch-timeout-ms"), DEFAULT_ROUTE_FETCH_TIMEOUT_MS),
     contextCloseTimeoutMs: parsePositiveInt(values.get("context-close-timeout-ms"), DEFAULT_CONTEXT_CLOSE_TIMEOUT_MS),
+    browserCloseTimeoutMs: parsePositiveInt(values.get("browser-close-timeout-ms"), DEFAULT_BROWSER_CLOSE_TIMEOUT_MS),
+    selfTest: values.get("self-test") === true || values.get("self-test") === "true",
   };
 }
 
@@ -653,6 +670,12 @@ function summarizeRecord(record) {
 }
 
 
+function toTimestamp(value) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+
 function summarizeRecords(records) {
   if (!records.length) {
     return {
@@ -1002,6 +1025,21 @@ async function closeContextWithTimeout(context, timeoutMs) {
 }
 
 
+async function closeBrowserWithTimeout(browser, timeoutMs) {
+  let timeout;
+  try {
+    await Promise.race([
+      browser.close(),
+      new Promise((resolve) => {
+        timeout = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+
 function readNumber(record, keys) {
   for (const key of keys) {
     const value = Number(record[key] ?? 0);
@@ -1011,6 +1049,43 @@ function readNumber(record, keys) {
   }
   const fallback = Number(record[keys[0]] ?? 0);
   return Number.isFinite(fallback) ? fallback : 0;
+}
+
+
+function runSelfTest() {
+  const startedAt = "2026-05-21T01:00:00.000Z";
+  assert.equal(toTimestamp(startedAt), Date.parse(startedAt));
+  assert.equal(toTimestamp("not-a-date"), 0);
+
+  const searchAudit = summarizeSearchFlowAudit([
+    {
+      path: "/companies/search?query=AAPL",
+      source: "homepage:autocomplete-search",
+      cacheDisposition: "network",
+      error: null,
+      startedAt,
+    },
+    {
+      path: "/companies/resolve?query=AAPL",
+      source: "homepage:resolve",
+      cacheDisposition: "network",
+      error: null,
+      startedAt: "2026-05-21T01:00:00.500Z",
+    },
+  ]);
+  assert.equal(searchAudit.autocompleteRequests, 1);
+  assert.equal(searchAudit.resolveFallbackRequests, 1);
+  assert.equal(searchAudit.searchToResolvePairCount, 1);
+
+  const summarized = summarizeRecord({
+    duration_ms: 12.5,
+    db_query_count: 3,
+    db_duration_ms: 4.25,
+    serialization_ms: 1.2,
+    response_bytes: 2048,
+  });
+  assert.equal(summarized.sqlQueryCount, 3);
+  assert.equal(summarized.sqlElapsedMs, 4.25);
 }
 
 

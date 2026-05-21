@@ -586,6 +586,19 @@ def latest_model_evaluation(
         ]
         confidence_flags = []
 
+    strict_suppression_flags = strict_official_model_evaluation_suppression_flags(usages)
+    if strict_suppression_flags:
+        payload = ModelEvaluationResponse(run=None, **_empty_provenance_contract(*strict_suppression_flags))
+        not_modified = _apply_conditional_headers(
+            request,
+            http_response,
+            payload,
+            last_modified=last_refreshed_at,
+        )
+        if not_modified is not None:
+            return not_modified  # type: ignore[return-value]
+        return payload
+
     payload = ModelEvaluationResponse(
         run=ModelEvaluationRunPayload.model_validate(serialized_run),
         **_build_provenance_contract(
@@ -614,4 +627,3 @@ __all__ = [
     "company_oil_scenario_overlay",
     "latest_model_evaluation",
 ]
-

@@ -174,6 +174,9 @@ def test_runtime_rejects_commercial_fallback_payload_in_strict_official_mode(mon
     monkeypatch.setattr(main_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: _serialized_model_evaluation_run())
     monkeypatch.setattr(legacy_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: _serialized_model_evaluation_run())
     monkeypatch.setattr(shared_handlers, "serialize_model_evaluation_run", legacy_module.serialize_model_evaluation_run)
+    monkeypatch.setattr(main_module, "strict_official_model_evaluation_suppression_flags", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(legacy_module, "strict_official_model_evaluation_suppression_flags", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(shared_handlers, "strict_official_model_evaluation_suppression_flags", legacy_module.strict_official_model_evaluation_suppression_flags)
     monkeypatch.setattr(
         main_module,
         "_build_provenance_contract",
@@ -258,3 +261,50 @@ def test_runtime_rejects_commercial_fallback_payload_in_strict_official_mode(mon
 
     with _client() as client, pytest.raises(RuntimeError, match="strict official mode payload still exposes fallback sources: yahoo_finance"):
         client.get("/api/model-evaluations/latest")
+
+
+def test_model_evaluation_suppresses_synthetic_fixture_in_strict_official_mode(monkeypatch) -> None:
+    serialized = _serialized_model_evaluation_run()
+    serialized["summary"] = {
+        **serialized["summary"],  # type: ignore[arg-type]
+        "provenance_mode": "synthetic_fixture",
+    }
+
+    monkeypatch.setattr(main_module, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(legacy_module, "settings", SimpleNamespace(strict_official_mode=True))
+    monkeypatch.setattr(shared_handlers, "settings", legacy_module.settings)
+    monkeypatch.setattr(
+        main_module,
+        "get_latest_model_evaluation_run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            created_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(
+        legacy_module,
+        "get_latest_model_evaluation_run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            created_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+            completed_at=datetime(2026, 3, 29, tzinfo=timezone.utc),
+        ),
+    )
+    monkeypatch.setattr(shared_handlers, "get_latest_model_evaluation_run", legacy_module.get_latest_model_evaluation_run)
+    monkeypatch.setattr(main_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: serialized)
+    monkeypatch.setattr(legacy_module, "serialize_model_evaluation_run", lambda *_args, **_kwargs: serialized)
+    monkeypatch.setattr(shared_handlers, "serialize_model_evaluation_run", legacy_module.serialize_model_evaluation_run)
+
+    with _client() as client:
+        response = client.get("/api/model-evaluations/latest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run"] is None
+    assert payload["provenance"] == []
+    assert payload["source_mix"]["source_ids"] == []
+    assert payload["source_mix"]["fallback_source_ids"] == []
+    assert set(payload["confidence_flags"]) == {
+        "model_evaluation_suppressed_strict_official_mode",
+        "strict_official_mode",
+        "synthetic_fixture_suppressed",
+    }

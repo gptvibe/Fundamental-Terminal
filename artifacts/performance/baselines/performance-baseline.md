@@ -1,77 +1,127 @@
 # Performance Baseline
 
-Generated: 2026-04-05T10:52:54.829Z
-
-Related optimization summary: [docs/performance-notes.md](performance-notes.md)
+Generated: 2026-05-21T02:00:36.957Z
 
 ## Run Command
 
 ```bash
-npm --prefix frontend run audit:performance -- --ticker AAPL
+npm --prefix frontend run audit:performance -- --ticker AAPL --search-query "AAPL" --topbar-query "MSFT" --resolve-query "NET"
 ```
 
 Prerequisites:
 - Start the backend with `PERFORMANCE_AUDIT_ENABLED=true`.
 - Start the frontend with `NEXT_PUBLIC_PERFORMANCE_AUDIT_ENABLED=true`.
 - Keep the services on the default local ports or pass `--frontend-url` / `--backend-url`.
-- Use `--search-query` to probe homepage submit reuse, `--topbar-query` for company-page top-bar search, and `--resolve-query` to inspect search→resolve fallback behavior for the same input.
+- Use `--search-query` to exercise exact autocomplete + submit reuse, `--topbar-query` for company-page top-bar search, and `--resolve-query` to force a resolve fallback probe.
 
-Search-flow counters are only collected during local frontend audit runs. Duplicate same-query search requests are counted when the same `/companies/search` input repeats within 1.5s, and the generated report now breaks out autocomplete, submit-triggered search, resolve fallback, and aborted autocomplete counts per audited flow.
+Search-flow counters are only collected when the frontend performance audit flag is enabled, and duplicate same-query requests are counted when the same `/companies/search` input repeats within 1.5s.
+
+## Search Flow Audit
+
+| Flow | Phase | Autocomplete | Submit Search | Resolve Fallback | Aborted Autocomplete | Duplicate Same Query | Search→Resolve Pairs |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Homepage search | cold | 1 | 0 | 0 | 0 | 0 | 0 |
+| Homepage search | warm | 1 | 0 | 0 | 0 | 0 | 0 |
+| Homepage resolve fallback | cold | 1 | 0 | 0 | 0 | 0 | 0 |
+| Homepage resolve fallback | warm | 1 | 0 | 0 | 0 | 0 | 0 |
+| Top-bar search | cold | 1 | 0 | 0 | 1 | 0 | 0 |
+| Top-bar search | warm | 1 | 0 | 0 | 1 | 0 | 0 |
+| Top-bar resolve fallback | cold | 1 | 0 | 0 | 1 | 0 | 0 |
+| Top-bar resolve fallback | warm | 1 | 0 | 0 | 1 | 0 | 0 |
+| /company/[ticker] | cold | 0 | 0 | 0 | 0 | 0 | 0 |
+| /company/[ticker] | warm | 0 | 0 | 0 | 0 | 0 | 0 |
+| Models | cold | 0 | 0 | 0 | 0 | 0 | 0 |
+| Models | warm | 0 | 0 | 0 | 0 | 0 | 0 |
+| Financials | cold | 0 | 0 | 0 | 0 | 0 | 0 |
+| Financials | warm | 0 | 0 | 0 | 0 | 0 | 0 |
+| Watchlist | cold | 0 | 0 | 0 | 0 | 0 | 0 |
+| Watchlist | warm | 0 | 0 | 0 | 0 | 0 | 0 |
+
+### Search Flow Totals
+
+- Autocomplete requests: 8
+- Submit-triggered search requests: 0
+- Resolve fallback requests: 0
+- Aborted autocomplete requests: 4
+- Duplicate same-query requests (1500ms window): 0
+- Search-to-resolve back-to-back pairs: 0
+
+### Duplicate Same-Query Search Requests
+
+| Flow | Phase | Query | Gap (ms) | First Source | Second Source | First Cache | Second Cache |
+| --- | --- | --- | ---: | --- | --- | --- | --- |
+No duplicate same-query search requests were captured in the audited flows.
+
+### Search Then Resolve Pairs
+
+| Flow | Phase | Query | Gap (ms) | Search Source | Search Cache | Resolve Source |
+| --- | --- | --- | ---: | --- | --- | --- |
+No search-to-resolve back-to-back pairs were captured in the audited flows.
+
+## Request Budgets
+
+| Flow | Phase | Max Requests | Max Network | Actual Requests | Actual Network | Status |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| /company/[ticker] | cold | 24 | 10 | 97 | 4 | FAIL |
+| /company/[ticker] | warm | 24 | 8 | 110 | 1 | FAIL |
 
 ## Top 10 Slowest Routes
 
 | Route | Kind | Warm p50 (ms) | Warm p95 (ms) | Avg SQL Count | Avg SQL (ms) | Avg Serialize (ms) | Avg Payload (KB) |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| /api/companies/{ticker}/governance/summary | read | 8264.55 | 95112.67 | 4 | 52.42 | 0.1 | 7.36 |
-| /api/companies/{ticker}/changes-since-last-filing | read | 530.62 | 94277.77 | 2.88 | 279.34 | 0.09 | 8.79 |
-| /api/companies/{ticker}/activity-overview | read | 963.22 | 1232.34 | 12 | 370.64 | 0.28 | 65.22 |
-| /api/watchlist/summary | refresh | 700.21 | 727.22 | 29 | 139.15 | 0.04 | 1.63 |
-| /api/companies/{ticker}/insider-trades | read | 177.09 | 524.13 | 3 | 136.38 | 0.53 | 108.89 |
-| /api/companies/{ticker}/earnings/summary | read | 18.83 | 340.4 | 3 | 60.75 | 0.03 | 1.42 |
-| /api/companies/{ticker}/financials | read | 249.78 | 333.16 | 0 | 0 | 7.97 | 1010.85 |
-| /api/companies/{ticker}/institutional-holdings | read | 172.11 | 308.46 | 4 | 89.07 | 0.08 | 9.25 |
-| /api/companies/{ticker}/capital-markets/summary | read | 12.71 | 297.89 | 2 | 48.84 | 0.03 | 1.15 |
-| /api/companies/search | read | 0.91 | 158.47 | 0 | 0 | 0.02 | 0.81 |
+| /api/watchlist/summary | refresh | 155.77 | 252.11 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/insider-trades | read | 25.64 | 104.89 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/changes-since-last-filing | read | 31.1 | 49.64 | 0 | 0 | 0 | 0 |
+| /api/watchlist/calendar | read | 32.43 | 47.59 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/governance/summary | read | 42.23 | 46.49 | 0 | 0 | 0 | 0 |
+| /api/source-registry | read | 13.68 | 30.88 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/beneficial-ownership/summary | read | 24.46 | 29.27 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/earnings/summary | read | 20.66 | 27.97 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/institutional-holdings | read | 18.78 | 26.3 | 0 | 0 | 0 | 0 |
+| /api/companies/{ticker}/activity-overview | read | 24.67 | 26.21 | 0 | 0 | 0 | 0 |
 
 ## Top 10 Most Over-Fetched Page Flows
 
 | Flow | Phase | Requests | Network | Cache Hits | Backend SQL Queries | Serialize (ms) | Payload (KB) | Page Elapsed (ms) |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| /company/[ticker] | warm | 52 | 21 | 31 | 90 | 35.78 | 3916.53 | 9738.7 |
-| /company/[ticker] | cold | 46 | 15 | 31 | 100 | 43.56 | 1658.41 | 18798.1 |
-| Models | warm | 19 | 9 | 10 | 38 | 12.16 | 1467.65 | 264.1 |
-| Models | cold | 18 | 8 | 10 | 47 | 12.1 | 1483.57 | 1569.6 |
-| Financials | cold | 9 | 4 | 5 | 41 | 11.39 | 1141.79 | 507.7 |
-| Financials | warm | 9 | 4 | 5 | 36 | 9.98 | 1141.79 | 851.9 |
-| Homepage search | cold | 5 | 3 | 2 | 33 | 0.17 | 21.2 | 1145.1 |
-| Homepage search | warm | 5 | 3 | 2 | 31 | 0.26 | 21.22 | 1192.8 |
-| Watchlist | warm | 2 | 2 | 0 | 68 | 0.74 | 63.49 | 5118.9 |
-| Watchlist | cold | 2 | 2 | 0 | 66 | 0.43 | 43.31 | 2554.1 |
+| Homepage resolve fallback | cold | 241 | 8 | 233 | 0 | 0 | 0 | 6463 |
+| Homepage resolve fallback | warm | 233 | 2 | 231 | 0 | 0 | 0 | 6684 |
+| /company/[ticker] | warm | 110 | 1 | 109 | 0 | 0 | 0 | 5293 |
+| Homepage search | cold | 101 | 8 | 93 | 0 | 0 | 0 | 6431 |
+| /company/[ticker] | cold | 97 | 4 | 93 | 0 | 0 | 0 | 5210 |
+| Homepage search | warm | 84 | 3 | 81 | 0 | 0 | 0 | 6683 |
+| Financials | warm | 63 | 0 | 63 | 0 | 0 | 0 | 5176 |
+| Financials | cold | 59 | 4 | 55 | 0 | 0 | 0 | 5127 |
+| Top-bar resolve fallback | cold | 58 | 2 | 56 | 0 | 0 | 0 | 3399.3 |
+| Top-bar search | warm | 56 | 1 | 55 | 0 | 0 | 0 | 3418.5 |
 
 ## Duplicate Request Sources
 
 | Flow | Phase | Source | Route | Count |
 | --- | --- | --- | --- | ---: |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/changes-since-last-filing | 6 |
-| /company/[ticker] | warm | company-overview:research-brief | /companies/AAPL/changes-since-last-filing | 6 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/metrics/summary?period_type=ttm | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/financial-restatements | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/activity-overview | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/earnings/summary | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/capital-structure?max_periods=6 | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/capital-markets/summary | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/governance/summary | 3 |
-| /company/[ticker] | cold | company-overview:research-brief | /companies/AAPL/beneficial-ownership/summary | 3 |
+| Homepage resolve fallback | cold | company-workspace:initial-load | /companies/NET/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 233 |
+| Homepage resolve fallback | warm | company-workspace:initial-load | /companies/NET/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 225 |
+| /company/[ticker] | warm | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 107 |
+| /company/[ticker] | cold | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 94 |
+| Homepage search | cold | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 93 |
+| Homepage search | warm | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 77 |
+| Financials | warm | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_earnings_summary=true | 61 |
+| Financials | cold | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_earnings_summary=true | 57 |
+| Top-bar resolve fallback | cold | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 56 |
+| Top-bar search | warm | company-workspace:initial-load | /companies/AAPL/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true | 55 |
 
 ## Cold vs Warm Timings
 
 | Flow | Cold (ms) | Warm (ms) | Cold Requests | Warm Requests | Warm Cache Hits |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Homepage search | 1145.1 | 1192.8 | 5 | 5 | 2 |
-| /company/[ticker] | 18798.1 | 9738.7 | 46 | 52 | 31 |
-| Models | 1569.6 | 264.1 | 18 | 19 | 10 |
-| Financials | 507.7 | 851.9 | 9 | 9 | 5 |
-| Watchlist | 2554.1 | 5118.9 | 2 | 2 | 0 |
+| Homepage search | 6431 | 6683 | 101 | 84 | 81 |
+| Homepage resolve fallback | 6463 | 6684 | 241 | 233 | 231 |
+| Top-bar search | 2981.3 | 3418.5 | 55 | 56 | 55 |
+| Top-bar resolve fallback | 3399.3 | 3597.5 | 58 | 55 | 54 |
+| /company/[ticker] | 5210 | 5293 | 97 | 110 | 109 |
+| Models | 92.1 | 4 | 1 | 2 | 2 |
+| Financials | 5127 | 5176 | 59 | 63 | 63 |
+| Watchlist | 265.4 | 212.7 | 2 | 2 | 1 |
 
 ## Recommendations By Expected Impact
 
@@ -84,16 +134,6 @@ Search-flow counters are only collected during local frontend audit runs. Duplic
 - Stop watchlist dual-fetch and polling from competing with the rest of the page. Summary and calendar are always requested together and the three-second poll loop can keep the page chatty.
 - Treat stale-cache returns separately from background revalidation in the UI. A page can feel slow even when network fan-out is lower because the client still fans out many logical reads and background revalidators.
 - Memoize or batch homepage search follow-ups. The audit makes it visible when autocomplete search and resolve-style lookup happen back-to-back for the same input.
-
-## Financials Payload Views
-
-The financials endpoint now supports additive compact views so screens can skip heavyweight statement substructures without changing the default public response:
-
-- `view=full` keeps the historical default payload.
-- `view=core_segments` keeps core statement rows, price history, and segment payloads while omitting reconciliation detail.
-- `view=core` keeps core statement rows and price history while omitting both reconciliation detail and segment payloads.
-
-The overview workspace uses `financials_view=core_segments`, and the models workspace uses `view=core`, so initial-screen reads stay narrower while export and deep-dive flows can keep using the full payload.
 
 ### Lower Impact
 - Increase the visibility of route-level payload and serialization metrics in local developer workflows so regressions show up before they reach UI review.
