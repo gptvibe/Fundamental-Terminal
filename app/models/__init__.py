@@ -11,6 +11,7 @@ from app.models.company_macro_snapshot import CompanyMacroSnapshot
 from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
 from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
 from app.models.company_sector_snapshot import CompanySectorSnapshot
+from app.models.company_workspace_bootstrap_snapshot import CompanyWorkspaceBootstrapSnapshot
 from app.models.dataset_refresh_state import DatasetRefreshState
 from app.models.derived_metric_point import DerivedMetricPoint
 from app.models.earnings_model_point import EarningsModelPoint
@@ -53,6 +54,7 @@ __all__ = [
     "CompanyOilScenarioOverlaySnapshot",
     "CompanyResearchBriefSnapshot",
     "CompanySectorSnapshot",
+    "CompanyWorkspaceBootstrapSnapshot",
     "DatasetRefreshState",
     "DerivedMetricPoint",
     "EarningsModelPoint",

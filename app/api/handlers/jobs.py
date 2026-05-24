@@ -61,7 +61,10 @@ async def readiness_check() -> dict[str, str]:
                 await result
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database not ready") from exc
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "cache_coordination": shared_hot_response_cache.cache_coordination_mode,
+    }
 
 
 @main_bound
@@ -75,6 +78,7 @@ async def cache_metrics() -> dict[str, Any]:
         },
         "hot_cache_backend": hot_cache_metrics["backend"],
         "hot_cache_backend_mode": hot_cache_metrics["backend_mode"],
+        "cache_coordination": hot_cache_metrics.get("cache_coordination"),
         "hot_cache_status": backend_details.get("status"),
         "hot_cache_scope": backend_details.get("cache_scope"),
         "hot_cache_cross_instance_reuse": backend_details.get("cross_instance_reuse"),

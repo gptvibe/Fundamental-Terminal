@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-import pytest
 
 import app.main as main_module
 import app.api.handlers._shared as _shared_handlers
@@ -172,6 +171,11 @@ def test_bootstrap_source_freshness_payload(monkeypatch):
     assert "financials_stale" in freshness
     assert "brief_stale" in freshness
     assert "ownership_stale" in freshness
+    assert payload["schema_version"] == "company_workspace_bootstrap_v1"
+    assert "provenance" in payload
+    assert "source_mix" in payload
+    assert payload["freshness_state"] == "fresh"
+    assert payload["strict_official_eligible"] is True
 
 
 def test_bootstrap_warnings_payload(monkeypatch):
@@ -237,3 +241,111 @@ def test_bootstrap_backward_compatibility_with_legacy_flags(monkeypatch):
     assert payload["brief"] is not None
 
     _patch_main_and_shared(monkeypatch, "_normalize_ticker", lambda ticker: ticker.upper())
+
+
+def test_compact_default_bootstrap_prefers_snapshot(monkeypatch):
+    """Compact default bootstrap requests use the persisted read model when present."""
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
+    shared_hot_response_cache.clear_sync()
+
+    snapshot = _snapshot()
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(
+        _company_overview_handlers,
+        "build_company_workspace_bootstrap_source_fingerprint",
+        lambda *_args, **_kwargs: "workspace-fingerprint",
+    )
+    monkeypatch.setattr(
+        _company_overview_handlers,
+        "_load_workspace_bootstrap_snapshot_response",
+        lambda *_args, **_kwargs: main_module.CompanyWorkspaceBootstrapResponse(
+            company=_company_payload(snapshot),
+            financials=_financials_payload(snapshot),
+            brief=_brief_payload(snapshot),
+            errors=main_module.CompanyWorkspaceBootstrapErrorsPayload(),
+            is_compact=True,
+            requested_sections=[
+                "company_summary",
+                "latest_financials",
+                "recent_filings",
+                "recent_events",
+                "source_freshness",
+                "warnings",
+            ],
+            schema_version="company_workspace_bootstrap_v1",
+            source_fingerprint="workspace-fingerprint",
+        ),
+    )
+    monkeypatch.setattr(
+        _company_overview_handlers,
+        "upsert_company_workspace_bootstrap_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("snapshot hit must not rebuild")),
+    )
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/companies/AAPL/workspace-bootstrap"
+        "?financials_view=core_segments"
+        "&price_latest_n=3200"
+        "&price_max_points=480"
+        "&include_overview_brief=true"
+        "&sections=company_summary,latest_financials,recent_filings,recent_events,source_freshness,warnings"
+        "&compact=true"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_fingerprint"] == "workspace-fingerprint"
+    assert payload["is_compact"] is True
+
+
+def test_compact_default_bootstrap_returns_building_payload_when_snapshot_missing(monkeypatch):
+    """Compact default bootstrap requests should queue refresh instead of composing inline on snapshot misses."""
+    monkeypatch.setattr(shared_hot_response_cache, "_redis", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_async", None)
+    monkeypatch.setattr(shared_hot_response_cache, "_redis_configured", False)
+    shared_hot_response_cache.clear_sync()
+
+    snapshot = _snapshot()
+    _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
+    monkeypatch.setattr(
+        _company_overview_handlers,
+        "build_company_workspace_bootstrap_source_fingerprint",
+        lambda *_args, **_kwargs: "workspace-fingerprint",
+    )
+    monkeypatch.setattr(
+        _company_overview_handlers,
+        "_load_workspace_bootstrap_snapshot_response",
+        lambda *_args, **_kwargs: None,
+    )
+    _patch_main_and_shared(
+        monkeypatch,
+        "_build_company_financials_response",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("compact bootstrap misses should not compose financials inline")),
+    )
+    _patch_main_and_shared(
+        monkeypatch,
+        "_build_company_research_brief_response",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("compact bootstrap misses should not compose the brief inline")),
+    )
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/companies/AAPL/workspace-bootstrap"
+        "?financials_view=core_segments"
+        "&price_latest_n=3200"
+        "&price_max_points=480"
+        "&include_overview_brief=true"
+        "&sections=company_summary,latest_financials,recent_filings,recent_events,source_freshness,warnings"
+        "&compact=true"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["company"]["ticker"] == "AAPL"
+    assert payload["brief"] is None
+    assert payload["freshness_state"] == "building"
+    assert payload["source_fingerprint"] == "workspace-fingerprint"
+    assert payload["warnings"][0]["code"] == "workspace_bootstrap_snapshot_building"

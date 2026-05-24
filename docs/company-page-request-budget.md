@@ -6,13 +6,13 @@ Updated: 2026-04-06
 
 The `/company/[ticker]` overview page should stay within the following client request budget during the initial page load:
 
-- Cold load: at most 10 backend API requests
-- Warm load: at most 8 backend API requests
+- Cold load: at most 6 blocking backend API requests
+- Warm load: at most 3 blocking backend API requests
 
 For the repo's audit tooling, the same flow is also budgeted in `frontend/scripts/run-performance-audit.mjs` as:
 
-- Cold load: `maxRequests = 24`, `maxNetworkRequests = 10`
-- Warm load: `maxRequests = 24`, `maxNetworkRequests = 8`
+- Cold load: `maxRequests = 16`, `maxNetworkRequests = 6`
+- Warm load: `maxRequests = 12`, `maxNetworkRequests = 3`
 
 The higher `maxRequests` value in the audit script accounts for cache-hit bookkeeping inside the client audit collector, while the API-request budget above stays focused on backend pressure.
 
@@ -34,6 +34,6 @@ That observation is within the cold-load budget.
 
 ## Payload Narrowing Notes
 
-- The overview workspace should prefer `/companies/{ticker}/overview?financials_view=core_segments` for initial loads so it keeps segment surfaces without paying the reconciliation payload cost up front.
+- The overview workspace should prefer `/companies/{ticker}/workspace-bootstrap?financials_view=core_segments&sections=company_summary,latest_financials,recent_filings,recent_events,source_freshness,warnings&compact=true` for initial loads so it hydrates the first viewport from one compact read-model payload.
 - The models workspace should prefer `/companies/{ticker}/financials?view=core` because it only needs the core statement rows and price history for initial model rendering.
 - The default `/companies/{ticker}/financials` contract remains `view=full` for exports, deep-dive diagnostics, and backward-compatible external callers.

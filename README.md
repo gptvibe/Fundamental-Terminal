@@ -36,23 +36,25 @@ Fundamental Terminal helps you move from ticker to evidence quickly, with compan
 
 ## Quickstart (Docker)
 
-The checked-in example env files are runnable for local evaluation. Change `POSTGRES_PASSWORD`, `DATABASE_URL`, and user-agent contact values before exposing the stack outside your machine.
+The default Docker path is the lite profile: Postgres, backend-with-worker, and frontend. Change `POSTGRES_PASSWORD` and the user-agent contact values before exposing the stack outside your machine.
 
-### 1) Lite profile (lowest resource use)
-
-```bash
-cp .env.lite.example .env
-docker compose -f docker-compose.yml -f docker-compose.lite.yml up -d
-```
-
-### 2) Normal profile (default)
+### 1) Lite profile (default, lowest resource use)
 
 ```bash
 cp .env.example .env
 docker compose up -d
 ```
 
-### 3) Build from local source (normal profile)
+This starts no Redis container and no separate data-fetcher. The backend runs the API and the lightweight refresh queue consumer in one container.
+
+### 2) Standard profile (Redis + separate data-fetcher)
+
+```bash
+cp .env.advanced.example .env
+docker compose --profile standard up -d
+```
+
+### 3) Build from local source
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d

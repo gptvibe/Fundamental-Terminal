@@ -1430,9 +1430,12 @@ class SharedStatusBroker:
     def _build_sync_redis_client(self):
         if redis is None:
             return None
+        redis_url = str(settings.redis_url).strip()
+        if not redis_url:
+            return None
         try:
             client = redis.Redis.from_url(
-                settings.redis_url,
+                redis_url,
                 decode_responses=True,
                 socket_timeout=max(settings.refresh_queue_block_seconds + 1.0, 5.0),
                 socket_connect_timeout=1.0,
@@ -1445,9 +1448,12 @@ class SharedStatusBroker:
     def _build_async_redis_client(self):
         if redis_async is None:
             return None
+        redis_url = str(settings.redis_url).strip()
+        if not redis_url:
+            return None
         try:
             return redis_async.Redis.from_url(
-                settings.redis_url,
+                redis_url,
                 decode_responses=True,
                 socket_timeout=max(settings.refresh_status_poll_seconds + 1.0, 5.0),
                 socket_connect_timeout=1.0,

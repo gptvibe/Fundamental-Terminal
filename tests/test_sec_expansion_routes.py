@@ -703,6 +703,17 @@ def test_company_workspace_bootstrap_route_keeps_schema_compatible_when_served_f
     assert first.status_code == 200
     assert second.status_code == 200
     assert list(second.json()) == [
+        "provenance",
+        "as_of",
+        "last_refreshed_at",
+        "source_mix",
+        "confidence_flags",
+        "schema_version",
+        "generated_at",
+        "source_fingerprint",
+        "freshness_state",
+        "fallback_flags",
+        "strict_official_eligible",
         "company",
         "financials",
         "brief",

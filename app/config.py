@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 DEFAULT_SEC_USER_AGENT = "FundamentalTerminal/1.0 (contact@example.com)"
@@ -11,6 +11,53 @@ SEC_CLIENT_MIN_REQUEST_INTERVAL_FLOOR_SECONDS = 0.2
 SEC_CLIENT_RETRY_BACKOFF_FLOOR_SECONDS = 0.1
 DEFAULT_SEC_MAX_RETRY_BACKOFF_SECONDS = 8.0
 DEFAULT_SEC_MAX_RETRY_AFTER_SECONDS = 30.0
+APP_PROFILES = {"lite", "standard", "prewarm"}
+CompanyReadModelMode = Literal["observe", "prefer_snapshot", "snapshot_only"]
+
+
+def _load_app_profile() -> str:
+    value = os.getenv("APP_PROFILE", "lite").strip().lower() or "lite"
+    if value == "full":
+        return "standard"
+    if value not in APP_PROFILES:
+        logging.getLogger(__name__).warning(
+            "Unknown APP_PROFILE=%r; falling back to lite.",
+            value,
+        )
+        return "lite"
+    return value
+
+
+def _profile_default(*, lite: Any, standard: Any, prewarm: Any | None = None) -> Any:
+    profile = _load_app_profile()
+    if profile == "lite":
+        return lite
+    if profile == "prewarm":
+        return standard if prewarm is None else prewarm
+    return standard
+
+
+def _redis_url_default() -> str:
+    return str(_profile_default(lite="", standard="redis://localhost:6379/0"))
+
+
+def _load_redis_url() -> str:
+    raw_value = os.getenv("REDIS_URL")
+    if raw_value is not None:
+        return raw_value.strip()
+    return _redis_url_default()
+
+
+def _redis_disabled_by_profile() -> bool:
+    raw_value = os.getenv("REDIS_URL")
+    return _load_app_profile() == "lite" and (raw_value is None or not raw_value.strip())
+
+
+def _choice_env(name: str, default: str, *, choices: set[str]) -> str:
+    value = os.getenv(name, default).strip().lower() or default
+    if value in choices:
+        return value
+    return default
 
 
 def _int_env(name: str, default: int, *, minimum: int = 0) -> int:
@@ -74,13 +121,15 @@ def _str_env(name: str, default: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class Settings:
+    app_profile: str = field(default_factory=_load_app_profile)
     database_url: str = field(
         default_factory=lambda: os.getenv(
             "DATABASE_URL",
             "postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals",
         )
     )
-    redis_url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    redis_url: str = field(default_factory=_load_redis_url)
+    redis_disabled_by_profile: bool = field(default_factory=_redis_disabled_by_profile)
     sec_user_agent: str = field(default_factory=_load_sec_user_agent)
     market_user_agent: str = field(default_factory=_load_market_user_agent)
     sec_ticker_lookup_url: str = "https://www.sec.gov/files/company_tickers.json"
@@ -153,13 +202,13 @@ class Settings:
     fred_api_key: str | None = field(default_factory=lambda: os.getenv("FRED_API_KEY", "").strip() or None)
     freshness_window_hours: int = field(default_factory=lambda: _int_env("FRESHNESS_WINDOW_HOURS", 24, minimum=1))
     strict_official_mode: bool = field(default_factory=lambda: _bool_env("STRICT_OFFICIAL_MODE", False))
-    db_pool_size: int = field(default_factory=lambda: _int_env("DB_POOL_SIZE", 20, minimum=1))
-    db_max_overflow: int = field(default_factory=lambda: _int_env("DB_MAX_OVERFLOW", 40, minimum=0))
+    db_pool_size: int = field(default_factory=lambda: _int_env("DB_POOL_SIZE", int(_profile_default(lite=2, standard=20)), minimum=1))
+    db_max_overflow: int = field(default_factory=lambda: _int_env("DB_MAX_OVERFLOW", int(_profile_default(lite=1, standard=40)), minimum=0))
     db_pool_timeout_seconds: int = field(default_factory=lambda: _int_env("DB_POOL_TIMEOUT_SECONDS", 30, minimum=1))
     db_pool_recycle_seconds: int = field(default_factory=lambda: _int_env("DB_POOL_RECYCLE_SECONDS", 1800, minimum=30))
     model_engine_max_financial_periods: int = field(default_factory=lambda: _int_env("MODEL_ENGINE_MAX_FINANCIAL_PERIODS", 16, minimum=4))
     refresh_lock_timeout_seconds: int = field(default_factory=lambda: _int_env("REFRESH_LOCK_TIMEOUT_SECONDS", 900, minimum=30))
-    refresh_queue_poll_seconds: float = field(default_factory=lambda: _float_env("REFRESH_QUEUE_POLL_SECONDS", 5.0, minimum=0.1))
+    refresh_queue_poll_seconds: float = field(default_factory=lambda: _float_env("REFRESH_QUEUE_POLL_SECONDS", float(_profile_default(lite=10.0, standard=5.0)), minimum=0.1))
     refresh_queue_block_seconds: float = field(default_factory=lambda: _float_env("REFRESH_QUEUE_BLOCK_SECONDS", 15.0, minimum=1.0))
     refresh_queue_dedupe_ttl_seconds: int = field(default_factory=lambda: _int_env("REFRESH_QUEUE_DEDUPE_TTL_SECONDS", 90, minimum=0))
     refresh_recovery_interval_seconds: float = field(default_factory=lambda: _float_env("REFRESH_RECOVERY_INTERVAL_SECONDS", 30.0, minimum=5.0))
@@ -180,9 +229,16 @@ class Settings:
     hot_response_cache_upstream_local_max_entries: int = field(default_factory=lambda: _int_env("HOT_RESPONSE_CACHE_UPSTREAM_LOCAL_MAX_ENTRIES", 512, minimum=0))
     hot_response_cache_upstream_local_max_bytes: int = field(default_factory=lambda: _int_env("HOT_RESPONSE_CACHE_UPSTREAM_LOCAL_MAX_BYTES", 16 * 1024 * 1024, minimum=0))
     observability_enabled: bool = field(default_factory=lambda: _bool_env("OBSERVABILITY_ENABLED", True))
-    observability_max_records: int = field(default_factory=lambda: _int_env("OBSERVABILITY_MAX_RECORDS", 5000, minimum=100))
+    observability_max_records: int = field(default_factory=lambda: _int_env("OBSERVABILITY_MAX_RECORDS", int(_profile_default(lite=500, standard=5000)), minimum=100))
     performance_audit_enabled: bool = field(default_factory=lambda: _bool_env("PERFORMANCE_AUDIT_ENABLED", False))
     performance_audit_max_records: int = field(default_factory=lambda: _int_env("PERFORMANCE_AUDIT_MAX_RECORDS", 5000, minimum=100))
+    workspace_bootstrap_snapshot_mode: CompanyReadModelMode = field(
+        default_factory=lambda: _choice_env(
+            "WORKSPACE_BOOTSTRAP_SNAPSHOT_MODE",
+            "snapshot_only",
+            choices={"observe", "prefer_snapshot", "snapshot_only"},
+        )
+    )
     dupont_mode: str = field(default_factory=lambda: os.getenv("DUPONT_MODE", "auto").lower())
     valuation_workbench_enabled: bool = field(default_factory=lambda: os.getenv("VALUATION_WORKBENCH_ENABLED", "true").strip().lower() not in {"0", "false", "no"})
     api_rate_limit_enabled: bool = field(default_factory=lambda: _bool_env("API_RATE_LIMIT_ENABLED", True))

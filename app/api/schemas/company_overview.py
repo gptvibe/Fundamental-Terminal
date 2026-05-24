@@ -199,7 +199,13 @@ class CompanyBootstrapWarningPayload(BaseModel):
     affected_sections: list[str] = Field(default_factory=list)
 
 
-class CompanyWorkspaceBootstrapResponse(BaseModel):
+class CompanyWorkspaceBootstrapResponse(ProvenanceEnvelope):
+    schema_version: str = "company_workspace_bootstrap_v1"
+    generated_at: datetime | None = None
+    source_fingerprint: str | None = None
+    freshness_state: Literal["fresh", "stale", "missing", "building", "partial"] = "fresh"
+    fallback_flags: list[str] = Field(default_factory=list)
+    strict_official_eligible: bool = True
     company: CompanyPayload | None
     financials: CompanyFinancialsResponse
     brief: CompanyResearchBriefResponse | None = None

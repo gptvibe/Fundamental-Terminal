@@ -54,6 +54,7 @@ def test_market_settings_fall_back_to_sec_values(monkeypatch) -> None:
 
 def test_settings_defaults_match_intended_values(monkeypatch) -> None:
     for name in (
+        "APP_PROFILE",
         "DATABASE_URL",
         "REDIS_URL",
         "AUTH_MODE",
@@ -68,11 +69,34 @@ def test_settings_defaults_match_intended_values(monkeypatch) -> None:
         default_settings.database_url
         == "postgresql+psycopg://fundamental:fundamental@localhost:5432/fundamentals"
     )
-    assert default_settings.redis_url == "redis://localhost:6379/0"
+    assert default_settings.app_profile == "lite"
+    assert default_settings.redis_url == ""
+    assert default_settings.redis_disabled_by_profile is True
     assert default_settings.auth_mode == "off"
     assert default_settings.valuation_workbench_enabled is True
     assert default_settings.rate_limit_namespace == "ft:rate-limit"
     assert default_settings.auth_required_path_prefixes == ("/api/internal",)
+
+
+def test_standard_profile_defaults_to_redis(monkeypatch) -> None:
+    monkeypatch.setenv("APP_PROFILE", "standard")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    parsed = config_module.Settings()
+
+    assert parsed.app_profile == "standard"
+    assert parsed.redis_url == "redis://localhost:6379/0"
+    assert parsed.redis_disabled_by_profile is False
+
+
+def test_blank_redis_url_is_disabled_in_lite_profile(monkeypatch) -> None:
+    monkeypatch.setenv("APP_PROFILE", "lite")
+    monkeypatch.setenv("REDIS_URL", " ")
+
+    parsed = config_module.Settings()
+
+    assert parsed.redis_url == ""
+    assert parsed.redis_disabled_by_profile is True
 
 
 def test_hot_response_cache_ttl_unified_across_environments(monkeypatch) -> None:

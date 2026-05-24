@@ -336,6 +336,14 @@ SOURCE_REGISTRY: dict[str, SourceDefinition] = {
         default_freshness_ttl_seconds=6 * 60 * 60,
         disclosure_note="Server-composed company brief assembled from persisted official-derived summaries and labeled price-sensitive sections.",
     ),
+    "ft_company_workspace_bootstrap": SourceDefinition(
+        source_id="ft_company_workspace_bootstrap",
+        tier="derived_from_official",
+        display_label="Fundamental Terminal Company Workspace Bootstrap",
+        url=_REPO_URL,
+        default_freshness_ttl_seconds=6 * 60 * 60,
+        disclosure_note="Compact first-load company workspace payload assembled from persisted official-derived read models and clearly labeled fallback context when allowed.",
+    ),
     "ft_company_charts_dashboard": SourceDefinition(
         source_id="ft_company_charts_dashboard",
         tier="derived_from_official",

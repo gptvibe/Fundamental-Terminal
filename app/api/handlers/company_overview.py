@@ -4,6 +4,14 @@ import sys
 from typing import Any, Callable
 
 from app.api.handlers import _shared as shared
+from app.services.company_workspace_bootstrap import (
+    BOOTSTRAP_SCHEMA_VERSION,
+    DEFAULT_BOOTSTRAP_SECTIONS,
+    build_company_workspace_bootstrap_source_fingerprint,
+    get_company_workspace_bootstrap_snapshot_for_read,
+    is_default_compact_bootstrap_request,
+    upsert_company_workspace_bootstrap_snapshot,
+)
 
 
 def _sync_route_handler(handler: Callable[..., Any]) -> Callable[..., Any]:
@@ -184,6 +192,65 @@ def company_workspace_bootstrap(
         "_build_company_research_brief_response",
         _build_company_research_brief_response,
     )
+    snapshot_source = resolve_company_brief_snapshot(session, normalized_ticker)
+    snapshot_mode = getattr(shared.settings, "workspace_bootstrap_snapshot_mode", "snapshot_only")
+    snapshot_eligible = is_default_compact_bootstrap_request(
+        sections=tuple(requested_sections),
+        compact=is_compact_mode,
+        financials_view=normalized_financials_view,
+        price_start_date=resolved_price_start_date,
+        price_end_date=resolved_price_end_date,
+        price_latest_n=resolved_price_latest_n,
+        price_max_points=resolved_price_max_points,
+    )
+    source_fingerprint: str | None = None
+    if snapshot_eligible and snapshot_source is not None:
+        try:
+            source_fingerprint = build_company_workspace_bootstrap_source_fingerprint(
+                session,
+                snapshot_source.company.id,
+                as_of=parsed_as_of,
+                sections=tuple(requested_sections),
+                compact=is_compact_mode,
+                financials_view=normalized_financials_view,
+                price_token=price_token,
+            )
+        except Exception:
+            shared.logging.getLogger(__name__).exception(
+                "Unable to build workspace bootstrap source fingerprint for %s",
+                normalized_ticker,
+            )
+
+        if source_fingerprint and snapshot_mode in {"prefer_snapshot", "snapshot_only"}:
+            snapshot_response = _load_workspace_bootstrap_snapshot_response(
+                session,
+                normalized_ticker,
+                company_id=snapshot_source.company.id,
+                as_of=parsed_as_of,
+                source_fingerprint=source_fingerprint,
+            )
+            if snapshot_response is not None:
+                shared._store_hot_cached_payload_sync(
+                    hot_key,
+                    snapshot_response,
+                    tags=shared._build_hot_cache_tags(
+                        ticker=normalized_ticker,
+                        datasets=("company_workspace_bootstrap",),
+                        schema_versions=(shared.HOT_CACHE_SCHEMA_VERSIONS["workspace_bootstrap"], BOOTSTRAP_SCHEMA_VERSION),
+                        as_of=normalized_as_of,
+                    ),
+                )
+                return snapshot_response
+
+    if snapshot_eligible and snapshot_mode == "snapshot_only":
+        return _build_workspace_bootstrap_building_response(
+            normalized_ticker,
+            snapshot=snapshot_source,
+            reason="missing" if snapshot_source is None else "stale",
+            requested_sections=requested_sections,
+            is_compact_mode=is_compact_mode,
+            source_fingerprint=source_fingerprint,
+        )
 
     # Determine which sections to actually load
     should_load_brief = "company_summary" in requested_sections or "recent_filings" in requested_sections or "recent_events" in requested_sections
@@ -193,7 +260,7 @@ def company_workspace_bootstrap(
     should_load_earnings = "recent_events" in requested_sections
 
     if should_load_brief and not should_load_insiders and not should_load_institutional:
-        snapshot = resolve_company_brief_snapshot(session, normalized_ticker)
+        snapshot = snapshot_source or resolve_company_brief_snapshot(session, normalized_ticker)
         if should_load_financials:
             financials = build_company_financials_response(
                 session,
@@ -296,7 +363,32 @@ def company_workspace_bootstrap(
         warnings=warnings,
         is_compact=is_compact_mode,
         requested_sections=requested_sections,
+        **_build_bootstrap_metadata(
+            brief=brief,
+            financials=financials,
+            earnings_summary=earnings_summary,
+            source_fingerprint=source_fingerprint,
+        ),
     )
+    if snapshot_eligible and snapshot_source is not None and source_fingerprint:
+        try:
+            upsert_company_workspace_bootstrap_snapshot(
+                session,
+                snapshot_source.company.id,
+                response.model_dump(mode="json"),
+                as_of=parsed_as_of,
+                source_fingerprint=source_fingerprint,
+            )
+            session.commit()
+        except Exception:
+            shared.logging.getLogger(__name__).exception(
+                "Unable to persist workspace bootstrap snapshot for %s",
+                normalized_ticker,
+            )
+            try:
+                session.rollback()
+            except Exception:
+                pass
     workspace_datasets = []
     if should_load_financials:
         workspace_datasets.extend(["financials", "prices"])
@@ -682,6 +774,234 @@ def _apply_compact_mode_to_brief(
             brief_copy.monitor.activity_overview.facts = []
     
     return brief_copy
+
+
+def _load_workspace_bootstrap_snapshot_response(
+    session: shared.Session,
+    normalized_ticker: str,
+    *,
+    company_id: int,
+    as_of: shared.datetime | None,
+    source_fingerprint: str,
+) -> shared.CompanyWorkspaceBootstrapResponse | None:
+    read = get_company_workspace_bootstrap_snapshot_for_read(
+        session,
+        company_id,
+        as_of=as_of,
+        source_fingerprint=source_fingerprint,
+    )
+    if read is None:
+        shared._trigger_refresh(normalized_ticker, reason="missing")
+        return None
+
+    response = shared.CompanyWorkspaceBootstrapResponse.model_validate(read.payload)
+    if read.is_stale:
+        return _mark_workspace_bootstrap_snapshot_stale(response, normalized_ticker, read.freshness_state)
+    return response
+
+
+def _mark_workspace_bootstrap_snapshot_stale(
+    response: shared.CompanyWorkspaceBootstrapResponse,
+    normalized_ticker: str,
+    freshness_state: str,
+) -> shared.CompanyWorkspaceBootstrapResponse:
+    reason = "missing" if freshness_state == "missing" else "stale"
+    refresh = shared._trigger_refresh(normalized_ticker, reason=reason)
+    warning = shared.CompanyBootstrapWarningPayload(
+        severity="warning",
+        code="workspace_bootstrap_snapshot_stale",
+        title="Workspace snapshot is stale",
+        detail="Showing the previous persisted company workspace while a refresh is queued.",
+        affected_sections=list(response.requested_sections or DEFAULT_BOOTSTRAP_SECTIONS),
+    )
+    warning_codes = {item.code for item in response.warnings}
+    warnings = list(response.warnings)
+    if warning.code not in warning_codes:
+        warnings.insert(0, warning)
+
+    source_freshness = response.source_freshness.model_copy(
+        update={
+            "financials_stale": True,
+            "financials_message": "Persisted workspace snapshot is stale.",
+            "brief_stale": response.brief is not None,
+            "brief_message": "Persisted research brief data may lag the latest inputs." if response.brief is not None else None,
+        }
+    )
+    return response.model_copy(
+        update={
+            "financials": response.financials.model_copy(update={"refresh": refresh}),
+            "brief": response.brief.model_copy(update={"refresh": refresh}) if response.brief is not None else None,
+            "source_freshness": source_freshness,
+            "warnings": warnings,
+            "freshness_state": "stale",
+            "confidence_flags": sorted(set([*response.confidence_flags, "workspace_bootstrap_snapshot_stale"])),
+        }
+    )
+
+
+def _build_workspace_bootstrap_building_response(
+    normalized_ticker: str,
+    *,
+    snapshot: Any | None,
+    reason: str,
+    requested_sections: list[str],
+    is_compact_mode: bool,
+    source_fingerprint: str | None,
+) -> shared.CompanyWorkspaceBootstrapResponse:
+    refresh_reason = "missing" if reason == "missing" else "stale"
+    refresh = shared._trigger_refresh(normalized_ticker, reason=refresh_reason)
+    company = shared._serialize_company(snapshot) if snapshot is not None else None
+    financials = shared.CompanyFinancialsResponse(
+        company=company,
+        financials=[],
+        price_history=[],
+        refresh=refresh,
+        diagnostics=shared._build_data_quality_diagnostics(stale_flags=["workspace_bootstrap_snapshot_missing"]),
+        **shared._empty_provenance_contract("workspace_bootstrap_snapshot_missing"),
+    )
+    source_freshness = shared.CompanyBootstrapSourceFreshnessPayload(
+        financials_stale=True,
+        financials_message="Workspace bootstrap snapshot is not ready yet.",
+        brief_stale=True,
+        brief_message="Research brief snapshot is queued for refresh.",
+    )
+    response = shared.CompanyWorkspaceBootstrapResponse(
+        company=company,
+        financials=financials,
+        brief=None,
+        earnings_summary=None,
+        insider_trades=None,
+        institutional_holdings=None,
+        errors=shared.CompanyWorkspaceBootstrapErrorsPayload(),
+        source_freshness=source_freshness,
+        warnings=[
+            shared.CompanyBootstrapWarningPayload(
+                severity="info",
+                code="workspace_bootstrap_snapshot_building",
+                title="Workspace snapshot is building",
+                detail="A refresh has been queued; the compact first-load workspace will become available after the builder finishes.",
+                affected_sections=list(requested_sections or DEFAULT_BOOTSTRAP_SECTIONS),
+            )
+        ],
+        is_compact=is_compact_mode,
+        requested_sections=list(requested_sections or DEFAULT_BOOTSTRAP_SECTIONS),
+        **_build_bootstrap_metadata(
+            brief=None,
+            financials=financials,
+            earnings_summary=None,
+            source_fingerprint=source_fingerprint,
+            freshness_state="building",
+            extra_confidence_flags=("workspace_bootstrap_snapshot_missing",),
+        ),
+    )
+    return response
+
+
+def _build_bootstrap_metadata(
+    *,
+    brief: shared.CompanyResearchBriefResponse | None,
+    financials: shared.CompanyFinancialsResponse,
+    earnings_summary: Any | None,
+    source_fingerprint: str | None,
+    freshness_state: str = "fresh",
+    extra_confidence_flags: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    generated_at = shared.datetime.now(shared.timezone.utc)
+    entries = _collect_bootstrap_provenance_entries(financials, brief, earnings_summary)
+    entries.extend(
+        shared.build_provenance_entries(
+            [
+                shared.SourceUsage(
+                    source_id="ft_company_workspace_bootstrap",
+                    role="derived",
+                    last_refreshed_at=generated_at,
+                )
+            ]
+        )
+    )
+    entries = _dedupe_bootstrap_provenance_entries(entries)
+    source_mix_payload = shared.SourceMixPayload.model_validate(shared.build_source_mix(entries))
+    confidence_flags = sorted(
+        {
+            *extra_confidence_flags,
+            *_collect_confidence_flags(financials, brief, earnings_summary),
+        }
+    )
+    fallback_flags = ["commercial_fallback_present"] if source_mix_payload.fallback_source_ids else []
+    if shared.settings.strict_official_mode:
+        confidence_flags = sorted({*confidence_flags, "strict_official_mode"})
+    return {
+        "schema_version": BOOTSTRAP_SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "source_fingerprint": source_fingerprint,
+        "freshness_state": freshness_state,
+        "provenance": [shared.ProvenanceEntryPayload.model_validate(entry) for entry in entries],
+        "source_mix": source_mix_payload,
+        "confidence_flags": confidence_flags,
+        "fallback_flags": fallback_flags,
+        "strict_official_eligible": not fallback_flags,
+    }
+
+
+def _collect_bootstrap_provenance_entries(*payloads: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for payload in payloads:
+        if payload is None:
+            continue
+        entries.extend(_entries_from_envelope(payload))
+        for attribute in (
+            "snapshot",
+            "what_changed",
+            "business_quality",
+            "capital_and_risk",
+            "valuation",
+            "monitor",
+        ):
+            section = getattr(payload, attribute, None)
+            entries.extend(_entries_from_envelope(section))
+    return entries
+
+
+def _entries_from_envelope(payload: Any) -> list[dict[str, Any]]:
+    rows = getattr(payload, "provenance", None) or []
+    entries: list[dict[str, Any]] = []
+    for row in rows:
+        if hasattr(row, "model_dump"):
+            entries.append(row.model_dump(mode="json"))
+        elif isinstance(row, dict):
+            entries.append(dict(row))
+    return entries
+
+
+def _dedupe_bootstrap_provenance_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        source_id = str(entry.get("source_id") or "")
+        if not source_id:
+            continue
+        deduped.setdefault(source_id, entry)
+    return list(deduped.values())
+
+
+def _collect_confidence_flags(*payloads: Any) -> list[str]:
+    flags: set[str] = set()
+    for payload in payloads:
+        if payload is None:
+            continue
+        flags.update(str(flag) for flag in getattr(payload, "confidence_flags", []) or [] if str(flag))
+        diagnostics = getattr(payload, "diagnostics", None)
+        flags.update(str(flag) for flag in getattr(diagnostics, "stale_flags", []) or [] if str(flag))
+        for attribute in (
+            "snapshot",
+            "what_changed",
+            "business_quality",
+            "capital_and_risk",
+            "valuation",
+            "monitor",
+        ):
+            section = getattr(payload, attribute, None)
+            flags.update(str(flag) for flag in getattr(section, "confidence_flags", []) or [] if str(flag))
+    return sorted(flags)
 
 
 def _company_workspace_bootstrap_hot_key(

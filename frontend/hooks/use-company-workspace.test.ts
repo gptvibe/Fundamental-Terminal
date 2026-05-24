@@ -201,6 +201,15 @@ describe("useCompanyWorkspace", () => {
       "RKLB",
       expect.objectContaining({
         financialsView: "core_segments",
+        sections: [
+          "company_summary",
+          "latest_financials",
+          "recent_filings",
+          "recent_events",
+          "source_freshness",
+          "warnings",
+        ],
+        compact: true,
         includeOverviewBrief: true,
         includeInsiders: false,
         includeInstitutional: false,

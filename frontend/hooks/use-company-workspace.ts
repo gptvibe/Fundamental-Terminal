@@ -64,6 +64,14 @@ const COMPATIBILITY_FALLBACK_STATUSES = new Set([405, 501]);
 const WORKSPACE_PRICE_HISTORY_LATEST_N = 3200;
 const WORKSPACE_PRICE_HISTORY_MAX_POINTS = 480;
 const WORKSPACE_LAYOUT_CACHE_TTL_MS = 30_000;
+const DEFAULT_BRIEF_BOOTSTRAP_SECTIONS = [
+  "company_summary",
+  "latest_financials",
+  "recent_filings",
+  "recent_events",
+  "source_freshness",
+  "warnings",
+];
 
 export function useCompanyWorkspace(
   ticker: string,
@@ -575,11 +583,19 @@ async function loadCompanyWorkspaceData(
   options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary" | "financialsView"> & { signal?: AbortSignal }
 ): Promise<LoadCompanyWorkspaceDataResult> {
   const financialsView = options.financialsView ?? (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional ? "core_segments" : "full");
+  const useCompactBriefBootstrap =
+    options.includeOverviewBrief === true &&
+    !options.includeInsiders &&
+    !options.includeInstitutional &&
+    !options.includeEarningsSummary &&
+    financialsView === "core_segments";
   try {
     const bootstrap = await getCompanyWorkspaceBootstrap(ticker, {
       financialsView,
       priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
       priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
+      sections: useCompactBriefBootstrap ? DEFAULT_BRIEF_BOOTSTRAP_SECTIONS : undefined,
+      compact: useCompactBriefBootstrap,
       includeOverviewBrief: options.includeOverviewBrief,
       includeInsiders: options.includeInsiders,
       includeInstitutional: options.includeInstitutional,

@@ -315,7 +315,8 @@ def test_readyz_returns_ok_when_database_is_usable(monkeypatch):
     response = client.get("/readyz")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert response.json()["cache_coordination"] == "disabled_by_profile"
 
 
 def test_readyz_returns_503_when_database_is_unavailable(monkeypatch):

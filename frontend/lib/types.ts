@@ -3468,7 +3468,33 @@ export interface CompanyWorkspaceBootstrapErrorsPayload {
   earnings_summary: string | null;
 }
 
-export interface CompanyWorkspaceBootstrapResponse {
+export interface CompanyBootstrapSourceFreshnessPayload {
+  financials_stale: boolean;
+  financials_message: string | null;
+  brief_stale: boolean;
+  brief_message: string | null;
+  ownership_stale: boolean;
+  ownership_message: string | null;
+  governance_stale: boolean;
+  governance_message: string | null;
+  last_updated: string | null;
+}
+
+export interface CompanyBootstrapWarningPayload {
+  severity: "info" | "warning" | "error";
+  code: string;
+  title: string;
+  detail: string | null;
+  affected_sections: string[];
+}
+
+export interface CompanyWorkspaceBootstrapResponse extends Partial<ProvenanceEnvelope> {
+  schema_version?: string;
+  generated_at?: string | null;
+  source_fingerprint?: string | null;
+  freshness_state?: "fresh" | "stale" | "missing" | "building" | "partial";
+  fallback_flags?: string[];
+  strict_official_eligible?: boolean;
   company: CompanyPayload | null;
   financials: CompanyFinancialsResponse;
   brief: CompanyResearchBriefResponse | null;
@@ -3476,6 +3502,10 @@ export interface CompanyWorkspaceBootstrapResponse {
   insider_trades: CompanyInsiderTradesResponse | null;
   institutional_holdings: CompanyInstitutionalHoldingsResponse | null;
   errors: CompanyWorkspaceBootstrapErrorsPayload;
+  source_freshness?: CompanyBootstrapSourceFreshnessPayload;
+  warnings?: CompanyBootstrapWarningPayload[];
+  is_compact?: boolean;
+  requested_sections?: string[];
 }
 
 export interface RefreshQueuedResponse {

@@ -333,7 +333,6 @@ from app.services.company_charts_dashboard import (
     get_company_charts_forecast_accuracy_snapshot,
     get_company_charts_dashboard_snapshot,
     recompute_and_persist_company_charts_forecast_accuracy,
-    recompute_and_persist_company_charts_dashboard,
 )
 from app.services.company_charts_scenarios import (
     clone_company_charts_scenario,
@@ -601,6 +600,7 @@ async def _redis_health_payload() -> tuple[dict[str, Any], bool]:
         "status": normalized_status,
         "backend": metrics.get("backend"),
         "backend_mode": metrics.get("backend_mode"),
+        "cache_coordination": metrics.get("cache_coordination") or backend_details.get("cache_coordination"),
         "summary": backend_details.get("summary"),
         "redis_configured": backend_details.get("redis_configured"),
         "cache_scope": backend_details.get("cache_scope"),
@@ -793,7 +793,10 @@ async def readiness_check() -> dict[str, str]:
                 await result
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database not ready") from exc
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "cache_coordination": shared_hot_response_cache.cache_coordination_mode,
+    }
 
 
 @app.get("/api/internal/cache-metrics")
@@ -807,6 +810,7 @@ async def cache_metrics() -> dict[str, Any]:
         },
         "hot_cache_backend": hot_cache_metrics["backend"],
         "hot_cache_backend_mode": hot_cache_metrics["backend_mode"],
+        "cache_coordination": hot_cache_metrics.get("cache_coordination"),
         "hot_cache_status": backend_details.get("status"),
         "hot_cache_scope": backend_details.get("cache_scope"),
         "hot_cache_cross_instance_reuse": backend_details.get("cross_instance_reuse"),
@@ -3849,7 +3853,7 @@ def _build_company_charts_response(
             as_of=requested_as_of,
         )
 
-    stored_snapshot, payload = _load_company_charts_snapshot_record(
+    stored_snapshot, payload, payload_is_stale = _load_company_charts_snapshot_record(
         session,
         resolved_snapshot.company.id,
         as_of=parsed_as_of,
@@ -3858,36 +3862,14 @@ def _build_company_charts_response(
         resolved_snapshot,
         stored_snapshot=stored_snapshot,
         as_of=parsed_as_of,
+        payload_is_stale=payload_is_stale,
     )
     if payload is None:
-        if hasattr(session, "execute") and hasattr(session, "commit"):
-            generated = recompute_and_persist_company_charts_dashboard(
-                session,
-                resolved_snapshot.company.id,
-                as_of=parsed_as_of,
-            )
-            if generated is not None:
-                session.commit()
-                response = _augment_company_charts_response(
-                    resolved_snapshot,
-                    generated,
-                    refresh=RefreshState(triggered=False, reason="fresh", ticker=resolved_snapshot.company.ticker, job_id=None),
-                    as_of=requested_as_of,
-                )
-                shared_hot_response_cache.store_sync(
-                    hot_key,
-                    route="charts",
-                    payload=response.model_dump(mode="json"),
-                    tags=_build_hot_cache_tags(
-                        ticker=resolved_snapshot.company.ticker,
-                        datasets=("charts_dashboard",),
-                        schema_versions=(response.payload_version or CHARTS_DASHBOARD_SCHEMA_VERSION,),
-                        as_of=normalized_as_of,
-                    ),
-                )
-                return response
         if not refresh.triggered:
-            refresh = _trigger_refresh(resolved_snapshot.company.ticker, reason="missing")
+            refresh = _trigger_refresh(
+                resolved_snapshot.company.ticker,
+                reason="stale" if stored_snapshot is not None else "missing",
+            )
         return _build_company_charts_bootstrap_for_snapshot(
             resolved_snapshot,
             refresh=refresh,
@@ -4140,7 +4122,7 @@ def _load_company_charts_snapshot_record(
     company_id: int,
     *,
     as_of: datetime | None = None,
-) -> tuple[Any | None, CompanyChartsDashboardResponse | None]:
+) -> tuple[Any | None, CompanyChartsDashboardResponse | None, bool]:
     try:
         stored = get_company_charts_dashboard_snapshot(
             session,
@@ -4153,10 +4135,10 @@ def _load_company_charts_snapshot_record(
             "Unable to load company charts dashboard snapshot for company_id=%s",
             company_id,
         )
-        return None, None
+        return None, None, True
 
     if stored is None:
-        return None, None
+        return None, None, False
 
     try:
         payload = CompanyChartsDashboardResponse.model_validate(stored.payload)
@@ -4165,20 +4147,20 @@ def _load_company_charts_snapshot_record(
             "Unable to validate company charts dashboard snapshot for company_id=%s",
             company_id,
         )
-        return stored, None
+        return stored, None, True
 
     # Older snapshots persisted an input fingerprint hash into payload_version.
-    # Treat those as stale so the current route can rebuild a contract-versioned payload
-    # that includes the additive Projection Studio fields when available.
+    # Serve those as stale reads and queue a background refresh instead of
+    # rebuilding them on the request path.
     if payload.payload_version != CHARTS_DASHBOARD_SCHEMA_VERSION:
         logging.getLogger(__name__).info(
-            "Ignoring stale company charts snapshot for company_id=%s with payload_version=%s",
+            "Serving stale company charts snapshot for company_id=%s with payload_version=%s",
             company_id,
             payload.payload_version,
         )
-        return stored, None
+        return stored, payload, True
 
-    return stored, payload
+    return stored, payload, False
 
 
 def _load_company_charts_forecast_accuracy_snapshot_record(
@@ -4221,6 +4203,7 @@ def _refresh_for_company_charts(
     *,
     stored_snapshot: Any | None,
     as_of: datetime | None,
+    payload_is_stale: bool = False,
 ) -> RefreshState:
     if stored_snapshot is None:
         if snapshot.cache_state in {"missing", "stale"}:
@@ -4228,6 +4211,8 @@ def _refresh_for_company_charts(
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     if as_of is not None:
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
+    if payload_is_stale:
+        return _trigger_refresh(snapshot.company.ticker, reason="stale")
     if _snapshot_last_checked_is_fresh(stored_snapshot):
         return RefreshState(triggered=False, reason="fresh", ticker=snapshot.company.ticker, job_id=None)
     return _trigger_refresh(snapshot.company.ticker, reason="stale")
@@ -6000,6 +5985,9 @@ async def _fill_hot_cached_payload(
 
 
 def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
+    if "company" in payload and payload.get("company") is not None:
+        return False
+
     confidence_flags = payload.get("confidence_flags")
     if isinstance(confidence_flags, list) and "company_missing" in confidence_flags:
         return True
@@ -6010,10 +5998,7 @@ def _is_company_missing_payload(payload: dict[str, Any]) -> bool:
         if isinstance(stale_flags, list) and "company_missing" in stale_flags:
             return True
 
-    if payload.get("company") is None and _payload_has_company_missing_marker(payload):
-        return True
-
-    return False
+    return payload.get("company") is None and _payload_has_company_missing_marker(payload)
 
 
 def _payload_has_company_missing_marker(payload: Any) -> bool:

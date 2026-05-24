@@ -95,10 +95,22 @@ class SharedHotResponseCache:
     @property
     def backend_mode(self) -> str:
         if self._redis is None:
+            if getattr(settings, "redis_disabled_by_profile", False):
+                return "disabled_by_profile"
             return "local_memory_fallback" if self._redis_configured else "local_memory"
         if self._fallback_events_total > 0:
             return "redis_with_local_fallbacks"
         return "redis"
+
+    @property
+    def cache_coordination_mode(self) -> str:
+        if self._redis is not None:
+            return "redis_degraded" if self._fallback_events_total > 0 else "redis_active"
+        if self._redis_configured:
+            return "local_memory_fallback"
+        if getattr(settings, "redis_disabled_by_profile", False):
+            return "disabled_by_profile"
+        return "local_memory_fallback"
 
     @property
     def is_shared(self) -> bool:
@@ -305,6 +317,7 @@ class SharedHotResponseCache:
         return {
             "backend": self.backend,
             "backend_mode": self.backend_mode,
+            "cache_coordination": self.cache_coordination_mode,
             "shared": self.is_shared,
             "namespace": self._namespace,
             "backend_details": self._backend_details(backend_status),
@@ -542,6 +555,17 @@ class SharedHotResponseCache:
         return sync_client, async_client
 
     def _build_redis_clients(self):
+        if not self._redis_configured:
+            self._startup_backend_reason = (
+                "redis_disabled_by_profile"
+                if getattr(settings, "redis_disabled_by_profile", False)
+                else "redis_not_configured"
+            )
+            self._emit_backend_log(
+                level=logging.INFO,
+                reason=self._startup_backend_reason,
+            )
+            return None, None
         if redis is None or redis_async is None:
             self._startup_backend_reason = "redis_dependency_missing"
             self._emit_backend_log(
@@ -1153,9 +1177,15 @@ class SharedHotResponseCache:
 
         return {
             "status": "local_only",
-            "summary": "Redis is not configured, so the app is using process-local hot cache only.",
+            "summary": (
+                "Redis is disabled by the active app profile, so the app is using process-local hot cache only."
+                if getattr(settings, "redis_disabled_by_profile", False)
+                else "Redis is not configured, so the app is using process-local hot cache only."
+            ),
             "operational_impact": "Cross-instance cache reuse and shared singleflight coordination are disabled because cache entries stay within one backend process.",
-            "recommended_checks": [
+            "recommended_checks": []
+            if getattr(settings, "redis_disabled_by_profile", False)
+            else [
                 "Set REDIS_URL to a shared Redis deployment if you want cross-instance hot-cache reuse.",
             ],
         }
@@ -1168,6 +1198,7 @@ class SharedHotResponseCache:
             "cache_scope": "cross-instance" if self.is_shared else "process-local",
             "redis_configured": self._redis_configured,
             "fallback_active": fallback_active,
+            "cache_coordination": self.cache_coordination_mode,
             "startup_reason": self._startup_backend_reason,
             "fallback_events_total": self._fallback_events_total,
             "last_fallback_reason": self._last_fallback_reason,
@@ -1194,6 +1225,7 @@ class SharedHotResponseCache:
             level=level,
             backend=self.backend,
             backend_mode=self.backend_mode,
+            cache_coordination=self.cache_coordination_mode,
             cache_scope="cross-instance" if self.is_shared else "process-local",
             redis_configured=self._redis_configured,
             shared=self.is_shared,

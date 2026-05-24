@@ -226,6 +226,17 @@ DATASET_REGISTRY: dict[str, DatasetDefinition] = {
         source_ids=("ft_company_research_brief",),
         runtime_dataset_keys=("company_research_brief",),
     ),
+    "company_workspace_bootstrap": DatasetDefinition(
+        dataset_key="company_workspace_bootstrap",
+        source_type="derived_internal",
+        freshness_ttl_seconds=24 * 60 * 60,
+        refresh_cost_class="medium",
+        refresh_function_path="app.services.company_workspace_bootstrap.recompute_and_persist_company_workspace_bootstrap_snapshot",
+        supports_point_in_time_reads=True,
+        refresh_policy="background_worker_only",
+        source_ids=("ft_company_workspace_bootstrap",),
+        runtime_dataset_keys=("company_workspace_bootstrap",),
+    ),
     "charts_dashboard": DatasetDefinition(
         dataset_key="charts_dashboard",
         source_type="derived_internal",

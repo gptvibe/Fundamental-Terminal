@@ -14,7 +14,7 @@ is_truthy() {
 
 ENABLED="${DATA_FETCHER_ENABLED:-true}"
 STARTUP_DELAY="${DATA_FETCHER_STARTUP_DELAY_SECONDS:-0}"
-APP_PROFILE="$(printf '%s' "${APP_PROFILE:-full}" | tr '[:upper:]' '[:lower:]')"
+APP_PROFILE="$(printf '%s' "${APP_PROFILE:-standard}" | tr '[:upper:]' '[:lower:]')"
 if [ -n "${DATA_FETCHER_ENQUEUE_ON_STARTUP+x}" ]; then
   ENQUEUE_ON_STARTUP="${DATA_FETCHER_ENQUEUE_ON_STARTUP}"
 elif [ "${APP_PROFILE}" = "lite" ]; then

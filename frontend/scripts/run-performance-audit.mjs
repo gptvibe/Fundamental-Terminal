@@ -24,6 +24,7 @@ const MODEL_NAMES = ["ratios", "dupont", "dcf", "reverse_dcf", "roic", "capital_
 const LOCAL_USER_DATA_STORAGE_KEY = "ft-local-user-data";
 const API_CACHE_STORAGE_PREFIX = "ft:api-cache:v2:";
 const PERFORMANCE_AUDIT_STORAGE_KEY = "ft:performance-audit:v1";
+const DEFAULT_BRIEF_BOOTSTRAP_SECTIONS = "company_summary,latest_financials,recent_filings,recent_events,source_freshness,warnings";
 
 const PAGE_SCENARIOS = [
   {
@@ -94,8 +95,14 @@ const PAGE_SCENARIOS = [
 
 const REQUEST_BUDGETS = {
   "/company/[ticker]": {
-    cold: { maxRequests: 24, maxNetworkRequests: 10 },
-    warm: { maxRequests: 24, maxNetworkRequests: 8 },
+    cold: { maxRequests: 16, maxNetworkRequests: 6 },
+    warm: { maxRequests: 12, maxNetworkRequests: 3 },
+  },
+};
+
+const ROUTE_BUDGETS = {
+  "Workspace bootstrap compact": {
+    warm: { maxLatencyP95Ms: 150, maxResponseBytes: 256 * 1024 },
   },
 };
 
@@ -103,6 +110,10 @@ const HOT_ROUTE_CASES = [
   {
     label: "Company search",
     url: (config) => `${config.backendUrl}/api/companies/search?query=${encodeURIComponent(config.ticker)}&refresh=false`,
+  },
+  {
+    label: "Workspace bootstrap compact",
+    url: (config) => `${config.backendUrl}/api/companies/${encodeURIComponent(config.ticker)}/workspace-bootstrap?financials_view=core_segments&price_latest_n=3200&price_max_points=480&include_overview_brief=true&sections=${encodeURIComponent(DEFAULT_BRIEF_BOOTSTRAP_SECTIONS)}&compact=true`,
   },
   {
     label: "Company financials",
@@ -761,6 +772,30 @@ function buildSummary(config, scenarioResults, benchmarkResults) {
     })
     .sort((left, right) => left.label.localeCompare(right.label) || left.phase.localeCompare(right.phase));
 
+  const routeBudgets = benchmarkResults
+    .flatMap((result) => {
+      const budget = ROUTE_BUDGETS[result.label]?.warm;
+      if (!budget) {
+        return [];
+      }
+
+      const warmP95 = result.warm.latencyMs.p95;
+      const maxPayloadBytes = result.warm.responseBytes.max;
+      const withinLatencyBudget = warmP95 <= budget.maxLatencyP95Ms;
+      const withinPayloadBudget = maxPayloadBytes <= budget.maxResponseBytes;
+
+      return [{
+        label: result.label,
+        routePath: result.routePath,
+        maxWarmLatencyP95Ms: budget.maxLatencyP95Ms,
+        maxResponseBytes: budget.maxResponseBytes,
+        actualWarmLatencyP95Ms: warmP95,
+        actualMaxResponseBytes: maxPayloadBytes,
+        status: withinLatencyBudget && withinPayloadBudget ? "pass" : "fail",
+      }];
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+
   const searchFlowRollup = buildSearchFlowRollup(scenarioResults);
 
   return {
@@ -769,6 +804,7 @@ function buildSummary(config, scenarioResults, benchmarkResults) {
     config,
     pageFlows: scenarioResults,
     requestBudgets,
+    routeBudgets,
     coldWarmPairs,
     slowestRoutes,
     mostOverFetchedFlows,
@@ -847,6 +883,17 @@ function buildMarkdown(summary) {
   }
   if (!(summary.requestBudgets ?? []).length) {
     lines.push("No request budgets are configured for the audited flows.");
+  }
+  lines.push("");
+  lines.push("## Route Budgets");
+  lines.push("");
+  lines.push("| Route | Warm p95 Max (ms) | Payload Max (KB) | Actual Warm p95 (ms) | Actual Max Payload (KB) | Status |");
+  lines.push("| --- | ---: | ---: | ---: | ---: | --- |");
+  for (const budget of summary.routeBudgets ?? []) {
+    lines.push(`| ${budget.label} | ${budget.maxWarmLatencyP95Ms} | ${round(budget.maxResponseBytes / 1024)} | ${budget.actualWarmLatencyP95Ms} | ${round(budget.actualMaxResponseBytes / 1024)} | ${budget.status.toUpperCase()} |`);
+  }
+  if (!(summary.routeBudgets ?? []).length) {
+    lines.push("No route budgets are configured for the audited benchmark routes.");
   }
   lines.push("");
   lines.push("## Top 10 Slowest Routes");

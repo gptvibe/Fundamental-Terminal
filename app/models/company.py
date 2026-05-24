@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from app.models.company_charts_dashboard_snapshot import CompanyChartsDashboardSnapshot
     from app.models.comment_letter import CommentLetter
     from app.models.company_research_brief_snapshot import CompanyResearchBriefSnapshot
+    from app.models.company_workspace_bootstrap_snapshot import CompanyWorkspaceBootstrapSnapshot
     from app.models.company_oil_scenario_overlay_snapshot import CompanyOilScenarioOverlaySnapshot
     from app.models.derived_metric_point import DerivedMetricPoint
     from app.models.dataset_refresh_state import DatasetRefreshState
@@ -116,6 +117,11 @@ class Company(Base):
         passive_deletes=True,
     )
     charts_dashboard_snapshots: Mapped[list["CompanyChartsDashboardSnapshot"]] = relationship(
+        back_populates="company",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    workspace_bootstrap_snapshots: Mapped[list["CompanyWorkspaceBootstrapSnapshot"]] = relationship(
         back_populates="company",
         cascade="all, delete-orphan",
         passive_deletes=True,

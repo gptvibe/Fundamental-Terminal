@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
+from dataclasses import replace
 from fnmatch import fnmatch
 import json
 import logging
@@ -23,6 +24,19 @@ def _disable_remote(monkeypatch, cache: SharedHotResponseCache) -> None:
     monkeypatch.setattr(cache, "_redis", None)
     monkeypatch.setattr(cache, "_redis_async", None)
     monkeypatch.setattr(cache, "_redis_configured", False)
+
+
+def _configure_standard_redis(monkeypatch) -> None:
+    monkeypatch.setattr(
+        hot_cache_module,
+        "settings",
+        replace(
+            hot_cache_module.settings,
+            app_profile="standard",
+            redis_url="redis://localhost:6379/0",
+            redis_disabled_by_profile=False,
+        ),
+    )
 
 
 def test_hot_cache_emits_request_cache_and_redis_metrics(monkeypatch) -> None:
@@ -420,7 +434,36 @@ def test_hot_cache_keeps_real_company_payloads(monkeypatch) -> None:
 
     asyncio.run(shared_handlers._store_hot_cached_payload("financials:ON", payload))
 
-    cached = asyncio.run(shared_handlers._get_hot_cached_payload("financials:ON"))
+
+def test_hot_cache_keeps_workspace_bootstrap_payloads_with_placeholder_brief(monkeypatch) -> None:
+    _disable_remote(monkeypatch, shared_hot_response_cache)
+    shared_handlers._hot_response_cache.clear()
+
+    snapshot = CompanyPayload(
+        ticker="ON",
+        cik="0001097864",
+        name="ON SEMICONDUCTOR CORP",
+        cache_state="fresh",
+    )
+    ready_refresh = RefreshState(triggered=False, reason="fresh", ticker="ON", job_id=None)
+    payload = main_module.CompanyWorkspaceBootstrapResponse(
+        company=snapshot,
+        financials=CompanyFinancialsResponse(
+            company=snapshot,
+            financials=[],
+            price_history=[],
+            refresh=ready_refresh,
+            diagnostics=DataQualityDiagnosticsPayload(),
+        ),
+        brief=main_module._empty_company_brief_response(
+            refresh=ready_refresh,
+            as_of=None,
+        ).model_copy(update={"company": snapshot}),
+    )
+
+    asyncio.run(shared_handlers._store_hot_cached_payload("workspace_bootstrap:ON:view=core:asof=latest", payload))
+
+    cached = asyncio.run(shared_handlers._get_hot_cached_payload("workspace_bootstrap:ON:view=core:asof=latest"))
     assert cached is not None
     assert json.loads(cached.content)["company"]["ticker"] == "ON"
 
@@ -598,6 +641,7 @@ def test_shared_hot_cache_singleflight_coalesces_identical_local_fills(monkeypat
 
 
 def test_shared_hot_cache_snapshot_reports_local_fallback_details(monkeypatch) -> None:
+    _configure_standard_redis(monkeypatch)
     monkeypatch.setattr(hot_cache_module, "redis", None)
     monkeypatch.setattr(hot_cache_module, "redis_async", None)
 
@@ -616,6 +660,7 @@ def test_shared_hot_cache_snapshot_reports_local_fallback_details(monkeypatch) -
 
 
 def test_shared_hot_cache_logs_connect_fallback_on_startup(monkeypatch, caplog) -> None:
+    _configure_standard_redis(monkeypatch)
     class _FailingRedisClient:
         def ping(self) -> None:
             raise RuntimeError("connection refused")
@@ -640,6 +685,7 @@ def test_shared_hot_cache_logs_connect_fallback_on_startup(monkeypatch, caplog) 
 
 
 def test_shared_hot_cache_startup_redis_failure_uses_local_fallback(monkeypatch) -> None:
+    _configure_standard_redis(monkeypatch)
     factory = _FakeRedisClientFactory(RuntimeError("startup unavailable"), RuntimeError("still unavailable"))
     monkeypatch.setattr(hot_cache_module, "redis", SimpleNamespace(Redis=object()))
     monkeypatch.setattr(hot_cache_module, "redis_async", SimpleNamespace(Redis=object()))
@@ -669,6 +715,7 @@ def test_shared_hot_cache_startup_redis_failure_uses_local_fallback(monkeypatch)
 
 
 def test_shared_hot_cache_lazy_reconnect_switches_to_redis_after_startup_failure(monkeypatch, caplog) -> None:
+    _configure_standard_redis(monkeypatch)
     factory = _FakeRedisClientFactory(RuntimeError("startup unavailable"), "success")
     monkeypatch.setattr(hot_cache_module, "redis", SimpleNamespace(Redis=object()))
     monkeypatch.setattr(hot_cache_module, "redis_async", SimpleNamespace(Redis=object()))
@@ -696,6 +743,7 @@ def test_shared_hot_cache_lazy_reconnect_switches_to_redis_after_startup_failure
 
 
 def test_shared_hot_cache_lazy_reconnect_throttles_repeated_failures(monkeypatch) -> None:
+    _configure_standard_redis(monkeypatch)
     factory = _FakeRedisClientFactory(
         RuntimeError("startup unavailable"),
         RuntimeError("retry unavailable"),

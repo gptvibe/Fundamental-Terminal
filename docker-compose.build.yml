@@ -25,6 +25,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    profiles:
+      - standard
 
   backend:
     image: fundamental-terminal/backend:local
@@ -34,8 +36,9 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-${DATABASE_URL:?DATABASE_URL must be set}}
-      REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
+      APP_PROFILE: ${APP_PROFILE:-lite}
+      DATABASE_URL: "${DATABASE_URL_OVERRIDE:-${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-fundamental}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-fundamentals}}}"
+      REDIS_URL: ${REDIS_URL_OVERRIDE:-${REDIS_URL:-}}
       API_HOST: 0.0.0.0
       API_PORT: 8000
       FRED_API_KEY: ${FRED_API_KEY:-}
@@ -51,8 +54,6 @@ services:
       API_RATE_LIMIT_EXEMPT_PATHS: ${API_RATE_LIMIT_EXEMPT_PATHS:-}
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
@@ -71,7 +72,8 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-${DATABASE_URL:?DATABASE_URL must be set}}
+      APP_PROFILE: ${APP_PROFILE:-standard}
+      DATABASE_URL: "${DATABASE_URL_OVERRIDE:-${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-fundamental}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-fundamentals}}}"
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
       DEMO_MODE: ${DEMO_MODE:-false}
@@ -84,6 +86,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - standard
 
   sp500-prewarm:
     image: fundamental-terminal/backend:local
@@ -92,12 +98,15 @@ services:
       context: .
       dockerfile: docker/backend/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL_OVERRIDE:-${DATABASE_URL:?DATABASE_URL must be set}}
+      APP_PROFILE: ${APP_PROFILE:-prewarm}
+      DATABASE_URL: "${DATABASE_URL_OVERRIDE:-${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-fundamental}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-fundamentals}}}"
       REDIS_URL: ${REDIS_URL_OVERRIDE:-redis://redis:6379/0}
       FRED_API_KEY: ${FRED_API_KEY:-}
     depends_on:
       backend:
         condition: service_healthy
+    profiles:
+      - prewarm
 
   frontend:
     image: fundamental-terminal/frontend:local

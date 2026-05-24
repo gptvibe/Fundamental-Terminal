@@ -377,6 +377,7 @@ USER_VISIBLE_ENDPOINT_SOURCE_CONTRACTS: dict[EndpointKey, SourceContract] = {
         "GET",
         "/api/companies/{ticker}/workspace-bootstrap",
     ): _price_sensitive_contract(
+        "ft_company_workspace_bootstrap",
         "ft_company_research_brief",
         "ft_activity_overview",
         "ft_changes_since_last_filing",

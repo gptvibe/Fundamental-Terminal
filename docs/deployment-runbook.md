@@ -11,9 +11,12 @@ This runbook is the shortest safe path for a new deployer.
 
 Required core settings:
 
-- `DATABASE_URL`
-- `REDIS_URL`
+- `POSTGRES_PASSWORD`
 - `SEC_USER_AGENT`
+- `APP_PROFILE=lite`
+- `STRICT_OFFICIAL_MODE=true`
+
+The lite profile builds `DATABASE_URL` from Compose service names and leaves Redis disabled by default.
 
 Optional market-data overrides:
 
@@ -75,24 +78,21 @@ For proxy-auth deployments, prefer terminating auth at the edge and forwarding o
 ## First Deployment
 
 1. Copy `.env.example` to `.env`.
-2. Set `SEC_USER_AGENT` to a real operator contact, and set `MARKET_USER_AGENT` too if you want a separate identifier for Yahoo or other market-data providers.
+2. Set `POSTGRES_PASSWORD` and set `SEC_USER_AGENT` to a real operator contact.
 3. Decide whether auth should stay off, use a bearer token, or trust a reverse proxy header.
-4. Decide whether the default public API rate limit is acceptable.
-5. Leave `RATE_LIMIT_NAMESPACE=ft:rate-limit` unless you intentionally need a custom Redis key prefix for rate-limit counters.
-6. Keep `API_RATE_LIMIT_TRUST_PROXY=false` unless a trusted reverse proxy sits in front of the API and rewrites `X-Forwarded-For`; only set it to `true` in that deployment model.
-7. Start the stack:
+4. Start the lite stack:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+docker compose up -d
 ```
 
-8. Verify the deployment:
+5. Verify the deployment:
 
 ```bash
 python scripts/verify_deployment_compat.py --backend-url http://127.0.0.1:8000 --frontend-url http://127.0.0.1:3000 --ticker AAPL
 ```
 
-9. Check health manually:
+6. Check health manually:
 
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/readyz`
@@ -102,9 +102,26 @@ Healthy deploy expectations:
 
 - `/health` returns `status=ok`
 - `components.db.status=ok`
-- `components.redis.status` is `ok` or, at worst, `degraded`
+- `components.redis.cache_coordination` is `disabled_by_profile` in lite, `redis_active` in standard, or `redis_degraded` / `local_memory_fallback` when Redis is configured but unavailable
 - `components.worker.status` is `ok` or `idle`
 - `components.api.auth_mode` and `components.api.rate_limit` match your intended config
+
+## Standard and Prewarm Profiles
+
+Use the standard profile when you want Redis-backed cache coordination and a separate data-fetcher container:
+
+```bash
+cp .env.advanced.example .env
+docker compose --profile standard up -d
+```
+
+Use the prewarm profile only for explicit broad-universe warmup:
+
+```bash
+docker compose --profile standard --profile prewarm up -d
+```
+
+Keep `SP500_PREWARM_LIMIT` unset only when you intentionally want the broad warmup workload.
 
 ## Migration Safety
 
@@ -169,14 +186,16 @@ If `AUTH_MODE=forwarded-user` and internal routes return `401`:
 
 If the worker is degraded:
 
-- check `docker compose logs data-fetcher`
-- confirm Redis is reachable
+- in lite, check `docker compose logs backend` because the queue consumer runs inside the backend container
+- in standard, check `docker compose logs data-fetcher`
+- confirm Redis is reachable when `APP_PROFILE=standard`
 - confirm the worker heartbeat is appearing in `/health`
 
 If Redis is degraded:
 
 - the app can still run in local fallback mode
 - cross-instance cache reuse and shared singleflight coordination will be weaker
+- in lite, `disabled_by_profile` is expected and does not indicate an incident
 
 ## Rollback
 
