@@ -50,6 +50,10 @@ services:
       REDIS_URL: ${REDIS_URL:-}
       API_HOST: 0.0.0.0
       API_PORT: 8000
+      CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+      BLS_API_KEY: ${BLS_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      BEA_API_KEY: ${BEA_API_KEY:-}
       FRED_API_KEY: ${FRED_API_KEY:-}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-FundamentalTerminal/1.0 (contact@example.com)}
       MARKET_USER_AGENT: ${MARKET_USER_AGENT:-${SEC_USER_AGENT:-FundamentalTerminal/1.0 (contact@example.com)}}
@@ -95,6 +99,10 @@ services:
       APP_PROFILE: ${APP_PROFILE:-standard}
       DATABASE_URL: "${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-fundamental}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-fundamentals}}"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+      BLS_API_KEY: ${BLS_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      BEA_API_KEY: ${BEA_API_KEY:-}
       FRED_API_KEY: ${FRED_API_KEY:-}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-FundamentalTerminal/1.0 (contact@example.com)}
       MARKET_USER_AGENT: ${MARKET_USER_AGENT:-${SEC_USER_AGENT:-FundamentalTerminal/1.0 (contact@example.com)}}
@@ -141,6 +149,10 @@ services:
       APP_PROFILE: ${APP_PROFILE:-prewarm}
       DATABASE_URL: "${DATABASE_URL:-postgresql+psycopg://${POSTGRES_USER:-fundamental}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-fundamentals}}"
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CENSUS_API_KEY: ${CENSUS_API_KEY:-}
+      BLS_API_KEY: ${BLS_API_KEY:-}
+      EIA_API_KEY: ${EIA_API_KEY:-}
+      BEA_API_KEY: ${BEA_API_KEY:-}
       FRED_API_KEY: ${FRED_API_KEY:-}
       SEC_USER_AGENT: ${SEC_USER_AGENT:-FundamentalTerminal/1.0 (contact@example.com)}
       MARKET_USER_AGENT: ${MARKET_USER_AGENT:-${SEC_USER_AGENT:-FundamentalTerminal/1.0 (contact@example.com)}}
