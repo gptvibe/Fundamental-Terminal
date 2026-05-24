@@ -212,10 +212,10 @@ export function CompanyChartsDashboard({
       </header>
 
       <KeyAssumptionsStrip card={detailCards.find((card) => card.key === "forecast_assumptions") ?? null} />
-      <DeferredClientSection placeholder={<LightweightPanelPlaceholder title="Event overlays" />}>
+      <DeferredClientSection fallbackDelayMs={1200} placeholder={<LightweightPanelPlaceholder title="Event overlays" />}>
         <EventOverlayPanel overlay={eventOverlay} enabledEventTypes={enabledEventTypeList} onToggleEventType={toggleEventType} />
       </DeferredClientSection>
-      <DeferredClientSection placeholder={<LightweightPanelPlaceholder title="What changed since last quarter?" />}>
+      <DeferredClientSection fallbackDelayMs={1200} placeholder={<LightweightPanelPlaceholder title="What changed since last quarter?" />}>
         <QuarterChangePanel panel={quarterChange} />
       </DeferredClientSection>
 
