@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   LOCAL_USER_DATA_VERSION,
@@ -13,6 +13,7 @@ import {
   saveCompanyNote,
   saveWatchlistMonitoringEntry,
   saveWatchlistSavedView,
+  syncLocalCompanyMetadata,
   toggleWatchlistCompany,
 } from "@/lib/local-user-data";
 
@@ -177,5 +178,32 @@ describe("local user data transfer helpers", () => {
 
   it("throws a clear error on invalid import JSON", () => {
     expect(() => importLocalUserData("{not-json}")).toThrow("Import file is not valid JSON.");
+  });
+
+  it("skips localStorage writes when metadata sync is a no-op", () => {
+    toggleWatchlistCompany({ ticker: "aapl", name: "Apple", sector: "Technology" });
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+
+    try {
+      syncLocalCompanyMetadata({ ticker: "AAPL", name: "Apple", sector: "Technology" });
+
+      expect(setItemSpy).not.toHaveBeenCalled();
+    } finally {
+      setItemSpy.mockRestore();
+    }
+  });
+
+  it("keeps metadata sync non-fatal when localStorage quota is exceeded", () => {
+    toggleWatchlistCompany({ ticker: "aapl" });
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Storage quota exceeded", "QuotaExceededError");
+    });
+
+    try {
+      expect(() => syncLocalCompanyMetadata({ ticker: "AAPL", name: "Apple", sector: "Technology" })).not.toThrow();
+      expect(readLocalUserData().watchlist[0]).toMatchObject({ ticker: "AAPL", name: null, sector: null });
+    } finally {
+      setItemSpy.mockRestore();
+    }
   });
 });

@@ -62,6 +62,14 @@ function canUseStorage() {
   return typeof window !== "undefined";
 }
 
+function isStorageQuotaError(error: unknown): boolean {
+  if (!(error instanceof DOMException)) {
+    return false;
+  }
+
+  return error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED" || error.code === 22 || error.code === 1014;
+}
+
 function sanitizeText(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -276,13 +284,23 @@ function normalizeLocalUserData(value: unknown): LocalUserData {
   };
 }
 
-function writeLocalUserData(data: LocalUserData) {
+function writeLocalUserData(data: LocalUserData): boolean {
   if (!canUseStorage()) {
-    return;
+    return false;
   }
 
-  window.localStorage.setItem(LOCAL_USER_DATA_STORAGE_KEY, JSON.stringify(data));
+  try {
+    window.localStorage.setItem(LOCAL_USER_DATA_STORAGE_KEY, JSON.stringify(data));
+  } catch (error) {
+    if (isStorageQuotaError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+
   window.dispatchEvent(new CustomEvent(LOCAL_USER_DATA_EVENT, { detail: data }));
+  return true;
 }
 
 function upsertWatchlistItem(items: LocalWatchlistItem[], snapshot: LocalCompanySnapshot): LocalWatchlistItem[] {
@@ -352,7 +370,13 @@ export function subscribeLocalUserData(onChange: () => void): () => void {
 }
 
 export function updateLocalUserData(updater: (current: LocalUserData) => LocalUserData): LocalUserData {
-  const nextValue = normalizeLocalUserData(updater(readLocalUserData()));
+  const currentValue = readLocalUserData();
+  const nextValue = normalizeLocalUserData(updater(currentValue));
+
+  if (JSON.stringify(nextValue) === JSON.stringify(currentValue)) {
+    return currentValue;
+  }
+
   writeLocalUserData(nextValue);
   return nextValue;
 }
