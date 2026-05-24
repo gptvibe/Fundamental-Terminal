@@ -583,7 +583,7 @@ async function loadCompanyWorkspaceData(
   options: Pick<UseCompanyWorkspaceOptions, "includeInsiders" | "includeInstitutional" | "includeOverviewBrief" | "includeEarningsSummary" | "financialsView"> & { signal?: AbortSignal }
 ): Promise<LoadCompanyWorkspaceDataResult> {
   const financialsView = options.financialsView ?? (options.includeOverviewBrief && !options.includeInsiders && !options.includeInstitutional ? "core_segments" : "full");
-  const useCompactBriefBootstrap =
+  const useSectionedBriefBootstrap =
     options.includeOverviewBrief === true &&
     !options.includeInsiders &&
     !options.includeInstitutional &&
@@ -594,8 +594,7 @@ async function loadCompanyWorkspaceData(
       financialsView,
       priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
       priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
-      sections: useCompactBriefBootstrap ? DEFAULT_BRIEF_BOOTSTRAP_SECTIONS : undefined,
-      compact: useCompactBriefBootstrap,
+      sections: useSectionedBriefBootstrap ? DEFAULT_BRIEF_BOOTSTRAP_SECTIONS : undefined,
       includeOverviewBrief: options.includeOverviewBrief,
       includeInsiders: options.includeInsiders,
       includeInstitutional: options.includeInstitutional,

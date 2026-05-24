@@ -132,9 +132,6 @@ def test_bootstrap_compact_mode_reduces_payload(monkeypatch):
     _patch_main_and_shared(monkeypatch, "_resolve_company_brief_snapshot", lambda *_args, **_kwargs: snapshot)
     _patch_main_and_shared(monkeypatch, "_build_company_financials_response", lambda *_args, **_kwargs: _financials_payload(snapshot))
     _patch_main_and_shared(monkeypatch, "_build_company_research_brief_response", _build_brief_with_facts)
-    if _company_overview_handlers is not None:
-        monkeypatch.setattr(_company_overview_handlers, "_apply_compact_mode_to_brief", lambda brief: brief)
-    
     client = TestClient(app)
     
     # Test with compact mode enabled

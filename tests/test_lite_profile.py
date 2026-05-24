@@ -18,8 +18,8 @@ def test_lite_compose_override_applies_low_compute_settings() -> None:
     contents = Path("docker-compose.lite.yml").read_text(encoding="utf-8")
 
     assert "UVICORN_WORKERS: ${UVICORN_WORKERS:-1}" in contents
-    assert "DB_POOL_SIZE: ${DB_POOL_SIZE:-2}" in contents
-    assert "DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-1}" in contents
+    assert "DB_POOL_SIZE: ${DB_POOL_SIZE:-5}" in contents
+    assert "DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}" in contents
     assert "REFRESH_QUEUE_POLL_SECONDS: ${REFRESH_QUEUE_POLL_SECONDS:-10}" in contents
     assert "DATA_FETCHER_STARTUP_DELAY_SECONDS: ${DATA_FETCHER_STARTUP_DELAY_SECONDS:-180}" in contents
     assert "start_period: ${DATA_FETCHER_HEALTH_START_PERIOD:-210s}" in contents

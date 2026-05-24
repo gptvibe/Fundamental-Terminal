@@ -759,21 +759,27 @@ def _apply_compact_mode_to_brief(
     # Suppress section details while keeping summary data
     if brief_copy.what_changed:
         if brief_copy.what_changed.activity_overview:
-            brief_copy.what_changed.activity_overview.facts = []
+            _clear_optional_list_field(brief_copy.what_changed.activity_overview, "facts")
         if brief_copy.what_changed.changes:
-            brief_copy.what_changed.changes.facts = []
+            _clear_optional_list_field(brief_copy.what_changed.changes, "facts")
     
     if brief_copy.capital_and_risk:
         if brief_copy.capital_and_risk.ownership_summary:
-            brief_copy.capital_and_risk.ownership_summary.facts = []
+            _clear_optional_list_field(brief_copy.capital_and_risk.ownership_summary, "facts")
         if brief_copy.capital_and_risk.governance_summary:
-            brief_copy.capital_and_risk.governance_summary.facts = []
+            _clear_optional_list_field(brief_copy.capital_and_risk.governance_summary, "facts")
     
     if brief_copy.monitor:
         if brief_copy.monitor.activity_overview:
-            brief_copy.monitor.activity_overview.facts = []
+            _clear_optional_list_field(brief_copy.monitor.activity_overview, "facts")
     
     return brief_copy
+
+
+def _clear_optional_list_field(payload: Any, field_name: str) -> None:
+    model_fields = getattr(type(payload), "model_fields", {})
+    if field_name in model_fields:
+        setattr(payload, field_name, [])
 
 
 def _load_workspace_bootstrap_snapshot_response(

@@ -209,7 +209,6 @@ describe("useCompanyWorkspace", () => {
           "source_freshness",
           "warnings",
         ],
-        compact: true,
         includeOverviewBrief: true,
         includeInsiders: false,
         includeInstitutional: false,
@@ -217,6 +216,7 @@ describe("useCompanyWorkspace", () => {
         signal: expect.anything(),
       })
     );
+    expect(fetchBootstrap.mock.calls[0]?.[1]).not.toHaveProperty("compact");
     expect(fetchOverview).not.toHaveBeenCalled();
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");
