@@ -27,7 +27,7 @@ REPO_SCRIPT_PATHS = {
     "/app/docker/backend/healthcheck-data-fetcher.sh": ROOT / "docker" / "backend" / "healthcheck-data-fetcher.sh",
 }
 EXPECTED_HTTP_TARGETS = {
-    "backend": "http://127.0.0.1:8000/health",
+    "backend": "http://127.0.0.1:8000/readyz",
     "frontend": "http://127.0.0.1:3000/",
 }
 
@@ -164,13 +164,13 @@ def _validate_healthcheck(*, compose_file: Path, service_name: str, healthcheck:
             )
         else:
             issues.extend(_validate_local_http_targets(compose_file=compose_file, service_name=service_name, urls=url_matches))
-            if service_name == "backend" and not _backend_health_route_exists():
+            if service_name == "backend" and not _backend_ready_route_exists():
                 issues.append(
                     HealthcheckIssue(
                         level="error",
                         compose_file=str(compose_file),
                         service=service_name,
-                        message="Backend /health route is missing from the repository",
+                        message="Backend /readyz route is missing from the repository",
                     )
                 )
             if service_name == "frontend" and not (ROOT / "frontend" / "app" / "page.tsx").exists():
@@ -328,10 +328,10 @@ def _extract_repo_script_path(command_text: str) -> Path | None:
     return None
 
 
-def _backend_health_route_exists() -> bool:
+def _backend_ready_route_exists() -> bool:
     for path in (ROOT / "app").rglob("*.py"):
         source = path.read_text(encoding="utf-8")
-        if '@app.get("/health")' in source or '"/health"' in source:
+        if '@app.get("/readyz")' in source or '"/readyz"' in source:
             return True
     return False
 

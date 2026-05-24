@@ -21,7 +21,7 @@ def test_main_compose_healthchecks_reference_expected_endpoints_and_scripts() ->
         "CMD",
         "python",
         "-c",
-        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()",
+        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz').read()",
     ]
     assert services["data-fetcher"]["healthcheck"]["test"] == [
         "CMD",
