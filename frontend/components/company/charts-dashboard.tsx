@@ -294,6 +294,7 @@ export function CompanyChartsDashboard({
           {deferredPrimaryCards.map((card) => (
             <DeferredClientSection
               key={card.key}
+              fallbackDelayMs={1800}
               placeholder={<MetricChartCardPlaceholder title={card.title} />}
             >
               <MetricChartCard
@@ -331,6 +332,7 @@ export function CompanyChartsDashboard({
           {deferredSecondaryCards.map((card) => (
             <DeferredClientSection
               key={card.key}
+              fallbackDelayMs={1800}
               placeholder={<MetricChartCardPlaceholder title={card.title} />}
             >
               <MetricChartCard
@@ -351,6 +353,7 @@ export function CompanyChartsDashboard({
           {detailCards.map((card) => (
             <DeferredClientSection
               key={card.key}
+              fallbackDelayMs={1800}
               placeholder={<AssumptionsCardPlaceholder title={card.title} />}
             >
               <ForecastAssumptionsCard card={card} />
