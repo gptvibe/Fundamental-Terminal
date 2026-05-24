@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { GET, POST } from "./route";
+import * as proxyTransport from "./proxy";
+import * as routeModule from "./route";
+
+const { GET, POST } = routeModule;
 
 describe("backend api proxy route", () => {
   const originalBackendApiBaseUrl = process.env.BACKEND_API_BASE_URL;
@@ -11,12 +14,12 @@ describe("backend api proxy route", () => {
     } else {
       process.env.BACKEND_API_BASE_URL = originalBackendApiBaseUrl;
     }
-    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("forwards backend GET requests and strips transport headers from the response", async () => {
     process.env.BACKEND_API_BASE_URL = "http://backend:8000";
-    const fetchMock = vi.fn().mockResolvedValue(
+    const requestSpy = vi.spyOn(proxyTransport, "executeBackendRequest").mockResolvedValue(
       new Response('{"ok":true}', {
         status: 200,
         headers: {
@@ -26,31 +29,39 @@ describe("backend api proxy route", () => {
         },
       })
     );
-    vi.stubGlobal("fetch", fetchMock);
-
     const response = await GET(new Request("http://localhost:3000/backend/api/source-registry?view=full"), {
       params: { path: ["source-registry"] },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(requestSpy).toHaveBeenCalledWith(
       "http://backend:8000/api/source-registry?view=full",
       expect.objectContaining({
         method: "GET",
-        cache: "no-store",
-        redirect: "manual",
+        headers: expect.any(Headers),
       })
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("application/json");
     expect(response.headers.get("x-test")).toBe("proxy");
-    expect(response.headers.get("content-length")).toBeNull();
+    expect(response.headers.get("content-length")).toBe("11");
     await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("strips transport headers from proxied upstream responses", () => {
+    const headers = proxyTransport.buildProxyResponseHeaders(new Headers({
+      "content-length": "11",
+      "content-type": "application/json",
+      "x-test": "proxy",
+    }));
+
+    expect(headers.get("content-length")).toBeNull();
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("x-test")).toBe("proxy");
   });
 
   it("forwards request bodies for mutating calls", async () => {
     process.env.BACKEND_API_BASE_URL = "http://backend:8000";
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
-    vi.stubGlobal("fetch", fetchMock);
+    const requestSpy = vi.spyOn(proxyTransport, "executeBackendRequest").mockResolvedValue(new Response(null, { status: 204 }));
 
     await POST(
       new Request("http://localhost:3000/backend/api/research-workspace/save?workspace_key=alpha", {
@@ -66,8 +77,8 @@ describe("backend api proxy route", () => {
       }
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = requestSpy.mock.calls[0] as [string, { method: string; headers: Headers; body?: ArrayBuffer }];
     expect(url).toBe("http://backend:8000/api/research-workspace/save?workspace_key=alpha");
     expect(init.method).toBe("POST");
     expect(init.headers).toBeInstanceOf(Headers);

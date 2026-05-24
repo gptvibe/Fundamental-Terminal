@@ -1,21 +1,10 @@
+import * as proxyTransport from "./proxy";
+
 const REQUEST_HOP_BY_HOP_HEADERS = new Set([
   "accept-encoding",
   "connection",
   "content-length",
   "host",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-]);
-
-const RESPONSE_TRANSPORT_HEADERS = new Set([
-  "connection",
-  "content-encoding",
-  "content-length",
   "keep-alive",
   "proxy-authenticate",
   "proxy-authorization",
@@ -55,29 +44,18 @@ function buildBackendRequestHeaders(request: Request): Headers {
   return headers;
 }
 
-function buildProxyResponseHeaders(upstream: Response): Headers {
-  const headers = new Headers();
-
-  upstream.headers.forEach((value, key) => {
-    if (RESPONSE_TRANSPORT_HEADERS.has(key.toLowerCase())) {
-      return;
-    }
-    headers.append(key, value);
-  });
-
-  return headers;
-}
-
 async function proxyBackendRequest(request: Request, { params }: RouteContext): Promise<Response> {
   const requestUrl = new URL(request.url);
   const path = params.path.map((segment) => encodeURIComponent(segment)).join("/");
   const backendUrl = `${resolveBackendApiBaseUrl()}/api/${path}${requestUrl.search}`;
 
-  const init: RequestInit = {
+  const init: {
+    method: string;
+    headers: Headers;
+    body?: ArrayBuffer;
+  } = {
     method: request.method,
     headers: buildBackendRequestHeaders(request),
-    cache: "no-store",
-    redirect: "manual",
   };
 
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -85,11 +63,7 @@ async function proxyBackendRequest(request: Request, { params }: RouteContext): 
   }
 
   try {
-    const upstream = await fetch(backendUrl, init);
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: buildProxyResponseHeaders(upstream),
-    });
+    return await proxyTransport.executeBackendRequest(backendUrl, init);
   } catch {
     return Response.json({ detail: "Backend proxy request failed" }, { status: 502 });
   }
