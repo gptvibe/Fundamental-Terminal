@@ -43,6 +43,9 @@ describe("api read cache", () => {
       financialsReason?: string;
       financialsCompany?: Record<string, unknown> | null;
       brief?: unknown;
+      earningsSummary?: unknown;
+      insiderTrades?: unknown;
+      institutionalHoldings?: unknown;
     } = {}
   ) {
     const financials = buildFinancialsPayload(ticker, options.financialsReason ?? "fresh");
@@ -60,13 +63,70 @@ describe("api read cache", () => {
             : options.financialsCompany,
       },
       brief: options.brief ?? null,
-      earnings_summary: null,
-      insider_trades: null,
-      institutional_holdings: null,
+      earnings_summary: options.earningsSummary ?? null,
+      insider_trades: options.insiderTrades ?? null,
+      institutional_holdings: options.institutionalHoldings ?? null,
       errors: {
         insider: null,
         institutional: null,
         earnings_summary: null,
+      },
+    };
+  }
+
+  function buildResearchBriefPayload(ticker = "AAPL") {
+    return {
+      company: { ticker, name: `${ticker} Inc.`, cache_state: "fresh" },
+      schema_version: "company_research_brief_v1",
+      generated_at: "2026-04-12T00:00:00Z",
+      as_of: null,
+      refresh: { triggered: false, reason: "fresh", ticker, job_id: null },
+      build_state: "ready",
+      build_status: "Research brief ready.",
+      available_sections: [],
+      section_statuses: [],
+      filing_timeline: [],
+      stale_summary_cards: [],
+      snapshot: { summary: {}, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+      what_changed: {
+        activity_overview: { company: null, entries: [], alerts: [], summary: { total: 0, high: 0, medium: 0, low: 0 }, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, error: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        changes: { company: null, current_filing: null, previous_filing: null, summary: {}, metric_deltas: [], new_risk_indicators: [], segment_shifts: [], share_count_changes: [], capital_structure_changes: [], amended_prior_values: [], high_signal_changes: [], comment_letter_history: { total_letters: 0, recent_letters: [] }, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        earnings_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, error: null },
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: null,
+        confidence_flags: [],
+      },
+      business_quality: { summary: {}, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+      capital_and_risk: {
+        capital_structure: { company: null, latest: null, history: [], last_capital_structure_check: null, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        capital_markets_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, error: null },
+        governance_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, error: null },
+        ownership_summary: { company: null, summary: {}, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, error: null },
+        equity_claim_risk_summary: {},
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: null,
+        confidence_flags: [],
+      },
+      valuation: {
+        models: { company: null, requested_models: [], models: [], refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, diagnostics: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        peers: { company: null, peer_basis: "Cached peer universe", available_companies: [], selected_tickers: [], peers: [], notes: {}, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: null,
+        confidence_flags: [],
+      },
+      monitor: {
+        activity_overview: { company: null, entries: [], alerts: [], summary: { total: 0, high: 0, medium: 0, low: 0 }, refresh: { triggered: false, reason: "fresh", ticker, job_id: null }, error: null, provenance: [], as_of: null, last_refreshed_at: null, source_mix: null, confidence_flags: [] },
+        provenance: [],
+        as_of: null,
+        last_refreshed_at: null,
+        source_mix: null,
+        confidence_flags: [],
       },
     };
   }
@@ -548,6 +608,26 @@ describe("api read cache", () => {
 
     expect(first.company?.ticker).toBe("BROS");
     expect(second.company?.ticker).toBe("BROS");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("primes the brief cache from workspace bootstrap payloads", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildOkJsonResponse(
+          buildWorkspaceBootstrapPayload("BROS", {
+            brief: buildResearchBriefPayload("BROS"),
+          })
+        )
+      );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCompanyWorkspaceBootstrap("BROS", { includeOverviewBrief: true, sections: ["company_summary", "latest_financials", "recent_filings", "recent_events", "source_freshness", "warnings"], compact: true, financialsView: "core_segments" });
+    const brief = await getCompanyResearchBrief("BROS");
+
+    expect(brief.company?.ticker).toBe("BROS");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

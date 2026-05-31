@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   getCompanyActivityOverview,
@@ -21,6 +21,62 @@ import { INITIAL_RESEARCH_BRIEF_DATA_STATE } from "../_lib/research-brief-types"
 import type { ResearchBriefDataState } from "../_lib/research-brief-types";
 import { mapBriefResponseToAsyncState, resolveAsyncState } from "../_lib/research-brief-utils";
 
+type FallbackSectionLoader = {
+  key: keyof Pick<ResearchBriefDataState, "activityOverview" | "changes" | "earningsSummary" | "capitalStructure" | "capitalMarketsSummary" | "governanceSummary" | "ownershipSummary" | "models" | "peers">;
+  fallbackMessage: string;
+  load: () => Promise<unknown>;
+};
+
+function buildFallbackSectionLoaders(ticker: string, asOf: string | null): FallbackSectionLoader[] {
+  return [
+    {
+      key: "activityOverview",
+      fallbackMessage: "Unable to load activity overview",
+      load: () => getCompanyActivityOverview(ticker),
+    },
+    {
+      key: "changes",
+      fallbackMessage: "Unable to load filing changes",
+      load: () => getCompanyChangesSinceLastFiling(ticker, { asOf }),
+    },
+    {
+      key: "earningsSummary",
+      fallbackMessage: "Unable to load earnings summary",
+      load: () => getCompanyEarningsSummary(ticker),
+    },
+    {
+      key: "capitalStructure",
+      fallbackMessage: "Unable to load capital structure",
+      load: () => getCompanyCapitalStructure(ticker, { asOf }),
+    },
+    {
+      key: "capitalMarketsSummary",
+      fallbackMessage: "Unable to load capital markets summary",
+      load: () => getCompanyCapitalMarketsSummary(ticker),
+    },
+    {
+      key: "governanceSummary",
+      fallbackMessage: "Unable to load governance summary",
+      load: () => getCompanyGovernanceSummary(ticker),
+    },
+    {
+      key: "ownershipSummary",
+      fallbackMessage: "Unable to load ownership summary",
+      load: () => getCompanyBeneficialOwnershipSummary(ticker),
+    },
+    {
+      key: "models",
+      fallbackMessage: "Unable to load valuation models",
+      load: () => getCompanyModels(ticker, undefined, { asOf }),
+    },
+    {
+      key: "peers",
+      fallbackMessage: "Unable to load peer snapshot",
+      load: () => getCompanyPeers(ticker, undefined, { asOf }),
+    },
+  ];
+}
+
 export function useResearchBriefData(
   ticker: string,
   reloadKey: string,
@@ -33,6 +89,9 @@ export function useResearchBriefData(
   const [state, setState] = useState<ResearchBriefDataState>(() =>
     initialBrief ? mapBriefResponseToAsyncState(initialBrief) : INITIAL_RESEARCH_BRIEF_DATA_STATE
   );
+  const stateRef = useRef(state);
+
+  stateRef.current = state;
 
   useEffect(() => {
     let cancelled = false;
@@ -65,17 +124,21 @@ export function useResearchBriefData(
         }
 
         const message = nextError instanceof Error ? nextError.message : "Unable to load research brief";
-        const settled = await Promise.allSettled([
-          getCompanyActivityOverview(ticker),
-          getCompanyChangesSinceLastFiling(ticker, { asOf }),
-          getCompanyEarningsSummary(ticker),
-          getCompanyCapitalStructure(ticker, { asOf }),
-          getCompanyCapitalMarketsSummary(ticker),
-          getCompanyGovernanceSummary(ticker),
-          getCompanyBeneficialOwnershipSummary(ticker),
-          getCompanyModels(ticker, undefined, { asOf }),
-          getCompanyPeers(ticker, undefined, { asOf }),
-        ] as const);
+        const fallbackPlan = buildFallbackSectionLoaders(ticker, asOf);
+        const pendingFallbacks = fallbackPlan.filter((loader) => previousStateNeedsData(stateRef.current, loader.key));
+
+        if (pendingFallbacks.length === 0) {
+          setState((previous) => ({
+            ...previous,
+            loading: false,
+            error: message,
+            buildState: previous.buildState === "ready" ? "ready" : "partial",
+            buildStatus: previous.buildStatus ?? "Brief endpoint unavailable. Reusing persisted bootstrap data.",
+          }));
+          return;
+        }
+
+        const settled = await Promise.allSettled(pendingFallbacks.map((loader) => loader.load()));
 
         if (cancelled) {
           return;
@@ -84,20 +147,20 @@ export function useResearchBriefData(
         setState((previous) => {
           const fallbackState: ResearchBriefDataState = {
             ...INITIAL_RESEARCH_BRIEF_DATA_STATE,
+            ...previous,
             loading: false,
             buildState: "partial",
-            buildStatus: "Brief endpoint unavailable. Loaded persisted section slices independently.",
+            buildStatus: "Brief endpoint unavailable. Loaded only the missing persisted section slices.",
             error: message,
-            activityOverview: resolveAsyncState(previous.activityOverview, settled[0], "Unable to load activity overview"),
-            changes: resolveAsyncState(previous.changes, settled[1], "Unable to load filing changes"),
-            earningsSummary: resolveAsyncState(previous.earningsSummary, settled[2], "Unable to load earnings summary"),
-            capitalStructure: resolveAsyncState(previous.capitalStructure, settled[3], "Unable to load capital structure"),
-            capitalMarketsSummary: resolveAsyncState(previous.capitalMarketsSummary, settled[4], "Unable to load capital markets summary"),
-            governanceSummary: resolveAsyncState(previous.governanceSummary, settled[5], "Unable to load governance summary"),
-            ownershipSummary: resolveAsyncState(previous.ownershipSummary, settled[6], "Unable to load ownership summary"),
-            models: resolveAsyncState(previous.models, settled[7], "Unable to load valuation models"),
-            peers: resolveAsyncState(previous.peers, settled[8], "Unable to load peer snapshot"),
           };
+
+          pendingFallbacks.forEach((loader, index) => {
+            const result = settled[index];
+            if (!result) {
+              return;
+            }
+            fallbackState[loader.key] = resolveAsyncState(previous[loader.key], result, loader.fallbackMessage) as never;
+          });
 
           const hasAnyFallbackData = Boolean(
             fallbackState.activityOverview.data ||
@@ -198,4 +261,12 @@ export function useResearchBriefData(
   }, [asOf, initialBrief, overviewBootstrapLoading, reloadKey, retryToken, ticker, warmupJobId]);
 
   return state;
+}
+
+function previousStateNeedsData(
+  state: ResearchBriefDataState,
+  key: keyof Pick<ResearchBriefDataState, "activityOverview" | "changes" | "earningsSummary" | "capitalStructure" | "capitalMarketsSummary" | "governanceSummary" | "ownershipSummary" | "models" | "peers">
+): boolean {
+  const sectionState = state[key];
+  return sectionState.data == null;
 }

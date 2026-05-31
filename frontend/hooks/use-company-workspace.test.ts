@@ -200,6 +200,7 @@ describe("useCompanyWorkspace", () => {
     expect(fetchBootstrap).toHaveBeenCalledWith(
       "RKLB",
       expect.objectContaining({
+        compact: true,
         financialsView: "core_segments",
         sections: [
           "company_summary",
@@ -216,7 +217,6 @@ describe("useCompanyWorkspace", () => {
         signal: expect.anything(),
       })
     );
-    expect(fetchBootstrap.mock.calls[0]?.[1]).not.toHaveProperty("compact");
     expect(fetchOverview).not.toHaveBeenCalled();
     expect(fetchFinancials).not.toHaveBeenCalled();
     expect(result.current.briefData?.company?.ticker).toBe("RKLB");

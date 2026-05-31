@@ -4530,7 +4530,7 @@ def _augment_company_brief_response(
     as_of: str | None,
 ) -> CompanyResearchBriefResponse:
     available_sections = list(RESEARCH_BRIEF_SECTION_ORDER)
-    filing_timeline = _load_company_brief_filing_timeline(session, snapshot=snapshot)
+    filing_timeline = payload.filing_timeline or _load_company_brief_filing_timeline(session, snapshot=snapshot)
     stale_summary_cards = payload.stale_summary_cards or _build_research_brief_summary_cards(
         company=payload.company or _serialize_company(snapshot),
         filing_timeline=filing_timeline,

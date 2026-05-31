@@ -97,6 +97,9 @@ export function getCompanyOverview(
 	}
 	appendAsOf(params, options?.asOf);
 	const suffix = params.toString() ? `?${params.toString()}` : "";
+	const briefParams = new URLSearchParams();
+	appendAsOf(briefParams, options?.asOf);
+	const briefSuffix = briefParams.toString() ? `?${briefParams.toString()}` : "";
 	const financialsParams = new URLSearchParams();
 	if (options?.financialsView && options.financialsView !== "full") {
 		financialsParams.set("view", options.financialsView);
@@ -118,6 +121,7 @@ export function getCompanyOverview(
 	const normalizedTicker = encodeURIComponent(ticker);
 	return fetchJson<CompanyOverviewResponse>(`/companies/${normalizedTicker}/overview${suffix}`, { signal: options?.signal }).then((payload) => {
 		shareReadCacheValue(`/companies/${normalizedTicker}/financials${financialsSuffix}`, payload.financials);
+		shareReadCacheValue(`/companies/${normalizedTicker}/brief${briefSuffix}`, payload.brief);
 		return payload;
 	});
 }
@@ -177,6 +181,9 @@ export function getCompanyWorkspaceBootstrap(
 	appendAsOf(params, options?.asOf);
 	const suffix = params.toString() ? `?${params.toString()}` : "";
 	const normalizedTicker = encodeURIComponent(ticker);
+	const briefParams = new URLSearchParams();
+	appendAsOf(briefParams, options?.asOf);
+	const briefSuffix = briefParams.toString() ? `?${briefParams.toString()}` : "";
 	const financialsParams = new URLSearchParams();
 	if (options?.financialsView && options.financialsView !== "full") {
 		financialsParams.set("view", options.financialsView);
@@ -201,6 +208,7 @@ export function getCompanyWorkspaceBootstrap(
 	}).then((payload) => {
 		shareReadCacheValue(`/companies/${normalizedTicker}/financials${financialsSuffix}`, payload.financials);
 		if (payload.brief) {
+			shareReadCacheValue(`/companies/${normalizedTicker}/brief${briefSuffix}`, payload.brief);
 			const overviewParams = new URLSearchParams();
 			if (options?.financialsView && options.financialsView !== "full") {
 				overviewParams.set("financials_view", options.financialsView);
@@ -212,6 +220,15 @@ export function getCompanyWorkspaceBootstrap(
 				financials: payload.financials,
 				brief: payload.brief,
 			});
+		}
+		if (payload.earnings_summary) {
+			shareReadCacheValue(`/companies/${normalizedTicker}/earnings/summary`, payload.earnings_summary);
+		}
+		if (payload.insider_trades) {
+			shareReadCacheValue(`/companies/${normalizedTicker}/insider-trades`, payload.insider_trades);
+		}
+		if (payload.institutional_holdings) {
+			shareReadCacheValue(`/companies/${normalizedTicker}/institutional-holdings`, payload.institutional_holdings);
 		}
 		return payload;
 	});

@@ -190,6 +190,66 @@ def test_company_brief_returns_stale_snapshot_and_queues_background_refresh(monk
     assert response.company.ticker == "ACME"
 
 
+def test_augment_company_brief_response_reuses_persisted_timeline_and_cards(monkeypatch):
+    snapshot = SimpleNamespace(
+        company=SimpleNamespace(
+            id=1,
+            ticker="ACME",
+            cik="0000123456",
+            name="Acme Corp",
+            sector="Technology",
+            market_sector="Technology",
+            market_industry="Software",
+        ),
+        cache_state="fresh",
+        last_checked=datetime(2026, 3, 10, tzinfo=timezone.utc),
+    )
+    refresh = main_module.RefreshState(triggered=False, reason="fresh", ticker="ACME", job_id=None)
+    filing_timeline = [
+        main_module.FilingTimelineItemPayload(
+            date=date(2025, 12, 31),
+            form="10-K",
+            description="Annual report",
+            accession="0000123456-26-000001",
+        )
+    ]
+    stale_summary_cards = [
+        main_module.ResearchBriefSummaryCardPayload(
+            key="latest_revenue",
+            title="Revenue",
+            value="$6.2K",
+            detail="2025-12-31",
+        )
+    ]
+    payload = main_module._empty_company_brief_response(refresh=refresh, as_of=None).model_copy(
+        update={
+            "company": main_module._serialize_company(snapshot),
+            "build_state": "ready",
+            "build_status": "Research brief ready.",
+            "filing_timeline": filing_timeline,
+            "stale_summary_cards": stale_summary_cards,
+        }
+    )
+
+    monkeypatch.setattr(
+        main_module,
+        "_load_company_brief_filing_timeline",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("warm read should reuse persisted timeline")),
+    )
+
+    response = main_module._augment_company_brief_response(
+        object(),
+        snapshot,
+        payload,
+        refresh=refresh,
+        as_of=None,
+    )
+
+    assert response.filing_timeline == filing_timeline
+    assert response.stale_summary_cards == stale_summary_cards
+    assert response.available_sections == list(main_module.RESEARCH_BRIEF_SECTION_ORDER)
+
+
 def test_company_overview_reuses_shared_snapshot_for_financials_and_brief(monkeypatch):
     snapshot = SimpleNamespace(
         company=SimpleNamespace(

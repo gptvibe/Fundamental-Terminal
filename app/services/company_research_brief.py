@@ -46,6 +46,7 @@ from app.research_brief_contracts import (
     DataQualityDiagnosticsPayload,
     EarningsReleasePayload,
     EarningsSummaryPayload,
+    FilingTimelineItemPayload,
     GovernanceSummaryPayload,
     ModelPayload,
     PeerMetricsPayload,
@@ -53,6 +54,7 @@ from app.research_brief_contracts import (
     ProvenanceEntryPayload,
     RefreshState,
     ResearchBriefBusinessQualitySummaryPayload,
+    ResearchBriefSummaryCardPayload,
     ResearchBriefSnapshotSummaryPayload,
     SourceMixPayload,
 )
@@ -103,6 +105,8 @@ from app.services.sec_sic import resolve_sec_sic_profile
 BRIEF_SCHEMA_VERSION = "company_research_brief_v1"
 BRIEF_MODEL_NAMES = ["dcf", "reverse_dcf", "roic", "capital_allocation", "dupont", "piotroski", "altman_z", "ratios"]
 ANNUAL_FILING_TYPES = {"10-K", "20-F", "40-F"}
+CORE_FILING_TIMELINE_FORMS = {"10-K", "10-Q", "8-K", "20-F", "40-F", "6-K"}
+MAX_FILING_TIMELINE_ITEMS = 60
 
 
 def get_company_research_brief_snapshot(
@@ -174,6 +178,7 @@ def build_company_research_brief_response(
     if as_of is not None:
         price_history = filter_price_history_as_of(price_history, as_of)
     price_last_checked, _price_cache_state = get_company_price_cache_status(session, company_id)
+    filing_timeline = _build_company_brief_filing_timeline(session, snapshot=snapshot, financials=financials)
 
     activity_overview = _build_activity_overview_response(session, snapshot, refresh)
     changes_response = _build_changes_response(session, snapshot, financials, refresh, as_of)
@@ -215,6 +220,11 @@ def build_company_research_brief_response(
             confidence_flags=[*changes_response.confidence_flags[:1]],
         ),
     )
+    stale_summary_cards = _build_research_brief_summary_cards(
+        company=company_payload,
+        filing_timeline=filing_timeline,
+        snapshot_summary=snapshot_summary,
+    )
 
     business_quality_summary = ResearchBriefBusinessQualitySummaryPayload(
         latest_period_end=latest_statement.period_end if latest_statement is not None else None,
@@ -242,6 +252,8 @@ def build_company_research_brief_response(
         generated_at=timestamp,
         as_of=_normalize_as_of(as_of),
         refresh=refresh,
+        filing_timeline=filing_timeline,
+        stale_summary_cards=stale_summary_cards,
         snapshot=snapshot_section,
         what_changed=CompanyResearchBriefWhatChangedSection(
             activity_overview=activity_overview,
@@ -1370,6 +1382,118 @@ def _governance_summary_line(form_display: str, statement: Any) -> str:
     return "; ".join(segments) + "."
 
 
+def _build_company_brief_filing_timeline(
+    session: Session,
+    *,
+    snapshot: CompanyCacheSnapshot,
+    financials: list[Any],
+) -> list[FilingTimelineItemPayload]:
+    filing_events = get_company_filing_events(session, snapshot.company.id, limit=MAX_FILING_TIMELINE_ITEMS * 4)
+    timeline: list[FilingTimelineItemPayload] = []
+    seen_keys: set[tuple[str | None, str, DateType | None]] = set()
+
+    for event in filing_events:
+        form = str(getattr(event, "form", "") or "").upper()
+        if not form:
+            continue
+        event_date = getattr(event, "filing_date", None) or getattr(event, "report_date", None)
+        key = (getattr(event, "accession_number", None), form, event_date)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        timeline.append(
+            FilingTimelineItemPayload(
+                date=event_date,
+                form=form,
+                description=(
+                    getattr(event, "primary_doc_description", None)
+                    or getattr(event, "summary", None)
+                    or str(getattr(event, "category", "SEC filing")).replace("_", " ").title()
+                ),
+                accession=getattr(event, "accession_number", None),
+            )
+        )
+
+    if timeline:
+        timeline.sort(key=lambda item: (item.date or DateType.min, item.form, item.accession or ""), reverse=True)
+        return timeline[:MAX_FILING_TIMELINE_ITEMS]
+
+    fallback_timeline = [
+        FilingTimelineItemPayload(
+            date=getattr(statement, "filing_date", None) or getattr(statement, "period_end", None),
+            form=statement.filing_type,
+            description=_filing_timeline_description(statement.filing_type),
+            accession=_extract_accession_number(getattr(statement, "source", None)),
+        )
+        for statement in financials
+        if getattr(statement, "filing_type", None) in CORE_FILING_TIMELINE_FORMS
+    ]
+    fallback_timeline.sort(key=lambda item: (item.date or DateType.min, item.form, item.accession or ""), reverse=True)
+    return fallback_timeline[:MAX_FILING_TIMELINE_ITEMS]
+
+
+def _build_research_brief_summary_cards(
+    *,
+    company: CompanyPayload | None,
+    filing_timeline: list[FilingTimelineItemPayload],
+    snapshot_summary: ResearchBriefSnapshotSummaryPayload,
+) -> list[ResearchBriefSummaryCardPayload]:
+    cards: list[ResearchBriefSummaryCardPayload] = []
+
+    latest_filing = filing_timeline[0] if filing_timeline else None
+    if latest_filing is not None:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="latest_filing",
+                title="Latest Filing",
+                value=latest_filing.form,
+                detail=latest_filing.date.isoformat() if latest_filing.date is not None else latest_filing.description,
+            )
+        )
+    if snapshot_summary.latest_revenue is not None:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="latest_revenue",
+                title="Revenue",
+                value=_format_research_brief_card_number(snapshot_summary.latest_revenue, currency=True),
+                detail=snapshot_summary.latest_period_end.isoformat() if snapshot_summary.latest_period_end is not None else None,
+            )
+        )
+    if snapshot_summary.latest_free_cash_flow is not None:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="latest_free_cash_flow",
+                title="Free Cash Flow",
+                value=_format_research_brief_card_number(snapshot_summary.latest_free_cash_flow, currency=True),
+                detail=snapshot_summary.latest_period_end.isoformat() if snapshot_summary.latest_period_end is not None else None,
+            )
+        )
+    if snapshot_summary.top_segment_name:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="top_segment",
+                title="Top Segment",
+                value=snapshot_summary.top_segment_name,
+                detail=(
+                    f"{round(float(snapshot_summary.top_segment_share_of_revenue) * 100)}% of revenue"
+                    if snapshot_summary.top_segment_share_of_revenue is not None
+                    else None
+                ),
+            )
+        )
+    if company is not None and company.sector:
+        cards.append(
+            ResearchBriefSummaryCardPayload(
+                key="sector",
+                title="Sector",
+                value=company.sector,
+                detail=company.market_industry or company.market_sector,
+            )
+        )
+
+    return cards[:4]
+
+
 def _filing_timeline_description(form: str) -> str:
     if form == "8-K":
         return "Current report"
@@ -1378,6 +1502,24 @@ def _filing_timeline_description(form: str) -> str:
     if form == "10-Q":
         return "Quarterly report"
     return "SEC filing"
+
+
+def _format_research_brief_card_number(value: float | int, *, currency: bool = False) -> str:
+    absolute = abs(float(value))
+    formatted: str
+    if absolute >= 1_000_000_000_000:
+        formatted = f"{float(value) / 1_000_000_000_000:.1f}T"
+    elif absolute >= 1_000_000_000:
+        formatted = f"{float(value) / 1_000_000_000:.1f}B"
+    elif absolute >= 1_000_000:
+        formatted = f"{float(value) / 1_000_000:.1f}M"
+    elif absolute >= 1_000:
+        formatted = f"{float(value) / 1_000:.1f}K"
+    elif absolute >= 100:
+        formatted = f"{float(value):,.0f}"
+    else:
+        formatted = f"{float(value):,.2f}".rstrip("0").rstrip(".")
+    return f"${formatted}" if currency else formatted
 
 
 def _extract_accession_number(source: str | None) -> str | None:

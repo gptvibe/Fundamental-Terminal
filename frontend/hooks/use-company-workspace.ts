@@ -595,6 +595,7 @@ async function loadCompanyWorkspaceData(
       priceLatestN: WORKSPACE_PRICE_HISTORY_LATEST_N,
       priceMaxPoints: WORKSPACE_PRICE_HISTORY_MAX_POINTS,
       sections: useSectionedBriefBootstrap ? DEFAULT_BRIEF_BOOTSTRAP_SECTIONS : undefined,
+      compact: useSectionedBriefBootstrap ? true : undefined,
       includeOverviewBrief: options.includeOverviewBrief,
       includeInsiders: options.includeInsiders,
       includeInstitutional: options.includeInstitutional,
